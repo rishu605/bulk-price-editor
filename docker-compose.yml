@@ -1,0 +1,44 @@
+# Local development dependencies (RFC-001 B1).
+# Postgres backs the catalog mirror, baselines and change ledger.
+# Redis backs the BullMQ job queue and the scheduler's leader lock.
+#
+#   docker compose up -d
+#   npm run setup
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: anchor-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: anchor
+      POSTGRES_PASSWORD: anchor
+      POSTGRES_DB: anchor_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - anchor-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U anchor -d anchor_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: anchor-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - anchor-redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  anchor-pgdata:
+  anchor-redisdata:
