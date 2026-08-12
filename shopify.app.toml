@@ -51,14 +51,10 @@ api_version = "2025-10"
 
   # Mandatory compliance topics for public apps (RFC-001 B10, task P0.4).
   # We hold no customer PII, but these must still be answered correctly.
+  #
+  # All three route to ONE handler that switches on topic -- see
+  # docs/reference-patterns.md. Fewer places to get HMAC handling wrong than
+  # three separate routes.
   # [[webhooks.subscriptions]]
-  # uri = "/webhooks/customers/data_request"
-  # compliance_topics = ["customers/data_request"]
-
-  # [[webhooks.subscriptions]]
-  # uri = "/webhooks/customers/redact"
-  # compliance_topics = ["customers/redact"]
-
-  # [[webhooks.subscriptions]]
-  # uri = "/webhooks/shop/redact"
-  # compliance_topics = ["shop/redact"]
+  # uri = "/webhooks/compliance"
+  # compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]

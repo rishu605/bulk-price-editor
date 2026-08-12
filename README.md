@@ -28,6 +28,7 @@ than a top-tier upsell.
 | [`docs/roadmap.md`](docs/roadmap.md) | Phase-by-phase task plan with acceptance criteria |
 | [`docs/decisions.md`](docs/decisions.md) | Decision log — what is committed, what is open and when it resolves |
 | [`docs/working-agreement.md`](docs/working-agreement.md) | How the issue tracker maps to these docs, and the rules for changing scope |
+| [`docs/reference-patterns.md`](docs/reference-patterns.md) | Proven patterns from a production app on the same stack, and what to do differently |
 
 Work is tracked in [GitHub Issues](https://github.com/rishu605/bulk-price-editor/issues),
 organised as milestones (phases) → epics (feature areas) → tasks → subtasks. See the
