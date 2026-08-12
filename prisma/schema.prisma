@@ -1,5 +1,9 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// Anchor data model. Mirrors RFC-001 §3 -- see docs/rfc-001-architecture.md.
+//
+// Money is stored as BigInt minor units plus an explicit currency, matching
+// app/lib/money. Never Float or Decimal: the whole arithmetic layer is built on the
+// premise that a fractional minor unit cannot exist. BigInt rather than Int because
+// Int tops out around $21M in cents, which a large B2B catalogue can exceed.
 
 generator client {
   provider = "prisma-client-js"
@@ -12,6 +16,8 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+// ---------------------------------------------------------------- shopify auth
 
 model Session {
   id            String    @id
@@ -29,6 +35,605 @@ model Session {
   locale        String?
   collaborator  Boolean?  @default(false)
   emailVerified Boolean?  @default(false)
+
   refreshToken        String?
   refreshTokenExpires DateTime?
+}
+
+// --------------------------------------------------------------------- shops
+
+enum PlanTier {
+  FREE
+  GROWTH
+  MARKETS
+  WHOLESALE
+}
+
+model Shop {
+  id     String @id @default(cuid())
+  domain String @unique
+
+  /// Offline access token, encrypted at rest (P0.3.5). Never stored in plaintext:
+  /// a database dump must not yield a usable token.
+  accessTokenEnc String?
+  scopes         String?
+
+  planTier   PlanTier @default(FREE)
+  variantCap Int?
+
+  /// IANA zone, e.g. "America/Toronto". Campaign times are stored UTC and rendered
+  /// in this zone; the UI always shows which zone it is displaying.
+  timezone String @default("UTC")
+
+  /// Store-level guardrails, drift policy, blast-radius thresholds, notification
+  /// preferences. JSON because these evolve faster than migrations should.
+  settings Json @default("{}")
+
+  installedAt   DateTime  @default(now())
+  uninstalledAt DateTime?
+
+  /// Set when the initial catalog import finishes; campaigns are blocked until then.
+  initialSyncCompletedAt DateTime?
+
+  variants         VariantIndex[]
+  surfaceEntries   PriceSurfaceEntry[]
+  baselines        Baseline[]
+  segments         Segment[]
+  campaigns        Campaign[]
+  campaignRuns     CampaignRun[]
+  variantChanges   VariantChange[]
+  writeIntents     WriteIntent[]
+  driftEvents      DriftEvent[]
+  roundingProfiles RoundingProfileRecord[]
+  webhookEvents    WebhookEvent[]
+  bulkOps          BulkOperationRecord[]
+  auditEntries     AuditLogEntry[]
+
+  @@index([uninstalledAt])
+  @@map("shops")
+}
+
+// ------------------------------------------------------------- catalog mirror
+
+enum VariantStatus {
+  ACTIVE
+  ARCHIVED
+  DRAFT
+}
+
+/// Local mirror of the Shopify catalog. A cache -- Shopify is truth. The nightly
+/// sampled audit (P1.6) is what keeps that honest.
+model VariantIndex {
+  shopId     String
+  variantGid String
+  productGid String
+
+  sku     String?
+  barcode String?
+  title   String?
+
+  /// Base-surface values in minor units, alongside the shop's primary currency.
+  price     BigInt?
+  compareAt BigInt?
+  cost      BigInt?
+  currency  String?
+
+  inventoryQty Int?
+  status       VariantStatus @default(ACTIVE)
+  vendor       String?
+  productType  String?
+  tags         String[]      @default([])
+  collections  String[]      @default([])
+
+  /// Shopify's updated_at. Compared against incoming webhooks so out-of-order
+  /// deliveries are ignored rather than applied (P1.3).
+  remoteUpdatedAt DateTime?
+  syncedAt        DateTime  @default(now())
+
+  /// Tombstone rather than hard delete: ledger rows may still reference this
+  /// variant and must stay resolvable on revert (edge case E4).
+  deletedAt DateTime?
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@id([shopId, variantGid])
+  @@index([shopId, productGid])
+  @@index([shopId, sku])
+  @@index([shopId, price])
+  @@index([shopId, status])
+  @@index([shopId, deletedAt])
+  @@map("variant_index")
+}
+
+enum SurfaceKind {
+  BASE
+  MARKET
+  B2B
+}
+
+/// Live values per price surface. Base rows live here too, deliberately: one uniform
+/// shape means the resolver, planner and reconciliation read every surface the same
+/// way instead of branching.
+model PriceSurfaceEntry {
+  id String @id @default(cuid())
+
+  shopId       String
+  variantGid   String
+  surfaceKind  SurfaceKind
+  /// Price list gid for MARKET/B2B. Empty string for BASE.
+  ///
+  /// Deliberately NOT nullable: Postgres treats NULLs as distinct in unique
+  /// indexes, so a nullable column here would silently defeat every uniqueness
+  /// guarantee below for base-surface rows -- including the one that stops a
+  /// ledger row being written twice.
+  priceListGid String      @default("")
+
+  currency      String
+  livePrice     BigInt?
+  liveCompareAt BigInt?
+
+  syncedAt DateTime @default(now())
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, variantGid, surfaceKind, priceListGid])
+  @@index([shopId, surfaceKind])
+  @@index([shopId, priceListGid])
+  @@map("price_surface_entries")
+}
+
+// -------------------------------------------------------------------- baselines
+
+enum BaselineSource {
+  INSTALL_CAPTURE
+  RECAPTURE
+  CSV_IMPORT
+  DRIFT_ADOPTION
+  AUTO_ENROLL
+}
+
+/// The durable reference price every campaign computes from -- the product's core
+/// differentiator.
+///
+/// Append-only: a new capture supersedes rather than updates, so the history of what
+/// a variant's reference price used to be survives. Current row is the one with
+/// supersededAt = null, enforced by a partial unique index in the migration (Prisma
+/// cannot express that declaratively).
+model Baseline {
+  id String @id @default(cuid())
+
+  shopId       String
+  variantGid   String
+  surfaceKind  SurfaceKind
+  priceListGid String      @default("")
+  currency     String
+
+  basePrice     BigInt
+  baseCompareAt BigInt?
+  /// Frequently absent on real catalogues. Never assume zero -- cost-dependent
+  /// guardrails skip or error instead.
+  cost          BigInt?
+
+  source     BaselineSource
+  capturedAt DateTime       @default(now())
+  capturedBy String?
+
+  supersededAt DateTime?
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, variantGid, surfaceKind])
+  @@index([shopId, supersededAt])
+  @@map("baselines")
+}
+
+// -------------------------------------------------------------------- segments
+
+enum SegmentKind {
+  /// Re-evaluated at run and enroll time, so new products join a running sale.
+  DYNAMIC
+  /// Variant list pinned at save time.
+  FROZEN
+}
+
+model Segment {
+  id String @id @default(cuid())
+
+  shopId String
+  name   String
+  kind   SegmentKind @default(DYNAMIC)
+
+  /// (OR of (AND of conditions)). JSON so segments stay versionable and previewable.
+  filterAst         Json     @default("{}")
+  /// Populated for FROZEN segments only.
+  frozenVariantGids String[] @default([])
+
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  shop      Shop       @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  campaigns Campaign[] @relation("CampaignSegments")
+
+  @@unique([shopId, name])
+  @@index([shopId, kind])
+  @@map("segments")
+}
+
+// ------------------------------------------------------------------- campaigns
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  APPLYING
+  ACTIVE
+  HELD
+  REVERTING
+  COMPLETED
+  PARTIAL
+  CANCELLED
+}
+
+model Campaign {
+  id String @id @default(cuid())
+
+  shopId String
+  name   String
+  status CampaignStatus @default(DRAFT)
+
+  /// Higher wins. Tie-break is startAt, then id -- a total order, so preview and
+  /// execution can never disagree about which campaign controls a variant.
+  priority Int @default(100)
+
+  /// Adjustment rules; where several match a variant, the last one wins (E16).
+  ruleRows Json @default("[]")
+
+  /// Surfaces targeted: base, and which market/B2B price lists.
+  surfaces Json @default("{}")
+
+  /// kind + optional rule.
+  compareAtPolicy          Json   @default("{\"kind\":\"leave\"}")
+  compareAtViolationPolicy String @default("clear")
+
+  roundingProfileId        String?
+  /// Campaign-level overrides. May only tighten the store's guardrails.
+  guardrails               Json?
+  guardrailViolationPolicy String  @default("clamp")
+
+  /// kind (once | window | recurring), start, end, rrule subset, revert buffer.
+  schedule Json      @default("{}")
+  startAt  DateTime?
+  endAt    DateTime?
+
+  /// Tags applied on start and removed on end; the storefront hook that lets us
+  /// ship no theme code at all.
+  tagKit     String[] @default([])
+  autoEnroll Boolean  @default(true)
+
+  excludedVariantGids String[] @default([])
+
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  shop            Shop                   @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  segments        Segment[]              @relation("CampaignSegments")
+  roundingProfile RoundingProfileRecord? @relation(fields: [roundingProfileId], references: [id])
+  runs            CampaignRun[]
+  driftEvents     DriftEvent[]
+
+  @@index([shopId, status])
+  @@index([shopId, startAt])
+  @@index([shopId, endAt])
+  @@map("campaigns")
+}
+
+enum RunKind {
+  APPLY
+  REVERT
+  REASSERT
+  ENROLL
+}
+
+enum RunStatus {
+  PLANNING
+  QUEUED
+  EXECUTING
+  VERIFYING
+  COMPLETED
+  PARTIAL
+  FAILED
+  CANCELLED
+}
+
+enum WritePath {
+  SYNC
+  BULK
+}
+
+model CampaignRun {
+  id String @id @default(cuid())
+
+  shopId     String
+  campaignId String
+  kind       RunKind
+  status     RunStatus @default(PLANNING)
+
+  /// Makes recurring runs idempotent: one run per (campaign, occurrence, kind),
+  /// so a duplicate scheduler tick cannot double-apply.
+  occurrenceKey String
+
+  writePath WritePath?
+
+  plannedRows  Int @default(0)
+  verifiedRows Int @default(0)
+  failedRows   Int @default(0)
+  skippedRows  Int @default(0)
+
+  startedAt  DateTime?
+  finishedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  shop     Shop                  @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  campaign Campaign              @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  changes  VariantChange[]
+  bulkOps  BulkOperationRecord[]
+
+  @@unique([campaignId, occurrenceKey, kind])
+  @@index([shopId, status])
+  @@map("campaign_runs")
+}
+
+// ----------------------------------------------------------------- the ledger
+
+enum ChangeStatus {
+  PENDING
+  WRITING
+  APPLIED
+  VERIFIED
+  FAILED
+  SKIPPED
+  CLAMPED
+  REVERTED
+}
+
+/// The change ledger. Rows are written BEFORE any Admin API call (invariant I4): if
+/// the worker dies between writing the row and calling the API, verification finds an
+/// unverified row and retries. The other order would change a merchant's storefront
+/// with no record of it.
+///
+/// Partitioned by shopId in the migration; Prisma cannot express partitioning
+/// declaratively, so it is applied as raw SQL.
+model VariantChange {
+  id String @id @default(cuid())
+
+  runId  String
+  shopId String
+
+  variantGid   String
+  surfaceKind  SurfaceKind
+  priceListGid String      @default("")
+  currency     String
+
+  beforePrice     BigInt?
+  beforeCompareAt BigInt?
+
+  intendedPrice        BigInt?
+  /// Null means "clear it"; the column being null with intendedCompareAtSet false
+  /// means "leave it alone". Conflating the two either wipes a merchant's compare-at
+  /// or fails to set up a strike-through.
+  intendedCompareAt    BigInt?
+  intendedCompareAtSet Boolean @default(false)
+
+  appliedPrice  BigInt?
+  verifiedPrice BigInt?
+
+  status        ChangeStatus @default(PENDING)
+  failureReason String?
+  attempt       Int          @default(0)
+
+  appliedAt  DateTime?
+  verifiedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  shop Shop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  run  CampaignRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, variantGid, surfaceKind, priceListGid])
+  @@index([shopId, status])
+  @@index([runId, status])
+  @@index([shopId, variantGid])
+  @@map("variant_changes")
+}
+
+/// Fingerprint of every write we make, so the products/update webhook can tell our
+/// own echo from a real merchant edit. Without it, drift detection would flag every
+/// one of our own writes. TTL-pruned.
+model WriteIntent {
+  id String @id @default(cuid())
+
+  shopId       String
+  variantGid   String
+  surfaceKind  SurfaceKind
+  priceListGid String      @default("")
+
+  valueHash String
+  writtenAt DateTime @default(now())
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, variantGid, valueHash])
+  @@index([writtenAt])
+  @@map("write_intents")
+}
+
+enum DriftResolution {
+  PENDING
+  ADOPTED
+  REASSERTED
+  IGNORED
+}
+
+/// A price changed outside the app while a campaign was active. The merchant made
+/// that edit on purpose, so the app asks rather than guessing.
+model DriftEvent {
+  id String @id @default(cuid())
+
+  shopId       String
+  variantGid   String
+  surfaceKind  SurfaceKind
+  priceListGid String      @default("")
+  campaignId   String?
+
+  observedPrice BigInt?
+  expectedPrice BigInt?
+  currency      String
+
+  resolution DriftResolution @default(PENDING)
+  resolvedBy String?
+  resolvedAt DateTime?
+  detectedAt DateTime        @default(now())
+
+  shop     Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  @@index([shopId, resolution])
+  @@index([shopId, variantGid])
+  @@map("drift_events")
+}
+
+// ------------------------------------------------------------ rounding profiles
+
+enum RoundingMode {
+  CHARM
+  STEP
+}
+
+model RoundingProfileRecord {
+  id String @id @default(cuid())
+
+  shopId   String
+  name     String
+  currency String
+
+  mode      RoundingMode
+  /// Charm ending in minor units below one major unit (99 -> x.99).
+  ending    Int?
+  /// Step size in minor units.
+  step      Int?
+  direction String       @default("nearest")
+
+  /// The shop default for this currency.
+  isDefault Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  shop      Shop       @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  campaigns Campaign[]
+
+  @@unique([shopId, name])
+  @@index([shopId, currency])
+  @@map("rounding_profiles")
+}
+
+// -------------------------------------------------------- webhooks & bulk ops
+
+enum WebhookStatus {
+  RECEIVED
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
+/// Dedup, replay and lag measurement. Shopify delivers at-least-once, so the unique
+/// constraint on webhookId is what makes reprocessing safe.
+model WebhookEvent {
+  id String @id @default(cuid())
+
+  /// X-Shopify-Webhook-Id.
+  webhookId  String  @unique
+  shopId     String?
+  shopDomain String
+  topic      String
+  payload    Json
+
+  status        WebhookStatus @default(RECEIVED)
+  attempts      Int           @default(0)
+  failureReason String?
+
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+
+  shop Shop? @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopDomain, topic])
+  @@index([status, receivedAt])
+  @@map("webhook_events")
+}
+
+enum BulkOpKind {
+  QUERY
+  MUTATION
+}
+
+enum BulkOpStatus {
+  CREATED
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELED
+  EXPIRED
+}
+
+/// Tracks Shopify bulk operations, and doubles as the poll-fallback cursor for when
+/// the bulk_operations/finish webhook never arrives (edge case E13).
+model BulkOperationRecord {
+  id String @id @default(cuid())
+
+  shopId String
+  runId  String?
+
+  shopifyGid String       @unique
+  kind       BulkOpKind
+  status     BulkOpStatus @default(CREATED)
+
+  stagedUploadPath String?
+  resultUrl        String?
+  objectCount      BigInt?
+  errorCode        String?
+
+  submittedAt  DateTime  @default(now())
+  finishedAt   DateTime?
+  lastPolledAt DateTime?
+
+  shop Shop         @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  run  CampaignRun? @relation(fields: [runId], references: [id], onDelete: SetNull)
+
+  @@index([shopId, status])
+  @@map("bulk_operations")
+}
+
+// ------------------------------------------------------------------ audit log
+
+/// Append-only record of every state-changing action. Exportable, because agencies
+/// running pricing for clients need to prove exactly what changed and when.
+model AuditLogEntry {
+  id String @id @default(cuid())
+
+  shopId   String
+  actor    String?
+  action   String
+  entity   String?
+  entityId String?
+
+  before Json?
+  after  Json?
+
+  createdAt DateTime @default(now())
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, createdAt])
+  @@index([shopId, action])
+  @@map("audit_log")
 }
