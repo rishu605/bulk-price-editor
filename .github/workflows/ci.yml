@@ -54,5 +54,11 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Includes the property tests for the resolver invariants (RFC-001 §4).
+      # These are the tests that make the correctness claims real; a failure here
+      # means a price could be computed wrongly, so it must block the merge.
+      - name: Test
+        run: npm test
+
       - name: Build
         run: npm run build
