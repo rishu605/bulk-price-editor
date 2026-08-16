@@ -20,6 +20,7 @@ import { loadCampaignContext } from "./model.server";
 import { guardrailsFor } from "../settings.server";
 import type { RunOutcome } from "./types";
 import { transitionCampaign } from "./lifecycle.server";
+import { planResume, type LedgerState } from "../../lib/execution/resume";
 
 export interface RunOptions {
   revert?: boolean;
@@ -29,6 +30,14 @@ export interface RunOptions {
    * confirmation from its result file instead.
    */
   verifySampleRate?: number;
+  /**
+   * Continue an interrupted run instead of starting fresh.
+   *
+   * Rows the previous attempt verified are left untouched, so a resumed run converges
+   * on the state a clean run would have produced (E2) without paying to rewrite work
+   * that already landed.
+   */
+  resume?: boolean;
 }
 
 export async function runCampaign(
@@ -58,7 +67,21 @@ export async function runCampaign(
   }
 
   const kind = options.revert ? "REVERT" : "APPLY";
-  const writable = outcome.rows.filter((row) => row.status !== "skipped");
+  let writable = outcome.rows.filter((row) => row.status !== "skipped");
+
+  // Resuming: drop rows a previous attempt already verified. The resolver would reach
+  // the same answer for them anyway, but re-sending costs rate limit and, worse, the
+  // mirror could be stale enough to make an already-correct row look like it needs
+  // rewriting.
+  let resumedFrom: { verified: number; quarantined: number } | null = null;
+  if (options.resume && !options.revert) {
+    const prior = await priorLedger(campaignId, kind);
+    if (prior.length > 0) {
+      const plan = planResume(writable, prior);
+      writable = plan.todo;
+      resumedFrom = { verified: plan.alreadyVerified, quarantined: plan.quarantined };
+    }
+  }
 
   const run = await prisma.campaignRun.create({
     data: {
@@ -97,7 +120,10 @@ export async function runCampaign(
   // Honour the planner's path choice. A 1,600-row campaign executed synchronously
   // would take roughly one variant every two seconds against a standard shop's
   // rate limit; the bulk path costs no rate-limit budget at all.
-  const result = await executeRows(outcome.rows, {
+  // `writable`, not `outcome.rows`: skipped rows were never going to be written, and
+  // on a resume this is the filtered set. Passing the unfiltered plan here would make
+  // the resume silently re-send every row it had just decided to leave alone.
+  const result = await executeRows(writable, {
     client,
     productOf: (gid) => products.get(gid) ?? gid,
     verifySampleRate: options.verifySampleRate ?? 1,
@@ -141,7 +167,26 @@ export async function runCampaign(
     failed: result.failed,
     unverified: result.unverified,
     clean: result.clean,
-    messages: messages.slice(0, 5),
+    messages: [
+      // Lead with what was skipped. "Applied 3 variants" after a 1,500-row campaign
+      // looks like a catastrophe until you know the other 1,497 were already correct
+      // and deliberately left alone.
+      //
+      // Two independent things skip work, and the merchant does not care which: the
+      // planner drops rows already showing the target price, and the resume drops rows
+      // the ledger says were verified. Reporting only the latter said "0 rows were
+      // already verified" straight after a run that had verified two of them.
+      ...(resumedFrom && resumedFrom.verified + outcome.counts.noop > 0
+        ? [
+            `Resumed: ${resumedFrom.verified + outcome.counts.noop} rows were already correct and left untouched` +
+              (resumedFrom.quarantined > 0
+                ? `, ${resumedFrom.quarantined} quarantined after repeated failures`
+                : "") +
+              ".",
+          ]
+        : []),
+      ...messages.slice(0, 5),
+    ],
   };
 }
 
@@ -177,27 +222,63 @@ async function writeLedgerRows(
 type ExecutedRows = Awaited<ReturnType<typeof executeRows>>["rows"];
 
 /** Folds execution results back into the ledger, grouped to avoid a query per row. */
+/**
+ * The most recent attempt's ledger for this campaign.
+ *
+ * Only the latest run matters: each run's rows are a complete picture of what that
+ * attempt achieved, and merging older ones would resurrect rows that a later attempt
+ * has since settled.
+ */
+async function priorLedger(campaignId: string, kind: "APPLY" | "REVERT") {
+  const previous = await prisma.campaignRun.findFirst({
+    where: { campaignId, kind },
+    orderBy: { createdAt: "desc" },
+    select: { id: true },
+  });
+  if (!previous) return [];
+
+  const changes = await prisma.variantChange.findMany({
+    where: { runId: previous.id },
+    select: { variantGid: true, status: true, attempt: true },
+  });
+
+  return changes.map((change) => ({
+    variantGid: change.variantGid,
+    status: change.status as LedgerState,
+    attempt: change.attempt,
+  }));
+}
+
 async function recordResults(
   runId: string,
   shopId: string,
   rows: ExecutedRows,
 ): Promise<string[]> {
-  const byStatus = new Map<"VERIFIED" | "APPLIED" | "FAILED", string[]>();
+  const byStatus = new Map<"VERIFIED" | "APPLIED" | "FAILED" | "SKIPPED", string[]>();
   const messages: string[] = [];
 
   for (const executed of rows) {
+    // A variant deleted mid-run is SKIPPED, not FAILED. Recording it as a failure
+    // would make an ordinary merchant action look like a defect, and a run full of
+    // "failures" nobody needs to act on is a run nobody reads (E4).
     const status =
       executed.status === "verified"
         ? "VERIFIED"
         : executed.status === "failed"
           ? "FAILED"
-          : "APPLIED";
+          : executed.status === "skipped-deleted"
+            ? "SKIPPED"
+            : "APPLIED";
 
     const bucket = byStatus.get(status) ?? [];
     bucket.push(executed.row.ref.variantGid);
     byStatus.set(status, bucket);
 
-    if (executed.failureReason) messages.push(executed.failureReason);
+    // Only genuine failures belong in the summary. A deleted variant has guidance
+    // attached but is not something the merchant has to fix.
+    if (executed.failureReason && executed.status === "failed") {
+      messages.push(executed.guidance ?? executed.failureReason);
+    }
   }
 
   const now = new Date();
@@ -218,7 +299,16 @@ async function recordResults(
     if (!executed.failureReason) continue;
     await prisma.variantChange.updateMany({
       where: { runId, shopId, variantGid: executed.row.ref.variantGid },
-      data: { failureReason: executed.failureReason },
+      data: {
+        // Shopify's own words, then ours. Support needs the former; the merchant
+        // needs the latter.
+        failureReason: executed.guidance
+          ? `${executed.guidance} (Shopify said: ${executed.failureReason})`
+          : executed.failureReason,
+        // Counts toward quarantine: a row that has burned its attempts is left alone
+        // by the next resume rather than retried forever.
+        attempt: { increment: 1 },
+      },
     });
   }
 

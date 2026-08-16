@@ -21,6 +21,12 @@
 import { formatMoney, money, type Money } from "../money/money";
 import type { PlannedRow } from "../planning/types";
 import { isThrottledError, RateLimitBudget, withRetry } from "../shopify/budget";
+import {
+  classifyFailure,
+  stopsTheRun,
+  type FailureClass,
+  type FailureReason,
+} from "./classify";
 import type { QueryCost } from "../shopify/budget";
 
 /** Minimal shape of the Admin GraphQL client, so tests can inject a fake. */
@@ -31,7 +37,12 @@ export interface AdminClient {
   ): Promise<{ data?: T; extensions?: { cost?: QueryCost } }>;
 }
 
-export type ExecutedStatus = "verified" | "failed" | "applied-unverified";
+export type ExecutedStatus =
+  | "verified"
+  | "failed"
+  | "applied-unverified"
+  /** Variant deleted in Shopify while the run was in flight -- not a failure (E4). */
+  | "skipped-deleted";
 
 export interface ExecutedRow {
   row: PlannedRow;
@@ -40,6 +51,12 @@ export interface ExecutedRow {
   failureReason?: string;
   /** What the read-back actually observed, when it disagreed. */
   observedPrice?: Money;
+  /** What the merchant should do about it, in plain words. */
+  guidance?: string;
+  /** Retryable, terminal for this row, terminal for the run, or the merchant's to fix. */
+  failureClass?: FailureClass;
+  /** Machine-readable, so the UI can group rows that failed for the same reason. */
+  failureCode?: FailureReason;
 }
 
 export interface ExecuteResult {
@@ -50,6 +67,8 @@ export interface ExecuteResult {
   unverified: number;
   /** True only when every row verified — the "verified clean" bar. */
   clean: boolean;
+  /** Set when the run stopped early because nothing further could succeed. */
+  stoppedEarly?: string;
 }
 
 export interface ExecuteOptions {
@@ -132,6 +151,9 @@ export async function executeSync(
   const writable = rows.filter((r) => r.status !== "skipped" && r.intendedPrice);
   const results = new Map<string, ExecutedRow>();
 
+  // Set when a failure means no further row can succeed; stops the loop.
+  let terminalRunFailure: string | undefined;
+
   // Skipped rows pass straight through: they were never going to be written, and
   // reporting them as failures would misrepresent a deliberate policy decision.
   for (const row of rows) {
@@ -182,17 +204,63 @@ export async function executeSync(
 
       group.forEach((row, index) => {
         const reason = errorsByIndex.get(index) ?? groupWideError;
-        results.set(
-          row.ref.variantGid,
-          reason
-            ? { row, status: "failed", failureReason: reason }
-            : { row, status: "applied-unverified" },
-        );
+
+        if (!reason) {
+          results.set(row.ref.variantGid, { row, status: "applied-unverified" });
+          return;
+        }
+
+        const classified = classifyFailure(reason);
+
+        // A variant deleted while the run was in flight is not a failure -- the
+        // merchant deleted it. Reporting it as one trains people to ignore failures,
+        // which is how a real failure goes unnoticed (E4).
+        if (classified.reason === "variant-deleted") {
+          results.set(row.ref.variantGid, {
+            row,
+            status: "skipped-deleted",
+            failureReason: reason,
+            guidance: classified.message,
+            failureCode: classified.reason,
+          });
+          return;
+        }
+
+        // Shopify's own words stay in failureReason. Replacing them with our
+        // paraphrase would leave support unable to see what Shopify actually said,
+        // which is the one thing worth having when a row fails for an unexpected
+        // reason. Our guidance rides alongside it.
+        results.set(row.ref.variantGid, {
+          row,
+          status: "failed",
+          failureReason: reason,
+          guidance: classified.message,
+          failureClass: classified.class,
+          failureCode: classified.reason,
+        });
       });
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
+      const classified = classifyFailure(error);
+
+      const original = error instanceof Error ? error.message : String(error);
       for (const row of group) {
-        results.set(row.ref.variantGid, { row, status: "failed", failureReason: reason });
+        results.set(row.ref.variantGid, {
+          row,
+          status: "failed",
+          failureReason: original,
+          guidance: classified.message,
+          failureClass: classified.class,
+          failureCode: classified.reason,
+        });
+      }
+
+      // Auth revoked or plan gate: every remaining product would fail identically.
+      // Working through them would burn the rate limit to produce 150,000 copies of
+      // the same message, and bury the one row that explains it. Rows not attempted
+      // stay PENDING, so a resume after the fix picks them up untouched.
+      if (stopsTheRun(classified)) {
+        terminalRunFailure = classified.message;
+        break;
       }
     }
   }
@@ -204,7 +272,18 @@ export async function executeSync(
   const failed = all.filter((r) => r.status === "failed").length;
   const unverified = all.filter((r) => r.status === "applied-unverified").length;
 
-  return { rows: all, verified, failed, unverified, clean: failed === 0 };
+  // Clean means every row was read back and confirmed -- not merely "nothing threw".
+  // A row we wrote but never verified may or may not have landed, and calling that
+  // success is exactly the reporting this product exists not to do. Deleted variants
+  // are settled decisions rather than outstanding work, so they do not block it.
+  return {
+    rows: all,
+    verified,
+    failed,
+    unverified,
+    clean: failed === 0 && unverified === 0 && terminalRunFailure === undefined,
+    stoppedEarly: terminalRunFailure,
+  };
 }
 
 /**
