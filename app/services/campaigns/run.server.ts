@@ -17,6 +17,7 @@ import { planRun } from "../../lib/planning/plan";
 import { recordWriteIntents } from "../drift.server";
 import { loadCandidates, productMapFor } from "./candidates.server";
 import { loadCampaignContext } from "./model.server";
+import { guardrailsFor } from "../settings.server";
 import type { RunOutcome } from "./types";
 
 export interface RunOptions {
@@ -36,12 +37,15 @@ export async function runCampaign(
   options: RunOptions = {},
 ): Promise<RunOutcome> {
   const { resolvable, ast } = await loadCampaignContext(shopId, campaignId);
-  const candidates = await loadCandidates(shopId, ast);
+  const [candidates, storeGuardrails] = await Promise.all([
+    loadCandidates(shopId, ast),
+    guardrailsFor(shopId),
+  ]);
 
   const outcome = planRun({
     campaigns: resolvable,
     candidates,
-    storeGuardrails: {},
+    storeGuardrails,
     excludeCampaignId: options.revert ? campaignId : undefined,
   });
 
