@@ -292,7 +292,10 @@ describe("read-back verification", () => {
     });
     expect(result.rows[0].status).toBe("applied-unverified");
     expect(result.rows[0].failureReason).toContain("verification read failed");
-    expect(result.clean).toBe(true); // no write failed
+    // Not clean: the write did not fail, but nobody confirmed it landed either. A run
+    // is clean only when every row is read back and verified -- an unconfirmed row is
+    // a visible, resumable partial state, never silence.
+    expect(result.clean).toBe(false);
     expect(call).toBeGreaterThan(1);
   });
 });

@@ -90,6 +90,7 @@ export const action = withGuard("/app/campaigns/$id", async ({ request, params }
     // implementation of the same thing, free to disagree with the first.
     const result = await runCampaign(shop.id, String(params.id), toAdminClient(admin), {
       revert: reverting,
+      resume: intent === "resume",
     });
 
     const verb = reverting ? "Reverted" : intent === "resume" ? "Resumed" : "Applied";
