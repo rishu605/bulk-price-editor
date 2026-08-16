@@ -20,6 +20,12 @@ import { RunHistoryTable } from "../components/RunHistoryTable";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { reportError } from "../services/error-report.server";
 import { withGuard } from "../lib/errors/guard.server";
+import {
+  describeState,
+  needsAttention,
+  type CampaignState,
+} from "../lib/lifecycle/transitions";
+import { transitionHistory } from "../services/campaigns/lifecycle.server";
 
 export const loader = withGuard("/app/campaigns/$id", async ({ request, params }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -31,9 +37,18 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     campaignRuns(shop.id, campaignId),
     prisma.campaign.findFirstOrThrow({
       where: { id: campaignId, shopId: shop.id },
-      select: { schedule: true, autoEnroll: true, enrollPendingAt: true },
+      select: {
+        schedule: true,
+        autoEnroll: true,
+        enrollPendingAt: true,
+        status: true,
+      },
     }),
   ]);
+
+  const state = record.status as CampaignState;
+  const lifecycle = describeState(state);
+  const history = await transitionHistory(shop.id, campaignId, 8);
 
   const schedule = parseSchedule(record.schedule);
   const scheduleText = describeSchedule(schedule, shop.timezone);
@@ -55,6 +70,10 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     warnings,
     autoEnroll: record.autoEnroll,
     enrollPendingAt: record.enrollPendingAt !== null,
+    state,
+    lifecycle,
+    needsAttention: needsAttention(state),
+    history,
   };
 });
 
@@ -65,11 +84,15 @@ export const action = withGuard("/app/campaigns/$id", async ({ request, params }
   const reverting = intent === "revert";
 
   try {
+    // Resume is an ordinary apply. The resolver is idempotent, so rows already at the
+    // campaign price are planned as "already correct" and cost nothing — only the ones
+    // that failed last time are written again. A separate retry path would be a second
+    // implementation of the same thing, free to disagree with the first.
     const result = await runCampaign(shop.id, String(params.id), toAdminClient(admin), {
       revert: reverting,
     });
 
-    const verb = reverting ? "Reverted" : "Applied";
+    const verb = reverting ? "Reverted" : intent === "resume" ? "Resumed" : "Applied";
     return {
       ok: result.clean,
       message: result.clean
@@ -116,6 +139,9 @@ export default function CampaignDetail() {
     warnings,
     autoEnroll,
     enrollPendingAt,
+    lifecycle,
+    needsAttention: attention,
+    history,
   } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
   const busy = fetcher.state !== "idle";
@@ -131,6 +157,16 @@ export default function CampaignDetail() {
           {result.details.map((detail) => (
             <s-paragraph key={detail}>{detail}</s-paragraph>
           ))}
+        </s-banner>
+      ) : null}
+
+      {attention ? (
+        <s-banner tone={lifecycle.tone === "critical" ? "critical" : "warning"}>
+          <s-paragraph>{lifecycle.label}</s-paragraph>
+          <s-paragraph>{lifecycle.explanation}</s-paragraph>
+          {lifecycle.nextAction?.intent === "drift" ? (
+            <s-button href="/app/drift">{lifecycle.nextAction.label}</s-button>
+          ) : null}
         </s-banner>
       ) : null}
 
@@ -204,6 +240,15 @@ export default function CampaignDetail() {
             </s-button>
           </fetcher.Form>
 
+          {lifecycle.nextAction?.intent === "resume" ? (
+            <fetcher.Form method="post">
+              <input type="hidden" name="intent" value="resume" />
+              <s-button type="submit" variant="primary" loading={busy || undefined}>
+                Resume — retry the rows that did not complete
+              </s-button>
+            </fetcher.Form>
+          ) : null}
+
           <fetcher.Form method="post">
             <input type="hidden" name="intent" value="revert" />
             <s-button type="submit" tone="critical" loading={busy || undefined}>
@@ -247,8 +292,27 @@ export default function CampaignDetail() {
 
       <s-section slot="aside" heading="Status">
         <s-paragraph>
-          <s-badge>{preview.status}</s-badge>
+          <s-badge tone={lifecycle.tone}>{lifecycle.label}</s-badge>
         </s-paragraph>
+        <s-paragraph>
+          <s-text>{lifecycle.explanation}</s-text>
+        </s-paragraph>
+
+        {history.length > 0 ? (
+          <>
+            <s-divider />
+            <s-paragraph>
+              <s-text>How it got here</s-text>
+            </s-paragraph>
+            {history.map((entry) => (
+              <s-paragraph key={`${entry.at}-${entry.to}`}>
+                <s-text>
+                  {entry.from} → {entry.to} · {entry.reason || entry.actor}
+                </s-text>
+              </s-paragraph>
+            ))}
+          </>
+        ) : null}
       </s-section>
     </s-page>
   );
