@@ -1,60 +1,30 @@
-# Shopify app configuration for Anchor (bulk price editor).
-#
-# `client_id`, `name`, `handle` and `application_url` are written by
-# `npm run config:link` -- run that once against your Partner app before `npm run dev`.
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
-client_id = ""
+client_id = "5401aeddaf37aac5c9e1650bf6abb462"
+name = "bulk-price-editor"
+application_url = "https://example.com"
+embedded = true
 
-[access_scopes]
-# RFC-001 D4 (open, resolved by task P0.2): current Shopify docs indicate `write_products`
-# alone covers products, variants, price lists and catalogs. This must be verified
-# empirically against every mutation in RFC-001 B6 before launch -- over-asking for scopes
-# hurts install conversion, under-asking breaks the Markets write path.
-#
-# Deliberately NOT requested yet:
-#   read_orders     -> only when Campaign P&L (A-5.7) ships; triggers Protected Customer
-#                      Data approval, so the paperwork starts at phase P5.
-#   read_companies  -> only when B2B catalog assignment display ships (P6.1).
-scopes = "write_products"
+[build]
+automatically_update_urls_on_dev = true
+dev_store_url = "boltify-apps.myshopify.com"
 
 [webhooks]
-api_version = "2025-10"
+api_version = "2026-07"
 
-  # Handled by: app/routes/webhooks.app.uninstalled.tsx
   [[webhooks.subscriptions]]
-  uri = "/webhooks/app/uninstalled"
-  topics = ["app/uninstalled"]
-
-  # Handled by: app/routes/webhooks.app.scopes_update.tsx
-  [[webhooks.subscriptions]]
-  topics = ["app/scopes_update"]
+  topics = [ "app/scopes_update" ]
   uri = "/webhooks/app/scopes_update"
 
-  # --- Below are registered as their handlers land. Do not uncomment ahead of the
-  # --- handler: a subscribed topic with no route means Shopify retries into a 404.
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
 
-  # Catalog mirror sync (RFC-001 B7, task P1.3)
-  # [[webhooks.subscriptions]]
-  # topics = ["products/create", "products/update", "products/delete"]
-  # uri = "/webhooks/products"
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = ""
+optional_scopes = [ ]
+use_legacy_install_flow = false
 
-  # Bulk executor completion (RFC-001 B5, task P2.5). Poll fallback still required --
-  # community reports document missed deliveries of this topic (edge case E13).
-  # [[webhooks.subscriptions]]
-  # topics = ["bulk_operations/finish"]
-  # uri = "/webhooks/bulk-operations/finish"
-
-  # Billing tier sync (A-5.6, task P5.8)
-  # [[webhooks.subscriptions]]
-  # topics = ["app_subscriptions/update"]
-  # uri = "/webhooks/app-subscriptions/update"
-
-  # Mandatory compliance topics for public apps (RFC-001 B10, task P0.4).
-  # We hold no customer PII, but these must still be answered correctly.
-  #
-  # All three route to ONE handler that switches on topic -- see
-  # docs/reference-patterns.md. Fewer places to get HMAC handling wrong than
-  # three separate routes.
-  # [[webhooks.subscriptions]]
-  # uri = "/webhooks/compliance"
-  # compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
+[auth]
+redirect_urls = [ ]
