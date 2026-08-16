@@ -11,11 +11,14 @@ import prisma from "../db.server";
 import { dueTransition, parseSchedule, type Transition } from "../lib/scheduling/window";
 import { runCampaign } from "./campaigns/run.server";
 import { adminClientForShop } from "./admin-client.server";
+import { claimEnrollment, pendingEnrollments } from "./auto-enroll.server";
 
 export interface TickResult {
   examined: number;
   applied: number;
   reverted: number;
+  /** Campaigns re-applied because products entered their scope while running. */
+  enrolled: number;
   failures: Array<{ campaignId: string; error: string }>;
 }
 
@@ -26,12 +29,22 @@ export interface TickResult {
  * `dueTransition` so there is one place that knows the rules.
  */
 export async function tick(now: Date = new Date()): Promise<TickResult> {
-  const result: TickResult = { examined: 0, applied: 0, reverted: 0, failures: [] };
+  const result: TickResult = {
+    examined: 0,
+    applied: 0,
+    reverted: 0,
+    enrolled: 0,
+    failures: [],
+  };
 
   const candidates = await prisma.campaign.findMany({
     where: { status: { in: ["SCHEDULED", "ACTIVE", "PARTIAL"] } },
     include: { shop: { select: { id: true, domain: true, uninstalledAt: true } } },
   });
+
+  // Campaigns this tick has already run, so the enrollment drain does not run them
+  // a second time for no reason.
+  const transitioned = new Set<string>();
 
   for (const campaign of candidates) {
     // An uninstalled shop has no usable token, and writing to it is impossible
@@ -48,8 +61,13 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
 
     try {
       await runTransition(campaign.shop.id, campaign.shop.domain, campaign.id, transition);
-      if (transition === "apply") result.applied++;
-      else result.reverted++;
+      if (transition === "apply") {
+        result.applied++;
+        transitioned.add(campaign.id);
+      } else {
+        result.reverted++;
+        transitioned.add(campaign.id);
+      }
     } catch (error) {
       // One campaign failing must not stop the tick: the others are still due, and
       // a scheduler that gives up on the first error leaves sales unstarted.
@@ -60,7 +78,47 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
     }
   }
 
+  await drainEnrollments(result, transitioned);
+
   return result;
+}
+
+/**
+ * Re-applies campaigns that gained products while running.
+ *
+ * This is a plain apply, not a special path. The run is idempotent -- variants
+ * already at the campaign price are planned as "already correct" and written to
+ * nobody -- so the newly enrolled variants are the only ones that cost an API call.
+ */
+async function drainEnrollments(
+  result: TickResult,
+  alreadyRun: ReadonlySet<string>,
+): Promise<void> {
+  const pending = await pendingEnrollments();
+
+  for (const entry of pending) {
+    // Claiming clears the mark. Another worker that got there first returns false,
+    // which is the whole point -- two workers must not re-apply the same campaign.
+    if (!(await claimEnrollment(entry.id))) continue;
+
+    // A campaign whose window transition already ran in this same tick has just been
+    // priced from scratch, and that run covered the new variants too. Clearing the
+    // mark without a second run is correct, not a shortcut.
+    if (alreadyRun.has(entry.id)) continue;
+
+    try {
+      const client = await adminClientForShop(entry.shopDomain);
+      if (!client) throw new Error(`No usable session for ${entry.shopDomain}`);
+
+      await runCampaign(entry.shopId, entry.id, client, {});
+      result.enrolled++;
+    } catch (error) {
+      result.failures.push({
+        campaignId: entry.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 }
 
 async function runTransition(

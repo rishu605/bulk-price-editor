@@ -18,6 +18,12 @@ export interface CampaignInput {
   rounding: "none" | "charm99";
   guardrails?: Guardrails;
   priority?: number;
+  /**
+   * Price products that enter scope while the campaign runs. Defaults on: a merchant
+   * who puts a collection on sale means the collection, not the products that
+   * happened to be in it at the moment they clicked.
+   */
+  autoEnroll?: boolean;
   /** Absent means the campaign only runs when applied by hand. */
   schedule?: Schedule;
 }

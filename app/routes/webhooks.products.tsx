@@ -27,6 +27,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { parseMoney } from "../lib/money/money";
 import { checkForDrift } from "../services/drift.server";
+import { enrollNewVariants } from "../services/auto-enroll.server";
 
 interface WebhookVariant {
   id: number | string;
@@ -73,6 +74,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const remoteUpdatedAt = product.updated_at ? new Date(product.updated_at) : null;
   const currency = await currencyFor(shop.id);
+
+  const seenVariantGids: string[] = [];
 
   const tags = Array.isArray(product.tags)
     ? product.tags
@@ -151,6 +154,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       },
       update: { livePrice: price, liveCompareAt: compareAt, syncedAt: new Date() },
     });
+
+    seenVariantGids.push(variantGid);
+  }
+
+  // Only after the mirror is current: enrollment captures baselines from these very
+  // rows, so a variant we have just learned about has something to anchor to.
+  //
+  // Failures here must not fail the webhook. Shopify would retry the whole payload,
+  // re-running the mirror update for no benefit, and a missed enrolment is recovered
+  // by the next product edit or catalogue sync -- whereas a retry storm is not.
+  try {
+    await enrollNewVariants(shop.id, seenVariantGids);
+  } catch (error) {
+    console.error(
+      `[webhook] auto-enroll failed for ${productGid}:`,
+      error instanceof Error ? error.message : error,
+    );
   }
 
   return new Response();
