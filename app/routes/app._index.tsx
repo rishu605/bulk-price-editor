@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useFetcher, useLoaderData, useRouteError } from "react-router";
+import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
@@ -7,8 +7,10 @@ import prisma from "../db.server";
 import { ensureShop, markSyncComplete } from "../services/shop.server";
 import { fetchShopBasics, syncCatalog } from "../services/catalog-sync.server";
 import { baselineHealth, captureBaselines } from "../services/baselines.server";
+import { RouteBoundary } from "../components/RouteBoundary";
+import { withGuard } from "../lib/errors/guard.server";
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
+export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
 
@@ -26,9 +28,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     },
     campaigns,
   };
-};
+});
 
-export const action = async ({ request }: ActionFunctionArgs) => {
+export const action = withGuard("/app", async ({ request }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
   const form = await request.formData();
@@ -74,7 +76,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   return { ok: false, message: `Unknown action: ${intent}`, errors: [] };
-};
+});
 
 type ActionData = { ok: boolean; message: string; errors: string[] };
 
@@ -194,7 +196,7 @@ export default function Dashboard() {
 }
 
 export function ErrorBoundary() {
-  return boundary.error(useRouteError());
+  return <RouteBoundary />;
 }
 
 export const headers: HeadersFunction = (headersArgs) => {

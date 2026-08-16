@@ -1,13 +1,15 @@
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useFetcher, useLoaderData, useRouteError } from "react-router";
+import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { ensureShop } from "../services/shop.server";
 import { readSettings, shopCurrency, writeSettings } from "../services/settings.server";
+import { RouteBoundary } from "../components/RouteBoundary";
+import { withGuard } from "../lib/errors/guard.server";
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
+export const loader = withGuard("/app/settings", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
 
@@ -19,9 +21,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   ]);
 
   return { settings, currency, withCost, variants };
-};
+});
 
-export const action = async ({ request }: ActionFunctionArgs) => {
+export const action = withGuard("/app/settings", async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
   const form = await request.formData();
@@ -35,7 +37,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   });
 
   return { ok: true, message: "Guardrails saved. They apply to every campaign.", saved };
-};
+});
 
 function emptyToNull(value: FormDataEntryValue | null): number | null {
   const text = String(value ?? "").trim();
@@ -168,7 +170,7 @@ export default function Settings() {
 }
 
 export function ErrorBoundary() {
-  return boundary.error(useRouteError());
+  return <RouteBoundary />;
 }
 
 export const headers: HeadersFunction = (headersArgs) => {

@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useFetcher, useLoaderData, useRouteError } from "react-router";
+import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
@@ -17,8 +17,11 @@ import { CountsRow } from "../components/CountsRow";
 import { LedgerTable } from "../components/LedgerTable";
 import { PreviewTable } from "../components/PreviewTable";
 import { RunHistoryTable } from "../components/RunHistoryTable";
+import { RouteBoundary } from "../components/RouteBoundary";
+import { reportError } from "../services/error-report.server";
+import { withGuard } from "../lib/errors/guard.server";
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
+export const loader = withGuard("/app/campaigns/$id", async ({ request, params }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
   const campaignId = String(params.id);
@@ -53,9 +56,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     autoEnroll: record.autoEnroll,
     enrollPendingAt: record.enrollPendingAt !== null,
   };
-};
+});
 
-export const action = async ({ request, params }: ActionFunctionArgs) => {
+export const action = withGuard("/app/campaigns/$id", async ({ request, params }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
   const intent = String((await request.formData()).get("intent"));
@@ -76,15 +79,32 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       details: result.messages,
     };
   } catch (error) {
+    // A failed run is the highest-stakes error in the app: the merchant needs to know
+    // their prices are intact, in words, plus a reference that leads us to the stack.
+    const reported = await reportError(error, {
+      shopId: shop.id,
+      shop: session.shop,
+      route: "/app/campaigns/$id",
+      method: "POST",
+      campaignId: String(params.id),
+      intent,
+    });
+
     return {
       ok: false,
-      message: error instanceof Error ? error.message : String(error),
-      details: [] as string[],
+      message: reported.userMessage,
+      details: [`Reference ${reported.errorId}`],
+      errorId: reported.errorId,
     };
   }
-};
+});
 
-type ActionData = { ok: boolean; message: string; details: string[] };
+type ActionData = {
+  ok: boolean;
+  message: string;
+  details: string[];
+  errorId?: string;
+};
 
 export default function CampaignDetail() {
   const {
@@ -235,7 +255,7 @@ export default function CampaignDetail() {
 }
 
 export function ErrorBoundary() {
-  return boundary.error(useRouteError());
+  return <RouteBoundary />;
 }
 
 export const headers: HeadersFunction = (headersArgs) => {
