@@ -423,3 +423,85 @@ export async function runCampaign(
     messages: messages.slice(0, 5),
   };
 }
+
+
+export interface RunSummary {
+  id: string;
+  kind: string;
+  status: string;
+  planned: number;
+  verified: number;
+  failed: number;
+  skipped: number;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface LedgerRow {
+  variantGid: string;
+  title: string;
+  before: string | null;
+  intended: string | null;
+  status: string;
+  failureReason: string | null;
+}
+
+/** Run history for a campaign, newest first. */
+export async function campaignRuns(shopId: string, campaignId: string): Promise<RunSummary[]> {
+  const runs = await prisma.campaignRun.findMany({
+    where: { shopId, campaignId },
+    orderBy: { createdAt: "desc" },
+    take: 20,
+  });
+
+  return runs.map((run) => ({
+    id: run.id,
+    kind: run.kind,
+    status: run.status,
+    planned: run.plannedRows,
+    verified: run.verifiedRows,
+    failed: run.failedRows,
+    skipped: run.skippedRows,
+    startedAt: run.startedAt?.toISOString() ?? null,
+    finishedAt: run.finishedAt?.toISOString() ?? null,
+  }));
+}
+
+/**
+ * The per-row ledger for one run.
+ *
+ * This is the forensic view: the success test is that support can trace any
+ * variant's complete price story without opening a database client. Retention is
+ * deliberately unlimited on every tier -- competitors sell 30/60/90-day history as
+ * a paid axis, and charging for the ability to explain what you did to someone's
+ * prices is the wrong trade.
+ */
+export async function runLedger(
+  shopId: string,
+  runId: string,
+  limit = 200,
+): Promise<LedgerRow[]> {
+  const changes = await prisma.variantChange.findMany({
+    where: { shopId, runId },
+    orderBy: { createdAt: "asc" },
+    take: limit,
+  });
+
+  const titles = await prisma.variantIndex.findMany({
+    where: { shopId, variantGid: { in: changes.map((c) => c.variantGid) } },
+    select: { variantGid: true, title: true },
+  });
+  const titleBy = new Map(titles.map((t) => [t.variantGid, t.title ?? t.variantGid]));
+
+  const fmt = (v: bigint | null, currency: string) =>
+    v === null ? null : formatMoneyLocal(money(Number(v), currency));
+
+  return changes.map((change) => ({
+    variantGid: change.variantGid,
+    title: titleBy.get(change.variantGid) ?? change.variantGid,
+    before: fmt(change.beforePrice, change.currency),
+    intended: fmt(change.intendedPrice, change.currency),
+    status: change.status,
+    failureReason: change.failureReason,
+  }));
+}
