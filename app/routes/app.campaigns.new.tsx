@@ -8,6 +8,7 @@ import { facets, previewMatches, type FilterAst } from "../services/segments.ser
 import { createCampaign } from "../services/campaigns/index.server";
 import type { AdjustmentRule, CompareAtPolicy } from "../lib/pricing/types";
 import { money } from "../lib/money/money";
+import { localInputToUtc, type Schedule } from "../lib/scheduling/window";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -21,6 +22,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   ]);
 
   return {
+    timeZone: shop.timezone,
     facets: available,
     preview,
     selected: {
@@ -80,6 +82,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         ? { kind: "clear" }
         : { kind: "leave" };
 
+  const startLocal = String(form.get("startAt") ?? "").trim();
+  const endLocal = String(form.get("endAt") ?? "").trim();
+  const startUtc = startLocal ? localInputToUtc(startLocal, shop.timezone) : null;
+
+  // A schedule needs a valid start. Anything else stays manual rather than being
+  // half-scheduled, which would leave the merchant unsure whether it will fire.
+  const schedule: Schedule | undefined = startUtc
+    ? {
+        kind: "window",
+        startAt: startUtc,
+        endAt: endLocal ? localInputToUtc(endLocal, shop.timezone) ?? undefined : undefined,
+        revertBufferMinutes: Number(form.get("revertBuffer") ?? 5) || 5,
+      }
+    : undefined;
+
   const campaign = await createCampaign(shop.id, {
     name: String(form.get("name") ?? "Untitled campaign").trim() || "Untitled campaign",
     ast: astFromParams(params),
@@ -87,13 +104,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     compareAtPolicy,
     rounding: String(form.get("rounding") ?? "none") === "charm99" ? "charm99" : "none",
     priority: Number(form.get("priority") ?? 100) || 100,
+    schedule,
   });
 
   return redirect(`/app/campaigns/${campaign.id}`);
 };
 
 export default function NewCampaign() {
-  const { facets: available, preview, selected } = useLoaderData<typeof loader>();
+  const { facets: available, preview, selected, timeZone } = useLoaderData<typeof loader>();
 
   return (
     <s-page heading="New campaign">
@@ -194,6 +212,29 @@ export default function NewCampaign() {
               label="Priority"
               defaultValue="100"
               details="Higher wins when two campaigns cover the same variant. They never stack."
+            />
+
+            <s-divider />
+
+            <s-heading>Schedule (optional)</s-heading>
+            <s-paragraph>
+              <s-text>
+                Times are in your store&rsquo;s zone, {timeZone}. Leave the start
+                blank to run the campaign only when you apply it by hand.
+              </s-text>
+            </s-paragraph>
+
+            <label htmlFor="startAt">Start</label>
+            <input id="startAt" type="datetime-local" name="startAt" />
+
+            <label htmlFor="endAt">End (optional)</label>
+            <input id="endAt" type="datetime-local" name="endAt" />
+
+            <s-number-field
+              name="revertBuffer"
+              label="Revert this many minutes early"
+              defaultValue="5"
+              details="A busy bulk queue takes time; starting early means prices are back before the window closes."
             />
 
             <s-button type="submit" variant="primary">

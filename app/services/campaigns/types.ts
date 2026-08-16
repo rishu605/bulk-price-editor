@@ -7,6 +7,7 @@
 
 import type { AdjustmentRule, CompareAtPolicy, Guardrails } from "../../lib/pricing/types";
 import type { PlannedRow } from "../../lib/planning/types";
+import type { Schedule } from "../../lib/scheduling/window";
 import type { FilterAst } from "../segments.server";
 
 export interface CampaignInput {
@@ -17,6 +18,8 @@ export interface CampaignInput {
   rounding: "none" | "charm99";
   guardrails?: Guardrails;
   priority?: number;
+  /** Absent means the campaign only runs when applied by hand. */
+  schedule?: Schedule;
 }
 
 export interface PreviewRow {

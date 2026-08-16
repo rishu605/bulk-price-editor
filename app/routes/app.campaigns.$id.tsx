@@ -3,6 +3,7 @@ import { useFetcher, useLoaderData, useRouteError } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
+import prisma from "../db.server";
 import { ensureShop } from "../services/shop.server";
 import { toAdminClient } from "../services/admin-client.server";
 import {
@@ -11,6 +12,7 @@ import {
   runCampaign,
   runLedger,
 } from "../services/campaigns/index.server";
+import { describeSchedule, parseSchedule, scheduleWarnings } from "../lib/scheduling/window";
 import { CountsRow } from "../components/CountsRow";
 import { LedgerTable } from "../components/LedgerTable";
 import { PreviewTable } from "../components/PreviewTable";
@@ -21,10 +23,18 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const shop = await ensureShop(session.shop);
   const campaignId = String(params.id);
 
-  const [preview, runs] = await Promise.all([
+  const [preview, runs, record] = await Promise.all([
     previewCampaign(shop.id, campaignId),
     campaignRuns(shop.id, campaignId),
+    prisma.campaign.findFirstOrThrow({
+      where: { id: campaignId, shopId: shop.id },
+      select: { schedule: true },
+    }),
   ]);
+
+  const schedule = parseSchedule(record.schedule);
+  const scheduleText = describeSchedule(schedule, shop.timezone);
+  const warnings = scheduleWarnings(schedule);
 
   // Show the newest run's ledger inline. The first question after a run is always
   // "what exactly did it do to each variant", and making that a second click loses
@@ -33,7 +43,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const selectedRunId = requested ?? runs[0]?.id ?? null;
   const ledger = selectedRunId ? await runLedger(shop.id, selectedRunId) : [];
 
-  return { preview, runs, ledger, selectedRunId };
+  return { preview, runs, ledger, selectedRunId, scheduleText, warnings };
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
@@ -68,7 +78,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 type ActionData = { ok: boolean; message: string; details: string[] };
 
 export default function CampaignDetail() {
-  const { preview, runs, ledger, selectedRunId } = useLoaderData<typeof loader>();
+  const { preview, runs, ledger, selectedRunId, scheduleText, warnings } =
+    useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
   const busy = fetcher.state !== "idle";
   const result = fetcher.data;
@@ -171,6 +182,15 @@ export default function CampaignDetail() {
             snap back to full price.
           </s-text>
         </s-paragraph>
+      </s-section>
+
+      <s-section slot="aside" heading="Schedule">
+        <s-paragraph>{scheduleText}</s-paragraph>
+        {warnings.map((warning) => (
+          <s-banner key={warning} tone="warning">
+            <s-paragraph>{warning}</s-paragraph>
+          </s-banner>
+        ))}
       </s-section>
 
       <s-section slot="aside" heading="Status">
