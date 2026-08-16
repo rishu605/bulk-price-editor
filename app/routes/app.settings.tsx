@@ -76,6 +76,9 @@ export default function Settings() {
               Only {costCoverage}% of your variants have a cost recorded. With
               &ldquo;never below cost&rdquo; on, the rest are skipped rather than
               priced unguarded — they will not be included in any campaign.
+              Variants added since the last catalogue sync have no cost yet, because
+              Shopify&rsquo;s product webhooks do not carry one; a re-sync from the
+              dashboard fills them in.
             </s-paragraph>
           </s-banner>
         ) : null}

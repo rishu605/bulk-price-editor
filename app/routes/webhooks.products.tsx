@@ -11,6 +11,14 @@
  *   Out-of-order deliveries are ignored, not applied. Shopify does not guarantee
  *   ordering, so an older payload arriving after a newer one would otherwise
  *   overwrite current data with stale data. `remoteUpdatedAt` decides.
+ *
+ * One thing this path CANNOT supply: cost per item. Shopify's product webhook
+ * payload has no cost field -- cost lives on the inventory item, behind a separate
+ * lookup. So a variant that first appears via webhook has no cost until the next
+ * catalogue sync, and cost-based guardrails will skip it in the meantime. `cost` is
+ * deliberately absent from the update below rather than set to null, so a sync that
+ * already found a cost is not undone by a later webhook. The settings page reports
+ * cost coverage so the gap is visible rather than silent.
  */
 
 import type { ActionFunctionArgs } from "react-router";
