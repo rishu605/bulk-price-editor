@@ -24,7 +24,7 @@ export async function createCampaign(shopId: string, input: CampaignInput) {
     data: {
       shopId,
       name: input.name,
-      status: "DRAFT",
+      status: input.schedule?.kind === "window" ? "SCHEDULED" : "DRAFT",
       priority: input.priority ?? 100,
       ruleRows: [{ segmentIds: [], rule: input.rule }] as never,
       surfaces: { base: true } as never,
@@ -32,7 +32,19 @@ export async function createCampaign(shopId: string, input: CampaignInput) {
       compareAtViolationPolicy: "clear",
       guardrails: (input.guardrails ?? {}) as never,
       guardrailViolationPolicy: "clamp",
-      schedule: { kind: "manual", rounding: input.rounding, ast: input.ast } as never,
+      // Rounding and scope ride along in the schedule blob so the shape can evolve
+      // without a migration; parseSchedule ignores the extra keys.
+      schedule: {
+        ...(input.schedule ?? { kind: "manual" }),
+        rounding: input.rounding,
+        ast: input.ast,
+      } as never,
+      ...(input.schedule?.kind === "window"
+        ? {
+            startAt: new Date(input.schedule.startAt),
+            endAt: input.schedule.endAt ? new Date(input.schedule.endAt) : null,
+          }
+        : {}),
     },
   });
 }
