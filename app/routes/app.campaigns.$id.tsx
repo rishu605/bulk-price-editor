@@ -4,14 +4,28 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
-import { previewCampaign, runCampaign } from "../services/campaigns.server";
+import {
+  campaignRuns,
+  previewCampaign,
+  runCampaign,
+  runLedger,
+} from "../services/campaigns.server";
 import { toAdminClient } from "../services/admin-client.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
   const preview = await previewCampaign(shop.id, String(params.id));
-  return { preview };
+  const runs = await campaignRuns(shop.id, String(params.id));
+
+  // Show the newest run's ledger inline: the first question after a run is always
+  // "what exactly did it do to each variant", and making that a second click loses
+  // the people who most need the answer.
+  const url = new URL(request.url);
+  const selectedRunId = url.searchParams.get("run") ?? runs[0]?.id ?? null;
+  const ledger = selectedRunId ? await runLedger(shop.id, selectedRunId) : [];
+
+  return { preview, runs, ledger, selectedRunId };
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
@@ -45,6 +59,21 @@ type ActionData = { ok: boolean; message: string; details: string[] };
 
 type Tone = "info" | "success" | "critical" | "neutral" | "warning" | "caution" | "auto";
 
+const RUN_TONE: Record<string, Tone> = {
+  COMPLETED: "success",
+  PARTIAL: "warning",
+  FAILED: "critical",
+  EXECUTING: "info",
+};
+
+const LEDGER_TONE: Record<string, Tone> = {
+  VERIFIED: "success",
+  APPLIED: "info",
+  FAILED: "critical",
+  SKIPPED: "neutral",
+  PENDING: "info",
+};
+
 const STATUS_TONE: Record<string, Tone> = {
   pending: "info",
   clamped: "warning",
@@ -52,7 +81,7 @@ const STATUS_TONE: Record<string, Tone> = {
 };
 
 export default function CampaignDetail() {
-  const { preview } = useLoaderData<typeof loader>();
+  const { preview, runs, ledger, selectedRunId } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
   const busy = fetcher.state !== "idle";
   const result = fetcher.data;
@@ -148,6 +177,80 @@ export default function CampaignDetail() {
           </s-paragraph>
         )}
       </s-section>
+
+      {runs.length > 0 ? (
+        <s-section heading="Run history">
+          <s-table>
+            <s-table-header-row>
+              <s-table-header>Run</s-table-header>
+              <s-table-header>Status</s-table-header>
+              <s-table-header>Planned</s-table-header>
+              <s-table-header>Verified</s-table-header>
+              <s-table-header>Failed</s-table-header>
+              <s-table-header>Finished</s-table-header>
+              <s-table-header></s-table-header>
+            </s-table-header-row>
+            <s-table-body>
+              {runs.map((run) => (
+                <s-table-row key={run.id}>
+                  <s-table-cell>{run.kind}</s-table-cell>
+                  <s-table-cell>
+                    <s-badge tone={RUN_TONE[run.status] ?? "neutral"}>{run.status}</s-badge>
+                  </s-table-cell>
+                  <s-table-cell>{run.planned}</s-table-cell>
+                  <s-table-cell>{run.verified}</s-table-cell>
+                  <s-table-cell>{run.failed}</s-table-cell>
+                  <s-table-cell>
+                    {run.finishedAt ? new Date(run.finishedAt).toLocaleString() : "—"}
+                  </s-table-cell>
+                  <s-table-cell>
+                    {run.id === selectedRunId ? (
+                      <s-text>Showing</s-text>
+                    ) : (
+                      <s-link href={`?run=${run.id}`}>View ledger</s-link>
+                    )}
+                  </s-table-cell>
+                </s-table-row>
+              ))}
+            </s-table-body>
+          </s-table>
+        </s-section>
+      ) : null}
+
+      {ledger.length > 0 ? (
+        <s-section heading="Ledger">
+          <s-paragraph>
+            <s-text>
+              Every row we wrote, with what it was and what we intended. Retained
+              indefinitely on every plan.
+            </s-text>
+          </s-paragraph>
+          <s-table>
+            <s-table-header-row>
+              <s-table-header>Variant</s-table-header>
+              <s-table-header>Before</s-table-header>
+              <s-table-header>Intended</s-table-header>
+              <s-table-header>State</s-table-header>
+              <s-table-header>Reason</s-table-header>
+            </s-table-header-row>
+            <s-table-body>
+              {ledger.map((row) => (
+                <s-table-row key={row.variantGid}>
+                  <s-table-cell>{row.title}</s-table-cell>
+                  <s-table-cell>{row.before ?? "—"}</s-table-cell>
+                  <s-table-cell>{row.intended ?? "—"}</s-table-cell>
+                  <s-table-cell>
+                    <s-badge tone={LEDGER_TONE[row.status] ?? "neutral"}>
+                      {row.status}
+                    </s-badge>
+                  </s-table-cell>
+                  <s-table-cell>{row.failureReason ?? "—"}</s-table-cell>
+                </s-table-row>
+              ))}
+            </s-table-body>
+          </s-table>
+        </s-section>
+      ) : null}
 
       <s-section slot="aside" heading="Actions">
         <s-stack gap="base">
