@@ -10,10 +10,10 @@
  */
 
 import prisma from "../../db.server";
-import { executeSync, type AdminClient } from "../../lib/execution/sync-executor";
+import type { AdminClient } from "../../lib/execution/sync-executor";
+import { executeRows } from "./execute.server";
 import type { PlannedRow } from "../../lib/planning/types";
 import { planRun } from "../../lib/planning/plan";
-import { RateLimitBudget } from "../../lib/shopify/budget";
 import { recordWriteIntents } from "../drift.server";
 import { loadCandidates, productMapFor } from "./candidates.server";
 import { loadCampaignContext } from "./model.server";
@@ -89,9 +89,11 @@ export async function runCampaign(
     writable.map((row) => row.ref.variantGid),
   );
 
-  const result = await executeSync(outcome.rows, {
+  // Honour the planner's path choice. A 1,600-row campaign executed synchronously
+  // would take roughly one variant every two seconds against a standard shop's
+  // rate limit; the bulk path costs no rate-limit budget at all.
+  const result = await executeRows(outcome.rows, {
     client,
-    budget: new RateLimitBudget(),
     productOf: (gid) => products.get(gid) ?? gid,
     verifySampleRate: options.verifySampleRate ?? 1,
   });
@@ -156,7 +158,7 @@ async function writeLedgerRows(
   }
 }
 
-type ExecutedRows = Awaited<ReturnType<typeof executeSync>>["rows"];
+type ExecutedRows = Awaited<ReturnType<typeof executeRows>>["rows"];
 
 /** Folds execution results back into the ledger, grouped to avoid a query per row. */
 async function recordResults(
