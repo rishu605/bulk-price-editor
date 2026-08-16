@@ -23,6 +23,7 @@ import { selectWritePath } from "../lib/planning/write-path";
 import { executeSync, type AdminClient } from "../lib/execution/sync-executor";
 import { RateLimitBudget } from "../lib/shopify/budget";
 import { astToWhere, type FilterAst } from "./segments.server";
+import { recordWriteIntents } from "./drift.server";
 
 export interface CampaignInput {
   name: string;
@@ -335,6 +336,21 @@ export async function runCampaign(
       skipDuplicates: true,
     });
   }
+
+  // Record intents BEFORE writing. Every price we write produces a products/update
+  // webhook moments later; without this the drift detector would flag our own
+  // writes and bury the merchant in false events.
+  await recordWriteIntents(
+    shopId,
+    writable.map((row) => ({
+      variantGid: row.ref.variantGid,
+      price: row.intendedPrice ? BigInt(row.intendedPrice.amount) : null,
+      compareAt:
+        row.intendedCompareAtSet && row.intendedCompareAt
+          ? BigInt(row.intendedCompareAt.amount)
+          : null,
+    })),
+  );
 
   const productOfMap = new Map(
     (

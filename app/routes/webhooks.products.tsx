@@ -18,6 +18,7 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { parseMoney } from "../lib/money/money";
+import { checkForDrift } from "../services/drift.server";
 
 interface WebhookVariant {
   id: number | string;
@@ -110,6 +111,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       // A variant reappearing after deletion clears its tombstone.
       deletedAt: null,
     };
+
+    // Before overwriting the mirror, ask whether this change was ours. A price that
+    // moved under an active campaign and is not our echo is a merchant edit, and
+    // silently adopting it would hide exactly what they need to know about.
+    await checkForDrift(shop.id, variantGid, price, compareAt);
 
     await prisma.variantIndex.upsert({
       where: { shopId_variantGid: { shopId: shop.id, variantGid } },
