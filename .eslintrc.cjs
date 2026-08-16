@@ -81,12 +81,26 @@ module.exports = {
       files: [
         ".eslintrc.cjs",
         "vite.config.{js,ts}",
+        "vitest.config.{js,ts}",
         ".graphqlrc.{js,ts}",
         "shopify.server.{js,ts}",
         "**/*.server.{js,ts}",
       ],
       env: {
         node: true,
+      },
+    },
+
+    // Tests
+    {
+      files: ["**/*.test.{ts,tsx}"],
+      env: {
+        node: true,
+      },
+      rules: {
+        // fast-check is designed around a namespace import (`fc.integer`, `fc.assert`).
+        // This rule flags every such call as a possible mistake; it is not.
+        "import/no-named-as-default-member": "off",
       },
     },
   ],
