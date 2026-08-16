@@ -20,6 +20,7 @@
 import { createHash } from "node:crypto";
 
 import prisma from "../db.server";
+import { formatMinorUnits } from "../lib/money/format";
 
 /** How long a write intent stays valid. Generous: webhook delivery is not instant. */
 const INTENT_TTL_MS = 15 * 60 * 1000;
@@ -172,20 +173,12 @@ export async function pendingDrift(shopId: string, limit = 100): Promise<DriftRo
   });
   const titleBy = new Map(titles.map((t) => [t.variantGid, t.title ?? t.variantGid]));
 
-  const fmt = (v: bigint | null, currency: string) => {
-    if (v === null) return null;
-    const exp = ["JPY", "KRW"].includes(currency) ? 0 : 2;
-    const digits = v.toString().padStart(exp + 1, "0");
-    const whole = digits.slice(0, digits.length - exp) || "0";
-    return exp > 0 ? `${whole}.${digits.slice(digits.length - exp)}` : whole;
-  };
-
   return events.map((event) => ({
     id: event.id,
     variantGid: event.variantGid,
     title: titleBy.get(event.variantGid) ?? event.variantGid,
-    observed: fmt(event.observedPrice, event.currency),
-    expected: fmt(event.expectedPrice, event.currency),
+    observed: formatMinorUnits(event.observedPrice, event.currency),
+    expected: formatMinorUnits(event.expectedPrice, event.currency),
     campaignName: event.campaign?.name ?? null,
     detectedAt: event.detectedAt.toISOString(),
   }));

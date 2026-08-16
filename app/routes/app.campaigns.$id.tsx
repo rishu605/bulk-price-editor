@@ -4,25 +4,33 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
+import { toAdminClient } from "../services/admin-client.server";
 import {
   campaignRuns,
   previewCampaign,
   runCampaign,
   runLedger,
-} from "../services/campaigns.server";
-import { toAdminClient } from "../services/admin-client.server";
+} from "../services/campaigns/index.server";
+import { CountsRow } from "../components/CountsRow";
+import { LedgerTable } from "../components/LedgerTable";
+import { PreviewTable } from "../components/PreviewTable";
+import { RunHistoryTable } from "../components/RunHistoryTable";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
-  const preview = await previewCampaign(shop.id, String(params.id));
-  const runs = await campaignRuns(shop.id, String(params.id));
+  const campaignId = String(params.id);
 
-  // Show the newest run's ledger inline: the first question after a run is always
+  const [preview, runs] = await Promise.all([
+    previewCampaign(shop.id, campaignId),
+    campaignRuns(shop.id, campaignId),
+  ]);
+
+  // Show the newest run's ledger inline. The first question after a run is always
   // "what exactly did it do to each variant", and making that a second click loses
   // the people who most need the answer.
-  const url = new URL(request.url);
-  const selectedRunId = url.searchParams.get("run") ?? runs[0]?.id ?? null;
+  const requested = new URL(request.url).searchParams.get("run");
+  const selectedRunId = requested ?? runs[0]?.id ?? null;
   const ledger = selectedRunId ? await runLedger(shop.id, selectedRunId) : [];
 
   return { preview, runs, ledger, selectedRunId };
@@ -31,54 +39,33 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 export const action = async ({ request, params }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
-  const form = await request.formData();
-  const intent = String(form.get("intent"));
+  const intent = String((await request.formData()).get("intent"));
+  const reverting = intent === "revert";
 
   try {
     const result = await runCampaign(shop.id, String(params.id), toAdminClient(admin), {
-      revert: intent === "revert",
+      revert: reverting,
     });
 
+    const verb = reverting ? "Reverted" : "Applied";
     return {
       ok: result.clean,
       message: result.clean
-        ? `${intent === "revert" ? "Reverted" : "Applied"} ${result.verified} variants, all verified.`
-        : `${intent === "revert" ? "Revert" : "Apply"} finished with ${result.failed} failures and ${result.unverified} unverified. Nothing is being hidden — resume to retry.`,
+        ? `${verb} ${result.verified} variants, all verified.`
+        : `${verb} with ${result.failed} failures and ${result.unverified} unverified. ` +
+          `Nothing is hidden — resume to retry.`,
       details: result.messages,
     };
   } catch (error) {
     return {
       ok: false,
       message: error instanceof Error ? error.message : String(error),
-      details: [],
+      details: [] as string[],
     };
   }
 };
 
 type ActionData = { ok: boolean; message: string; details: string[] };
-
-type Tone = "info" | "success" | "critical" | "neutral" | "warning" | "caution" | "auto";
-
-const RUN_TONE: Record<string, Tone> = {
-  COMPLETED: "success",
-  PARTIAL: "warning",
-  FAILED: "critical",
-  EXECUTING: "info",
-};
-
-const LEDGER_TONE: Record<string, Tone> = {
-  VERIFIED: "success",
-  APPLIED: "info",
-  FAILED: "critical",
-  SKIPPED: "neutral",
-  PENDING: "info",
-};
-
-const STATUS_TONE: Record<string, Tone> = {
-  pending: "info",
-  clamped: "warning",
-  skipped: "neutral",
-};
 
 export default function CampaignDetail() {
   const { preview, runs, ledger, selectedRunId } = useLoaderData<typeof loader>();
@@ -102,32 +89,22 @@ export default function CampaignDetail() {
       {preview.blocked ? (
         <s-banner tone="critical">
           <s-paragraph>
-            Blocked by a guardrail on {preview.blocked.variantGid}: {preview.blocked.reason}.
-            No prices were changed — a blocking guardrail stops the whole run, not just
-            the offending variant.
+            Blocked by a guardrail on {preview.blocked.variantGid}:{" "}
+            {preview.blocked.reason}. No prices were changed — a blocking guardrail
+            stops the whole run, not just the offending variant.
           </s-paragraph>
         </s-banner>
       ) : null}
 
       <s-section heading="Preview">
-        <s-stack direction="inline" gap="large">
-          <s-box>
-            <s-text>Will change</s-text>
-            <s-heading>{preview.counts.planned}</s-heading>
-          </s-box>
-          <s-box>
-            <s-text>Already correct</s-text>
-            <s-heading>{preview.counts.noop}</s-heading>
-          </s-box>
-          <s-box>
-            <s-text>Skipped</s-text>
-            <s-heading>{preview.counts.skipped}</s-heading>
-          </s-box>
-          <s-box>
-            <s-text>Clamped</s-text>
-            <s-heading>{preview.counts.clamped}</s-heading>
-          </s-box>
-        </s-stack>
+        <CountsRow
+          items={[
+            { label: "Will change", value: preview.counts.planned },
+            { label: "Already correct", value: preview.counts.noop },
+            { label: "Skipped", value: preview.counts.skipped },
+            { label: "Clamped", value: preview.counts.clamped },
+          ]}
+        />
 
         <s-paragraph>
           <s-text>
@@ -144,76 +121,12 @@ export default function CampaignDetail() {
           </s-banner>
         ) : null}
 
-        {preview.rows.length > 0 ? (
-          <s-table>
-            <s-table-header-row>
-              <s-table-header>Variant</s-table-header>
-              <s-table-header>Before</s-table-header>
-              <s-table-header>After</s-table-header>
-              <s-table-header>Compare at</s-table-header>
-              <s-table-header>State</s-table-header>
-            </s-table-header-row>
-            <s-table-body>
-              {preview.rows.map((row) => (
-                <s-table-row key={row.variantGid}>
-                  <s-table-cell>{row.title}</s-table-cell>
-                  <s-table-cell>{row.before ?? "—"}</s-table-cell>
-                  <s-table-cell>{row.after ?? "—"}</s-table-cell>
-                  <s-table-cell>{row.compareAt ?? "—"}</s-table-cell>
-                  <s-table-cell>
-                    <s-badge tone={STATUS_TONE[row.status] ?? "neutral"}>
-                      {row.status}
-                      {row.reason ? ` · ${row.reason}` : ""}
-                    </s-badge>
-                  </s-table-cell>
-                </s-table-row>
-              ))}
-            </s-table-body>
-          </s-table>
-        ) : (
-          <s-paragraph>
-            Nothing to change. Either every variant already shows the target price, or
-            the scope matched no variants with baselines.
-          </s-paragraph>
-        )}
+        <PreviewTable rows={preview.rows} />
       </s-section>
 
       {runs.length > 0 ? (
         <s-section heading="Run history">
-          <s-table>
-            <s-table-header-row>
-              <s-table-header>Run</s-table-header>
-              <s-table-header>Status</s-table-header>
-              <s-table-header>Planned</s-table-header>
-              <s-table-header>Verified</s-table-header>
-              <s-table-header>Failed</s-table-header>
-              <s-table-header>Finished</s-table-header>
-              <s-table-header></s-table-header>
-            </s-table-header-row>
-            <s-table-body>
-              {runs.map((run) => (
-                <s-table-row key={run.id}>
-                  <s-table-cell>{run.kind}</s-table-cell>
-                  <s-table-cell>
-                    <s-badge tone={RUN_TONE[run.status] ?? "neutral"}>{run.status}</s-badge>
-                  </s-table-cell>
-                  <s-table-cell>{run.planned}</s-table-cell>
-                  <s-table-cell>{run.verified}</s-table-cell>
-                  <s-table-cell>{run.failed}</s-table-cell>
-                  <s-table-cell>
-                    {run.finishedAt ? new Date(run.finishedAt).toLocaleString() : "—"}
-                  </s-table-cell>
-                  <s-table-cell>
-                    {run.id === selectedRunId ? (
-                      <s-text>Showing</s-text>
-                    ) : (
-                      <s-link href={`?run=${run.id}`}>View ledger</s-link>
-                    )}
-                  </s-table-cell>
-                </s-table-row>
-              ))}
-            </s-table-body>
-          </s-table>
+          <RunHistoryTable runs={runs} selectedRunId={selectedRunId} />
         </s-section>
       ) : null}
 
@@ -225,30 +138,7 @@ export default function CampaignDetail() {
               indefinitely on every plan.
             </s-text>
           </s-paragraph>
-          <s-table>
-            <s-table-header-row>
-              <s-table-header>Variant</s-table-header>
-              <s-table-header>Before</s-table-header>
-              <s-table-header>Intended</s-table-header>
-              <s-table-header>State</s-table-header>
-              <s-table-header>Reason</s-table-header>
-            </s-table-header-row>
-            <s-table-body>
-              {ledger.map((row) => (
-                <s-table-row key={row.variantGid}>
-                  <s-table-cell>{row.title}</s-table-cell>
-                  <s-table-cell>{row.before ?? "—"}</s-table-cell>
-                  <s-table-cell>{row.intended ?? "—"}</s-table-cell>
-                  <s-table-cell>
-                    <s-badge tone={LEDGER_TONE[row.status] ?? "neutral"}>
-                      {row.status}
-                    </s-badge>
-                  </s-table-cell>
-                  <s-table-cell>{row.failureReason ?? "—"}</s-table-cell>
-                </s-table-row>
-              ))}
-            </s-table-body>
-          </s-table>
+          <LedgerTable rows={ledger} />
         </s-section>
       ) : null}
 

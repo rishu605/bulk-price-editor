@@ -62,6 +62,32 @@ export async function captureBaselines(
     existing.map((b) => [`${b.variantGid}|${b.surfaceKind}|${b.priceListGid}`, b.id]),
   );
 
+  // Costs are fetched once for the whole batch. Looking them up per variant meant
+  // three round trips each, which on a 1,600-variant catalogue is thousands of
+  // queries and minutes of wall time -- capture appeared to stall entirely.
+  const costs = new Map(
+    (
+      await prisma.variantIndex.findMany({
+        where: { shopId },
+        select: { variantGid: true, cost: true },
+      })
+    ).map((v) => [v.variantGid, v.cost]),
+  );
+
+  const toSupersede: string[] = [];
+  const toCreate: Array<{
+    shopId: string;
+    variantGid: string;
+    surfaceKind: (typeof entries)[number]["surfaceKind"];
+    priceListGid: string;
+    currency: string;
+    basePrice: bigint;
+    baseCompareAt: bigint | null;
+    cost: bigint | null;
+    source: BaselineSource;
+    capturedBy: string | null;
+  }> = [];
+
   for (const entry of entries) {
     // A surface with no live price has nothing to anchor to. Recording zero would be
     // a lie that every future campaign would compute from.
@@ -75,36 +101,46 @@ export async function captureBaselines(
       continue;
     }
 
-    const variant = await prisma.variantIndex.findUnique({
-      where: { shopId_variantGid: { shopId, variantGid: entry.variantGid } },
-      select: { cost: true },
-    });
+    if (currentId) toSupersede.push(currentId);
 
-    await prisma.$transaction(async (tx) => {
-      if (currentId) {
-        await tx.baseline.update({
-          where: { id: currentId },
-          data: { supersededAt: new Date() },
-        });
-        result.superseded++;
-      }
-      await tx.baseline.create({
-        data: {
-          shopId,
-          variantGid: entry.variantGid,
-          surfaceKind: entry.surfaceKind,
-          priceListGid: entry.priceListGid,
-          currency: entry.currency,
-          basePrice: entry.livePrice!,
-          baseCompareAt: entry.liveCompareAt,
-          cost: variant?.cost ?? null,
-          source: options.source ?? (currentId ? "RECAPTURE" : "INSTALL_CAPTURE"),
-          capturedBy: options.capturedBy ?? null,
-        },
-      });
+    toCreate.push({
+      shopId,
+      variantGid: entry.variantGid,
+      surfaceKind: entry.surfaceKind,
+      priceListGid: entry.priceListGid,
+      currency: entry.currency,
+      basePrice: entry.livePrice,
+      baseCompareAt: entry.liveCompareAt,
+      cost: costs.get(entry.variantGid) ?? null,
+      source: options.source ?? (currentId ? "RECAPTURE" : "INSTALL_CAPTURE"),
+      capturedBy: options.capturedBy ?? null,
     });
+  }
 
-    result.captured++;
+  // Supersede and create together per chunk. The partial unique index allows only
+  // one current baseline per variant per surface, so the old row must be retired in
+  // the same transaction that adds its replacement -- otherwise a mid-batch failure
+  // leaves either two current baselines or none, and campaign maths depends on
+  // exactly one.
+  const CHUNK = 1_000;
+  for (let i = 0; i < toCreate.length; i += CHUNK) {
+    const createChunk = toCreate.slice(i, i + CHUNK);
+    const supersedeChunk = toSupersede.slice(i, i + CHUNK);
+
+    await prisma.$transaction([
+      ...(supersedeChunk.length > 0
+        ? [
+            prisma.baseline.updateMany({
+              where: { id: { in: supersedeChunk } },
+              data: { supersededAt: new Date() },
+            }),
+          ]
+        : []),
+      prisma.baseline.createMany({ data: createChunk }),
+    ]);
+
+    result.captured += createChunk.length;
+    result.superseded += supersedeChunk.length;
   }
 
   return result;

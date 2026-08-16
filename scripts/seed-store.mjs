@@ -106,9 +106,11 @@ function buildProduct(index) {
   };
 }
 
+// productCreate no longer accepts inline `variants` (API 2026-07); productSet is
+// the all-in-one mutation that does, so a product and its variants land together.
 const MUTATION = `
-  mutation call($input: ProductCreateInput!) {
-    productCreate(product: $input) {
+  mutation call($input: ProductSetInput!) {
+    productSet(input: $input) {
       product { id title }
       userErrors { field message }
     }

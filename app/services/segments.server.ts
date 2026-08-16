@@ -9,6 +9,7 @@
 
 import type { Prisma } from "@prisma/client";
 import prisma from "../db.server";
+import { formatMinorUnits } from "../lib/money/format";
 
 export type ConditionField =
   | "collection"
@@ -131,16 +132,9 @@ export async function previewMatches(
       variantGid: v.variantGid,
       title: v.title ?? v.variantGid,
       sku: v.sku,
-      price: v.price === null ? null : formatMinor(v.price, v.currency ?? "USD"),
+      price: formatMinorUnits(v.price, v.currency ?? "USD"),
     })),
   };
-}
-
-function formatMinor(amount: bigint, currency: string): string {
-  const exponent = ["JPY", "KRW"].includes(currency) ? 0 : 2;
-  const digits = amount.toString().padStart(exponent + 1, "0");
-  const whole = digits.slice(0, digits.length - exponent) || "0";
-  return exponent > 0 ? `${whole}.${digits.slice(digits.length - exponent)}` : whole;
 }
 
 /** Every variant gid matching the AST, for enrollment. */
