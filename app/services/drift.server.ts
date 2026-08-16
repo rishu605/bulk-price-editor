@@ -21,6 +21,7 @@ import { createHash } from "node:crypto";
 
 import prisma from "../db.server";
 import { formatMinorUnits } from "../lib/money/format";
+import { holdForDrift } from "./campaigns/lifecycle.server";
 
 /** How long a write intent stays valid. Generous: webhook delivery is not instant. */
 const INTENT_TTL_MS = 15 * 60 * 1000;
@@ -129,6 +130,7 @@ export async function checkForDrift(
       where: { id: existing.id },
       data: { observedPrice: incomingPrice, detectedAt: new Date() },
     });
+    await holdForDrift(shopId, activeCampaign.id, variantGid);
     return true;
   }
 
@@ -145,6 +147,10 @@ export async function checkForDrift(
       resolution: "PENDING",
     },
   });
+
+  // Hold the campaign as well as recording the event. Recording alone would leave the
+  // campaign looking healthy while it quietly stopped controlling one of its prices.
+  await holdForDrift(shopId, activeCampaign.id, variantGid);
 
   return true;
 }

@@ -24,20 +24,52 @@ export function toAdminClient(admin: ShopifyAdminContext): AdminClient {
       const body = (await response.json()) as {
         data?: T;
         extensions?: { cost?: QueryCost };
-        errors?: Array<{ message: string }>;
+        errors?: unknown;
       };
 
       // Top-level GraphQL errors are transport-level failures, distinct from the
       // per-row `userErrors` the executors map back to individual variants.
-      if (body.errors?.length) {
-        throw new Error(body.errors.map((e) => e.message).join("; "));
-      }
+      const message = formatGraphQLErrors(body.errors);
+      if (message) throw new Error(message);
 
       return { data: body.data, extensions: body.extensions };
     },
   };
 }
 
+
+/**
+ * Renders whatever Shopify put in `errors` as a single message.
+ *
+ * The shape is not consistent. Field-level failures come back as the array the spec
+ * describes, but request-level ones -- a malformed query, a throttle -- arrive as a
+ * bare object such as `{"query": "Throttled"}`. Assuming an array turned every one of
+ * those into `body.errors.map is not a function`, which replaced the real cause with
+ * a TypeError from inside our own client at precisely the moment we needed to know
+ * what Shopify actually said.
+ */
+function formatGraphQLErrors(errors: unknown): string | null {
+  if (!errors) return null;
+
+  if (Array.isArray(errors)) {
+    if (errors.length === 0) return null;
+    return errors
+      .map((entry) => (entry as { message?: string })?.message ?? JSON.stringify(entry))
+      .join("; ");
+  }
+
+  if (typeof errors === "string") return errors;
+
+  if (typeof errors === "object") {
+    const entries = Object.entries(errors as Record<string, unknown>);
+    if (entries.length === 0) return null;
+    return entries
+      .map(([key, value]) => `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`)
+      .join("; ");
+  }
+
+  return String(errors);
+}
 
 /**
  * Builds a client for a shop from its stored offline session.
@@ -49,8 +81,19 @@ export function toAdminClient(admin: ShopifyAdminContext): AdminClient {
 export async function adminClientForShop(shopDomain: string): Promise<AdminClient | null> {
   const { default: prisma } = await import("../db.server");
 
+  // Offline sessions first: they are the ones that outlive a browser tab, which is the
+  // whole point for a worker with no request to authenticate. An expired token is
+  // filtered out rather than used, because Shopify answers a dead token with
+  // "Invalid API key or access token" -- which reads like a misconfigured app and
+  // sends you looking in entirely the wrong place. Returning null instead surfaces as
+  // NO_SESSION: "reinstall the app", which is the actual remedy.
   const session = await prisma.session.findFirst({
-    where: { shop: shopDomain, accessToken: { not: "" } },
+    where: {
+      shop: shopDomain,
+      accessToken: { not: "" },
+      OR: [{ expires: null }, { expires: { gt: new Date() } }],
+    },
+    orderBy: [{ isOnline: "asc" }, { expires: "desc" }],
   });
   if (!session?.accessToken) return null;
 

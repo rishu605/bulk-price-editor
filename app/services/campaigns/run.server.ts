@@ -19,6 +19,7 @@ import { loadCandidates, productMapFor } from "./candidates.server";
 import { loadCampaignContext } from "./model.server";
 import { guardrailsFor } from "../settings.server";
 import type { RunOutcome } from "./types";
+import { transitionCampaign } from "./lifecycle.server";
 
 export interface RunOptions {
   revert?: boolean;
@@ -115,9 +116,20 @@ export async function runCampaign(
     },
   });
 
-  await prisma.campaign.update({
-    where: { id: campaignId },
-    data: { status: options.revert ? "COMPLETED" : result.clean ? "ACTIVE" : "PARTIAL" },
+  // Through the state machine, not a direct write: it enforces which moves are legal
+  // and records how the campaign got here. A run that finishes late must not clobber a
+  // newer state, which a bare update would happily do.
+  const finalState = options.revert
+    ? result.clean
+      ? "COMPLETED"
+      : "PARTIAL"
+    : result.clean
+      ? "ACTIVE"
+      : "PARTIAL";
+
+  await transitionCampaign(shopId, campaignId, finalState, {
+    reason: `${options.revert ? "revert" : "apply"} finished: ${result.verified} verified, ${result.failed} failed`,
+    runId: run.id,
   });
 
   await refreshMirror(shopId, result.rows);
