@@ -1,18 +1,20 @@
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useFetcher, useLoaderData, useRouteError } from "react-router";
+import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
 import { pendingDrift, resolveDrift, type DriftResolution } from "../services/drift.server";
+import { RouteBoundary } from "../components/RouteBoundary";
+import { withGuard } from "../lib/errors/guard.server";
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
+export const loader = withGuard("/app/drift", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
   return { events: await pendingDrift(shop.id) };
-};
+});
 
-export const action = async ({ request }: ActionFunctionArgs) => {
+export const action = withGuard("/app/drift", async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
 
@@ -29,7 +31,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   };
 
   return { ok: true, message: wording[resolution] };
-};
+});
 
 type ActionData = { ok: boolean; message: string };
 
@@ -121,7 +123,7 @@ export default function DriftQueue() {
 }
 
 export function ErrorBoundary() {
-  return boundary.error(useRouteError());
+  return <RouteBoundary />;
 }
 
 export const headers: HeadersFunction = (headersArgs) => {

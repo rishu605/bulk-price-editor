@@ -1,12 +1,14 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useRouteError } from "react-router";
+import { useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { ensureShop } from "../services/shop.server";
+import { RouteBoundary } from "../components/RouteBoundary";
+import { withGuard } from "../lib/errors/guard.server";
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
+export const loader = withGuard("/app/campaigns", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
 
@@ -35,7 +37,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         : null,
     })),
   };
-};
+});
 
 type Tone = "info" | "success" | "critical" | "neutral" | "warning" | "caution" | "auto";
 
@@ -119,7 +121,7 @@ export default function CampaignList() {
 }
 
 export function ErrorBoundary() {
-  return boundary.error(useRouteError());
+  return <RouteBoundary />;
 }
 
 export const headers: HeadersFunction = (headersArgs) => {

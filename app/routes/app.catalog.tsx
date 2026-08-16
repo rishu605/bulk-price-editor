@@ -1,15 +1,17 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useRouteError, useSearchParams } from "react-router";
+import { useLoaderData, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { ensureShop } from "../services/shop.server";
 import { formatMoney, money } from "../lib/money/money";
+import { RouteBoundary } from "../components/RouteBoundary";
+import { withGuard } from "../lib/errors/guard.server";
 
 const PAGE_SIZE = 50;
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
+export const loader = withGuard("/app/catalog", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
 
@@ -80,7 +82,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
   return { rows, total, page, query, pageSize: PAGE_SIZE };
-};
+});
 
 export default function Catalog() {
   const { rows, total, page, query, pageSize } = useLoaderData<typeof loader>();
@@ -197,7 +199,7 @@ export default function Catalog() {
 }
 
 export function ErrorBoundary() {
-  return boundary.error(useRouteError());
+  return <RouteBoundary />;
 }
 
 export const headers: HeadersFunction = (headersArgs) => {

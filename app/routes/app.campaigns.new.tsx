@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { redirect, useLoaderData, useRouteError } from "react-router";
+import { redirect, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
@@ -9,8 +9,10 @@ import { createCampaign } from "../services/campaigns/index.server";
 import type { AdjustmentRule, CompareAtPolicy } from "../lib/pricing/types";
 import { money } from "../lib/money/money";
 import { localInputToUtc, type Schedule } from "../lib/scheduling/window";
+import { RouteBoundary } from "../components/RouteBoundary";
+import { withGuard } from "../lib/errors/guard.server";
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
+export const loader = withGuard("/app/campaigns/new", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
 
@@ -32,7 +34,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       title: url.searchParams.get("title") ?? "",
     },
   };
-};
+});
 
 /** Builds an AST from the simple scope form: all provided conditions ANDed. */
 function astFromParams(params: URLSearchParams): FilterAst {
@@ -50,7 +52,7 @@ function astFromParams(params: URLSearchParams): FilterAst {
   return conditions.length > 0 ? { groups: [{ conditions }] } : { groups: [] };
 }
 
-export const action = async ({ request }: ActionFunctionArgs) => {
+export const action = withGuard("/app/campaigns/new", async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
 
@@ -110,7 +112,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   });
 
   return redirect(`/app/campaigns/${campaign.id}`);
-};
+});
 
 export default function NewCampaign() {
   const { facets: available, preview, selected, timeZone } = useLoaderData<typeof loader>();
@@ -269,7 +271,7 @@ export default function NewCampaign() {
 }
 
 export function ErrorBoundary() {
-  return boundary.error(useRouteError());
+  return <RouteBoundary />;
 }
 
 export const headers: HeadersFunction = (headersArgs) => {

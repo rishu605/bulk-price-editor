@@ -88,6 +88,7 @@ model Shop {
   webhookEvents    WebhookEvent[]
   bulkOps          BulkOperationRecord[]
   auditEntries     AuditLogEntry[]
+  errorEvents      ErrorEvent[]
 
   @@index([uninstalledAt])
   @@map("shops")
@@ -622,6 +623,40 @@ model BulkOperationRecord {
 
 /// Append-only record of every state-changing action. Exportable, because agencies
 /// running pricing for clients need to prove exactly what changed and when.
+/// Every unhandled failure, kept so a merchant quoting an id gets a real answer.
+///
+/// Deliberately a table rather than only a log line: logs roll over, and the one
+/// question worth answering fast -- "is this happening to everyone or just them" --
+/// needs a query, not a grep.
+model ErrorEvent {
+  id String @id @default(cuid())
+
+  /// The short id shown on the error screen, e.g. ANC-K3M2-P7QR.
+  errorId String @unique
+
+  shopId String?
+  code   String
+  /// The technical message. Never shown to a merchant.
+  message String
+  stack   String?
+  /// What the merchant was shown, so support can see both halves of the story.
+  userMessage String
+
+  route     String?
+  method    String?
+  /// Redacted structured detail: ids, counts, durations. Never tokens.
+  context   Json?
+  retryable Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  shop Shop? @relation(fields: [shopId], references: [id], onDelete: SetNull)
+
+  @@index([shopId, createdAt])
+  @@index([code, createdAt])
+  @@map("error_events")
+}
+
 model AuditLogEntry {
   id String @id @default(cuid())
 
