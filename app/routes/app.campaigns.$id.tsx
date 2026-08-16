@@ -28,7 +28,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     campaignRuns(shop.id, campaignId),
     prisma.campaign.findFirstOrThrow({
       where: { id: campaignId, shopId: shop.id },
-      select: { schedule: true },
+      select: { schedule: true, autoEnroll: true, enrollPendingAt: true },
     }),
   ]);
 
@@ -43,7 +43,16 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const selectedRunId = requested ?? runs[0]?.id ?? null;
   const ledger = selectedRunId ? await runLedger(shop.id, selectedRunId) : [];
 
-  return { preview, runs, ledger, selectedRunId, scheduleText, warnings };
+  return {
+    preview,
+    runs,
+    ledger,
+    selectedRunId,
+    scheduleText,
+    warnings,
+    autoEnroll: record.autoEnroll,
+    enrollPendingAt: record.enrollPendingAt !== null,
+  };
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
@@ -78,8 +87,16 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 type ActionData = { ok: boolean; message: string; details: string[] };
 
 export default function CampaignDetail() {
-  const { preview, runs, ledger, selectedRunId, scheduleText, warnings } =
-    useLoaderData<typeof loader>();
+  const {
+    preview,
+    runs,
+    ledger,
+    selectedRunId,
+    scheduleText,
+    warnings,
+    autoEnroll,
+    enrollPendingAt,
+  } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
   const busy = fetcher.state !== "idle";
   const result = fetcher.data;
@@ -191,6 +208,21 @@ export default function CampaignDetail() {
             <s-paragraph>{warning}</s-paragraph>
           </s-banner>
         ))}
+      </s-section>
+
+      <s-section slot="aside" heading="New products">
+        <s-paragraph>
+          {autoEnroll
+            ? "Products that enter this campaign's scope while it runs are priced automatically, from their own normal price."
+            : "Products added while this campaign runs are left at their current price."}
+        </s-paragraph>
+        {enrollPendingAt ? (
+          <s-banner tone="info">
+            <s-paragraph>
+              New products found; they are priced on the next scheduler run.
+            </s-paragraph>
+          </s-banner>
+        ) : null}
       </s-section>
 
       <s-section slot="aside" heading="Status">

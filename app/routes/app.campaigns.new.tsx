@@ -104,6 +104,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     compareAtPolicy,
     rounding: String(form.get("rounding") ?? "none") === "charm99" ? "charm99" : "none",
     priority: Number(form.get("priority") ?? 100) || 100,
+    // An unchecked checkbox is simply absent from the form, so presence is the value.
+    autoEnroll: form.get("autoEnroll") !== null,
     schedule,
   });
 
@@ -212,6 +214,13 @@ export default function NewCampaign() {
               label="Priority"
               defaultValue="100"
               details="Higher wins when two campaigns cover the same variant. They never stack."
+            />
+
+            <s-checkbox
+              name="autoEnroll"
+              label="Price products that join this campaign while it runs"
+              defaultChecked
+              details="A product you add to the sale later is priced from its own normal price, not the sale price."
             />
 
             <s-divider />

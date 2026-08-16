@@ -310,6 +310,11 @@ model Campaign {
   tagKit     String[] @default([])
   autoEnroll Boolean  @default(true)
 
+  /// Set when a product enters this campaign's scope while it is running, and
+  /// cleared once the scheduler has re-applied. A timestamp rather than a boolean
+  /// so a queue that stops draining is visibly stuck rather than merely "true".
+  enrollPendingAt DateTime?
+
   excludedVariantGids String[] @default([])
 
   createdBy String?

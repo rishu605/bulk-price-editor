@@ -57,11 +57,16 @@ async function runOnce(): Promise<void> {
   const result = await tick();
   ticks++;
 
-  if (result.applied > 0 || result.reverted > 0 || result.failures.length > 0) {
+  if (
+    result.applied > 0 ||
+    result.reverted > 0 ||
+    result.enrolled > 0 ||
+    result.failures.length > 0
+  ) {
     console.log(
       `[worker] tick ${ticks}: examined ${result.examined}, applied ${result.applied}, ` +
-        `reverted ${result.reverted}, failed ${result.failures.length} ` +
-        `(${Date.now() - started}ms)`,
+        `reverted ${result.reverted}, enrolled ${result.enrolled}, ` +
+        `failed ${result.failures.length} (${Date.now() - started}ms)`,
     );
     for (const failure of result.failures) {
       console.error(`[worker]   campaign ${failure.campaignId}: ${failure.error}`);
