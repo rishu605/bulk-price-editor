@@ -111,7 +111,7 @@ export default function Dashboard() {
           </s-paragraph>
           <fetcher.Form method="post">
             <input type="hidden" name="intent" value="sync" />
-            <s-button type="submit" variant="primary" loading={busy}>
+            <s-button type="submit" variant="primary" loading={busy || undefined}>
               {busy ? "Syncing…" : "Sync catalogue and capture baselines"}
             </s-button>
           </fetcher.Form>
@@ -149,7 +149,7 @@ export default function Dashboard() {
           <s-stack direction="inline" gap="base">
             <fetcher.Form method="post">
               <input type="hidden" name="intent" value="sync" />
-              <s-button type="submit" loading={busy}>
+              <s-button type="submit" loading={busy || undefined}>
                 Re-sync catalogue
               </s-button>
             </fetcher.Form>
@@ -183,7 +183,7 @@ export default function Dashboard() {
           </s-paragraph>
           <fetcher.Form method="post">
             <input type="hidden" name="intent" value="recapture" />
-            <s-button type="submit" tone="critical" loading={busy}>
+            <s-button type="submit" tone="critical" loading={busy || undefined}>
               Recapture all baselines
             </s-button>
           </fetcher.Form>
