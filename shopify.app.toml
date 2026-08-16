@@ -2,7 +2,7 @@
 
 client_id = "5401aeddaf37aac5c9e1650bf6abb462"
 name = "bulk-price-editor"
-application_url = "https://example.com"
+application_url = "https://olympic-hit-forum-thomas.trycloudflare.com"
 embedded = true
 
 [build]
@@ -22,9 +22,9 @@ api_version = "2026-07"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = ""
+scopes = "write_products"
 optional_scopes = [ ]
 use_legacy_install_flow = false
 
 [auth]
-redirect_urls = [ ]
+redirect_urls = [ "https://olympic-hit-forum-thomas.trycloudflare.com/auth/callback", "https://olympic-hit-forum-thomas.trycloudflare.com/auth/shopify/callback", "https://olympic-hit-forum-thomas.trycloudflare.com/api/auth/callback" ]
