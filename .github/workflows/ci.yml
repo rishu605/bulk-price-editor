@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      chaos_repeats:
+        description: "Consecutive chaos runs (P2 exit needs three green in a row)"
+        default: "1"
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -62,3 +67,79 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  # ---------------------------------------------------------------- the gate
+  #
+  # This is the job that makes the reliability claim honest. Every competitor in this
+  # category says their jobs are safe; the difference is a suite that kills the worker
+  # mid-chunk, drops the database under a running campaign and restarts Redis, then
+  # proves the engine ends up verified-clean or visibly partial -- never quietly wrong
+  # about what is live on a merchant's storefront.
+  #
+  # It blocks the merge. A green build with a red chaos run would mean shipping an
+  # engine we have just watched fail to explain itself.
+  chaos:
+    name: Chaos scenarios
+    runs-on: ubuntu-latest
+    # The acceptance criterion is a practical runtime, so it is enforced rather than
+    # hoped for. A suite that creeps toward an hour is one people start skipping.
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: anchor
+          POSTGRES_PASSWORD: anchor
+          POSTGRES_DB: anchor_chaos
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U anchor -d anchor_chaos"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://anchor:anchor@localhost:5432/anchor_chaos
+      REDIS_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+
+      # Consecutive, with a different seed each time. Three green runs of the same
+      # seed would only prove the suite is deterministic; three green runs of three
+      # different catalogues is the claim P2 exit actually wants.
+      - name: Chaos suite
+        run: |
+          repeats="${{ github.event.inputs.chaos_repeats || '1' }}"
+          for i in $(seq 1 "$repeats"); do
+            echo "::group::chaos run $i of $repeats"
+            CHAOS_SEED="$((20260825 + i))" npm run test:chaos
+            echo "::endgroup::"
+          done
+
+      # The failure artefact: seed to replay with, run id, every row's state and
+      # reason. A red chaos run whose only output is a stack trace is a red chaos run
+      # nobody can act on.
+      - name: Upload failure artefacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chaos-artefacts
+          path: chaos/artefacts/
+          if-no-files-found: ignore

@@ -94,6 +94,15 @@ export const action = withGuard("/app/campaigns/$id", async ({ request, params }
     });
 
     const verb = reverting ? "Reverted" : intent === "resume" ? "Resumed" : "Applied";
+
+    // Another worker already owns this occurrence, so this call wrote nothing. It is
+    // clean and it verified zero rows, which would otherwise render as "Applied 0
+    // variants, all verified" -- technically true and completely misleading about
+    // what is happening to the merchant's prices right now.
+    if (result.deferredTo) {
+      return { ok: true, message: result.messages[0], details: [] };
+    }
+
     return {
       ok: result.clean,
       message: result.clean

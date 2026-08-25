@@ -59,6 +59,15 @@ export interface RunOutcome {
   unverified: number;
   clean: boolean;
   messages: string[];
+  /**
+   * Set when this call did not start a run because another process already owns the
+   * same occurrence.
+   *
+   * Not an error: declining to double-apply is the constraint working. It is reported
+   * rather than swallowed so a caller can tell "nothing to do" apart from "somebody
+   * else is doing it", which are different things to show a merchant.
+   */
+  deferredTo?: string;
 }
 
 export interface RunSummary {

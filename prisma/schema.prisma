@@ -380,6 +380,16 @@ model CampaignRun {
   finishedAt DateTime?
   createdAt  DateTime  @default(now())
 
+  /// Liveness, not progress. A process that is SIGKILLed cannot report its own
+  /// death, so a run stuck in EXECUTING is indistinguishable from a slow one unless
+  /// something is stamping this as it works. The scheduler reclaims runs whose
+  /// heartbeat has gone quiet (P2.8).
+  ///
+  /// Deliberately not a fixed timeout on startedAt: a legitimate 200K-row bulk run
+  /// takes hours, and a timeout long enough not to kill it would leave a genuinely
+  /// dead run hanging for just as long.
+  heartbeatAt DateTime?
+
   shop     Shop                  @relation(fields: [shopId], references: [id], onDelete: Cascade)
   campaign Campaign              @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   changes  VariantChange[]
@@ -387,6 +397,9 @@ model CampaignRun {
 
   @@unique([campaignId, occurrenceKey, kind])
   @@index([shopId, status])
+  /// Drives the reaper's sweep: find non-terminal runs whose heartbeat is stale
+  /// without scanning every run a shop has ever had.
+  @@index([status, heartbeatAt])
   @@map("campaign_runs")
 }
 

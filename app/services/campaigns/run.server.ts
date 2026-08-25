@@ -38,6 +38,11 @@ export interface RunOptions {
    * that already landed.
    */
   resume?: boolean;
+  /**
+   * Identifies which occurrence this run is, so a duplicate tick cannot start a
+   * second one. Defaults to the current instant, which is right for a manual apply.
+   */
+  occurrenceKey?: string;
 }
 
 export async function runCampaign(
@@ -83,17 +88,52 @@ export async function runCampaign(
     }
   }
 
-  const run = await prisma.campaignRun.create({
-    data: {
-      shopId,
-      campaignId,
-      kind,
-      status: "EXECUTING",
-      occurrenceKey: `${kind}-${Date.now()}`,
-      plannedRows: outcome.counts.planned,
-      startedAt: new Date(),
-    },
-  });
+  // One run per (campaign, occurrence, kind), enforced by a unique index. Two workers
+  // ticking the same campaign at once -- which is exactly what happens in the window
+  // after a Redis restart drops the leader lock -- have one of them lose this race,
+  // and losing it must not look like a failure. The loser stands down; the winner
+  // applies. Letting the constraint violation escape instead surfaced a raw Prisma
+  // error to the merchant, and a scheduler tick that reports a crash where it should
+  // report "already running" is a scheduler nobody can read.
+  const occurrenceKey = options.occurrenceKey ?? `${kind}-${Date.now()}`;
+
+  let run: { id: string };
+  try {
+    run = await prisma.campaignRun.create({
+      data: {
+        shopId,
+        campaignId,
+        kind,
+        status: "EXECUTING",
+        occurrenceKey,
+        plannedRows: outcome.counts.planned,
+        startedAt: new Date(),
+        heartbeatAt: new Date(),
+      },
+      select: { id: true },
+    });
+  } catch (error) {
+    if (!isOccurrenceTaken(error)) throw error;
+
+    const existing = await prisma.campaignRun.findFirst({
+      where: { campaignId, occurrenceKey, kind },
+      select: { id: true },
+    });
+
+    return {
+      runId: existing?.id ?? "",
+      planned: outcome.counts.planned,
+      verified: 0,
+      failed: 0,
+      unverified: 0,
+      clean: true,
+      deferredTo: existing?.id,
+      messages: [
+        `This campaign is already being ${options.revert ? "reverted" : "applied"} by ` +
+          `another worker. Nothing was written twice; watch the run already in progress.`,
+      ],
+    };
+  }
 
   await writeLedgerRows(run.id, shopId, writable);
 
@@ -127,6 +167,7 @@ export async function runCampaign(
     client,
     productOf: (gid) => products.get(gid) ?? gid,
     verifySampleRate: options.verifySampleRate ?? 1,
+    onProgress: heartbeat(run.id),
   });
 
   const messages = await recordResults(run.id, shopId, result.rows);
@@ -187,6 +228,46 @@ export async function runCampaign(
         : []),
       ...messages.slice(0, 5),
     ],
+  };
+}
+
+/** Prisma's unique-constraint violation, which here means somebody else got there first. */
+function isOccurrenceTaken(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { code?: string }).code === "P2002"
+  );
+}
+
+/**
+ * Stamps the run as still alive, at most once every few seconds.
+ *
+ * Throttled because the alternative is an UPDATE per product group, which on a large
+ * sync run is thousands of writes to say nothing new. The reaper's staleness
+ * threshold is minutes, so seconds of resolution is ample.
+ *
+ * Failures are swallowed on purpose. A heartbeat that could abort a run would mean
+ * adding liveness reporting had made runs *less* reliable, and the worst case of a
+ * missed stamp is a live run being reclaimed -- which the reaper's status guard
+ * already makes safe.
+ */
+function heartbeat(runId: string, everyMs = 5_000) {
+  let last = 0;
+
+  return async () => {
+    const now = Date.now();
+    if (now - last < everyMs) return;
+    last = now;
+
+    try {
+      await prisma.campaignRun.update({
+        where: { id: runId },
+        data: { heartbeatAt: new Date(now) },
+      });
+    } catch {
+      // Liveness is a hint, never a reason to fail a run that is otherwise working.
+    }
   };
 }
 
