@@ -95,6 +95,12 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
     usingSegment: segment ? { id: segment.id, name: segment.name, kind: segment.kind } : null,
     practice,
     guided,
+    // Set when the merchant arrived by clicking a day on the calendar. Nine in the
+    // morning rather than midnight: a sale that starts at midnight is a sale nobody sees
+    // start, and the merchant can still change it.
+    presetStart: url.searchParams.get("startAt")
+      ? `${url.searchParams.get("startAt")}T09:00`
+      : "",
     selected: {
       collection: url.searchParams.get("collection") ?? "",
       tag: url.searchParams.get("tag") ?? "",
@@ -218,6 +224,7 @@ export default function NewCampaign() {
     currencies,
     storeRounding,
     roundingOptions,
+    presetStart,
   } = useLoaderData<typeof loader>();
 
   return (
@@ -465,7 +472,12 @@ export default function NewCampaign() {
             </s-paragraph>
 
             <label htmlFor="startAt">Start</label>
-            <input id="startAt" type="datetime-local" name="startAt" />
+            <input
+              id="startAt"
+              type="datetime-local"
+              name="startAt"
+              defaultValue={presetStart}
+            />
 
             <label htmlFor="endAt">End (optional)</label>
             <input id="endAt" type="datetime-local" name="endAt" />
