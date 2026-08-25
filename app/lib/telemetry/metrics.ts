@@ -35,7 +35,12 @@ export type Metric =
   /** How much of a shop's rate-limit budget a run consumed. */
   | "budget.saturation"
   /** Jobs waiting. Zero is healthy; a rising floor is not. */
-  | "queue.depth";
+  | "queue.depth"
+  /** Jobs accepted onto a queue, by class. */
+  | "queue.enqueued"
+  /** Jobs that exhausted their attempts. A class failing every attempt is the thing an
+   * operator most needs to know, and the queue library's default is silence. */
+  | "queue.failed";
 
 export interface MetricLabels {
   shopId?: string;
