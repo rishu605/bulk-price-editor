@@ -6,9 +6,16 @@
  * search by when something has gone wrong at 2am: the error id the merchant quoted,
  * the shop, the route, and the code.
  *
- * Everything routes through `redact` on the way out -- see that module for why.
+ * Everything routes through two redaction passes on the way out. `logging/redact`
+ * strips secrets -- the object nearest a failed Shopify call is often the one holding
+ * an access token. `telemetry/redact` strips prices, which are commercial data that has
+ * no business in an aggregator with its own retention and its own access list.
+ *
+ * Both happen here rather than at every call site, because a rule kept by everyone
+ * remembering lasts until somebody adds a field in a hurry.
  */
 
+import { redactPrices } from "../telemetry/redact";
 import { redact } from "./redact";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -51,7 +58,11 @@ function isPretty(): boolean {
 function emit(level: LogLevel, message: string, fields: LogFields = {}): void {
   if (LEVELS[level] < threshold()) return;
 
-  const safe = redact(fields) as LogFields;
+  // Prices first, then secrets. The order matters: the secret pass renders a bigint as
+  // "8000n", and a price that has already become a string slips past a money-shaped
+  // check. Every price in this codebase is a bigint, so catching it while it still is
+  // one is the only reliable pass.
+  const safe = redact(redactPrices(fields)) as LogFields;
   const sink = level === "error" ? console.error : level === "warn" ? console.warn : console.log;
 
   if (isPretty()) {
