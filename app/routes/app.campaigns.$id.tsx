@@ -19,12 +19,15 @@ import { describeSchedule, parseSchedule, scheduleWarnings } from "../lib/schedu
 import { CountsRow } from "../components/CountsRow";
 import { LedgerTable } from "../components/LedgerTable";
 import { RollbackReportTable } from "../components/RollbackReportTable";
+import { downloadCsv, filenameSlug } from "../lib/reporting/csv";
+import { rollbackReportCsv } from "../lib/reporting/rollback";
 import { PreviewTable } from "../components/PreviewTable";
 import { RunHistoryTable } from "../components/RunHistoryTable";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { reportError } from "../services/error-report.server";
 import { withGuard } from "../lib/errors/guard.server";
 import {
+  canTransition,
   describeState,
   needsAttention,
   type CampaignState,
@@ -190,6 +193,7 @@ export default function CampaignDetail() {
     autoEnroll,
     enrollPendingAt,
     lifecycle,
+    state,
     needsAttention: attention,
     history,
   } = useLoaderData<typeof loader>();
@@ -197,7 +201,12 @@ export default function CampaignDetail() {
   const busy = fetcher.state !== "idle";
   const result = fetcher.data;
 
-  const canApply = preview.counts.planned > 0 && !preview.blocked;
+  // Gated on the lifecycle and on guardrails, deliberately not on "would this write
+  // anything". A campaign whose prices already match -- because a merchant set them by
+  // hand, or because an earlier run got there first -- still needs to be applied to
+  // take ownership of them. Requiring rows to write left such a campaign stuck in
+  // Draft forever, which also meant nothing would ever revert those prices.
+  const canApply = !preview.blocked && canTransition(state, "APPLYING");
 
   return (
     <s-page heading={preview.name}>
@@ -291,9 +300,18 @@ export default function CampaignDetail() {
               <s-button type="submit" tone="critical" loading={busy || undefined}>
                 Revert, keeping the ticked edits
               </s-button>
-              <s-link href={`/app/campaigns/${rollback.campaignId}/rollback`}>
+              <s-button
+                type="button"
+                variant="tertiary"
+                onClick={() =>
+                  downloadCsv(
+                    `rollback-${filenameSlug(preview.name) || "campaign"}.csv`,
+                    rollbackReportCsv(rollback),
+                  )
+                }
+              >
                 Export this report (CSV)
-              </s-link>
+              </s-button>
             </s-stack>
           </fetcher.Form>
         </s-section>

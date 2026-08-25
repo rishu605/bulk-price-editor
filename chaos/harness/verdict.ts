@@ -142,7 +142,24 @@ export async function judge(
     }
   }
 
-  // ------------------------------------------ 4. finished runs are finished
+  // ------------------------- 4. the campaign's state agrees with its own ledger
+  //
+  // A campaign showing DRAFT or SCHEDULED is telling the merchant, in those words,
+  // that nothing has been written to their storefront. If the ledger for this run
+  // says otherwise, one of the two is lying, and the merchant has no way to tell
+  // which. This exact contradiction shipped: applying a draft wrote and verified
+  // every price, then failed the illegal DRAFT -> ACTIVE move at the end, leaving
+  // four VERIFIED rows behind a panel that read "nothing has been written".
+  const wroteSomething = rows.some((row) => row.status === "VERIFIED" || row.status === "APPLIED");
+  if (wroteSomething && (campaign.status === "DRAFT" || campaign.status === "SCHEDULED")) {
+    violations.push(
+      `The campaign reports ${campaign.status} -- which tells the merchant nothing has ` +
+        `been written -- but this run has ${rows.filter((r) => r.status === "VERIFIED").length} ` +
+        `verified rows in the ledger.`,
+    );
+  }
+
+  // ------------------------------------------ 5. finished runs are finished
   if (run.finishedAt === null && (run.status === "COMPLETED" || run.status === "PARTIAL")) {
     violations.push(`Run is ${run.status} but has no finishedAt.`);
   }

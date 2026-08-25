@@ -71,6 +71,30 @@ export async function runCampaign(
   client: AdminClient,
   options: RunOptions = {},
 ): Promise<RunOutcome> {
+  // Enter the running state here, before anything is planned or written, rather than
+  // leaving it to each caller.
+  //
+  // It used to be the caller's job, and the campaign page forgot. Applying a draft
+  // campaign wrote and verified every price, then threw on the illegal DRAFT -> ACTIVE
+  // move at the very end -- leaving the storefront changed, the ledger full of
+  // VERIFIED rows, and the campaign showing "Draft: nothing has been written to your
+  // storefront". The app contradicting its own ledger about a merchant's live prices
+  // is the exact failure this product exists to prevent, so the state machine now
+  // rides with the run instead of being an instruction callers have to remember.
+  //
+  // Doing it first also means an illegal action -- reverting a draft, applying a
+  // cancelled campaign -- is refused before a single price moves, and the state
+  // machine's own message says which state blocked it.
+  //
+  // Scoped runs are exempt: reverting one variant out of a four-thousand-variant sale
+  // says nothing about the campaign, and moving it to APPLYING would misreport the
+  // other 3,999.
+  if (!options.variantGids) {
+    await transitionCampaign(shopId, campaignId, options.revert ? "REVERTING" : "APPLYING", {
+      reason: options.resume ? "resume requested" : options.revert ? "revert requested" : "apply requested",
+    });
+  }
+
   const { resolvable, ast } = await loadCampaignContext(shopId, campaignId);
   const [candidates, storeGuardrails] = await Promise.all([
     loadCandidates(shopId, ast, options.variantGids),
