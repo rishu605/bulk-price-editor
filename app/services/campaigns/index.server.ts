@@ -21,6 +21,7 @@ export {
 } from "./rollback-report.server";
 export type {
   CampaignInput,
+  MarketPreview,
   CampaignPreview,
   LedgerRow,
   PreviewRow,

@@ -83,6 +83,7 @@ model Shop {
   campaignRuns     CampaignRun[]
   variantChanges   VariantChange[]
   tagChanges       TagChange[]
+  priceListChanges PriceListChange[]
   writeIntents     WriteIntent[]
   driftEvents      DriftEvent[]
   roundingProfiles RoundingProfileRecord[]
@@ -396,6 +397,7 @@ model CampaignRun {
   campaign Campaign              @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   changes    VariantChange[]
   tagChanges TagChange[]
+  priceListChanges PriceListChange[]
   bulkOps    BulkOperationRecord[]
 
   @@unique([campaignId, occurrenceKey, kind])
@@ -508,6 +510,46 @@ model TagChange {
   @@index([shopId, campaignId])
   @@index([campaignId, status])
   @@map("tag_changes")
+}
+
+/// Ledger for a market-wide adjustment.
+///
+/// A parent adjustment is a property of the price list, not of any variant: one write
+/// that moves every price on the market. It gets its own ledger because the thing a
+/// revert must restore -- the merchant's own prior percentage -- exists nowhere else
+/// once the campaign has overwritten it.
+model PriceListChange {
+  id String @id @default(cuid())
+
+  shopId       String
+  runId        String
+  campaignId   String
+  priceListGid String
+
+  /// The merchant's percentage before this campaign, in basis points. Null means the
+  /// list had no parent adjustment at all, which reverts differently from 0%: one
+  /// removes the adjustment, the other pins it at zero.
+  priorAdjustmentBps Int?
+  /// What the campaign set it to: the campaign's percentage composed with the prior one.
+  appliedAdjustmentBps Int
+
+  status        ChangeStatus @default(PENDING)
+  failureReason String?
+
+  appliedAt  DateTime?
+  verifiedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  shop Shop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  run  CampaignRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  /// One row per market per run, so a resumed run updates its row rather than
+  /// recording the campaign's own adjustment as the prior one on the second pass --
+  /// which would make the revert restore the sale.
+  @@unique([runId, priceListGid])
+  @@index([shopId, campaignId])
+  @@index([campaignId, status])
+  @@map("price_list_changes")
 }
 
 model WriteIntent {

@@ -58,6 +58,27 @@ export type AnchorPriceListDerivedPricesQuery = { priceList?: AdminTypes.Maybe<(
     & { prices: { nodes: Array<{ variant: Pick<AdminTypes.ProductVariant, 'id'>, price: Pick<AdminTypes.MoneyV2, 'amount' | 'currencyCode'> }>, pageInfo: Pick<AdminTypes.PageInfo, 'hasNextPage' | 'endCursor'> } }
   )> };
 
+export type AnchorPriceListParentQueryVariables = AdminTypes.Exact<{
+  id: AdminTypes.Scalars['ID']['input'];
+}>;
+
+
+export type AnchorPriceListParentQuery = { priceList?: AdminTypes.Maybe<(
+    Pick<AdminTypes.PriceList, 'id' | 'currency'>
+    & { parent?: AdminTypes.Maybe<{ adjustment: Pick<AdminTypes.PriceListAdjustment, 'type' | 'value'>, settings: Pick<AdminTypes.PriceListAdjustmentSettings, 'compareAtMode'> }>, fixed: { nodes: Array<{ variant: Pick<AdminTypes.ProductVariant, 'id'> }> } }
+  )> };
+
+export type AnchorPriceListUpdateMutationVariables = AdminTypes.Exact<{
+  id: AdminTypes.Scalars['ID']['input'];
+  input: AdminTypes.PriceListUpdateInput;
+}>;
+
+
+export type AnchorPriceListUpdateMutation = { priceListUpdate?: AdminTypes.Maybe<{ priceList?: AdminTypes.Maybe<(
+      Pick<AdminTypes.PriceList, 'id'>
+      & { parent?: AdminTypes.Maybe<{ adjustment: Pick<AdminTypes.PriceListAdjustment, 'type' | 'value'> }> }
+    )>, userErrors: Array<Pick<AdminTypes.PriceListUserError, 'field' | 'message' | 'code'>> }> };
+
 export type AnchorProductVariantsBulkUpdateMutationVariables = AdminTypes.Exact<{
   productId: AdminTypes.Scalars['ID']['input'];
   variants: Array<AdminTypes.ProductVariantsBulkInput> | AdminTypes.ProductVariantsBulkInput;
@@ -169,6 +190,7 @@ export type AnchorAuditVariantsQuery = { nodes: Array<AdminTypes.Maybe<Pick<Admi
 interface GeneratedQueryTypes {
   "#graphql\n  query AnchorCurrentBulkOperation {\n    currentBulkOperation(type: MUTATION) {\n      id status url partialDataUrl objectCount errorCode\n    }\n  }\n": {return: AnchorCurrentBulkOperationQuery, variables: AnchorCurrentBulkOperationQueryVariables},
   "#graphql\n  query AnchorPriceListDerivedPrices($priceListId: ID!, $query: String!, $first: Int!, $after: String) {\n    priceList(id: $priceListId) {\n      currency\n      prices(originType: RELATIVE, query: $query, first: $first, after: $after) {\n        nodes {\n          variant { id }\n          price { amount currencyCode }\n        }\n        pageInfo { hasNextPage endCursor }\n      }\n    }\n  }\n": {return: AnchorPriceListDerivedPricesQuery, variables: AnchorPriceListDerivedPricesQueryVariables},
+  "#graphql\n  query AnchorPriceListParent($id: ID!) {\n    priceList(id: $id) {\n      id\n      currency\n      parent {\n        adjustment { type value }\n        settings { compareAtMode }\n      }\n      fixed: prices(originType: FIXED, first: 1) {\n        nodes { variant { id } }\n      }\n    }\n  }\n": {return: AnchorPriceListParentQuery, variables: AnchorPriceListParentQueryVariables},
   "#graphql\n  query AnchorVariantPrices($ids: [ID!]!) {\n    nodes(ids: $ids) {\n      ... on ProductVariant { id price compareAtPrice }\n    }\n  }\n": {return: AnchorVariantPricesQuery, variables: AnchorVariantPricesQueryVariables},
   "#graphql\n  query AnchorProductTags($ids: [ID!]!) {\n    nodes(ids: $ids) {\n      ... on Product { id tags }\n    }\n  }\n": {return: AnchorProductTagsQuery, variables: AnchorProductTagsQueryVariables},
   "#graphql\n  query AnchorCurrentBulkQuery {\n    currentBulkOperation(type: QUERY) {\n      id status url partialDataUrl objectCount errorCode\n    }\n  }\n": {return: AnchorCurrentBulkQueryQuery, variables: AnchorCurrentBulkQueryQueryVariables},
@@ -184,6 +206,7 @@ interface GeneratedMutationTypes {
   "#graphql\n  mutation AnchorBulkOperationRunMutation($mutation: String!, $stagedUploadPath: String!) {\n    bulkOperationRunMutation(mutation: $mutation, stagedUploadPath: $stagedUploadPath) {\n      bulkOperation { id status url partialDataUrl objectCount }\n      userErrors { field message }\n    }\n  }\n": {return: AnchorBulkOperationRunMutationMutation, variables: AnchorBulkOperationRunMutationMutationVariables},
   "#graphql\n  mutation AnchorPriceListFixedPricesAdd($priceListId: ID!, $prices: [PriceListPriceInput!]!) {\n    priceListFixedPricesAdd(priceListId: $priceListId, prices: $prices) {\n      prices { variant { id } price { amount currencyCode } compareAtPrice { amount currencyCode } }\n      userErrors { field message code }\n    }\n  }\n": {return: AnchorPriceListFixedPricesAddMutation, variables: AnchorPriceListFixedPricesAddMutationVariables},
   "#graphql\n  mutation AnchorPriceListFixedPricesDelete($priceListId: ID!, $variantIds: [ID!]!) {\n    priceListFixedPricesDelete(priceListId: $priceListId, variantIds: $variantIds) {\n      deletedFixedPriceVariantIds\n      userErrors { field message code }\n    }\n  }\n": {return: AnchorPriceListFixedPricesDeleteMutation, variables: AnchorPriceListFixedPricesDeleteMutationVariables},
+  "#graphql\n  mutation AnchorPriceListUpdate($id: ID!, $input: PriceListUpdateInput!) {\n    priceListUpdate(id: $id, input: $input) {\n      priceList {\n        id\n        parent { adjustment { type value } }\n      }\n      userErrors { field message code }\n    }\n  }\n": {return: AnchorPriceListUpdateMutation, variables: AnchorPriceListUpdateMutationVariables},
   "#graphql\n  mutation AnchorProductVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {\n    productVariantsBulkUpdate(productId: $productId, variants: $variants) {\n      productVariants { id price compareAtPrice }\n      userErrors { field message code }\n    }\n  }\n": {return: AnchorProductVariantsBulkUpdateMutation, variables: AnchorProductVariantsBulkUpdateMutationVariables},
   "#graphql\n  mutation AnchorTagsAdd($id: ID!, $tags: [String!]!) {\n    tagsAdd(id: $id, tags: $tags) {\n      node { id }\n      userErrors { field message }\n    }\n  }\n": {return: AnchorTagsAddMutation, variables: AnchorTagsAddMutationVariables},
   "#graphql\n  mutation AnchorTagsRemove($id: ID!, $tags: [String!]!) {\n    tagsRemove(id: $id, tags: $tags) {\n      node { id }\n      userErrors { field message }\n    }\n  }\n": {return: AnchorTagsRemoveMutation, variables: AnchorTagsRemoveMutationVariables},

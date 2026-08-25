@@ -37,12 +37,15 @@ import {
 import { transitionHistory } from "../services/campaigns/lifecycle.server";
 
 export const loader = withGuard("/app/campaigns/$id", async ({ request, params }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
   const campaignId = String(params.id);
 
   const [preview, runs, record] = await Promise.all([
-    previewCampaign(shop.id, campaignId),
+    // The client lets the review step say how each market will actually be written.
+    // Without it the preview says the choice is made at run time, which is honest but
+    // less useful than the answer.
+    previewCampaign(shop.id, campaignId, { client: toAdminClient(admin) }),
     campaignRuns(shop.id, campaignId),
     prisma.campaign.findFirstOrThrow({
       where: { id: campaignId, shopId: shop.id },
@@ -263,6 +266,23 @@ export default function CampaignDetail() {
             Write path: {preview.writePath} — {preview.writePathReason}
           </s-text>
         </s-paragraph>
+
+        {preview.markets.length > 0 ? (
+          <s-section heading="Markets">
+            <s-paragraph>
+              <s-text>
+                Each market is priced from its own normal price in its own currency,
+                not converted from the base sale price.
+              </s-text>
+            </s-paragraph>
+
+            {preview.markets.map((market) => (
+              <s-paragraph key={market.priceListGid}>
+                <s-text>{market.explanation}</s-text>
+              </s-paragraph>
+            ))}
+          </s-section>
+        ) : null}
 
         {preview.blastRadius ? (
           <s-banner tone="warning">

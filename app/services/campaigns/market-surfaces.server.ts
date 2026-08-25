@@ -24,17 +24,17 @@
  */
 
 import prisma from "../../db.server";
+import type { MarketWritePath } from "../../lib/execution/price-list-parent";
+import { decideMarketPath, planMarket } from "./market-plan.server";
+import { applyMarketWide, revertMarketWide } from "./market-wide.server";
 import {
   deleteMarketPrices,
-  readDerivedPrices,
   writeMarketPrices,
   type MarketPriceRow,
   type MarketWriteResult,
 } from "../../lib/execution/market-executor";
 import type { AdminClient } from "../../lib/execution/sync-executor";
-import { planRun } from "../../lib/planning/plan";
 import type { Guardrails, ResolvableCampaign } from "../../lib/pricing/types";
-import { money, parseMoney, type Money } from "../../lib/money/money";
 import { logger } from "../../lib/logging/logger";
 import { metric } from "../../lib/telemetry/metrics";
 
@@ -66,6 +66,18 @@ export interface MarketSurfaceOutcome {
   failed: number;
   chunks: number;
   messages: string[];
+  /**
+   * How this market was priced.
+   *
+   * Surfaced rather than kept internal because the two paths produce identical prices
+   * but behave differently afterwards: a market-wide percentage keeps deriving from the
+   * base price as it changes, and it is undone by restoring the merchant's own
+   * percentage rather than by deleting per-product prices. A merchant reading their run
+   * report is entitled to know which one happened.
+   */
+  path: MarketWritePath;
+  /** Why the one-mutation path was not used, when it was not. */
+  pathReason?: string;
 }
 
 /**
@@ -102,29 +114,10 @@ export async function applyMarketSurfaces(
   const outcomes: MarketSurfaceOutcome[] = [];
 
   for (const list of lists) {
-    const baselines = await marketBaselines(shopId, list, [...variantGids], client);
-    if (baselines.size === 0) continue;
+    const plan = await planMarket(shopId, list, variantGids, campaigns, client, storeGuardrails);
+    if (!plan) continue;
 
-    // Candidates on this surface, with this market's baseline and currency. The planner
-    // then does exactly what it does for the base surface — same rule, same guardrails,
-    // same rounding, same no-op skipping.
-    const outcome = planRun({
-      campaigns: [...campaigns],
-      storeGuardrails,
-      candidates: [...baselines].map(([variantGid, baseline]) => ({
-        ref: {
-          variantGid,
-          surfaceKind: "market" as const,
-          priceListGid: list.priceListGid,
-          currency: baseline.currency,
-        },
-        baseline: { price: baseline },
-        // No mirrored live value for a relative list, and for a fixed one the stored
-        // price is the baseline. Leaving it undefined means the planner writes rather
-        // than deciding a row is already correct on evidence it does not have.
-        livePrice: undefined,
-      })),
-    });
+    const { outcome } = plan;
 
     if (outcome.kind === "blocked") {
       outcomes.push({
@@ -137,6 +130,7 @@ export async function applyMarketSurfaces(
         messages: [
           `${list.name}: a guardrail stopped this market before anything was written (${outcome.reason}).`,
         ],
+        path: "per-product",
       });
       continue;
     }
@@ -154,6 +148,39 @@ export async function applyMarketSurfaces(
 
     if (rows.length === 0) continue;
 
+    // The same decision the review step showed the merchant, taken by the same
+    // function, so the run cannot quietly do something else.
+    const decision = await decideMarketPath(plan, client);
+
+    if (decision.path === "market-wide") {
+      // Write-ahead for every row first, exactly as the chunked path does. The
+      // shortcut is in the number of requests, not in the ledger.
+      await ledgerChunk(runId, shopId, list, rows, 0);
+
+      const wide = await applyMarketWide({
+        shopId,
+        campaignId,
+        runId,
+        list,
+        rows: outcome.rows,
+        campaignBps: decision.bps,
+        parent: decision.parent,
+        client,
+      });
+
+      outcomes.push({
+        priceListGid: list.priceListGid,
+        name: list.name,
+        currency: list.currency,
+        verified: wide.verified,
+        failed: wide.failed,
+        chunks: wide.corrected > 0 ? 2 : 1,
+        messages: wide.messages,
+        path: "market-wide",
+      });
+      continue;
+    }
+
     const result = await writeMarketPrices(
       client,
       list.priceListGid,
@@ -163,7 +190,7 @@ export async function applyMarketSurfaces(
     );
 
     await recordResults(runId, shopId, list.priceListGid, result);
-    outcomes.push(summarise(list, result));
+    outcomes.push({ ...summarise(list, result), path: "per-product", pathReason: decision.reason });
   }
 
   return outcomes;
@@ -181,6 +208,10 @@ export async function revertMarketSurfaces(
   campaignId: string,
   client: AdminClient,
 ): Promise<MarketSurfaceOutcome[]> {
+  // Markets repriced by a single percentage are undone by restoring the merchant's
+  // own percentage, not by deleting per-product prices — there are none to delete.
+  const wideMessages = await revertMarketWide(campaignId, client);
+
   const written = await prisma.variantChange.findMany({
     where: {
       shopId,
@@ -190,7 +221,12 @@ export async function revertMarketSurfaces(
     },
     select: { variantGid: true, priceListGid: true },
   });
-  if (written.length === 0) return [];
+  // The per-product sweep still runs after a market-wide revert, and should: the
+  // apply may have corrected a handful of variants with exact prices where Shopify
+  // rounded differently, and those really are fixed prices that have to be deleted.
+  // Deleting one that is not there is a no-op, and the ledger rows need settling
+  // either way.
+  if (written.length === 0) return wideOutcomes(wideMessages);
 
   const byList = new Map<string, string[]>();
   for (const row of written) {
@@ -210,60 +246,31 @@ export async function revertMarketSurfaces(
       data: { status: result.clean ? "REVERTED" : "FAILED" },
     });
 
-    outcomes.push(
-      summarise(
-        list ?? { priceListGid, name: priceListGid, currency: "" },
-        result,
-      ),
-    );
+    outcomes.push({
+      ...summarise(list ?? { priceListGid, name: priceListGid, currency: "" }, result),
+      path: "per-product",
+    });
   }
 
-  return outcomes;
+  return [...outcomes, ...wideOutcomes(wideMessages)];
 }
 
-/**
- * The reference price on this market, per variant.
- *
- * A fixed list stores one, so the mirror has it. A relative list does not: its price is
- * the base price converted at Shopify's rate for that market and then adjusted, and the
- * rate is not ours to know. So we ask — scoped to the variants this campaign touches,
- * which is why the relative list still does not get mirrored per variant.
- */
-async function marketBaselines(
-  shopId: string,
-  list: { priceListGid: string; currency: string; adjustmentBps: number | null },
-  variantGids: string[],
-  client: AdminClient,
-): Promise<Map<string, Money>> {
-  const out = new Map<string, Money>();
+/** Markets that could not have their own percentage put back, as an outcome row. */
+function wideOutcomes(messages: string[]): MarketSurfaceOutcome[] {
+  if (messages.length === 0) return [];
 
-  if (list.adjustmentBps === null) {
-    const entries = await prisma.priceSurfaceEntry.findMany({
-      where: {
-        shopId,
-        priceListGid: list.priceListGid,
-        variantGid: { in: variantGids },
-        livePrice: { not: null },
-      },
-      select: { variantGid: true, livePrice: true, currency: true },
-    });
-
-    for (const entry of entries) {
-      out.set(entry.variantGid, money(Number(entry.livePrice), entry.currency || list.currency));
-    }
-    return out;
-  }
-
-  const derived = await readDerivedPrices(client, list.priceListGid, variantGids);
-
-  for (const [variantGid, amount] of derived) {
-    out.set(variantGid, parseMoney(amount, list.currency));
-  }
-
-  // A variant Shopify has no derived price for is left out rather than guessed at. It
-  // then simply is not priced on this market, which the run reports — the alternative
-  // is inventing a reference price and writing a real one on top of it.
-  return out;
+  return [
+    {
+      priceListGid: "",
+      name: "Markets",
+      currency: "",
+      verified: 0,
+      failed: messages.length,
+      chunks: 0,
+      messages,
+      path: "market-wide",
+    },
+  ];
 }
 
 /** Write-ahead, per chunk. A chunk is the smallest thing that can independently fail. */
@@ -342,7 +349,7 @@ async function recordResults(
 function summarise(
   list: { priceListGid: string; name: string; currency: string },
   result: MarketWriteResult,
-): MarketSurfaceOutcome {
+): Omit<MarketSurfaceOutcome, "path"> {
   return {
     priceListGid: list.priceListGid,
     name: list.name,
