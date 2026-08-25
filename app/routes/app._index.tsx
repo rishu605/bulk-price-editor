@@ -153,18 +153,10 @@ export const action = withGuard("/app", async ({ request }: ActionFunctionArgs) 
     };
   }
 
-  if (intent === "recapture") {
-    const capture = await captureBaselines(shop.id, {
-      recapture: true,
-      source: "RECAPTURE",
-      capturedBy: session.shop,
-    });
-    return {
-      ok: true,
-      message: `Recaptured ${capture.captured} baselines (${capture.superseded} superseded).`,
-      errors: [],
-    };
-  }
+  // The unguarded store-wide recapture that used to live here is gone. It took one
+  // click, warned generically, checked nothing, and would happily enshrine a live sale's
+  // prices as a merchant's permanent normal. /app/baselines/recapture does the same job
+  // with the scope, the overlap check and the typed confirmation it always needed.
 
   return { ok: false, message: `Unknown action: ${intent}`, errors: [] };
 });
@@ -390,16 +382,16 @@ export default function Dashboard() {
             </s-text>
           </s-paragraph>
           <s-paragraph>
-            Recapturing replaces every baseline with today&rsquo;s live prices. Do not
-            do this while a sale is running — it would make the sale prices your new
-            normal, permanently.
+            <s-text>
+              Recapturing replaces baselines with today&rsquo;s live prices. Done while a
+              sale is running it makes the sale price the new normal, permanently — so it
+              has its own page, which shows you which campaigns your scope would catch
+              before anything is replaced.
+            </s-text>
           </s-paragraph>
-          <fetcher.Form method="post">
-            <input type="hidden" name="intent" value="recapture" />
-            <s-button type="submit" tone="critical" loading={busy || undefined}>
-              Recapture all baselines
-            </s-button>
-          </fetcher.Form>
+          {/* A link, not a button. One click from the dashboard was not enough ceremony
+              for the most destructive operation in the app. */}
+          <s-link href="/app/baselines/recapture">Recapture baselines…</s-link>
         </s-section>
       ) : null}
     </s-page>
