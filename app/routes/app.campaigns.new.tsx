@@ -21,6 +21,8 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
 
   const url = new URL(request.url);
   const segmentId = url.searchParams.get("segment") ?? "";
+  const practice = url.searchParams.get("practice") === "1";
+  const guided = url.searchParams.get("guided") === "1";
 
   // A chosen segment replaces the inline filter rather than narrowing it. Combining
   // the two would mean a campaign whose scope no longer matches the segment the
@@ -56,6 +58,8 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
     preview,
     segments,
     usingSegment: segment ? { id: segment.id, name: segment.name, kind: segment.kind } : null,
+    practice,
+    guided,
     selected: {
       collection: url.searchParams.get("collection") ?? "",
       tag: url.searchParams.get("tag") ?? "",
@@ -134,11 +138,13 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
     : undefined;
 
   const segmentId = String(form.get("segment") ?? "").trim();
+  const practice = String(form.get("practice") ?? "") === "1";
 
   const campaign = await createCampaign(shop.id, {
     name: String(form.get("name") ?? "Untitled campaign").trim() || "Untitled campaign",
     ast: astFromParams(params),
     ...(segmentId ? { segmentId } : {}),
+    ...(practice ? { practice: true } : {}),
     rule,
     compareAtPolicy,
     rounding: String(form.get("rounding") ?? "none") === "charm99" ? "charm99" : "none",
@@ -156,11 +162,31 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
 });
 
 export default function NewCampaign() {
-  const { facets: available, preview, selected, segments, usingSegment, timeZone } =
+  const { facets: available, preview, selected, segments, usingSegment, practice, guided, timeZone } =
     useLoaderData<typeof loader>();
 
   return (
-    <s-page heading="New campaign">
+    <s-page heading={practice ? "Practice campaign" : guided ? "Your first campaign" : "New campaign"}>
+      {practice ? (
+        <s-banner tone="info">
+          <s-paragraph>
+            Practice mode. You will see exactly which prices would change and by how
+            much, and nothing will be written to your storefront — not now, and not
+            later. This campaign cannot be applied at all.
+          </s-paragraph>
+        </s-banner>
+      ) : null}
+
+      {guided ? (
+        <s-banner tone="info">
+          <s-paragraph>
+            Start small. Narrow the scope below to a handful of products — five is
+            plenty — so your first run is quick and easy to check. You will see every
+            price that would change before anything is applied.
+          </s-paragraph>
+        </s-banner>
+      ) : null}
+
       <s-section heading="1 · Scope">
         <s-paragraph>
           Leave everything blank to target the whole catalogue. Conditions combine
@@ -241,6 +267,7 @@ export default function NewCampaign() {
           {/* The scope form and the create form are separate elements, so the chosen
               segment has to travel with the submission that actually creates. */}
           <input type="hidden" name="segment" value={selected.segment} />
+          <input type="hidden" name="practice" value={practice ? "1" : ""} />
           <input type="hidden" name="collection" value={selected.collection} />
           <input type="hidden" name="tag" value={selected.tag} />
           <input type="hidden" name="vendor" value={selected.vendor} />
@@ -323,7 +350,7 @@ export default function NewCampaign() {
             />
 
             <s-button type="submit" variant="primary">
-              Create and preview
+              {practice ? "Preview it — nothing will be written" : "Create and preview"}
             </s-button>
           </s-stack>
         </Form>

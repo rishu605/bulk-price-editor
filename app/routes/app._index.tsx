@@ -7,7 +7,9 @@ import prisma from "../db.server";
 import { ensureShop, markSyncComplete } from "../services/shop.server";
 import { fetchShopBasics, syncCatalog } from "../services/catalog-sync.server";
 import { baselineHealth, captureBaselines } from "../services/baselines.server";
+import { OnboardingCard } from "../components/OnboardingCard";
 import { RouteBoundary } from "../components/RouteBoundary";
+import { onboarding } from "../lib/onboarding/steps";
 import { withGuard } from "../lib/errors/guard.server";
 
 export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) => {
@@ -46,9 +48,15 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
 
   // Runs that need somebody: the number a merchant should act on, distinct from how
   // many campaigns exist.
-  const needsAttention = await prisma.campaign.count({
-    where: { shopId: shop.id, status: { in: ["PARTIAL", "HELD"] } },
-  });
+  const [needsAttention, cleanRuns, practiceCampaigns] = await Promise.all([
+    prisma.campaign.count({ where: { shopId: shop.id, status: { in: ["PARTIAL", "HELD"] } } }),
+    // The onboarding goal, asked of the data rather than of a dismissed flag: a
+    // merchant who clicked past a step has not run a campaign cleanly.
+    prisma.campaignRun.count({
+      where: { shopId: shop.id, kind: "APPLY", status: "COMPLETED", verifiedRows: { gt: 0 } },
+    }),
+    prisma.campaign.count({ where: { shopId: shop.id, schedule: { path: ["practice"], equals: true } } }),
+  ]);
 
   return {
     shopDomain: shop.domain,
@@ -58,6 +66,12 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
       oldestCapturedAt: health.oldestCapturedAt?.toISOString() ?? null,
     },
     campaigns,
+    onboarding: onboarding({
+      hasBaselines: health.withBaseline > 0,
+      hasCampaign: campaigns > 0,
+      hasPracticed: practiceCampaigns > 0,
+      hasCleanRun: cleanRuns > 0,
+    }),
     live,
     upcoming,
     driftOpen,
@@ -139,6 +153,7 @@ export default function Dashboard() {
     syncedAt,
     health,
     campaigns,
+    onboarding: guide,
     live,
     upcoming,
     driftOpen,
@@ -162,6 +177,8 @@ export default function Dashboard() {
           ))}
         </s-banner>
       ) : null}
+
+      <OnboardingCard state={guide} />
 
       {neverSynced ? (
         <s-section heading="Start by capturing your baselines">

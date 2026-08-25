@@ -41,6 +41,7 @@ export async function createCampaign(shopId: string, input: CampaignInput) {
         rounding: input.rounding,
         ast: input.ast,
         ...(input.segmentId ? { segmentId: input.segmentId } : {}),
+        ...(input.practice ? { practice: true } : {}),
       } as never,
       // The declarative reference as well as the id in the blob. The rule engine reads
       // the blob; the delete guard reads the relation, and a segment that could be
@@ -64,6 +65,19 @@ export function roundingFor(name: unknown): RoundingProfile {
 export function astOf(campaign: Pick<Campaign, "schedule">): FilterAst {
   const schedule = (campaign.schedule ?? {}) as { ast?: FilterAst };
   return schedule.ast ?? { groups: [] };
+}
+
+/**
+ * Whether this campaign is practice.
+ *
+ * A practice campaign exists to be previewed and never applied. It is how a merchant
+ * with fifty thousand products builds confidence before touching a live price, which is
+ * exactly the merchant most worth converting — and the promise is only worth anything
+ * if it is impossible to break by accident.
+ */
+export function isPractice(campaign: Pick<Campaign, "schedule">): boolean {
+  const schedule = (campaign.schedule ?? {}) as { practice?: boolean };
+  return schedule.practice === true;
 }
 
 /** The segment a campaign targets, if it targets one rather than an inline filter. */

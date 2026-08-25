@@ -16,7 +16,8 @@ import type { PlannedRow } from "../../lib/planning/types";
 import { planRun } from "../../lib/planning/plan";
 import { recordWriteIntents } from "../drift.server";
 import { loadCandidates, productMapFor } from "./candidates.server";
-import { loadCampaignContext } from "./model.server";
+import { isPractice, loadCampaignContext } from "./model.server";
+import { AppError } from "../../lib/errors/app-error";
 import { guardrailsFor } from "../settings.server";
 import type { RunOutcome } from "./types";
 import { transitionCampaign } from "./lifecycle.server";
@@ -73,6 +74,24 @@ export async function runCampaign(
   client: AdminClient,
   options: RunOptions = {},
 ): Promise<RunOutcome> {
+  // Practice campaigns never write. Refused here, in the one function that writes
+  // prices, rather than only in the UI that offers the button: the merchant was told
+  // nothing would be written, and that has to hold against a scheduler tick, a stray
+  // caller, or a future button somebody adds without knowing.
+  const practising = await prisma.campaign.findUnique({
+    where: { id: campaignId },
+    select: { schedule: true },
+  });
+  if (practising && isPractice(practising)) {
+    throw new AppError({
+      code: "VALIDATION",
+      userMessage:
+        "This is a practice campaign, so it cannot be applied — that is the point of it. " +
+        "Create a real campaign with the same scope and rule when you are ready.",
+      context: { campaignId },
+    });
+  }
+
   // Enter the running state here, before anything is planned or written, rather than
   // leaving it to each caller.
   //
