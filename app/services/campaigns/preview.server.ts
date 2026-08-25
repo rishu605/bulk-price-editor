@@ -16,7 +16,13 @@ import { decideMarketPath, describePath, planMarket } from "./market-plan.server
 import { parseSurfaces } from "./market-surfaces.server";
 import type { AdminClient } from "../../lib/execution/sync-executor";
 import prisma from "../../db.server";
-import { BLAST_RADIUS_THRESHOLD, type CampaignPreview, type MarketPreview } from "./types";
+import {
+  BLAST_RADIUS_THRESHOLD,
+  type CampaignPreview,
+  type MarketPreview,
+  type SurfaceCell,
+} from "./types";
+import { rowsThatFit } from "../../lib/ui/table-budget";
 
 export interface PreviewOptions {
   /** Preview the revert instead of the apply. */
@@ -68,11 +74,22 @@ export async function previewCampaign(
     };
   }
 
-  const limit = options.limit ?? 100;
+  // Rows are limited by what the table can render, which depends on how many markets
+  // this campaign targets: each one is another column, and the widget blanks the whole
+  // page rather than the table when given too many cells.
+  const surfaceCount = await targetedMarketCount(shopId, campaignId);
+  const limit = options.limit ?? rowsThatFit(BASE_PREVIEW_COLUMNS + surfaceCount);
   const shown = outcome.rows.slice(0, limit);
   const titles = await titleMapFor(shopId, shown.map((row) => row.ref.variantGid));
 
   const fmt = (value?: Money | null) => (value ? format(value) : null);
+  const marketCells = await marketCellsFor(
+    shopId,
+    campaignId,
+    resolvable,
+    shown.map((row) => row.ref.variantGid),
+    options,
+  );
   const decision = selectWritePath(outcome.rows.length);
   const markets = await marketPathPreview(shopId, campaignId, resolvable, outcome, options);
 
@@ -90,6 +107,9 @@ export async function previewCampaign(
       compareAt: row.intendedCompareAtSet ? fmt(row.intendedCompareAt) : null,
       status: row.status,
       reason: row.reason,
+      ...(marketCells.size > 0
+        ? { surfaces: marketCells.get(row.ref.variantGid) ?? {} }
+        : {}),
     })),
     writePath: decision.path,
     writePathReason: decision.reason,
@@ -132,6 +152,8 @@ async function marketPathPreview(
       name: list.name,
       currency: list.currency,
       path: "unknown" as const,
+      clamped: 0,
+      skipped: 0,
       explanation:
         `${list.name} will be priced when the campaign runs, and how it is written ` +
         `depends on this market's settings at that moment.`,
@@ -146,6 +168,7 @@ async function marketPathPreview(
     if (!plan) continue;
 
     const decision = await decideMarketPath(plan, options.client);
+    const counts = plan.outcome.kind === "ok" ? plan.outcome.counts : { clamped: 0, skipped: 0 };
 
     previews.push({
       priceListGid: list.priceListGid,
@@ -153,8 +176,75 @@ async function marketPathPreview(
       currency: list.currency,
       path: decision.path,
       explanation: describePath(decision, list.name),
+      clamped: counts.clamped,
+      skipped: counts.skipped,
     });
   }
 
   return previews;
+}
+
+
+/** Columns a base-only preview renders: variant, before, after, compare-at, state. */
+const BASE_PREVIEW_COLUMNS = 5;
+
+/** How many markets this campaign also prices, for sizing the table. */
+async function targetedMarketCount(shopId: string, campaignId: string): Promise<number> {
+  const campaign = await prisma.campaign.findUnique({
+    where: { id: campaignId },
+    select: { surfaces: true },
+  });
+
+  return parseSurfaces(campaign?.surfaces).priceLists.length;
+}
+
+/**
+ * Each variant's outcome on each market, for the side-by-side matrix.
+ *
+ * Planned through `planMarket`, which is the same function the run uses — so the
+ * matrix shows the prices that will actually be written rather than a second
+ * calculation that might not agree with the first.
+ */
+async function marketCellsFor(
+  shopId: string,
+  campaignId: string,
+  resolvable: readonly Parameters<typeof planMarket>[3][number][],
+  variantGids: readonly string[],
+  options: PreviewOptions,
+): Promise<Map<string, Record<string, SurfaceCell>>> {
+  const cells = new Map<string, Record<string, SurfaceCell>>();
+  if (!options.client || variantGids.length === 0) return cells;
+
+  const campaign = await prisma.campaign.findUnique({
+    where: { id: campaignId },
+    select: { surfaces: true },
+  });
+
+  const surfaces = parseSurfaces(campaign?.surfaces);
+  if (surfaces.priceLists.length === 0) return cells;
+
+  const lists = await prisma.priceListRecord.findMany({
+    where: { shopId, priceListGid: { in: surfaces.priceLists } },
+    select: { priceListGid: true, name: true, currency: true, adjustmentBps: true },
+  });
+
+  for (const list of lists) {
+    const plan = await planMarket(shopId, list, variantGids, resolvable, options.client);
+    if (!plan || plan.outcome.kind !== "ok") continue;
+
+    for (const row of plan.outcome.rows) {
+      const forVariant = cells.get(row.ref.variantGid) ?? {};
+      forVariant[list.priceListGid] = {
+        after: row.intendedPrice ? format(row.intendedPrice) : null,
+        compareAt: row.intendedCompareAtSet && row.intendedCompareAt
+          ? format(row.intendedCompareAt)
+          : null,
+        status: row.status,
+        reason: row.reason,
+      };
+      cells.set(row.ref.variantGid, forVariant);
+    }
+  }
+
+  return cells;
 }

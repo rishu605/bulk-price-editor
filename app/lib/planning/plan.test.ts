@@ -3,6 +3,7 @@ import fc from "fast-check";
 
 import { money } from "../money/money";
 import { NO_ROUNDING } from "../money/rounding";
+import { policyOf } from "../money/rounding-policy";
 import type { ResolvableCampaign } from "../pricing/types";
 import { planRun, priceDelta, refKey, rowsNeedingWrite } from "./plan";
 import { DEFAULT_THRESHOLD, selectWritePath, thresholdFromEnv } from "./write-path";
@@ -34,7 +35,7 @@ function campaign(over: Partial<ResolvableCampaign> = {}): ResolvableCampaign {
     ruleRows: [{ segmentIds: [], rule: { kind: "percent-change", percent: -20 } }],
     compareAtPolicy: { kind: "leave" },
     compareAtViolationPolicy: "clear",
-    roundingProfile: NO_ROUNDING,
+    roundingPolicy: policyOf(NO_ROUNDING),
     guardrailViolationPolicy: "clamp",
     ...over,
   };

@@ -10,9 +10,15 @@ import type { AdjustmentRule, CompareAtPolicy } from "../lib/pricing/types";
 import { money } from "../lib/money/money";
 import { localInputToUtc, type Schedule } from "../lib/scheduling/window";
 import { describeAdjustment } from "../lib/markets/describe";
+import {
+  profileNameFor,
+  readRoundingPolicy,
+  ROUNDING_LABELS,
+} from "../lib/money/rounding-policy";
 import { FilterForm } from "../components/FilterForm";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
+import { readSettings, shopCurrency } from "../services/settings.server";
 import prisma from "../db.server";
 import { segmentToAst } from "../services/segments.server";
 
@@ -43,7 +49,7 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
       })
     : astFromParams(url.searchParams);
 
-  const [available, preview, segments, priceLists] = await Promise.all([
+  const [available, preview, segments, priceLists, settings, currency] = await Promise.all([
     facets(shop.id),
     previewMatches(shop.id, ast),
     prisma.segment.findMany({
@@ -53,16 +59,36 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
     }),
     // Markets the shop actually has. Offered rather than assumed: a single-market
     // store sees no market section at all, which is most stores.
+    // Markets and B2B catalogues alike. B2B is listed rather than hidden: a wholesale
+    // price list is a surface a campaign can price, and a merchant who has one is
+    // usually the merchant who most needs to know whether this sale reaches it.
     prisma.priceListRecord.findMany({
-      where: { shopId: shop.id, surfaceKind: "MARKET" },
-      select: { priceListGid: true, name: true, currency: true, adjustmentBps: true },
-      orderBy: { name: "asc" },
+      where: { shopId: shop.id },
+      select: {
+        priceListGid: true,
+        name: true,
+        currency: true,
+        adjustmentBps: true,
+        surfaceKind: true,
+      },
+      orderBy: [{ surfaceKind: "asc" }, { name: "asc" }],
     }),
+    readSettings(shop.id),
+    shopCurrency(shop.id),
   ]);
+
+  // Every currency this campaign could price in. Only these are offered: a list of all
+  // 180 world currencies would bury the two or three that matter.
+  const currencies = [
+    ...new Set([currency, ...priceLists.map((list) => list.currency)].filter(Boolean)),
+  ].sort();
 
   return {
     timeZone: shop.timezone,
     priceLists,
+    currencies,
+    storeRounding: settings.rounding,
+    roundingOptions: Object.entries(ROUNDING_LABELS).map(([value, label]) => ({ value, label })),
     facets: available,
     preview,
     segments,
@@ -163,7 +189,7 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
     ...(practice ? { practice: true } : {}),
     rule,
     compareAtPolicy,
-    rounding: String(form.get("rounding") ?? "none") === "charm99" ? "charm99" : "none",
+    rounding: readRoundingPolicy(form.entries()),
     priority: Number(form.get("priority") ?? 100) || 100,
     // An unchecked checkbox is simply absent from the form, so presence is the value.
     autoEnroll: form.get("autoEnroll") !== null,
@@ -189,6 +215,9 @@ export default function NewCampaign() {
     guided,
     timeZone,
     priceLists,
+    currencies,
+    storeRounding,
+    roundingOptions,
   } = useLoaderData<typeof loader>();
 
   return (
@@ -325,11 +354,24 @@ export default function NewCampaign() {
               <option value="clear">Clear it</option>
             </select>
 
-            <label htmlFor="rounding">Rounding</label>
-            <select id="rounding" name="rounding" defaultValue="none">
-              <option value="none">None</option>
-              <option value="charm99">Charm endings (.99)</option>
+            <label htmlFor="rounding.default">Rounding</label>
+            <select
+              id="rounding.default"
+              name="rounding.default"
+              defaultValue={storeRounding.default}
+            >
+              {roundingOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
+            <s-paragraph>
+              <s-text>
+                Starts from your store setting. Change it here to round this campaign
+                differently.
+              </s-text>
+            </s-paragraph>
 
             <s-number-field
               name="priority"
@@ -356,11 +398,11 @@ export default function NewCampaign() {
               <>
                 <s-divider />
 
-                <s-heading>Markets</s-heading>
+                <s-heading>Markets and catalogues</s-heading>
                 <s-paragraph>
                   <s-text>
                     Your base price always changes. Tick a market to run this campaign
-                    there too &mdash; each market is priced from{" "}
+                    there too &mdash; each is priced from{" "}
                     <s-text>its own normal price in its own currency</s-text>, not
                     converted from the base sale price.
                   </s-text>
@@ -371,13 +413,43 @@ export default function NewCampaign() {
                     key={list.priceListGid}
                     name="priceList"
                     value={list.priceListGid}
-                    label={`${list.name} (${list.currency})`}
+                    label={`${list.name} (${list.currency})${
+                      list.surfaceKind === "B2B" ? " · wholesale" : ""
+                    }`}
                     details={
                       list.adjustmentBps === null
-                        ? "Prices set per product on this market."
+                        ? "Prices set per product here."
                         : `Normally ${describeAdjustment(list.adjustmentBps)} the base price.`
                     }
                   />
+                ))}
+
+                <s-paragraph>
+                  <s-text>
+                    A price ending that looks considered in one currency can look like a
+                    mistake in another, and some currencies have no cents to end in.
+                  </s-text>
+                </s-paragraph>
+
+                {currencies.map((code) => (
+                  <s-stack key={code} gap="small">
+                    <label htmlFor={`rounding.${code}`}>Rounding for {code}</label>
+                    <select
+                      id={`rounding.${code}`}
+                      name={`rounding.${code}`}
+                      defaultValue={storeRounding.byCurrency[code] ?? "inherit"}
+                    >
+                      <option value="inherit">
+                        Same as this campaign&rsquo;s rounding (
+                        {ROUNDING_LABELS[profileNameFor(storeRounding, code)].toLowerCase()})
+                      </option>
+                      {roundingOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </s-stack>
                 ))}
               </>
             ) : null}

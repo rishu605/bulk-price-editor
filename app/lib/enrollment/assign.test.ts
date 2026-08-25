@@ -5,6 +5,7 @@ import { assignEnrollments, type CampaignMatch } from "./assign";
 import { selectWinner } from "../pricing/resolver";
 import type { ResolvableCampaign } from "../pricing/types";
 import { NO_ROUNDING } from "../money/rounding";
+import { policyOf } from "../money/rounding-policy";
 
 const campaign = (
   id: string,
@@ -17,7 +18,7 @@ const campaign = (
   ruleRows: [],
   compareAtPolicy: { kind: "leave" },
   compareAtViolationPolicy: "clear",
-  roundingProfile: NO_ROUNDING,
+  roundingPolicy: policyOf(NO_ROUNDING),
   guardrailViolationPolicy: "clamp",
 });
 

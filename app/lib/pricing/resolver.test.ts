@@ -3,6 +3,7 @@ import fc from "fast-check";
 
 import { money } from "../money/money";
 import { charm99, NO_ROUNDING, type RoundingProfile } from "../money/rounding";
+import { policyOf } from "../money/rounding-policy";
 import { compareCampaigns, resolve, resolveWithout, selectWinner } from "./resolver";
 import { selectRule } from "./rules";
 import type {
@@ -25,7 +26,7 @@ function campaign(over: Partial<ResolvableCampaign> = {}): ResolvableCampaign {
     ruleRows: [{ segmentIds: [], rule: { kind: "percent-change", percent: -20 } }],
     compareAtPolicy: { kind: "leave" },
     compareAtViolationPolicy: "clear",
-    roundingProfile: NO_ROUNDING,
+    roundingPolicy: policyOf(NO_ROUNDING),
     guardrailViolationPolicy: "clamp",
     ...over,
   };
@@ -92,8 +93,14 @@ const anyCampaign: fc.Arbitrary<ResolvableCampaign> = fc
     anyRule,
     anyProfile,
   )
-  .map(([id, priority, startAt, rule, roundingProfile]) =>
-    campaign({ id, priority, startAt, ruleRows: [{ segmentIds: [], rule }], roundingProfile }),
+  .map(([id, priority, startAt, rule, profile]) =>
+    campaign({
+      id,
+      priority,
+      startAt,
+      ruleRows: [{ segmentIds: [], rule }],
+      roundingPolicy: policyOf(profile),
+    }),
   );
 
 const anyInput: fc.Arbitrary<ResolveInput> = fc
@@ -202,7 +209,7 @@ describe("invariant I6 — floor totality", () => {
           campaigns: [
             campaign({
               ruleRows: [{ segmentIds: [], rule }],
-              roundingProfile: profile,
+              roundingPolicy: policyOf(profile),
               guardrailViolationPolicy: "clamp",
             }),
           ],
@@ -474,7 +481,7 @@ describe("rounding and clamping order", () => {
       campaigns: [
         campaign({
           ruleRows: [{ segmentIds: [], rule: { kind: "percent-change", percent: -20 } }],
-          roundingProfile: { mode: "step", step: 1_000, direction: "down" },
+          roundingPolicy: policyOf({ mode: "step", step: 1_000, direction: "down" }),
         }),
       ],
       storeGuardrails: { minPrice: usd(8_500) },
@@ -490,7 +497,7 @@ describe("rounding and clamping order", () => {
       campaigns: [
         campaign({
           ruleRows: [{ segmentIds: [], rule: { kind: "percent-change", percent: -33 } }],
-          roundingProfile: charm99,
+          roundingPolicy: policyOf(charm99),
         }),
       ],
     });

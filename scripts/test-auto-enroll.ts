@@ -35,7 +35,7 @@ async function main() {
     priority: 900, // outrank anything else left over from earlier testing
     rule: { kind: "percent-change", percent: -30 },
     compareAtPolicy: { kind: "leave" },
-    rounding: "none",
+    rounding: { default: "none", byCurrency: {} },
     ast: { groups: [{ conditions: [{ field: "tag", value: TAG }] }] },
     schedule: { kind: "manual" },
   });

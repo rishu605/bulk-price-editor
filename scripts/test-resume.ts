@@ -52,7 +52,7 @@ async function main() {
     priority: 960,
     rule: { kind: "percent-change", percent: -20 },
     compareAtPolicy: { kind: "leave" },
-    rounding: "none",
+    rounding: { default: "none", byCurrency: {} },
     ast: { groups: [{ conditions: [{ field: "tag", value: TAG }] }] },
     schedule: { kind: "manual" },
   });

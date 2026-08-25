@@ -10,7 +10,7 @@
  */
 
 import type { Money } from "../money/money";
-import type { RoundingProfile } from "../money/rounding";
+import type { RoundingPolicy } from "../money/rounding-policy";
 
 /** Which price surface a resolution targets. */
 export type SurfaceKind = "base" | "market" | "b2b";
@@ -123,7 +123,14 @@ export interface ResolvableCampaign {
   ruleRows: RuleRow[];
   compareAtPolicy: CompareAtPolicy;
   compareAtViolationPolicy: CompareAtViolationPolicy;
-  roundingProfile: RoundingProfile;
+  /**
+   * Rounding, per currency.
+   *
+   * A policy rather than a profile because a campaign that prices into three markets
+   * prices in three currencies, and the charm ending that reads as considered in one
+   * reads as broken in another. Yen has no sub-unit for one at all (E9).
+   */
+  roundingPolicy: RoundingPolicy;
   /** Tightens the store guardrails for this campaign only. */
   guardrails?: Guardrails;
   guardrailViolationPolicy: GuardrailViolationPolicy;

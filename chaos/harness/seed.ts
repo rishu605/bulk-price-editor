@@ -140,7 +140,7 @@ export async function seedFixture(options: SeedOptions): Promise<Fixture> {
     priority: options.priority ?? 900,
     rule: { kind: "percent-change", percent: options.percent ?? -20 },
     compareAtPolicy: { kind: "leave" },
-    rounding: "none",
+    rounding: { default: "none", byCurrency: {} },
     ast: { groups: [{ conditions: [{ field: "tag", value: TAG }] }] },
     schedule: { kind: "manual" },
     tagKit: options.tagKit,
