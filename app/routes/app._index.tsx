@@ -4,6 +4,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { openNotices, resolveNotice } from "../services/markets-topology.server";
 import { ensureShop, markSyncComplete } from "../services/shop.server";
 import { fetchShopBasics, syncCatalog } from "../services/catalog-sync.server";
 import { baselineHealth, captureBaselines } from "../services/baselines.server";
@@ -51,7 +52,8 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
 
   // Runs that need somebody: the number a merchant should act on, distinct from how
   // many campaigns exist.
-  const [needsAttention, cleanRuns, practiceCampaigns] = await Promise.all([
+  const [notices, needsAttention, cleanRuns, practiceCampaigns] = await Promise.all([
+    openNotices(shop.id),
     prisma.campaign.count({ where: { shopId: shop.id, status: { in: ["PARTIAL", "HELD"] } } }),
     // The onboarding goal, asked of the data rather than of a dismissed flag: a
     // merchant who clicked past a step has not run a campaign cleanly.
@@ -78,6 +80,13 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
     live,
     upcoming,
     driftOpen,
+    notices: notices.map((notice) => ({
+      id: notice.id,
+      kind: notice.kind,
+      name: notice.name,
+      detail: notice.detail,
+      campaigns: notice.campaignIds.length,
+    })),
     needsAttention,
     lastRun: lastRun
       ? {
@@ -105,6 +114,16 @@ export const action = withGuard("/app", async ({ request }: ActionFunctionArgs) 
   const shop = await ensureShop(session.shop);
   const form = await request.formData();
   const intent = String(form.get("intent"));
+
+  if (intent === "resolve-notice") {
+    const resolution = String(form.get("resolution"));
+    await resolveNotice(
+      shop.id,
+      String(form.get("noticeId")),
+      resolution === "extended" || resolution === "removed" ? resolution : "ignored",
+    );
+    return { ok: true, message: "Thanks — that market question is settled." };
+  }
 
   if (intent === "sync") {
     const basics = await fetchShopBasics(admin);
@@ -173,6 +192,7 @@ export default function Dashboard() {
     live,
     upcoming,
     driftOpen,
+    notices,
     needsAttention,
     lastRun,
     recent,
@@ -244,6 +264,48 @@ export default function Dashboard() {
                 and reverted.
               </s-text>
             </s-paragraph>
+          ) : null}
+
+          {notices.length > 0 ? (
+            <s-banner tone="warning">
+              <s-heading>Your markets changed</s-heading>
+              {notices.map((notice) => (
+                <s-stack key={notice.id} gap="small">
+                  <s-paragraph>{notice.detail}</s-paragraph>
+                  <s-stack direction="inline" gap="base">
+                    {notice.kind === "added" ? (
+                      <fetcher.Form method="post">
+                        <input type="hidden" name="intent" value="resolve-notice" />
+                        <input type="hidden" name="noticeId" value={notice.id} />
+                        <input type="hidden" name="resolution" value="extended" />
+                        <s-button type="submit" loading={busy || undefined}>
+                          Add it to {notice.campaigns === 1 ? "that campaign" : "those campaigns"}
+                        </s-button>
+                      </fetcher.Form>
+                    ) : (
+                      <fetcher.Form method="post">
+                        <input type="hidden" name="intent" value="resolve-notice" />
+                        <input type="hidden" name="noticeId" value={notice.id} />
+                        <input type="hidden" name="resolution" value="removed" />
+                        <s-button type="submit" loading={busy || undefined}>
+                          Remove it from{" "}
+                          {notice.campaigns === 1 ? "that campaign" : "those campaigns"}
+                        </s-button>
+                      </fetcher.Form>
+                    )}
+
+                    <fetcher.Form method="post">
+                      <input type="hidden" name="intent" value="resolve-notice" />
+                      <input type="hidden" name="noticeId" value={notice.id} />
+                      <input type="hidden" name="resolution" value="ignored" />
+                      <s-button type="submit" variant="tertiary" loading={busy || undefined}>
+                        Leave it as it is
+                      </s-button>
+                    </fetcher.Form>
+                  </s-stack>
+                </s-stack>
+              ))}
+            </s-banner>
           ) : null}
 
           {health.missing > 0 ? (
