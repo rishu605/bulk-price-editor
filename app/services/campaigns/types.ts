@@ -7,6 +7,7 @@
 
 import type { AdjustmentRule, CompareAtPolicy, Guardrails } from "../../lib/pricing/types";
 import type { PlannedRow } from "../../lib/planning/types";
+import type { MarginRow } from "../../lib/pricing/margin";
 import type { StoredRoundingPolicy } from "../../lib/money/rounding-policy";
 import type { Schedule } from "../../lib/scheduling/window";
 import type { FilterAst } from "../segments.server";
@@ -93,6 +94,19 @@ export interface SurfaceCell {
   reason?: string;
 }
 
+/** The margin picture for a planned campaign. */
+export interface MarginPreview {
+  covered: number;
+  unknown: number;
+  averageBefore: number;
+  averageAfter: number;
+  averageDelta: number;
+  belowTarget: MarginRow[];
+  belowCost: MarginRow[];
+  /** One sentence a merchant can act on. */
+  summary: string;
+}
+
 /** How one market will be written, and why, in the merchant's own terms. */
 export interface MarketPreview {
   priceListGid: string;
@@ -128,6 +142,14 @@ export interface CampaignPreview {
   writePathReason: string;
   /** One entry per market this campaign also prices. Empty for base-only campaigns. */
   markets: MarketPreview[];
+  /**
+   * What this campaign does to margin, where cost is known.
+   *
+   * Null when the plan was blocked before it could be computed. Arithmetic on price and
+   * cost — never an estimate for products with no cost, and never a claim about what the
+   * campaign will earn, which needs order data and is a separate, approval-gated thing.
+   */
+  margin: MarginPreview | null;
   /** Campaigns over this size need typed confirmation (A-3.11). */
   blastRadius: boolean;
 }

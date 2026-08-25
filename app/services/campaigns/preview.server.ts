@@ -6,12 +6,13 @@
  */
 
 import { format } from "../../lib/money/format";
-import type { Money } from "../../lib/money/money";
+import { money, type Money } from "../../lib/money/money";
 import { planRun } from "../../lib/planning/plan";
 import { selectWritePath } from "../../lib/planning/write-path";
 import { loadCandidates, titleMapFor } from "./candidates.server";
 import { loadCampaignContext } from "./model.server";
-import { guardrailsFor } from "../settings.server";
+import { guardrailsFor, readSettings } from "../settings.server";
+import { describeImpact, marginImpact } from "../../lib/pricing/margin";
 import { decideMarketPath, describePath, planMarket } from "./market-plan.server";
 import { parseSurfaces } from "./market-surfaces.server";
 import type { AdminClient } from "../../lib/execution/sync-executor";
@@ -70,6 +71,7 @@ export async function previewCampaign(
       writePath: "none",
       writePathReason: "Blocked before planning completed.",
       markets: [],
+      margin: null,
       blastRadius: false,
     };
   }
@@ -83,6 +85,14 @@ export async function previewCampaign(
   const titles = await titleMapFor(shopId, shown.map((row) => row.ref.variantGid));
 
   const fmt = (value?: Money | null) => (value ? format(value) : null);
+  // Costs for every variant in the plan, not just the shown page. Read from the current
+  // baseline because that is what the guardrails use, so the margin shown here and the
+  // floor that clamps a price cannot disagree.
+  const costs = await costsFor(
+    shopId,
+    outcome.rows.map((row) => row.ref.variantGid),
+  );
+
   const marketCells = await marketCellsFor(
     shopId,
     campaignId,
@@ -93,8 +103,33 @@ export async function previewCampaign(
   const decision = selectWritePath(outcome.rows.length);
   const markets = await marketPathPreview(shopId, campaignId, resolvable, outcome, options);
 
+  // What this does to margin, before it happens. Computed over the whole plan rather
+  // than the shown page: a merchant asking "what does this cost me" means the campaign,
+  // not the first twenty-five rows of it.
+  const storeSettings = await readSettings(shopId);
+  const margin = marginImpact(
+    outcome.rows
+      .filter((row) => row.status !== "skipped" && row.intendedPrice && row.beforePrice)
+      .map((row) => ({
+        variantGid: row.ref.variantGid,
+        title: titles.get(row.ref.variantGid) ?? row.ref.variantGid,
+        cost: costs.get(row.ref.variantGid),
+        before: row.beforePrice!,
+        after: row.intendedPrice!,
+      })),
+    storeSettings.minMarginPercent,
+  );
+
   return {
     markets,
+    margin: {
+      ...margin,
+      // Named products, capped. Twenty is enough to see the shape of the problem; the
+      // export has all of them.
+      belowTarget: margin.belowTarget.slice(0, 20),
+      belowCost: margin.belowCost.slice(0, 20),
+      summary: describeImpact(margin, storeSettings.minMarginPercent),
+    },
     campaignId,
     name: campaign.name,
     status: campaign.status,
@@ -247,4 +282,32 @@ async function marketCellsFor(
   }
 
   return cells;
+}
+
+
+/**
+ * Each variant's cost, from the current baseline.
+ *
+ * From the baseline rather than the catalogue mirror, because the baseline is what the
+ * margin guardrail reads at resolve time. Taking them from different places would let the
+ * margin a merchant is shown disagree with the floor that clamps the price.
+ */
+async function costsFor(shopId: string, variantGids: readonly string[]) {
+  if (variantGids.length === 0) return new Map<string, Money>();
+
+  const rows = await prisma.baseline.findMany({
+    where: {
+      shopId,
+      surfaceKind: "BASE",
+      priceListGid: "",
+      supersededAt: null,
+      variantGid: { in: [...variantGids] },
+      cost: { not: null },
+    },
+    select: { variantGid: true, cost: true, currency: true },
+  });
+
+  return new Map(
+    rows.map((row) => [row.variantGid, money(Number(row.cost), row.currency)] as const),
+  );
 }
