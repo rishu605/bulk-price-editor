@@ -25,6 +25,8 @@
 import type { BulkOperationState } from "../../app/lib/execution/bulk-executor";
 import type { QueryCost, ThrottleStatus } from "../../app/lib/shopify/budget";
 import type { BulkResultLine } from "../../app/lib/execution/jsonl";
+import { minorUnitsPerMajor } from "../../app/lib/money/currency";
+import { formatMoney, money, parseMoney } from "../../app/lib/money/money";
 import type { BlobStore } from "./blob-store";
 
 export interface FakeProduct {
@@ -81,8 +83,32 @@ export class FakeShopify {
   /** Market and B2B price lists. */
   readonly priceLists: FakePriceList[] = [];
 
-  /** Every variant write this fake has accepted, in order. Scenarios assert on it. */
-  readonly writeLog: Array<{ variantGid: string; price: string }> = [];
+  /** The base price's currency. Market lists carry their own. */
+  shopCurrency = "USD";
+
+  /**
+   * Exchange rates from the shop currency, per market currency.
+   *
+   * Present so the fake can derive a relative list's prices the way Shopify does:
+   * convert first, adjust second. A fake that skipped the conversion would agree with
+   * an app that also skipped it, and the two would be wrong together — which is the
+   * failure mode a fake is supposed to make impossible.
+   */
+  readonly rates = new Map<string, number>([["EUR", 0.92], ["JPY", 148]]);
+
+  /**
+   * Every price this store accepted, and which surface it landed on.
+   *
+   * The surface is part of the record because I4 is per-surface: a variant with a
+   * ledgered base price and an unledgered EUR price is still an unexplainable change
+   * to somebody's storefront. Keying the check on the variant alone let the base row
+   * vouch for the market write, which is the one case the market path could get wrong.
+   */
+  readonly writeLog: Array<{
+    variantGid: string;
+    price: string;
+    priceListGid: string | null;
+  }> = [];
 
   /** Bulk-operation status polls served. Proof the fallback did the recovering. */
   polls = 0;
@@ -136,7 +162,28 @@ export class FakeShopify {
     if (variant) variant.deleted = true;
   }
 
-  priceOf(variantGid: string): string | undefined {
+  /**
+   * The currency a surface prices in, so a reader can parse its amounts.
+   *
+   * Not a formality: "9312" is ¥9,312 on the Japanese list and $93.12 on the base
+   * price. A reader that assumes two decimals is wrong by a factor of a hundred in
+   * exactly the market this feature exists to serve.
+   */
+  currencyOf(priceListGid?: string | null): string {
+    if (!priceListGid) return this.shopCurrency;
+    return this.priceLists.find((l) => l.id === priceListGid)?.currency ?? this.shopCurrency;
+  }
+
+  /**
+   * What a shopper pays, on the surface they are shopping.
+   *
+   * Without a price list this is the variant's own price. With one it is the fixed
+   * price on that list -- and `undefined` if the list has none, because the shopper
+   * then pays whatever the list's parent adjustment derives, which is by definition
+   * not a price the campaign wrote.
+   */
+  priceOf(variantGid: string, priceListGid?: string | null): string | undefined {
+    if (priceListGid) return this.fixedPricesOn(priceListGid).get(variantGid)?.amount;
     const variant = this.variants.get(variantGid);
     return variant && !variant.deleted ? variant.price : undefined;
   }
@@ -158,6 +205,15 @@ export class FakeShopify {
     }
     if (query.includes("currentBulkOperation")) {
       return this.currentBulkOperation() as { data?: T; extensions?: { cost?: QueryCost } };
+    }
+    if (query.includes("prices(originType: RELATIVE")) {
+      return this.derivedPrices(variables) as { data?: T; extensions?: { cost?: QueryCost } };
+    }
+    if (query.includes("priceListFixedPricesAdd")) {
+      return this.priceListFixedPricesAdd(variables) as { data?: T; extensions?: { cost?: QueryCost } };
+    }
+    if (query.includes("priceListFixedPricesDelete")) {
+      return this.priceListFixedPricesDelete(variables) as { data?: T; extensions?: { cost?: QueryCost } };
     }
     if (query.includes("priceLists(")) {
       return this.listPriceLists() as { data?: T; extensions?: { cost?: QueryCost } };
@@ -232,7 +288,7 @@ export class FakeShopify {
 
       if (typeof input.price === "string") {
         variant.price = input.price;
-        this.writeLog.push({ variantGid: id, price: input.price });
+        this.writeLog.push({ variantGid: id, price: input.price, priceListGid: null });
       }
       if ("compareAtPrice" in input) {
         variant.compareAtPrice = input.compareAtPrice === null ? null : String(input.compareAtPrice);
@@ -294,6 +350,165 @@ export class FakeShopify {
 
   addPriceList(list: FakePriceList): void {
     this.priceLists.push(list);
+  }
+
+  /** Fixed prices currently on a list, keyed by variant — what a shopper there sees. */
+  fixedPricesOn(priceListGid: string): Map<string, { amount: string; compareAt: string | null }> {
+    const list = this.priceLists.find((l) => l.id === priceListGid);
+    const out = new Map<string, { amount: string; compareAt: string | null }>();
+    for (const entry of list?.prices ?? []) {
+      if (entry.originType === "FIXED") {
+        out.set(entry.variantGid, { amount: entry.amount, compareAt: entry.compareAt });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * What a relative list derives for a variant: converted, then adjusted, then rounded
+   * to the target currency's precision.
+   *
+   * The order is Shopify's and it is not interchangeable. Adjusting before converting
+   * gives a different number in every currency whose minor unit is not the shop's.
+   */
+  derivedPriceOf(variantGid: string, list: FakePriceList): string | undefined {
+    const variant = this.variants.get(variantGid);
+    if (!variant || variant.deleted || !list.adjustment) return undefined;
+
+    const rate = list.currency === this.shopCurrency ? 1 : (this.rates.get(list.currency) ?? 1);
+    const converted = parseMoney(variant.price, this.shopCurrency).amount * rate;
+
+    const sign = list.adjustment.type === "PERCENTAGE_DECREASE" ? -1 : 1;
+    const adjusted = converted * (1 + (sign * list.adjustment.value) / 100);
+
+    // From the shop's minor units into the market's: $77.60 is 7760 cents, and at 148
+    // that is ¥11,485 — 11485 minor units, not 1,148,480.
+    const inTarget = (adjusted / minorUnitsPerMajor(this.shopCurrency)) * minorUnitsPerMajor(list.currency);
+
+    return formatMoney(money(Math.round(inTarget), list.currency));
+  }
+
+  /** Serves `priceList.prices(originType: RELATIVE)`, filtered by variant id. */
+  private derivedPrices(variables: Record<string, unknown>) {
+    const list = this.priceLists.find((l) => l.id === String(variables.priceListId ?? ""));
+    const ids = new Set(
+      String(variables.query ?? "")
+        .split(" OR ")
+        .map((term) => term.replace("variant_id:", "").trim())
+        .filter(Boolean),
+    );
+
+    const nodes: Array<{ variant: { id: string }; price: { amount: string; currencyCode: string } }> = [];
+
+    if (list) {
+      for (const [gid, variant] of this.variants) {
+        if (variant.deleted) continue;
+        if (ids.size > 0 && !ids.has(gid.split("/").pop() ?? "")) continue;
+        // A variant with a fixed price on this list has no relative price -- its origin
+        // is FIXED, so it is not in this connection at all.
+        if (list.prices.some((p) => p.variantGid === gid && p.originType === "FIXED")) continue;
+
+        const amount = this.derivedPriceOf(gid, list);
+        if (amount) {
+          nodes.push({ variant: { id: gid }, price: { amount, currencyCode: list.currency } });
+        }
+      }
+    }
+
+    return {
+      data: {
+        priceList: list
+          ? { currency: list.currency, prices: { nodes, pageInfo: { hasNextPage: false, endCursor: null } } }
+          : null,
+      },
+      extensions: this.cost(5),
+    };
+  }
+
+  /**
+   * Add-and-replace, as Shopify documents it, and capped.
+   *
+   * The cap is enforced rather than assumed: a fake that silently accepted 400 prices
+   * would let a chunking bug through and the first real store would find it.
+   */
+  private priceListFixedPricesAdd(variables: Record<string, unknown>) {
+    const list = this.priceLists.find((l) => l.id === String(variables.priceListId ?? ""));
+    const prices = (variables.prices ?? []) as Array<{
+      variantId: string;
+      price: { amount: string };
+      compareAtPrice?: { amount: string } | null;
+    }>;
+
+    if (!list) {
+      return {
+        data: {
+          priceListFixedPricesAdd: {
+            prices: [],
+            userErrors: [{ field: ["priceListId"], message: "Price list does not exist." }],
+          },
+        },
+        extensions: this.cost(10),
+      };
+    }
+
+    if (prices.length > 250) {
+      return {
+        data: {
+          priceListFixedPricesAdd: {
+            prices: [],
+            userErrors: [{ field: ["prices"], message: "Cannot set more than 250 prices per request." }],
+          },
+        },
+        extensions: this.cost(10),
+      };
+    }
+
+    const confirmed: Array<{ variant: { id: string } }> = [];
+
+    for (const price of prices) {
+      const existing = list.prices.findIndex((entry) => entry.variantGid === price.variantId);
+      const row = {
+        variantGid: price.variantId,
+        amount: price.price.amount,
+        compareAt: price.compareAtPrice?.amount ?? null,
+        originType: "FIXED" as const,
+      };
+
+      if (existing === -1) list.prices.push(row);
+      else list.prices[existing] = row;
+
+      this.writeLog.push({
+        variantGid: price.variantId,
+        price: price.price.amount,
+        priceListGid: list.id,
+      });
+      confirmed.push({ variant: { id: price.variantId } });
+    }
+
+    return {
+      data: { priceListFixedPricesAdd: { prices: confirmed, userErrors: [] } },
+      extensions: this.cost(10 * Math.max(1, prices.length)),
+    };
+  }
+
+  /** Deleting a fixed price returns the variant to the list's parent adjustment. */
+  private priceListFixedPricesDelete(variables: Record<string, unknown>) {
+    const list = this.priceLists.find((l) => l.id === String(variables.priceListId ?? ""));
+    const ids = new Set((variables.variantIds ?? []) as string[]);
+    const deleted: string[] = [];
+
+    if (list) {
+      list.prices = list.prices.filter((entry) => {
+        const remove = entry.originType === "FIXED" && ids.has(entry.variantGid);
+        if (remove) deleted.push(entry.variantGid);
+        return !remove;
+      });
+    }
+
+    return {
+      data: { priceListFixedPricesDelete: { deletedFixedPriceVariantIds: deleted, userErrors: [] } },
+      extensions: this.cost(10),
+    };
   }
 
   private listPriceLists() {
