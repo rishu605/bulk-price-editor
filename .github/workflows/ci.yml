@@ -53,6 +53,20 @@ jobs:
       - name: Validate migrations against clean database
         run: npx prisma migrate deploy
 
+      # Regenerated and diffed rather than trusted. A hand-written response type agrees
+      # with the schema exactly as far as whoever wrote it remembered — a field that
+      # returns null, a connection that grew a level, a rename between API versions all
+      # typecheck perfectly and fail at runtime, in code that writes prices. This is
+      # also what catches a query that no longer compiles against the pinned version.
+      - name: GraphQL types match the pinned schema
+        run: |
+          npm run graphql-codegen
+          if ! git diff --quiet -- app/types; then
+            echo "::error::Generated GraphQL types are out of date. Run 'npm run graphql-codegen' and commit the result."
+            git diff --stat -- app/types
+            exit 1
+          fi
+
       - name: Typecheck
         run: npm run typecheck
 

@@ -70,6 +70,32 @@ interface PriceListNode {
   catalog?: { id: string; title: string; __typename?: string } | null;
 }
 
+/**
+ * Which surface a price list belongs to, or null for one that is not ours to touch.
+ *
+ * A list with no catalog is attached to companies rather than to a market, which is B2B
+ * in practice. An `AppCatalog` belongs to another app: mirroring it would invite a
+ * campaign to write prices into a surface this merchant did not ask us to manage, so it
+ * is skipped and said so rather than being quietly filed under MARKET.
+ */
+export function surfaceKindOf(
+  catalog: { __typename?: string } | null | undefined,
+): "MARKET" | "B2B" | null {
+  if (!catalog) return "B2B";
+  switch (catalog.__typename) {
+    case "CompanyLocationCatalog":
+      return "B2B";
+    case "MarketCatalog":
+      return "MARKET";
+    case "AppCatalog":
+      return null;
+    default:
+      // An unfamiliar catalog kind. Skipped for the same reason as an app catalog:
+      // guessing which surface it is means guessing where prices go.
+      return null;
+  }
+}
+
 interface PricesNode {
   originType?: string | null;
   variant?: { id: string } | null;
@@ -123,10 +149,15 @@ export async function syncMarkets(
   for (const list of lists) {
     const adjustmentBps = toBasisPoints(list.parent?.adjustment ?? null);
 
-    // A catalog is a market catalog or a company-location one. Absent means B2B in
-    // practice: the list is attached to companies rather than to a market.
-    const surfaceKind =
-      list.catalog?.__typename === "CompanyLocationCatalog" || !list.catalog ? "B2B" : "MARKET";
+    // Three catalog kinds, not two. Generated types made that visible: alongside
+    // MarketCatalog and CompanyLocationCatalog there is AppCatalog — a price list owned
+    // by another app. Treating it as a market, which a two-way check does, would mirror
+    // somebody else's surface and then let a campaign price into it.
+    const surfaceKind = surfaceKindOf(list.catalog);
+    if (surfaceKind === null) {
+      logger.info("skipped an app-owned price list", { shopId, priceListGid: list.id });
+      continue;
+    }
 
     await prisma.priceListRecord.upsert({
       where: { shopId_priceListGid: { shopId, priceListGid: list.id } },

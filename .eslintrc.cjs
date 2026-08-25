@@ -19,7 +19,10 @@ module.exports = {
     commonjs: true,
     es6: true,
   },
-  ignorePatterns: ["!**/.server", "!**/.client"],
+  // Generated GraphQL types are Shopify's schema, not our code: three and a half
+  // megabytes of it, carrying its own eslint-disable directives for rules this config
+  // does not load. Linting output nobody edits produces errors nobody can fix.
+  ignorePatterns: ["!**/.server", "!**/.client", "app/types/**"],
 
   // Base config
   extends: ["eslint:recommended"],

@@ -9,6 +9,7 @@
 
 import type { QueryCost } from "../lib/shopify/budget";
 import type { AdminClient } from "../lib/execution/sync-executor";
+import { API_VERSION_STRING } from "../lib/shopify/api-version";
 
 export interface ShopifyAdminContext {
   graphql(
@@ -97,8 +98,11 @@ export async function adminClientForShop(shopDomain: string): Promise<AdminClien
   });
   if (!session?.accessToken) return null;
 
-  const apiVersion = process.env.SHOPIFY_API_VERSION ?? "2026-07";
-  const endpoint = `https://${shopDomain}/admin/api/${apiVersion}/graphql.json`;
+  // The same version the web process speaks. This used to read an environment variable
+  // with a different default, so a scheduled run hit a different Admin API than the
+  // identical run started by hand — invisible in the code, and only ever failing
+  // overnight.
+  const endpoint = `https://${shopDomain}/admin/api/${API_VERSION_STRING}/graphql.json`;
 
   return toAdminClient({
     async graphql(query, options) {
