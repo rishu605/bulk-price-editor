@@ -69,6 +69,20 @@ export interface PreviewRow {
   reason?: string;
 }
 
+/** How one market will be written, and why, in the merchant's own terms. */
+export interface MarketPreview {
+  priceListGid: string;
+  name: string;
+  currency: string;
+  /**
+   * "unknown" when the review step could not read the market's live settings. The two
+   * real paths produce identical prices but are undone differently, so saying "unknown"
+   * is materially better than guessing one of them.
+   */
+  path: "market-wide" | "per-product" | "unknown";
+  explanation: string;
+}
+
 export interface CampaignPreview {
   campaignId: string;
   name: string;
@@ -78,6 +92,8 @@ export interface CampaignPreview {
   blocked?: { reason: string; variantGid: string };
   writePath: string;
   writePathReason: string;
+  /** One entry per market this campaign also prices. Empty for base-only campaigns. */
+  markets: MarketPreview[];
   /** Campaigns over this size need typed confirmation (A-3.11). */
   blastRadius: boolean;
 }

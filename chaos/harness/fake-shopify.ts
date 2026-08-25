@@ -183,7 +183,17 @@ export class FakeShopify {
    * not a price the campaign wrote.
    */
   priceOf(variantGid: string, priceListGid?: string | null): string | undefined {
-    if (priceListGid) return this.fixedPricesOn(priceListGid).get(variantGid)?.amount;
+    if (priceListGid) {
+      const fixed = this.fixedPricesOn(priceListGid).get(variantGid)?.amount;
+      if (fixed !== undefined) return fixed;
+
+      // No fixed price does not mean no price. A market repriced by its parent
+      // adjustment has no per-variant rows at all, and reading that as "the campaign
+      // wrote nothing here" would let the whole market-wide path go unverified.
+      const list = this.priceLists.find((l) => l.id === priceListGid);
+      return list ? this.derivedPriceOf(variantGid, list) : undefined;
+    }
+
     const variant = this.variants.get(variantGid);
     return variant && !variant.deleted ? variant.price : undefined;
   }
@@ -205,6 +215,12 @@ export class FakeShopify {
     }
     if (query.includes("currentBulkOperation")) {
       return this.currentBulkOperation() as { data?: T; extensions?: { cost?: QueryCost } };
+    }
+    if (query.includes("priceListUpdate")) {
+      return this.priceListUpdate(variables) as { data?: T; extensions?: { cost?: QueryCost } };
+    }
+    if (query.includes("fixed: prices(originType: FIXED")) {
+      return this.priceListParent(variables) as { data?: T; extensions?: { cost?: QueryCost } };
     }
     if (query.includes("prices(originType: RELATIVE")) {
       return this.derivedPrices(variables) as { data?: T; extensions?: { cost?: QueryCost } };
@@ -386,6 +402,88 @@ export class FakeShopify {
     const inTarget = (adjusted / minorUnitsPerMajor(this.shopCurrency)) * minorUnitsPerMajor(list.currency);
 
     return formatMoney(money(Math.round(inTarget), list.currency));
+  }
+
+  /** Mutations that moved a whole market at once. Scenarios count these. */
+  readonly parentWrites: Array<{ priceListGid: string; type: string; value: number }> = [];
+
+  /** Serves the parent-adjustment read, including whether anything overrides it. */
+  private priceListParent(variables: Record<string, unknown>) {
+    const list = this.priceLists.find((l) => l.id === String(variables.id ?? ""));
+    if (!list) return { data: { priceList: null }, extensions: this.cost(2) };
+
+    return {
+      data: {
+        priceList: {
+          id: list.id,
+          currency: list.currency,
+          parent: list.adjustment
+            ? { adjustment: list.adjustment, settings: { compareAtMode: "ADJUSTED" } }
+            : null,
+          fixed: {
+            nodes: list.prices
+              .filter((entry) => entry.originType === "FIXED")
+              .slice(0, 1)
+              .map((entry) => ({ variant: { id: entry.variantGid } })),
+          },
+        },
+      },
+      extensions: this.cost(2),
+    };
+  }
+
+  /** Sets a list's parent adjustment. Every derived price moves with it. */
+  private priceListUpdate(variables: Record<string, unknown>) {
+    const list = this.priceLists.find((l) => l.id === String(variables.id ?? ""));
+    const input = (variables.input ?? {}) as {
+      parent?: { adjustment?: { type?: string; value?: number } };
+    };
+    const adjustment = input.parent?.adjustment;
+
+    if (!list || !adjustment?.type || typeof adjustment.value !== "number") {
+      return {
+        data: {
+          priceListUpdate: {
+            priceList: null,
+            userErrors: [{ field: ["id"], message: "Price list does not exist." }],
+          },
+        },
+        extensions: this.cost(10),
+      };
+    }
+
+    list.adjustment = { type: adjustment.type, value: adjustment.value };
+
+    // Every variant whose price this moved, logged as a write.
+    //
+    // One mutation, but N price changes on the storefront, and I4 does not care which
+    // it was: no price may change without a ledger row behind it. Logging them all is
+    // what makes a wrongly-granted market-wide shortcut fail the verdict automatically
+    // -- the campaign ledgered its own variants, so the ones it never covered show up
+    // as unexplainable changes, which is precisely what they are.
+    for (const [gid, variant] of this.variants) {
+      if (variant.deleted) continue;
+      if (list.prices.some((p) => p.variantGid === gid && p.originType === "FIXED")) continue;
+
+      const amount = this.derivedPriceOf(gid, list);
+      if (amount) this.writeLog.push({ variantGid: gid, price: amount, priceListGid: list.id });
+    }
+
+    this.parentWrites.push({
+      priceListGid: list.id,
+      type: adjustment.type,
+      value: adjustment.value,
+    });
+
+    return {
+      data: {
+        priceListUpdate: {
+          priceList: { id: list.id, parent: { adjustment: list.adjustment } },
+          userErrors: [],
+        },
+      },
+      extensions: this.cost(10),
+    };
   }
 
   /** Serves `priceList.prices(originType: RELATIVE)`, filtered by variant id. */
