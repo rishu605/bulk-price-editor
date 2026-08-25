@@ -28,7 +28,7 @@ export default function App() {
         <s-link href="/app/catalog">Catalogue</s-link>
         <s-link href="/app/baselines">Baselines</s-link>
         <s-link href="/app/baselines/import">Import baselines</s-link>
-        <s-link href="/app/costs/import">Import costs</s-link>
+        <s-link href="/app/costs">Costs</s-link>
         <s-link href="/app/reconciliation">What is live</s-link>
         <s-link href="/app/drift">Drift</s-link>
         <s-link href="/app/activity">Activity</s-link>
