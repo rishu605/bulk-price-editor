@@ -119,6 +119,30 @@ describe("deciding whether a market can be repriced with one mutation", () => {
     ).toBe(false);
   });
 
+  it("does not let a cheap product decide the percentage", () => {
+    // The bug this replaces: the percentage was recovered from whichever row came
+    // first. At a baseline of 7 minor units a 20% cut is 6, and the only percentage
+    // that reproduces 6 from 7 is -14.29% — which then fails to reproduce anything
+    // else, so a perfectly uniform campaign was rejected whenever a cheap product
+    // happened to sort first. It made the whole optimisation a coin flip on catalogue
+    // order, and it passed locally purely because one seed's catalogue was lucky.
+    const verdict = uniformAdjustment(uniformMarket(-2000, [7, 1000, 250_000]));
+
+    expect(verdict).toEqual({ eligible: true, bps: -2000 });
+  });
+
+  it("still rejects a genuinely non-uniform change in a catalogue of mixed prices", () => {
+    // The looser derivation must not become a looser *decision*. Perturbing a middle
+    // product rather than the dearest one, because a small nudge to the dearest is
+    // reproducible by a slightly different percentage and is therefore still uniform —
+    // correctly eligible, just at -19.96% rather than -20%. This one no single
+    // percentage can produce.
+    const input = uniformMarket(-2000, [7, 1000, 250_000]);
+    input.rows[1] = row("v1", 900);
+
+    expect(uniformAdjustment(input).eligible).toBe(false);
+  });
+
   it("accepts a markup as readily as a discount", () => {
     expect(uniformAdjustment(uniformMarket(1500, [1000, 2500]))).toEqual({
       eligible: true,

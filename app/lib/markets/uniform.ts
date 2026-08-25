@@ -116,7 +116,7 @@ export function uniformAdjustment(inputs: UniformInputs): UniformVerdict {
     }
   }
 
-  let bps: number | null = null;
+  const priced: Array<{ baseline: number; to: number }> = [];
 
   for (const row of rows) {
     const baseline = baselines.get(row.ref.variantGid);
@@ -129,21 +129,33 @@ export function uniformAdjustment(inputs: UniformInputs): UniformVerdict {
       return { eligible: false, reason: "a product is priced at zero, which has no percentage" };
     }
 
-    // Derived from the first row, then *verified* against every other one by
-    // recomputing forward. Comparing ratios instead would accept rows that merely
-    // round to the same percentage, and "rounds to the same" is precisely the case
-    // this check exists to reject.
-    const candidate: number = bps ?? Math.round(((to - baseline) * 10_000) / baseline);
-    if (applyBps(baseline, candidate) !== to) {
+    priced.push({ baseline, to });
+  }
+
+  // Derived from the *dearest* product, then verified against every other one.
+  //
+  // Not the first, which is what this did originally and which made the whole
+  // optimisation a coin flip on catalogue order. Recovering a percentage from a cheap
+  // product is imprecise: at a baseline of 7 minor units a 20% cut is 6, and the only
+  // percentage that reproduces 6 from 7 is -14.29%, which then fails to reproduce
+  // anything else. The dearest product carries the most significant digits, so the
+  // percentage it implies is the one most likely to be the campaign's actual intent.
+  //
+  // It is still only a candidate. Every row has to reproduce exactly, so a wrong guess
+  // costs the optimisation and never a wrong price.
+  const strongest = priced.reduce((best, row) => (row.baseline > best.baseline ? row : best));
+  const bps = Math.round(((strongest.to - strongest.baseline) * 10_000) / strongest.baseline);
+
+  for (const row of priced) {
+    if (applyBps(row.baseline, bps) !== row.to) {
       return {
         eligible: false,
         reason: "the change is not the same percentage on every product",
       };
     }
-    bps = candidate;
   }
 
-  if (bps === null || bps === 0) {
+  if (bps === 0) {
     return { eligible: false, reason: "the campaign does not change this market's prices" };
   }
 
