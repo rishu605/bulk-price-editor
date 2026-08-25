@@ -11,6 +11,8 @@
  * screen tells a merchant nothing and tells an attacker something.
  */
 
+import { helpLabelFor, helpUrlFor } from "../lib/errors/help-links";
+
 export interface ErrorScreenProps {
   errorId: string;
   userMessage: string;
@@ -44,6 +46,15 @@ export function ErrorScreen({
               campaign — its ledger shows exactly which variants were written before
               the failure, and resuming picks up from there.
             </s-text>
+          </s-paragraph>
+
+          {/* Every merchant-visible error links to the page that explains it. Somebody
+              hitting this at 9pm before a sale wants the sentence that says what to do,
+              one click from here — not a search box. */}
+          <s-paragraph>
+            <s-link href={helpUrlFor(code)} target="_blank">
+              {helpLabelFor(code)}
+            </s-link>
           </s-paragraph>
 
           <s-stack direction="inline" gap="base">
