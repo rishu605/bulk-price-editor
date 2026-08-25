@@ -7,7 +7,12 @@ import prisma from "../db.server";
 import { ensureShop, markSyncComplete } from "../services/shop.server";
 import { fetchShopBasics, syncCatalog } from "../services/catalog-sync.server";
 import { baselineHealth, captureBaselines } from "../services/baselines.server";
+import { syncMarkets } from "../services/markets-sync.server";
+import { syncCatalogViaBulk } from "../services/catalog-bulk-sync.server";
+import { toAdminClient } from "../services/admin-client.server";
+import { OnboardingCard } from "../components/OnboardingCard";
 import { RouteBoundary } from "../components/RouteBoundary";
+import { onboarding } from "../lib/onboarding/steps";
 import { withGuard } from "../lib/errors/guard.server";
 
 export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) => {
@@ -46,9 +51,15 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
 
   // Runs that need somebody: the number a merchant should act on, distinct from how
   // many campaigns exist.
-  const needsAttention = await prisma.campaign.count({
-    where: { shopId: shop.id, status: { in: ["PARTIAL", "HELD"] } },
-  });
+  const [needsAttention, cleanRuns, practiceCampaigns] = await Promise.all([
+    prisma.campaign.count({ where: { shopId: shop.id, status: { in: ["PARTIAL", "HELD"] } } }),
+    // The onboarding goal, asked of the data rather than of a dismissed flag: a
+    // merchant who clicked past a step has not run a campaign cleanly.
+    prisma.campaignRun.count({
+      where: { shopId: shop.id, kind: "APPLY", status: "COMPLETED", verifiedRows: { gt: 0 } },
+    }),
+    prisma.campaign.count({ where: { shopId: shop.id, schedule: { path: ["practice"], equals: true } } }),
+  ]);
 
   return {
     shopDomain: shop.domain,
@@ -58,6 +69,12 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
       oldestCapturedAt: health.oldestCapturedAt?.toISOString() ?? null,
     },
     campaigns,
+    onboarding: onboarding({
+      hasBaselines: health.withBaseline > 0,
+      hasCampaign: campaigns > 0,
+      hasPracticed: practiceCampaigns > 0,
+      hasCleanRun: cleanRuns > 0,
+    }),
     live,
     upcoming,
     driftOpen,
@@ -96,7 +113,23 @@ export const action = withGuard("/app", async ({ request }: ActionFunctionArgs) 
       data: { timezone: basics.timezone },
     });
 
-    const sync = await syncCatalog(admin, shop.id, basics.currency);
+    // Bulk first. One operation and a streamed result beats ten thousand paginated
+    // round trips against a rate limit that allows a couple a second — and the
+    // paginated path holds nothing back on a catalogue that does not fit in memory.
+    const client = toAdminClient(admin);
+    const bulk = await syncCatalogViaBulk(client, shop.id, basics.currency);
+
+    // Falling back rather than failing. A shop already running a bulk operation, or a
+    // catalogue Shopify declines to build a file for, still deserves a sync — and on a
+    // small store the paginated path is perfectly adequate, which is what it is for.
+    const sync =
+      bulk.errors.length === 0 && bulk.written > 0
+        ? { variants: bulk.written, products: bulk.products, errors: [] as string[] }
+        : await syncCatalog(admin, shop.id, basics.currency);
+
+    // After the catalogue, never alongside it: Shopify allows one bulk operation per
+    // shop, and the market sync checks for a running one rather than racing it.
+    const markets = await syncMarkets(client, shop.id);
 
     // Capture baselines immediately: a variant with no baseline cannot be priced by
     // a campaign, and capturing at sync time is the only moment we can be confident
@@ -110,6 +143,11 @@ export const action = withGuard("/app", async ({ request }: ActionFunctionArgs) 
         `Synced ${sync.variants} variants across ${sync.products} products. ` +
         `Captured ${capture.captured} baselines` +
         (capture.alreadyCurrent > 0 ? `, ${capture.alreadyCurrent} already current` : "") +
+        (markets.priceLists > 0
+          ? `. Mirrored ${markets.priceLists} price list${markets.priceLists === 1 ? "" : "s"}` +
+            (markets.relative > 0 ? ` (${markets.relative} derived from a percentage)` : "") +
+            (markets.entries > 0 ? `, ${markets.entries} fixed prices` : "")
+          : "") +
         ".",
       errors: sync.errors.slice(0, 5),
     };
@@ -139,6 +177,7 @@ export default function Dashboard() {
     syncedAt,
     health,
     campaigns,
+    onboarding: guide,
     live,
     upcoming,
     driftOpen,
@@ -162,6 +201,8 @@ export default function Dashboard() {
           ))}
         </s-banner>
       ) : null}
+
+      <OnboardingCard state={guide} />
 
       {neverSynced ? (
         <s-section heading="Start by capturing your baselines">

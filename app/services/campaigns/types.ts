@@ -34,6 +34,14 @@ export interface CampaignInput {
    */
   tagKit?: string[];
   /**
+   * Practice: preview everything, write nothing, ever.
+   *
+   * Enforced in the run path rather than only in the UI, because a promise that
+   * nothing will be written has to hold even if a button, a scheduler tick or a future
+   * caller gets it wrong.
+   */
+  practice?: boolean;
+  /**
    * Target a saved segment instead of an inline filter.
    *
    * Stored as a reference, not copied, so editing the segment updates every campaign

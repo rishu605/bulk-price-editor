@@ -86,6 +86,7 @@ model Shop {
   writeIntents     WriteIntent[]
   driftEvents      DriftEvent[]
   roundingProfiles RoundingProfileRecord[]
+  priceLists       PriceListRecord[]
   webhookEvents    WebhookEvent[]
   bulkOps          BulkOperationRecord[]
   auditEntries     AuditLogEntry[]
@@ -567,6 +568,44 @@ model DriftEvent {
 enum RoundingMode {
   CHARM
   STEP
+}
+
+/// A market or B2B price list, and how it derives its prices.
+///
+/// The mode is load-bearing rather than informational. A list with a `PriceListParent`
+/// percentage adjustment *derives* every price from the base one; a list with fixed
+/// overrides *stores* them. That decides whether a campaign can be written with one
+/// mutation against the parent adjustment (P5.2) or has to write a row per variant —
+/// the difference between one API call and five hundred thousand.
+///
+/// It is also why a relative list is never expanded into `price_surface_entries`. A
+/// 500K-variant catalogue across four markets would be two million mirrored rows
+/// restating a single percentage.
+model PriceListRecord {
+  id String @id @default(cuid())
+
+  shopId       String
+  priceListGid String
+  name         String
+  currency     String
+
+  /// MARKET for a market catalog, B2B for a company-location one.
+  surfaceKind SurfaceKind @default(MARKET)
+
+  catalogGid   String?
+  catalogTitle String?
+
+  /// Basis points, so the adjustment never touches a float. A 5% decrease is -500.
+  /// Null means the list stores fixed per-variant prices instead.
+  adjustmentBps Int?
+
+  syncedAt DateTime @default(now())
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, priceListGid])
+  @@index([shopId, surfaceKind])
+  @@map("price_lists")
 }
 
 model RoundingProfileRecord {

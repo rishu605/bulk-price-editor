@@ -27,6 +27,7 @@ import { RouteBoundary } from "../components/RouteBoundary";
 import { reportError } from "../services/error-report.server";
 import { withGuard } from "../lib/errors/guard.server";
 import { actorFor } from "../lib/audit/actor";
+import { isPractice } from "../services/campaigns/model.server";
 import {
   canTransition,
   describeState,
@@ -55,6 +56,7 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
   ]);
 
   const state = record.status as CampaignState;
+  const practice = isPractice(record);
   const lifecycle = describeState(state);
   const history = await transitionHistory(shop.id, campaignId, 8);
 
@@ -89,6 +91,7 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     autoEnroll: record.autoEnroll,
     enrollPendingAt: record.enrollPendingAt !== null,
     state,
+    practice,
     lifecycle,
     needsAttention: needsAttention(state),
     history,
@@ -186,6 +189,7 @@ type ActionData = {
 export default function CampaignDetail() {
   const {
     rollback,
+    practice,
     preview,
     runs,
     ledger,
@@ -208,7 +212,10 @@ export default function CampaignDetail() {
   // hand, or because an earlier run got there first -- still needs to be applied to
   // take ownership of them. Requiring rows to write left such a campaign stuck in
   // Draft forever, which also meant nothing would ever revert those prices.
-  const canApply = !preview.blocked && canTransition(state, "APPLYING");
+  // A practice campaign can never be applied — the run path refuses it outright. The
+  // button is not merely disabled: offering a control that exists only to be refused
+  // undermines the promise the merchant was given when they chose practice.
+  const canApply = !practice && !preview.blocked && canTransition(state, "APPLYING");
 
   return (
     <s-page heading={preview.name}>
@@ -352,6 +359,16 @@ export default function CampaignDetail() {
       ) : null}
 
       <s-section slot="aside" heading="Actions">
+        {practice ? (
+          <s-banner tone="info">
+            <s-paragraph>
+              This is a practice campaign. The preview above is exactly what would
+              happen, and nothing has been or will be written to your storefront.
+              Create a real campaign with the same scope and rule when you are ready.
+            </s-paragraph>
+          </s-banner>
+        ) : null}
+
         <s-stack gap="base">
           <fetcher.Form method="post">
             <input type="hidden" name="intent" value="apply" />

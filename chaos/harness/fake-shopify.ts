@@ -33,6 +33,22 @@ export interface FakeProduct {
   tags: string[];
 }
 
+export interface FakePriceList {
+  id: string;
+  name: string;
+  currency: string;
+  /** Percentage adjustment, or null when the list stores fixed per-variant prices. */
+  adjustment: { type: string; value: number } | null;
+  catalog: { id: string; title: string; __typename: string } | null;
+  /** Per-variant entries, as Shopify reports them -- fixed and derived alike. */
+  prices: Array<{
+    variantGid: string;
+    amount: string;
+    compareAt: string | null;
+    originType: "FIXED" | "RELATIVE";
+  }>;
+}
+
 export interface FakeVariant {
   variantGid: string;
   productGid: string;
@@ -61,6 +77,9 @@ export class FakeShopify {
 
   /** Product-level state. Tags live here, not on variants, exactly as in Shopify. */
   readonly products = new Map<string, FakeProduct>();
+
+  /** Market and B2B price lists. */
+  readonly priceLists: FakePriceList[] = [];
 
   /** Every variant write this fake has accepted, in order. Scenarios assert on it. */
   readonly writeLog: Array<{ variantGid: string; price: string }> = [];
@@ -139,6 +158,12 @@ export class FakeShopify {
     }
     if (query.includes("currentBulkOperation")) {
       return this.currentBulkOperation() as { data?: T; extensions?: { cost?: QueryCost } };
+    }
+    if (query.includes("priceLists(")) {
+      return this.listPriceLists() as { data?: T; extensions?: { cost?: QueryCost } };
+    }
+    if (query.includes("priceList(")) {
+      return this.priceListPrices(variables) as { data?: T; extensions?: { cost?: QueryCost } };
     }
     if (query.includes("tagsAdd")) {
       return this.tagsAdd(variables) as { data?: T; extensions?: { cost?: QueryCost } };
@@ -264,6 +289,60 @@ export class FakeShopify {
         }),
       },
       extensions: this.cost(Math.max(1, ids.length)),
+    };
+  }
+
+  addPriceList(list: FakePriceList): void {
+    this.priceLists.push(list);
+  }
+
+  private listPriceLists() {
+    return {
+      data: {
+        priceLists: {
+          pageInfo: { hasNextPage: false, endCursor: null },
+          nodes: this.priceLists.map((list) => ({
+            id: list.id,
+            name: list.name,
+            currency: list.currency,
+            parent: list.adjustment ? { adjustment: list.adjustment } : null,
+            catalog: list.catalog,
+          })),
+        },
+      },
+      extensions: this.cost(10),
+    };
+  }
+
+  /**
+   * Prices on one list.
+   *
+   * Returns derived entries alongside fixed ones, as the real API does — that mixture
+   * is the whole reason the mirror has to look at `originType` rather than storing
+   * whatever it is handed.
+   */
+  private priceListPrices(variables: Record<string, unknown>) {
+    const list = this.priceLists.find((l) => l.id === String(variables.id ?? ""));
+    if (!list) return { data: { priceList: null }, extensions: this.cost(1) };
+
+    return {
+      data: {
+        priceList: {
+          id: list.id,
+          prices: {
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: list.prices.map((entry) => ({
+              originType: entry.originType,
+              variant: { id: entry.variantGid },
+              price: { amount: entry.amount, currencyCode: list.currency },
+              compareAtPrice: entry.compareAt
+                ? { amount: entry.compareAt, currencyCode: list.currency }
+                : null,
+            })),
+          },
+        },
+      },
+      extensions: this.cost(5),
     };
   }
 
