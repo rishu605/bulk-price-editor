@@ -9,7 +9,11 @@
 
 import { describe, expect, it } from "vitest";
 
-import { classifyRollbackRow, rollbackReportCsv, type RollbackReport } from "./rollback-report.server";
+import {
+  classifyRollbackRow,
+  rollbackReportCsv,
+  type RollbackReport,
+} from "./rollback";
 
 describe("classifyRollbackRow", () => {
   it("calls a row clean when live matches what we applied", () => {
@@ -62,7 +66,11 @@ describe("rollbackReportCsv", () => {
     );
 
     const lines = csv.trim().split("\n");
-    expect(lines[0]).toBe("variant_gid,title,state,applied,live_now,reverts_to");
+    // Header quoted like every other cell. Uniform quoting means there is no cell
+    // whose safety depends on someone having checked it could not contain a comma.
+    expect(lines[0]).toBe(
+      '"variant_gid","title","state","applied","live_now","reverts_to"',
+    );
     expect(lines[1]).toBe(
       '"gid://Variant/1","Blue shirt","drifted","$80.00","$75.00","$100.00"',
     );

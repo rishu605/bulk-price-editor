@@ -12,7 +12,6 @@ import { expect } from "vitest";
 
 import prisma from "../../app/db.server";
 import { runCampaign, type RunOptions } from "../../app/services/campaigns/run.server";
-import { transitionCampaign } from "../../app/services/campaigns/lifecycle.server";
 import type { RunOutcome } from "../../app/services/campaigns/types";
 import type { FakeShopify } from "./fake-shopify";
 import type { FaultRule } from "./faults";
@@ -97,28 +96,25 @@ export async function withChaos(
     arm: (rules) => server.faults.arm(rules),
     heal: () => server.faults.heal(),
 
-    apply: async (options = {}) => {
-      await transitionCampaign(fixture.shopId, fixture.campaignId, "APPLYING", {
-        reason: `chaos/${scenario}`,
-      });
-      return runCampaign(fixture.shopId, fixture.campaignId, client, {
+    // Deliberately no lifecycle transition first. `runCampaign` owns entering the
+    // running state, and a harness that helpfully moved the campaign to APPLYING
+    // beforehand was testing a path the campaign page does not take -- which is
+    // exactly how applying a draft came to write and verify four prices and then
+    // report "nothing has been written to your storefront".
+    apply: async (options = {}) =>
+      runCampaign(fixture.shopId, fixture.campaignId, client, {
         // Full read-back. Sampling would let a scenario pass because the one bad row
         // happened not to be sampled -- the opposite of what this suite is for.
         verifySampleRate: 1,
         ...options,
-      });
-    },
+      }),
 
-    revert: async (options = {}) => {
-      await transitionCampaign(fixture.shopId, fixture.campaignId, "REVERTING", {
-        reason: `chaos/${scenario}: reset`,
-      });
-      return runCampaign(fixture.shopId, fixture.campaignId, client, {
+    revert: async (options = {}) =>
+      runCampaign(fixture.shopId, fixture.campaignId, client, {
         revert: true,
         verifySampleRate: 1,
         ...options,
-      });
-    },
+      }),
 
     livePrices: () =>
       new Map(fixture.variantGids.map((gid) => [gid, server.fake.priceOf(gid)])),

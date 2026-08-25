@@ -6,6 +6,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { ensureShop } from "../services/shop.server";
 import { formatMoney, money } from "../lib/money/money";
+import { FilterForm } from "../components/FilterForm";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 
@@ -101,7 +102,7 @@ export default function Catalog() {
   return (
     <s-page heading="Catalogue">
       <s-section>
-        <form method="get">
+        <FilterForm fields={["q"]}>
           <s-stack direction="inline" gap="base">
             <s-text-field
               name="q"
@@ -112,7 +113,7 @@ export default function Catalog() {
             />
             <s-button type="submit">Search</s-button>
           </s-stack>
-        </form>
+        </FilterForm>
 
         {total === 0 ? (
           <s-paragraph>

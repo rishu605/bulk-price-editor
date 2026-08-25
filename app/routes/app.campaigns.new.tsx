@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { redirect, useLoaderData } from "react-router";
+import { Form, redirect, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
@@ -9,6 +9,7 @@ import { createCampaign } from "../services/campaigns/index.server";
 import type { AdjustmentRule, CompareAtPolicy } from "../lib/pricing/types";
 import { money } from "../lib/money/money";
 import { localInputToUtc, type Schedule } from "../lib/scheduling/window";
+import { FilterForm } from "../components/FilterForm";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 
@@ -36,16 +37,17 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
   };
 });
 
+/**
+ * The scope form's fields.
+ *
+ * Named once and shared with the form, so a field added to one and forgotten in the
+ * other cannot silently stop being filterable.
+ */
+export const SCOPE_FIELDS = ["collection", "tag", "vendor", "title"] as const;
+
 /** Builds an AST from the simple scope form: all provided conditions ANDed. */
 function astFromParams(params: URLSearchParams): FilterAst {
-  const conditions = (
-    [
-      ["collection", params.get("collection")],
-      ["tag", params.get("tag")],
-      ["vendor", params.get("vendor")],
-      ["title", params.get("title")],
-    ] as const
-  )
+  const conditions = SCOPE_FIELDS.map((field) => [field, params.get(field)] as const)
     .filter(([, value]) => value && value.trim().length > 0)
     .map(([field, value]) => ({ field, value: value!.trim() }));
 
@@ -124,7 +126,7 @@ export default function NewCampaign() {
           Leave everything blank to target the whole catalogue. Conditions combine
           with AND.
         </s-paragraph>
-        <form method="get">
+        <FilterForm fields={SCOPE_FIELDS}>
           <s-stack gap="base">
             <label htmlFor="collection">Collection</label>
             <select id="collection" name="collection" defaultValue={selected.collection}>
@@ -156,7 +158,7 @@ export default function NewCampaign() {
             <s-text-field name="title" label="Title contains" defaultValue={selected.title} />
             <s-button type="submit">Update match count</s-button>
           </s-stack>
-        </form>
+        </FilterForm>
 
         <s-paragraph>
           <strong>{preview.count}</strong> variants match.
@@ -173,7 +175,7 @@ export default function NewCampaign() {
       </s-section>
 
       <s-section heading="2 · Rule">
-        <form method="post">
+        <Form method="post">
           <input type="hidden" name="collection" value={selected.collection} />
           <input type="hidden" name="tag" value={selected.tag} />
           <input type="hidden" name="vendor" value={selected.vendor} />
@@ -252,7 +254,7 @@ export default function NewCampaign() {
               Create and preview
             </s-button>
           </s-stack>
-        </form>
+        </Form>
       </s-section>
 
       <s-section slot="aside" heading="Nothing is written yet">

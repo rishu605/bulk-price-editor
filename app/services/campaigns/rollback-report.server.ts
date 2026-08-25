@@ -25,56 +25,20 @@ import { planRun } from "../../lib/planning/plan";
 import { loadCandidates, titleMapFor } from "./candidates.server";
 import { loadCampaignContext } from "./model.server";
 import { guardrailsFor } from "../settings.server";
+import {
+  classifyRollbackRow,
+  type RollbackReport,
+  type RollbackRow,
+  type RollbackRowKind,
+} from "../../lib/reporting/rollback";
 
-export type RollbackRowKind =
-  /** Live value matches what we applied. Reverting is uncontroversial. */
-  | "clean"
-  /** Live value differs from what we applied — somebody edited it. */
-  | "drifted"
-  /** Variant no longer exists in Shopify. Nothing to revert. */
-  | "deleted";
-
-export interface RollbackRow {
-  variantGid: string;
-  title: string;
-  kind: RollbackRowKind;
-  /** What this campaign last wrote, from the ledger. */
-  applied: string | null;
-  /** What the storefront shows now, from the mirror. */
-  live: string | null;
-  /** What `resolve(without this campaign)` would write. */
-  revertsTo: string | null;
-}
-
-export interface RollbackReport {
-  campaignId: string;
-  campaignName: string;
-  rows: RollbackRow[];
-  counts: { total: number; clean: number; drifted: number; deleted: number };
-  /** True when nothing needs a decision and the revert can just run. */
-  straightforward: boolean;
-}
-
-/**
- * Which of the three states a row is in.
- *
- * Pure, so the boundaries are testable without a database — and they need to be,
- * because the default matters. An unknown comparison resolves to `clean`, meaning the
- * revert proceeds. That is the right way round: `drifted` asks a person a question,
- * and a report that invents questions about rows nobody touched is a report people
- * learn to click through, which is how the real ones get missed.
- */
-export function classifyRollbackRow(input: {
-  deleted: boolean;
-  /** What the campaign wrote, in minor units. */
-  applied: number | null;
-  /** What the mirror says is live, in minor units. */
-  live: number | null;
-}): RollbackRowKind {
-  if (input.deleted) return "deleted";
-  if (input.applied === null || input.live === null) return "clean";
-  return input.live === input.applied ? "clean" : "drifted";
-}
+export {
+  classifyRollbackRow,
+  rollbackReportCsv,
+  type RollbackReport,
+  type RollbackRow,
+  type RollbackRowKind,
+} from "../../lib/reporting/rollback";
 
 export async function rollbackReport(
   shopId: string,
@@ -247,31 +211,4 @@ async function appliedValues(campaignId: string): Promise<Map<string, bigint | n
     if (!latest.has(change.variantGid)) latest.set(change.variantGid, change.intendedPrice);
   }
   return latest;
-}
-
-/**
- * The report as CSV.
- *
- * Exportable because this is the artefact somebody forwards to whoever made the edit,
- * or keeps as the record of a decision about a few thousand prices. Values are
- * quoted and internal quotes doubled: product titles contain commas and inches
- * routinely, and a report that corrupts itself on a 24" monitor is not a record.
- */
-export function rollbackReportCsv(report: RollbackReport): string {
-  const header = ["variant_gid", "title", "state", "applied", "live_now", "reverts_to"];
-  const lines = [header.join(",")];
-
-  for (const row of report.rows) {
-    lines.push(
-      [row.variantGid, row.title, row.kind, row.applied ?? "", row.live ?? "", row.revertsTo ?? ""]
-        .map(csvCell)
-        .join(","),
-    );
-  }
-
-  return `${lines.join("\n")}\n`;
-}
-
-function csvCell(value: string): string {
-  return `"${value.replace(/"/g, '""')}"`;
 }
