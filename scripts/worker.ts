@@ -13,6 +13,8 @@
 import Redis from "ioredis";
 
 import { tick } from "../app/services/scheduler.server";
+import { reportDepths, runtimeFor } from "../app/worker/queue-runtime.server";
+import { handleJob } from "../app/worker/handlers.server";
 import { LeaderLock } from "../app/worker/leader-lock";
 import { pruneWriteIntents } from "../app/services/drift.server";
 import prisma from "../app/db.server";
@@ -43,6 +45,11 @@ redis.on("error", (error) => {
 
 const lock = new LeaderLock(redis, "anchor:scheduler:leader", LOCK_TTL_MS);
 
+// Queue consumers start with the process, not with leadership. Only one worker may
+// *schedule*, because two deciding a campaign is due would start it twice — but every
+// worker should be draining queues, which is the entire point of running more than one.
+const queues = runtimeFor(handleJob);
+
 let running = true;
 let isLeader = false;
 let ticks = 0;
@@ -56,6 +63,11 @@ async function runOnce(): Promise<void> {
   const started = Date.now();
   const result = await tick();
   ticks++;
+
+  // Reported from the leader only, so N replicas do not publish N copies of the same
+  // number. A rising floor here is the earliest signal that the worker is losing
+  // ground, and the one that predicts a missed scheduled revert before it is missed.
+  await reportDepths(queues);
 
   if (
     result.applied > 0 ||
