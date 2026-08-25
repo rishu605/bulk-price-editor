@@ -96,6 +96,7 @@ model Shop {
   tagChanges       TagChange[]
   priceListChanges PriceListChange[]
   topologyNotices  TopologyNotice[]
+  feedback         Feedback[]
   writeIntents     WriteIntent[]
   driftEvents      DriftEvent[]
   roundingProfiles RoundingProfileRecord[]
@@ -695,6 +696,43 @@ model TopologyNotice {
 
   @@index([shopId, createdAt])
   @@map("topology_notices")
+}
+
+/// Feedback a merchant sent from inside the app.
+///
+/// Persisted rather than emailed straight out: a merchant should be able to see that it
+/// arrived, and telling them when it ships is what keeps a beta cohort engaged. Neither
+/// is possible if the only copy is in somebody's inbox.
+model Feedback {
+  id String @id @default(cuid())
+
+  shopId String
+
+  message   String
+  /// "problem", "idea" or "praise". Three, because a longer list makes people think.
+  sentiment String
+
+  /// Captured automatically. Asking "which screen were you on" wastes a question whose
+  /// answer we already have, and every question asked is a reason not to send.
+  route        String?
+  planTier     String?
+  variantCount Int?
+  actor        String?
+
+  /// Triage. Null means nobody has looked yet, which is what the weekly review reads.
+  status     String?
+  theme      String?
+  shippedAt  DateTime?
+  /// Set when the merchant was told it shipped.
+  notifiedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, createdAt])
+  @@index([status])
+  @@map("feedback")
 }
 
 model RoundingProfileRecord {

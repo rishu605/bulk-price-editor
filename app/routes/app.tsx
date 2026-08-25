@@ -32,6 +32,7 @@ export default function App() {
         <s-link href="/app/reconciliation">What is live</s-link>
         <s-link href="/app/drift">Drift</s-link>
         <s-link href="/app/activity">Activity</s-link>
+        <s-link href="/app/feedback">Feedback</s-link>
         <s-link href="/app/plan">Plan</s-link>
         <s-link href="/app/settings">Settings</s-link>
         <s-link href="/app/debug">Diagnostics</s-link>
