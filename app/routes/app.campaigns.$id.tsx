@@ -269,6 +269,53 @@ export default function CampaignDetail() {
           </s-text>
         </s-paragraph>
 
+        {preview.margin ? (
+          <s-section heading="What this does to your margins">
+            <s-paragraph>
+              <s-text>{preview.margin.summary}</s-text>
+            </s-paragraph>
+            <s-paragraph>
+              {/* Said plainly, because overstating causality in a pricing tool is how
+                  merchants make expensive decisions on bad inference. */}
+              <s-text tone="neutral">
+                This is arithmetic on your prices and costs. It does not predict what you
+                will sell.
+              </s-text>
+            </s-paragraph>
+
+            {preview.margin.belowCost.length > 0 ? (
+              <s-banner tone="critical">
+                <s-paragraph>
+                  {preview.margin.belowCost.length} of these would sell at or below cost:
+                </s-paragraph>
+                <s-unordered-list>
+                  {preview.margin.belowCost.map((row) => (
+                    <s-list-item key={row.variantGid}>
+                      {row.title} — {row.after.toFixed(1)}% margin
+                    </s-list-item>
+                  ))}
+                </s-unordered-list>
+              </s-banner>
+            ) : null}
+
+            {preview.margin.belowTarget.length > 0 ? (
+              <s-banner tone="warning">
+                <s-paragraph>
+                  {preview.margin.belowTarget.length} would fall below your target margin,
+                  worst first:
+                </s-paragraph>
+                <s-unordered-list>
+                  {preview.margin.belowTarget.map((row) => (
+                    <s-list-item key={row.variantGid}>
+                      {row.title} — {row.before.toFixed(1)}% becomes {row.after.toFixed(1)}%
+                    </s-list-item>
+                  ))}
+                </s-unordered-list>
+              </s-banner>
+            ) : null}
+          </s-section>
+        ) : null}
+
         {preview.markets.length > 0 ? (
           <s-section heading="Markets">
             <s-paragraph>

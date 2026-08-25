@@ -207,3 +207,97 @@ describe("chaos: importing costs", () => {
     );
   });
 });
+
+describe("chaos: what a campaign does to margin", () => {
+  it("reports margin only for products whose cost it knows", async () => {
+    await withChaos(
+      "margin-coverage",
+      { catalog: { products: 6, variantsPerProduct: 1 }, percent: -20 },
+      async (chaos) => {
+        const { shopId, campaignId, variantGids } = chaos.fixture;
+
+        // Costs for half the catalogue, which is the realistic shape: Shopify does not
+        // require a cost and most stores have them on some products and not others.
+        await Promise.all(
+          variantGids.slice(0, 3).map((gid, i) =>
+            prisma.variantIndex.updateMany({
+              where: { shopId, variantGid: gid },
+              data: { sku: `SKU-${i}` },
+            }),
+          ),
+        );
+
+        const { importCosts } = await import("../../app/services/cost-import.server");
+        const file = [
+          "Variant SKU,Variant Cost",
+          ...variantGids.slice(0, 3).map((_, i) => `SKU-${i},10.00`),
+        ].join("\n");
+        await importCosts(shopId, linesOf(file), "USD");
+
+        const { previewCampaign } = await import("../../app/services/campaigns/preview.server");
+        const preview = await previewCampaign(shopId, campaignId);
+
+        expect(preview.margin).not.toBeNull();
+        expect(preview.margin!.covered).toBe(3);
+        expect(preview.margin!.unknown).toBe(3);
+
+        // The caveat is in the sentence, not buried. A margin figure computed from half
+        // a catalogue is a different claim from one computed from all of it.
+        expect(preview.margin!.summary).toContain("3 do not");
+      },
+    );
+  });
+
+  it("names the products a campaign would sell below cost", async () => {
+    await withChaos(
+      "margin-below-cost",
+      { catalog: { products: 4, variantsPerProduct: 1 }, percent: -60 },
+      async (chaos) => {
+        const { shopId, campaignId, variantGids, baseline } = chaos.fixture;
+
+        await Promise.all(
+          variantGids.map((gid, i) =>
+            prisma.variantIndex.updateMany({
+              where: { shopId, variantGid: gid },
+              data: { sku: `SKU-${i}` },
+            }),
+          ),
+        );
+
+        // Cost at 60% of baseline, so a 60% discount lands under it.
+        const { importCosts } = await import("../../app/services/cost-import.server");
+        const file = [
+          "Variant SKU,Variant Cost",
+          ...variantGids.map(
+            (gid, i) => `SKU-${i},${((baseline.get(gid)! * 0.6) / 100).toFixed(2)}`,
+          ),
+        ].join("\n");
+        await importCosts(shopId, linesOf(file), "USD");
+
+        const { previewCampaign } = await import("../../app/services/campaigns/preview.server");
+        const preview = await previewCampaign(shopId, campaignId);
+
+        // Named, not counted. "Four products sell below cost" prompts "which ones", and
+        // the answer should already be there.
+        expect(preview.margin!.belowCost.length).toBe(variantGids.length);
+        expect(preview.margin!.belowCost[0].title).toBeTruthy();
+        expect(preview.margin!.summary).toContain("at or below cost");
+      },
+    );
+  });
+
+  it("says it knows nothing when no product has a cost", async () => {
+    await withChaos(
+      "margin-no-costs",
+      { catalog: { products: 3, variantsPerProduct: 1 }, percent: -20 },
+      async (chaos) => {
+        const { previewCampaign } = await import("../../app/services/campaigns/preview.server");
+        const preview = await previewCampaign(chaos.fixture.shopId, chaos.fixture.campaignId);
+
+        // Rather than an average of nothing presented as a fact.
+        expect(preview.margin!.covered).toBe(0);
+        expect(preview.margin!.summary).toContain("Import your costs");
+      },
+    );
+  });
+});
