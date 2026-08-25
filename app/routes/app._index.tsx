@@ -7,6 +7,8 @@ import prisma from "../db.server";
 import { ensureShop, markSyncComplete } from "../services/shop.server";
 import { fetchShopBasics, syncCatalog } from "../services/catalog-sync.server";
 import { baselineHealth, captureBaselines } from "../services/baselines.server";
+import { syncMarkets } from "../services/markets-sync.server";
+import { toAdminClient } from "../services/admin-client.server";
 import { OnboardingCard } from "../components/OnboardingCard";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { onboarding } from "../lib/onboarding/steps";
@@ -112,6 +114,10 @@ export const action = withGuard("/app", async ({ request }: ActionFunctionArgs) 
 
     const sync = await syncCatalog(admin, shop.id, basics.currency);
 
+    // After the catalogue, never alongside it: Shopify allows one bulk operation per
+    // shop, and the market sync checks for a running one rather than racing it.
+    const markets = await syncMarkets(toAdminClient(admin), shop.id);
+
     // Capture baselines immediately: a variant with no baseline cannot be priced by
     // a campaign, and capturing at sync time is the only moment we can be confident
     // the live price is the merchant's normal price.
@@ -124,6 +130,11 @@ export const action = withGuard("/app", async ({ request }: ActionFunctionArgs) 
         `Synced ${sync.variants} variants across ${sync.products} products. ` +
         `Captured ${capture.captured} baselines` +
         (capture.alreadyCurrent > 0 ? `, ${capture.alreadyCurrent} already current` : "") +
+        (markets.priceLists > 0
+          ? `. Mirrored ${markets.priceLists} price list${markets.priceLists === 1 ? "" : "s"}` +
+            (markets.relative > 0 ? ` (${markets.relative} derived from a percentage)` : "") +
+            (markets.entries > 0 ? `, ${markets.entries} fixed prices` : "")
+          : "") +
         ".",
       errors: sync.errors.slice(0, 5),
     };
