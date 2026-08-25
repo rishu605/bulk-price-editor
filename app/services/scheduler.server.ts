@@ -21,6 +21,7 @@ import { reclaimStaleRuns } from "./campaigns/reaper.server";
 import { sendDueDigests } from "./digest.server";
 import { auditMirror } from "./mirror-audit.server";
 import { logger } from "../lib/logging/logger";
+import { metric } from "../lib/telemetry/metrics";
 
 export interface TickResult {
   examined: number;
@@ -120,6 +121,17 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
   } catch {
     // sendDueDigests already logs per shop; a throw here would be the loop itself.
   }
+
+  // Emitted every tick, including the quiet ones. A scheduler panel that only has data
+  // when something happened cannot distinguish "nothing was due" from "the worker died"
+  // — and those need very different responses.
+  metric("scheduler.tick", 1, {
+    examined: result.examined,
+    applied: result.applied,
+    reverted: result.reverted,
+    reclaimed: result.reclaimed,
+    failed: result.failures.length,
+  });
 
   try {
     result.audited = await auditDueMirrors(now);

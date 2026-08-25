@@ -26,6 +26,7 @@ import {
   type LiveRow,
 } from "../lib/audit/sampling";
 import { logger } from "../lib/logging/logger";
+import { metric } from "../lib/telemetry/metrics";
 import type { AdminClient } from "../lib/execution/sync-executor";
 import { isThrottledError, withRetry } from "../lib/shopify/budget";
 
@@ -167,6 +168,8 @@ export async function auditMirror(
     healed: result.healed,
     tombstoned: result.tombstoned,
   };
+
+  metric("mirror.divergence_rate", verdict.rate, { shopId, checked: verdict.checked });
 
   if (verdict.alert) {
     // Systematic. One missed webhook is a row; half a percent of a sample is a

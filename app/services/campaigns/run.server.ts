@@ -24,6 +24,7 @@ import { transitionCampaign } from "./lifecycle.server";
 import { planResume, type LedgerState } from "../../lib/execution/resume";
 import { applyCampaignTags, removeCampaignTags } from "./tags.server";
 import { notify } from "../notifications.server";
+import { metric } from "../../lib/telemetry/metrics";
 
 export interface RunOptions {
   revert?: boolean;
@@ -116,6 +117,7 @@ export async function runCampaign(
     });
   }
 
+  const startedAt = Date.now();
   const { campaign: campaignRecord, resolvable, ast } = await loadCampaignContext(shopId, campaignId);
   const campaignName = campaignRecord.name;
   const [candidates, storeGuardrails] = await Promise.all([
@@ -275,6 +277,16 @@ export async function runCampaign(
   // what happened to those rows; the campaign's own state is left alone.
   if (options.variantGids) {
     await refreshMirror(shopId, result.rows);
+
+  // The headline panels, from the one place that knows the answer. Counts and durations
+  // only — the ledger holds what actually changed.
+  metric("run.duration_ms", Date.now() - startedAt, { shopId, campaignId, kind });
+  metric("run.verified_clean_rate", result.clean ? 1 : 0, { shopId, campaignId, kind });
+  metric("run.rows", result.verified, { shopId, campaignId, outcome: "verified" });
+  if (result.failed > 0) metric("run.rows", result.failed, { shopId, campaignId, outcome: "failed" });
+  if (result.unverified > 0) {
+    metric("run.rows", result.unverified, { shopId, campaignId, outcome: "unverified" });
+  }
     return scopedOutcome(run.id, outcome.counts.planned, result, messages);
   }
 
@@ -295,6 +307,16 @@ export async function runCampaign(
   });
 
   await refreshMirror(shopId, result.rows);
+
+  // The headline panels, from the one place that knows the answer. Counts and durations
+  // only — the ledger holds what actually changed.
+  metric("run.duration_ms", Date.now() - startedAt, { shopId, campaignId, kind });
+  metric("run.verified_clean_rate", result.clean ? 1 : 0, { shopId, campaignId, kind });
+  metric("run.rows", result.verified, { shopId, campaignId, outcome: "verified" });
+  if (result.failed > 0) metric("run.rows", result.failed, { shopId, campaignId, outcome: "failed" });
+  if (result.unverified > 0) {
+    metric("run.rows", result.unverified, { shopId, campaignId, outcome: "unverified" });
+  }
 
   // Best-effort, and deliberately last. A campaign runs for hours; the merchant has to
   // be able to close the tab and still learn the outcome. Nothing about a mail
