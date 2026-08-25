@@ -275,7 +275,15 @@ export default function Segments() {
           <input type="hidden" name="intent" value="create-from-csv" />
           <s-stack gap="base">
             <s-text-field name="name" label="Name" placeholder="Clearance list" required />
-            <s-text-area name="csv" label="SKUs, barcodes or IDs" rows={8} />
+            {/* Native, like the selects above it — a plain element that is certain
+                to serialise a pasted list into the form. */}
+            <label htmlFor="segment-csv">SKUs, barcodes or IDs</label>
+            <textarea
+              id="segment-csv"
+              name="csv"
+              rows={8}
+              style={{ width: "100%", fontFamily: "monospace" }}
+            />
             <s-button type="submit" variant="primary" loading={busy || undefined}>
               Match and create
             </s-button>
