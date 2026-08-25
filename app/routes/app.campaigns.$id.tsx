@@ -23,6 +23,7 @@ import { downloadCsv, filenameSlug } from "../lib/reporting/csv";
 import { rollbackReportCsv } from "../lib/reporting/rollback";
 import { PreviewTable } from "../components/PreviewTable";
 import { RunHistoryTable } from "../components/RunHistoryTable";
+import { ledgerCsv } from "../lib/reporting/ledger-csv";
 import { previewCsv } from "../lib/reporting/preview-csv";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { reportError } from "../services/error-report.server";
@@ -378,6 +379,19 @@ export default function CampaignDetail() {
               its price without it.
             </s-text>
           </s-paragraph>
+          <s-button
+            type="button"
+            variant="tertiary"
+            onClick={() =>
+              downloadCsv(
+                `ledger-${filenameSlug(preview.name) || "campaign"}.csv`,
+                ledgerCsv(ledger),
+              )
+            }
+          >
+            Export this ledger (CSV)
+          </s-button>
+
           <LedgerTable
             rows={ledger}
             renderAction={(row) =>

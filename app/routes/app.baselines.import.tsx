@@ -21,6 +21,7 @@ import { shopCurrency } from "../services/settings.server";
 import { importBaselines, type BaselineImportResult } from "../services/baseline-import.server";
 import { importErrorCsv } from "../lib/reporting/baseline-errors";
 import { downloadCsv } from "../lib/reporting/csv";
+import { linesOf } from "../lib/reporting/lines";
 import { actorFor } from "../lib/audit/actor";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
@@ -67,18 +68,6 @@ export const action = withGuard("/app/baselines/import", async ({ request }: Act
     return { ok: false, message: reported.userMessage, errorId: reported.errorId };
   }
 });
-
-/** Splits pasted text into lines without holding a second copy of the whole file. */
-async function* linesOf(text: string): AsyncGenerator<string> {
-  let start = 0;
-  for (;;) {
-    const next = text.indexOf("\n", start);
-    if (next === -1) break;
-    yield text.slice(start, next).replace(/\r$/, "");
-    start = next + 1;
-  }
-  if (start < text.length) yield text.slice(start);
-}
 
 export default function ImportBaselines() {
   const { currency } = useLoaderData<typeof loader>();

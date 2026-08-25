@@ -26,6 +26,7 @@ export interface RawRow {
   price: string;
   compareAt?: string;
   currency?: string;
+  cost?: string;
 }
 
 export interface ValidRow extends RawRow {
@@ -104,18 +105,60 @@ export function isValid(row: ValidRow | InvalidRow): row is ValidRow {
 }
 
 /** Header names understood for each column, so a merchant's export mostly just works. */
-const HEADERS: Record<"identifier" | "price" | "compareAt" | "currency", string[]> = {
-  identifier: ["sku", "barcode", "variant", "variant_id", "variantid", "gid", "id", "handle", "product"],
-  price: ["price", "baseline", "baseline_price", "msrp", "list_price", "list price", "rrp"],
-  compareAt: ["compare_at", "compare at", "compareatprice", "compare_at_price", "was", "was_price"],
+/**
+ * Header names we recognise, including Matrixify's.
+ *
+ * Matrixify is how a large share of Shopify merchants already move catalogue data, so a
+ * file exported from it should import here untouched. Its columns are title-case and
+ * multi-word — "Variant SKU", "Variant Price" — which lowercase to strings none of the
+ * original single-word aliases matched. A merchant with a working spreadsheet workflow
+ * would have hit "unrecognised header" and gone back to doing it by hand.
+ */
+const HEADERS: Record<"identifier" | "price" | "compareAt" | "currency" | "cost", string[]> = {
+  // Most specific first, and the order matters. A Matrixify export carries both
+  // "Handle" and "Variant SKU", with Handle in the first column — and a handle names a
+  // *product* while a SKU names a *variant*. Taking whichever appeared first would match
+  // a variant-level price row on a product-level identifier, which is how one row
+  // silently reprices every size of a shirt.
+  identifier: [
+    "variant id", "variant_id", "variantid", "gid",
+    "sku", "variant sku",
+    "barcode", "variant barcode",
+    "variant", "id",
+    "handle", "product handle", "product",
+  ],
+  price: [
+    "price", "baseline", "baseline_price", "msrp", "list_price", "list price", "rrp",
+    // Matrixify
+    "variant price",
+  ],
+  compareAt: [
+    "compare_at", "compare at", "compareatprice", "compare_at_price", "was", "was_price",
+    // Matrixify
+    "variant compare at price",
+  ],
   currency: ["currency", "currency_code", "currencycode"],
+  cost: [
+    "cost", "unit_cost", "unit cost", "cost_per_item",
+    // Matrixify
+    "variant cost", "cost per item",
+  ],
 };
 
 export interface ColumnMap {
   identifier: number;
-  price: number;
+  /**
+   * Null when the file has no price column at all.
+   *
+   * A cost file legitimately has none — "Variant SKU, Variant Cost" is a complete and
+   * ordinary spreadsheet. Requiring a price here meant the header went unrecognised, the
+   * reader fell back to *positions*, and every row then read its cost from a column that
+   * was not there. The file imported nothing and said every row had no cost.
+   */
+  price: number | null;
   compareAt: number | null;
   currency: number | null;
+  cost: number | null;
 }
 
 /**
@@ -128,21 +171,33 @@ export interface ColumnMap {
  * caller falls back to positional columns it can describe to the merchant.
  */
 export function mapColumns(header: readonly string[]): ColumnMap | null {
-  const find = (names: string[]) =>
-    header.findIndex((cell) => names.includes(cell.trim().toLowerCase()));
+  // Searched in the order the aliases are listed, not the order the columns appear, so
+  // a file carrying several usable identifiers is matched on the most specific one.
+  const find = (names: string[]) => {
+    for (const name of names) {
+      const at = header.findIndex((cell) => cell.trim().toLowerCase() === name);
+      if (at !== -1) return at;
+    }
+    return -1;
+  };
 
   const identifier = find(HEADERS.identifier);
   const price = find(HEADERS.price);
-  if (identifier === -1 || price === -1) return null;
+  const cost = find(HEADERS.cost);
+
+  // An identifier and at least one value worth importing. Neither alone is a file: a
+  // column of SKUs says nothing, and a column of prices names nothing.
+  if (identifier === -1 || (price === -1 && cost === -1)) return null;
 
   const compareAt = find(HEADERS.compareAt);
   const currency = find(HEADERS.currency);
 
   return {
     identifier,
-    price,
+    price: price === -1 ? null : price,
     compareAt: compareAt === -1 ? null : compareAt,
     currency: currency === -1 ? null : currency,
+    cost: cost === -1 ? null : cost,
   };
 }
 
@@ -189,7 +244,7 @@ export function splitCsvLine(line: string): string[] {
  */
 export async function* readRows(
   lines: AsyncIterable<string>,
-  fallback: ColumnMap = { identifier: 0, price: 1, compareAt: 2, currency: 3 },
+  fallback: ColumnMap = { identifier: 0, price: 1, compareAt: 2, currency: 3, cost: null },
 ): AsyncGenerator<RawRow> {
   let columns: ColumnMap | null = null;
   let lineNumber = 0;
@@ -214,9 +269,10 @@ export async function* readRows(
     yield {
       line: lineNumber,
       identifier: cells[columns.identifier] ?? "",
-      price: cells[columns.price] ?? "",
+      price: columns.price === null ? "" : (cells[columns.price] ?? ""),
       compareAt: columns.compareAt === null ? undefined : cells[columns.compareAt],
       currency: columns.currency === null ? undefined : cells[columns.currency],
+      cost: columns.cost === null ? undefined : cells[columns.cost],
     };
   }
 }

@@ -108,7 +108,38 @@ describe("mapColumns", () => {
       price: 1,
       compareAt: 2,
       currency: null,
+      cost: null,
     });
+  });
+
+  it("reads a Matrixify export untouched", () => {
+    // Matrixify is how a large share of Shopify merchants already move catalogue data.
+    // Its headers are title-case and multi-word, which lowercase to strings none of the
+    // single-word aliases matched — so a merchant with a working spreadsheet workflow
+    // hit "unrecognised header" and went back to doing it by hand.
+    expect(
+      mapColumns([
+        "Handle",
+        "Variant SKU",
+        "Variant Price",
+        "Variant Compare At Price",
+        "Variant Cost",
+      ]),
+      // Identifier is the SKU at index 1, not the Handle at index 0. Matrixify puts
+      // Handle first, and a handle names a product where a SKU names a variant.
+    ).toEqual({ identifier: 1, price: 2, compareAt: 3, currency: null, cost: 4 });
+  });
+
+  it("prefers the SKU column over a handle, whichever comes first", () => {
+    // Both orderings, because the bug this replaces was "whichever column appeared
+    // first wins" and it only shows up when the handle is on the left.
+    expect(mapColumns(["Variant SKU", "Handle", "Variant Price"])?.identifier).toBe(0);
+    expect(mapColumns(["Handle", "Variant SKU", "Variant Price"])?.identifier).toBe(1);
+  });
+
+  it("still accepts a handle when that is the only identifier there is", () => {
+    // Preferring a SKU must not mean refusing a file that has none.
+    expect(mapColumns(["Handle", "Variant Price"])?.identifier).toBe(0);
   });
 
   it("returns null when it cannot tell which column is the price", () => {
