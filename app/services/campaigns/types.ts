@@ -149,6 +149,14 @@ export interface RunOutcome {
    * else is doing it", which are different things to show a merchant.
    */
   deferredTo?: string;
+  /**
+   * Set when the shop's plan does not cover this campaign, so no run was started.
+   *
+   * Distinct from a failure and from "nothing to do". A caller showing a run report
+   * needs to say "your plan does not cover this" rather than "your sale failed", and an
+   * empty `runId` alone cannot carry that difference.
+   */
+  refusedByPlan?: string;
 }
 
 export interface RunSummary {

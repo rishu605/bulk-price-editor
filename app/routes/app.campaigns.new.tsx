@@ -20,6 +20,8 @@ import { FilterForm } from "../components/FilterForm";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { readSettings, shopCurrency } from "../services/settings.server";
+import { billingFrom } from "../services/billing.server";
+import { canUseSurface } from "../lib/billing/plans";
 import prisma from "../db.server";
 import { segmentToAst } from "../services/segments.server";
 
@@ -50,7 +52,8 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
       })
     : astFromParams(url.searchParams);
 
-  const [available, preview, segments, priceLists, settings, currency] = await Promise.all([
+  const [available, preview, segments, priceLists, settings, currency, shopRecord] =
+    await Promise.all([
     facets(shop.id),
     previewMatches(shop.id, ast),
     prisma.segment.findMany({
@@ -76,7 +79,18 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
     }),
     readSettings(shop.id),
     shopCurrency(shop.id),
+    prisma.shop.findUniqueOrThrow({
+      where: { id: shop.id },
+      select: {
+        planTier: true,
+        subscriptionStatus: true,
+        trialEndsAt: true,
+        developerStore: true,
+      },
+    }),
   ]);
+
+  const billing = billingFrom(shopRecord);
 
   // Every currency this campaign could price in. Only these are offered: a list of all
   // 180 world currencies would bury the two or three that matter.
@@ -88,6 +102,14 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
     timeZone: shop.timezone,
     priceLists,
     currencies,
+    // Gated surfaces are listed with an upgrade prompt rather than hidden. Hiding a
+    // feature a merchant is paying a competitor for is how you lose them without ever
+    // finding out why.
+    gates: {
+      market: canUseSurface(billing.plan, "market"),
+      b2b: canUseSurface(billing.plan, "b2b"),
+    },
+    planName: billing.plan.name,
     storeRounding: settings.rounding,
     roundingOptions: Object.entries(ROUNDING_LABELS).map(([value, label]) => ({ value, label })),
     facets: available,
@@ -230,6 +252,8 @@ export default function NewCampaign() {
     storeRounding,
     roundingOptions,
     presetStart,
+    gates,
+    planName,
   } = useLoaderData<typeof loader>();
 
   return (
@@ -427,21 +451,39 @@ export default function NewCampaign() {
                   </s-text>
                 </s-paragraph>
 
-                {priceLists.map((list) => (
-                  <s-checkbox
-                    key={list.priceListGid}
-                    name="priceList"
-                    value={list.priceListGid}
-                    label={`${list.name} (${list.currency})${
-                      list.surfaceKind === "B2B" ? " · wholesale" : ""
-                    }`}
-                    details={
-                      list.adjustmentBps === null
-                        ? "Prices set per product here."
-                        : `Normally ${describeAdjustment(list.adjustmentBps)} the base price.`
-                    }
-                  />
-                ))}
+                {priceLists.map((list) => {
+                  const gate = list.surfaceKind === "B2B" ? gates.b2b : gates.market;
+
+                  return (
+                    <s-checkbox
+                      key={list.priceListGid}
+                      name="priceList"
+                      value={list.priceListGid}
+                      disabled={!gate.allowed || undefined}
+                      label={`${list.name} (${list.currency})${
+                        list.surfaceKind === "B2B" ? " · wholesale" : ""
+                      }`}
+                      details={
+                        !gate.allowed
+                          ? gate.message
+                          : list.adjustmentBps === null
+                            ? "Prices set per product here."
+                            : `Normally ${describeAdjustment(list.adjustmentBps)} the base price.`
+                      }
+                    />
+                  );
+                })}
+
+                {!gates.market.allowed || !gates.b2b.allowed ? (
+                  <s-banner tone="info">
+                    <s-paragraph>
+                      Some of these need a different plan than {planName}. Everything
+                      already running keeps running, and reverts always work whatever
+                      plan you are on.
+                    </s-paragraph>
+                    <s-link href="/app/plan">See the plans</s-link>
+                  </s-banner>
+                ) : null}
 
                 <s-paragraph>
                   <s-text>
