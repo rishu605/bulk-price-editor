@@ -26,6 +26,7 @@ import { RunHistoryTable } from "../components/RunHistoryTable";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { reportError } from "../services/error-report.server";
 import { withGuard } from "../lib/errors/guard.server";
+import { actorFor } from "../lib/audit/actor";
 import {
   canTransition,
   describeState,
@@ -95,8 +96,9 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
 });
 
 export const action = withGuard("/app/campaigns/$id", async ({ request, params }: ActionFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
+  const { admin, session, sessionToken } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
+  const actor = actorFor(sessionToken, session.shop);
   const form = await request.formData();
   const intent = String(form.get("intent"));
   const reverting = intent === "revert";
@@ -109,11 +111,11 @@ export const action = withGuard("/app/campaigns/$id", async ({ request, params }
       const result =
         intent === "revert-variant"
           ? await revertVariant(shop.id, String(params.id), variantGid, toAdminClient(admin), {
-              actor: session.shop,
+              actor,
               excludeOnly: form.get("excludeOnly") === "1",
             })
           : await reinstateVariant(shop.id, String(params.id), variantGid, toAdminClient(admin), {
-              actor: session.shop,
+              actor,
             });
 
       return {

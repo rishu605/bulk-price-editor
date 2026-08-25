@@ -162,36 +162,51 @@ export interface BaselineHealth {
  * campaign is running and a warning sign when none is. The dashboard says which.
  */
 export async function baselineHealth(shopId: string): Promise<BaselineHealth> {
-  const [variants, current] = await Promise.all([
-    prisma.variantIndex.count({ where: { shopId, deletedAt: null } }),
-    prisma.baseline.findMany({
-      where: { shopId, supersededAt: null },
-      select: { variantGid: true, surfaceKind: true, priceListGid: true, basePrice: true, capturedAt: true },
-    }),
-  ]);
+  // One aggregate rather than three full table reads diffed in memory.
+  //
+  // The previous version pulled every baseline and every price-surface row into the
+  // process and compared them in a loop. That is fine on a dev store and quietly
+  // quadratic in memory on a real one: a 500K-variant catalogue means a million rows
+  // crossing the wire to compute four numbers, on the app's landing page, on every
+  // load. The dashboard has a sub-second budget and this was the whole of it.
+  const [row] = await prisma.$queryRaw<
+    Array<{
+      variants: bigint;
+      withBaseline: bigint;
+      drifted: bigint;
+      oldest: Date | null;
+    }>
+  >`
+    SELECT
+      (SELECT count(*) FROM "variant_index"
+        WHERE "shopId" = ${shopId} AND "deletedAt" IS NULL) AS "variants",
+      count(b.*) AS "withBaseline",
+      count(*) FILTER (
+        WHERE e."livePrice" IS NOT NULL AND e."livePrice" <> b."basePrice"
+      ) AS "drifted",
+      min(b."capturedAt") AS "oldest"
+    FROM "baselines" b
+    LEFT JOIN "price_surface_entries" e
+      ON e."shopId" = b."shopId"
+     AND e."variantGid" = b."variantGid"
+     AND e."surfaceKind" = 'BASE'
+     AND e."priceListGid" = ''
+    WHERE b."shopId" = ${shopId}
+      AND b."supersededAt" IS NULL
+      AND b."surfaceKind" = 'BASE'
+  `;
 
-  const entries = await prisma.priceSurfaceEntry.findMany({
-    where: { shopId, surfaceKind: "BASE" },
-    select: { variantGid: true, livePrice: true },
-  });
-
-  const liveByVariant = new Map(entries.map((e) => [e.variantGid, e.livePrice]));
-
-  let drifted = 0;
-  let oldest: Date | null = null;
-  const baseSurface = current.filter((b) => b.surfaceKind === "BASE");
-
-  for (const baseline of baseSurface) {
-    const live = liveByVariant.get(baseline.variantGid);
-    if (live !== undefined && live !== null && live !== baseline.basePrice) drifted++;
-    if (!oldest || baseline.capturedAt < oldest) oldest = baseline.capturedAt;
-  }
+  const variants = Number(row?.variants ?? 0);
+  const withBaseline = Number(row?.withBaseline ?? 0);
 
   return {
     variants,
-    withBaseline: baseSurface.length,
-    missing: Math.max(0, variants - baseSurface.length),
-    drifted,
-    oldestCapturedAt: oldest,
+    withBaseline,
+    // Clamped, because a catalogue can carry baselines for variants since deleted --
+    // the tombstones stay so ledger rows resolve on revert (E4). A negative "missing"
+    // reads as a bug in the dashboard rather than as the expected consequence.
+    missing: Math.max(0, variants - withBaseline),
+    drifted: Number(row?.drifted ?? 0),
+    oldestCapturedAt: row?.oldest ?? null,
   };
 }

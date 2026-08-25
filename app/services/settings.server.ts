@@ -76,20 +76,36 @@ function finiteOrNull(value: unknown, min: number, max: number): number | null {
 export async function writeSettings(
   shopId: string,
   settings: StoreSettings,
+  /** Who changed them. Recorded so "who turned the cost floor off?" is answerable. */
+  actor?: string,
 ): Promise<StoreSettings> {
   const parsed = parseSettings(settings);
 
+  // Read first, so the entry records what actually changed rather than only where it
+  // ended up. "minPrice: — → 5" answers the question somebody opens the audit log
+  // with; "minPrice: 5" leaves them wondering whether it was ever anything else.
+  const previous = await readSettings(shopId);
+
+  // Merged, not replaced. Notification preferences live in the same JSON column, and
+  // saving a guardrail must not silently switch a merchant's emails off.
+  const existing = await prisma.shop.findUniqueOrThrow({
+    where: { id: shopId },
+    select: { settings: true },
+  });
+
   await prisma.shop.update({
     where: { id: shopId },
-    data: { settings: parsed as never },
+    data: { settings: { ...((existing.settings ?? {}) as object), ...parsed } as never },
   });
 
   await prisma.auditLogEntry.create({
     data: {
       shopId,
+      actor: actor ?? null,
       action: "settings.guardrails.update",
       entity: "Shop",
       entityId: shopId,
+      before: previous as never,
       after: parsed as never,
     },
   });

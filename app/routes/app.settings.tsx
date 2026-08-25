@@ -7,6 +7,7 @@ import prisma from "../db.server";
 import { ensureShop } from "../services/shop.server";
 import { readSettings, shopCurrency, writeSettings } from "../services/settings.server";
 import { readPreferences, writePreferences } from "../services/notifications.server";
+import { actorFor } from "../lib/audit/actor";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 
@@ -35,8 +36,9 @@ export const loader = withGuard("/app/settings", async ({ request }: LoaderFunct
 });
 
 export const action = withGuard("/app/settings", async ({ request }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, sessionToken } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
+  const actor = actorFor(sessionToken, session.shop);
   const form = await request.formData();
 
   if (String(form.get("intent")) === "notifications") {
@@ -51,13 +53,17 @@ export const action = withGuard("/app/settings", async ({ request }: ActionFunct
     return { ok: true, message: "Notification preferences saved." };
   }
 
-  const saved = await writeSettings(shop.id, {
-    neverBelowCost: form.get("neverBelowCost") === "on",
-    minMarginPercent: emptyToNull(form.get("minMarginPercent")),
-    minPrice: emptyToNull(form.get("minPrice")),
-    violationPolicy: asPolicy(form.get("violationPolicy")),
-    missingCostPolicy: form.get("missingCostPolicy") === "error" ? "error" : "skip",
-  });
+  const saved = await writeSettings(
+    shop.id,
+    {
+      neverBelowCost: form.get("neverBelowCost") === "on",
+      minMarginPercent: emptyToNull(form.get("minMarginPercent")),
+      minPrice: emptyToNull(form.get("minPrice")),
+      violationPolicy: asPolicy(form.get("violationPolicy")),
+      missingCostPolicy: form.get("missingCostPolicy") === "error" ? "error" : "skip",
+    },
+    actor,
+  );
 
   return { ok: true, message: "Guardrails saved. They apply to every campaign.", saved };
 });
