@@ -47,6 +47,16 @@ export function planRun(input: PlanInput): PlanOutcome {
     ? input.campaigns.filter((c) => c.id !== excludeCampaignId)
     : input.campaigns;
 
+  // Variant-level exclusions, resolved per candidate below. Built once as sets: the
+  // alternative is an array scan per campaign per variant, which on a 100K-variant
+  // catalogue is the difference between a plan and a hang.
+  const exclusions = new Map<string, Set<string>>();
+  for (const campaign of campaigns) {
+    if (campaign.excludedVariantGids?.length) {
+      exclusions.set(campaign.id, new Set(campaign.excludedVariantGids));
+    }
+  }
+
   const rows: PlannedRow[] = [];
   const counts: PlanCounts = { planned: 0, noop: 0, skipped: 0, clamped: 0 };
 
@@ -63,6 +73,16 @@ export function planRun(input: PlanInput): PlanOutcome {
     if (seen.has(key)) continue;
     seen.add(key);
 
+    // A variant reverted out of a campaign individually. Dropping the campaign for
+    // this candidate and re-resolving is what makes the variant fall through to
+    // whatever else still controls it, rather than to full price.
+    const applicable =
+      exclusions.size === 0
+        ? campaigns
+        : campaigns.filter(
+            (campaign) => !exclusions.get(campaign.id)?.has(candidate.ref.variantGid),
+          );
+
     const resolution = resolve({
       baseline: candidate.baseline,
       surface: {
@@ -76,7 +96,7 @@ export function planRun(input: PlanInput): PlanOutcome {
       // tagged mid-campaign is not priced by a run that never planned for it, and
       // one untagged mid-campaign is still reverted (edge cases E5, E6). Those
       // decisions need the clock and the database, so they live in the caller.
-      campaigns,
+      campaigns: applicable,
       storeGuardrails,
       variantSegmentIds: candidate.segmentIds,
     });

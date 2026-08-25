@@ -53,9 +53,21 @@ export async function titleMapFor(
 export async function loadCandidates(
   shopId: string,
   ast: FilterAst,
+  /**
+   * Restricts the scope to these variants, for a run that concerns only some of them.
+   *
+   * Intersected with the campaign's filter rather than replacing it: a variant outside
+   * the campaign's scope must not be pulled into a run just because a caller named it.
+   */
+  onlyVariantGids?: string[],
 ): Promise<PlanCandidate[]> {
+  if (onlyVariantGids?.length === 0) return [];
+
   const variants = await prisma.variantIndex.findMany({
-    where: astToWhere(shopId, ast),
+    where: {
+      ...astToWhere(shopId, ast),
+      ...(onlyVariantGids ? { variantGid: { in: onlyVariantGids } } : {}),
+    },
     select: { variantGid: true, currency: true, cost: true },
   });
   if (variants.length === 0) return [];

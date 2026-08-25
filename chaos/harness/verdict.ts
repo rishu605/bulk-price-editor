@@ -47,6 +47,21 @@ export async function judge(
   });
   const rows = await prisma.variantChange.findMany({ where: { runId } });
 
+  // Every ledger row on the shop, not just this run's. I4 says no price is written
+  // without a row committed first -- it says nothing about which run owns it, and a
+  // scenario that applies then reverts then reverts one variant has writes spread
+  // across several runs. Checking one run's rows against every write ever made
+  // reported the earlier runs' perfectly-ledgered writes as violations.
+  const everLedgered = new Set(
+    (
+      await prisma.variantChange.findMany({
+        where: { shopId: fixture.shopId },
+        select: { variantGid: true },
+        distinct: ["variantGid"],
+      })
+    ).map((row) => row.variantGid),
+  );
+
   const counts: Record<string, number> = {};
   for (const row of rows) counts[row.status] = (counts[row.status] ?? 0) + 1;
 
@@ -83,9 +98,8 @@ export async function judge(
   //
   // Every price the store accepted must have had a row committed first. A write with
   // no ledger row is a storefront change we cannot explain, attribute or revert.
-  const ledgered = new Set(rows.map((row) => row.variantGid));
   for (const write of fake.writeLog) {
-    if (!ledgered.has(write.variantGid)) {
+    if (!everLedgered.has(write.variantGid)) {
       violations.push(
         `${write.variantGid} was written to the store with no ledger row behind it (I4).`,
       );

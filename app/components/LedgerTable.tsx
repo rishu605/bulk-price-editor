@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import type { LedgerRow } from "../services/campaigns/index.server";
 import { LEDGER_TONE, toneFor } from "./tone";
 
@@ -7,7 +9,20 @@ import { LEDGER_TONE, toneFor } from "./tone";
  * Retained indefinitely on every plan -- charging to explain what you did to
  * someone's prices is the wrong trade.
  */
-export function LedgerTable({ rows }: { rows: LedgerRow[] }) {
+export function LedgerTable({
+  rows,
+  /**
+   * Optional per-row control, rendered in a trailing column.
+   *
+   * A render prop rather than a flag, because the action needs a fetcher and this
+   * component has no business knowing about one. Passing the markup in keeps the
+   * table a table.
+   */
+  renderAction,
+}: {
+  rows: LedgerRow[];
+  renderAction?: (row: LedgerRow) => ReactNode;
+}) {
   return (
     <s-table>
       <s-table-header-row>
@@ -16,6 +31,7 @@ export function LedgerTable({ rows }: { rows: LedgerRow[] }) {
         <s-table-header>Intended</s-table-header>
         <s-table-header>State</s-table-header>
         <s-table-header>Reason</s-table-header>
+        {renderAction ? <s-table-header>Action</s-table-header> : null}
       </s-table-header-row>
       <s-table-body>
         {rows.map((row) => (
@@ -27,6 +43,7 @@ export function LedgerTable({ rows }: { rows: LedgerRow[] }) {
               <s-badge tone={toneFor(LEDGER_TONE, row.status)}>{row.status}</s-badge>
             </s-table-cell>
             <s-table-cell>{row.failureReason ?? "—"}</s-table-cell>
+            {renderAction ? <s-table-cell>{renderAction(row)}</s-table-cell> : null}
           </s-table-row>
         ))}
       </s-table-body>
