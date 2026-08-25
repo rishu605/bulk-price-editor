@@ -25,6 +25,7 @@ export default function App() {
         <s-link href="/app/campaigns">Campaigns</s-link>
         <s-link href="/app/segments">Segments</s-link>
         <s-link href="/app/catalog">Catalogue</s-link>
+        <s-link href="/app/baselines/import">Import baselines</s-link>
         <s-link href="/app/drift">Drift</s-link>
         <s-link href="/app/activity">Activity</s-link>
         <s-link href="/app/settings">Settings</s-link>
