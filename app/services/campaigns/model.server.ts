@@ -16,7 +16,7 @@ import type {
   Guardrails,
   ResolvableCampaign,
 } from "../../lib/pricing/types";
-import type { FilterAst } from "../segments.server";
+import { segmentToAst, type FilterAst } from "../segments.server";
 import type { CampaignInput } from "./types";
 
 export async function createCampaign(shopId: string, input: CampaignInput) {
@@ -39,7 +39,12 @@ export async function createCampaign(shopId: string, input: CampaignInput) {
         ...(input.schedule ?? { kind: "manual" }),
         rounding: input.rounding,
         ast: input.ast,
+        ...(input.segmentId ? { segmentId: input.segmentId } : {}),
       } as never,
+      // The declarative reference as well as the id in the blob. The rule engine reads
+      // the blob; the delete guard reads the relation, and a segment that could be
+      // deleted out from under a running campaign is the failure that matters.
+      ...(input.segmentId ? { segments: { connect: { id: input.segmentId } } } : {}),
       ...(input.schedule?.kind === "window"
         ? {
             startAt: new Date(input.schedule.startAt),
@@ -58,6 +63,45 @@ export function roundingFor(name: unknown): RoundingProfile {
 export function astOf(campaign: Pick<Campaign, "schedule">): FilterAst {
   const schedule = (campaign.schedule ?? {}) as { ast?: FilterAst };
   return schedule.ast ?? { groups: [] };
+}
+
+/** The segment a campaign targets, if it targets one rather than an inline filter. */
+export function segmentIdOf(campaign: Pick<Campaign, "schedule">): string | null {
+  const schedule = (campaign.schedule ?? {}) as { segmentId?: string };
+  return schedule.segmentId ?? null;
+}
+
+/**
+ * The scope a campaign actually runs against.
+ *
+ * Resolved rather than copied. A campaign that had its segment's filter written into
+ * it at creation would keep pricing the old products after the segment was edited,
+ * which would make "reusable" a lie -- the merchant fixes the segment once and expects
+ * every campaign using it to follow.
+ *
+ * A segment that has since been deleted falls back to the campaign's own stored
+ * filter. The reference guard makes that nearly unreachable, but "nearly" is not a
+ * basis for letting an empty AST through here: an empty AST matches the whole
+ * catalogue, so the failure mode would be repricing every product in the store.
+ */
+export async function scopeOf(
+  shopId: string,
+  campaign: Pick<Campaign, "schedule">,
+): Promise<FilterAst> {
+  const segmentId = segmentIdOf(campaign);
+  if (!segmentId) return astOf(campaign);
+
+  const segment = await prisma.segment.findFirst({
+    where: { id: segmentId, shopId },
+    select: { kind: true, filterAst: true, frozenVariantGids: true },
+  });
+  if (!segment) return astOf(campaign);
+
+  return segmentToAst({
+    kind: segment.kind as "DYNAMIC" | "FROZEN",
+    filterAst: segment.filterAst,
+    frozenVariantGids: segment.frozenVariantGids,
+  });
 }
 
 /** Rehydrates a stored campaign into the shape the pure resolver expects. */
@@ -115,6 +159,6 @@ export async function loadCampaignContext(shopId: string, campaignId: string) {
   return {
     campaign,
     resolvable: [toResolvable(campaign), ...others.map(toResolvable)],
-    ast: astOf(campaign),
+    ast: await scopeOf(shopId, campaign),
   };
 }

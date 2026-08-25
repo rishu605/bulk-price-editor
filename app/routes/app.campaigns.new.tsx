@@ -12,27 +12,56 @@ import { localInputToUtc, type Schedule } from "../lib/scheduling/window";
 import { FilterForm } from "../components/FilterForm";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
+import prisma from "../db.server";
+import { segmentToAst } from "../services/segments.server";
 
 export const loader = withGuard("/app/campaigns/new", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
 
   const url = new URL(request.url);
-  const ast = astFromParams(url.searchParams);
-  const [available, preview] = await Promise.all([
+  const segmentId = url.searchParams.get("segment") ?? "";
+
+  // A chosen segment replaces the inline filter rather than narrowing it. Combining
+  // the two would mean a campaign whose scope no longer matches the segment the
+  // merchant thinks it targets, which is exactly the confusion segments exist to end.
+  const segment = segmentId
+    ? await prisma.segment.findFirst({
+        where: { id: segmentId, shopId: shop.id },
+        select: { id: true, name: true, kind: true, filterAst: true, frozenVariantGids: true },
+      })
+    : null;
+
+  const ast = segment
+    ? segmentToAst({
+        kind: segment.kind as "DYNAMIC" | "FROZEN",
+        filterAst: segment.filterAst,
+        frozenVariantGids: segment.frozenVariantGids,
+      })
+    : astFromParams(url.searchParams);
+
+  const [available, preview, segments] = await Promise.all([
     facets(shop.id),
     previewMatches(shop.id, ast),
+    prisma.segment.findMany({
+      where: { shopId: shop.id },
+      select: { id: true, name: true, kind: true },
+      orderBy: { name: "asc" },
+    }),
   ]);
 
   return {
     timeZone: shop.timezone,
     facets: available,
     preview,
+    segments,
+    usingSegment: segment ? { id: segment.id, name: segment.name, kind: segment.kind } : null,
     selected: {
       collection: url.searchParams.get("collection") ?? "",
       tag: url.searchParams.get("tag") ?? "",
       vendor: url.searchParams.get("vendor") ?? "",
       title: url.searchParams.get("title") ?? "",
+      segment: segmentId,
     },
   };
 });
@@ -43,11 +72,14 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
  * Named once and shared with the form, so a field added to one and forgotten in the
  * other cannot silently stop being filterable.
  */
-export const SCOPE_FIELDS = ["collection", "tag", "vendor", "title"] as const;
+export const SCOPE_FIELDS = ["collection", "tag", "vendor", "title", "segment"] as const;
 
 /** Builds an AST from the simple scope form: all provided conditions ANDed. */
 function astFromParams(params: URLSearchParams): FilterAst {
-  const conditions = SCOPE_FIELDS.map((field) => [field, params.get(field)] as const)
+  // `segment` rides in the same form but is a reference, not a condition -- the
+  // loader resolves it into a whole AST rather than adding a clause to one.
+  const conditions = SCOPE_FIELDS.filter((field) => field !== "segment")
+    .map((field) => [field, params.get(field)] as const)
     .filter(([, value]) => value && value.trim().length > 0)
     .map(([field, value]) => ({ field, value: value!.trim() }));
 
@@ -101,9 +133,12 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
       }
     : undefined;
 
+  const segmentId = String(form.get("segment") ?? "").trim();
+
   const campaign = await createCampaign(shop.id, {
     name: String(form.get("name") ?? "Untitled campaign").trim() || "Untitled campaign",
     ast: astFromParams(params),
+    ...(segmentId ? { segmentId } : {}),
     rule,
     compareAtPolicy,
     rounding: String(form.get("rounding") ?? "none") === "charm99" ? "charm99" : "none",
@@ -117,7 +152,8 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
 });
 
 export default function NewCampaign() {
-  const { facets: available, preview, selected, timeZone } = useLoaderData<typeof loader>();
+  const { facets: available, preview, selected, segments, usingSegment, timeZone } =
+    useLoaderData<typeof loader>();
 
   return (
     <s-page heading="New campaign">
@@ -128,6 +164,28 @@ export default function NewCampaign() {
         </s-paragraph>
         <FilterForm fields={SCOPE_FIELDS}>
           <s-stack gap="base">
+            <label htmlFor="segment">Saved segment</label>
+            <select id="segment" name="segment" defaultValue={selected.segment}>
+              <option value="">Build a filter below instead</option>
+              {segments.map((segment) => (
+                <option key={segment.id} value={segment.id}>
+                  {segment.name} ({segment.kind === "DYNAMIC" ? "dynamic" : "frozen"})
+                </option>
+              ))}
+            </select>
+
+            {usingSegment ? (
+              <s-banner tone="info">
+                <s-paragraph>
+                  Targeting the segment <s-text>{usingSegment.name}</s-text>. The filter
+                  below is ignored.{" "}
+                  {usingSegment.kind === "DYNAMIC"
+                    ? "It re-checks its filter on every run, so products added later join this campaign."
+                    : "Its product list is pinned, so this campaign hits exactly those products and nothing added later."}
+                </s-paragraph>
+              </s-banner>
+            ) : null}
+
             <label htmlFor="collection">Collection</label>
             <select id="collection" name="collection" defaultValue={selected.collection}>
               <option value="">Any collection</option>
@@ -176,6 +234,9 @@ export default function NewCampaign() {
 
       <s-section heading="2 · Rule">
         <Form method="post">
+          {/* The scope form and the create form are separate elements, so the chosen
+              segment has to travel with the submission that actually creates. */}
+          <input type="hidden" name="segment" value={selected.segment} />
           <input type="hidden" name="collection" value={selected.collection} />
           <input type="hidden" name="tag" value={selected.tag} />
           <input type="hidden" name="vendor" value={selected.vendor} />
