@@ -29,6 +29,7 @@ import type { AdminClient } from "../lib/execution/sync-executor";
 import { isFixedOrigin, toBasisPoints } from "../lib/markets/adjustment";
 import { parseMoney } from "../lib/money/money";
 import { isThrottledError, withRetry } from "../lib/shopify/budget";
+import { currentTopology, recordTopologyChanges } from "./markets-topology.server";
 
 export const PRICE_LISTS_QUERY = `#graphql
   query AnchorPriceLists($cursor: String) {
@@ -109,6 +110,10 @@ export interface MarketsSyncResult {
   fixed: number;
   /** Per-variant rows written for lists that store prices rather than deriving them. */
   entries: number;
+  /** Topology differences found against the previous mirror. */
+  changes: number;
+  /** Of those, the ones needing a merchant's decision (E15). */
+  questions: number;
   errors: string[];
 }
 
@@ -128,8 +133,15 @@ export async function syncMarkets(
     relative: 0,
     fixed: 0,
     entries: 0,
+    changes: 0,
+    questions: 0,
     errors: [],
   };
+
+  // Snapshotted before anything is mirrored, so the diff afterwards compares the shop
+  // as we understood it against the shop as it now is. Taken here rather than passed in
+  // because a caller that forgot would silently get "nothing changed" for ever.
+  const before = await currentTopology(shopId);
 
   const running = await prisma.bulkOperationRecord.findFirst({
     where: { shopId, status: { in: ["CREATED", "RUNNING"] } },
@@ -206,7 +218,12 @@ export async function syncMarkets(
 
   // Lists the merchant deleted in Shopify. Their mirrored rows go too, or a campaign
   // would keep resolving against a surface that no longer exists.
-  if (seen.length > 0) {
+  //
+  // Guarded on the sync having run cleanly rather than on having seen any lists. The
+  // latter looks equivalent and is not: a shop that deleted its *last* market returns
+  // zero lists with no error, and skipping the cleanup there left a phantom market in
+  // the mirror permanently — the exact state this block exists to prevent.
+  if (result.errors.length === 0) {
     const gone = await prisma.priceListRecord.findMany({
       where: { shopId, priceListGid: { notIn: seen } },
       select: { priceListGid: true },
@@ -216,6 +233,19 @@ export async function syncMarkets(
       await prisma.priceSurfaceEntry.deleteMany({ where: { shopId, priceListGid: { in: gids } } });
       await prisma.priceListRecord.deleteMany({ where: { shopId, priceListGid: { in: gids } } });
     }
+  }
+
+  // Diffed after the mirror is current, and only when the sync ran cleanly. A sync that
+  // failed partway would otherwise read as every market it did not reach having been
+  // deleted, and would raise a question about each one.
+  //
+  // Keyed on errors rather than on having seen any lists, because a shop whose last
+  // market really was deleted returns zero lists and no errors — and that is precisely
+  // the change most worth telling the merchant about.
+  if (result.errors.length === 0) {
+    const topology = await recordTopologyChanges(shopId, before, await currentTopology(shopId));
+    result.changes = topology.changes.length;
+    result.questions = topology.raised;
   }
 
   logger.info("markets mirrored", {

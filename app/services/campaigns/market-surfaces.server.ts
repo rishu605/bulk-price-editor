@@ -113,6 +113,38 @@ export async function applyMarketSurfaces(
 
   const outcomes: MarketSurfaceOutcome[] = [];
 
+  // A market the campaign targets that no longer exists in the mirror. Skipping it is
+  // right — the run must not fail because a merchant deleted a market (E15) — but
+  // skipping it in silence is not: the merchant asked for a sale in that market and
+  // needs to know it did not happen, and why.
+  const found = new Set(lists.map((list) => list.priceListGid));
+  for (const gid of surfaces.priceLists) {
+    if (found.has(gid)) continue;
+
+    const notice = await prisma.topologyNotice.findFirst({
+      where: { shopId, priceListGid: gid, kind: "removed" },
+      orderBy: { createdAt: "desc" },
+      select: { name: true },
+    });
+    const name = notice?.name ?? gid;
+
+    outcomes.push({
+      priceListGid: gid,
+      name,
+      currency: "",
+      verified: 0,
+      failed: 0,
+      chunks: 0,
+      messages: [
+        `${name}: this market no longer exists in Shopify, so nothing was priced there. ` +
+          `Everything else in this campaign ran normally. Remove it from the campaign to ` +
+          `stop seeing this.`,
+      ],
+      path: "per-product",
+      pathReason: "the market no longer exists",
+    });
+  }
+
   for (const list of lists) {
     const plan = await planMarket(shopId, list, variantGids, campaigns, client, storeGuardrails);
     if (!plan) continue;

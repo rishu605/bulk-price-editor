@@ -84,6 +84,7 @@ model Shop {
   variantChanges   VariantChange[]
   tagChanges       TagChange[]
   priceListChanges PriceListChange[]
+  topologyNotices  TopologyNotice[]
   writeIntents     WriteIntent[]
   driftEvents      DriftEvent[]
   roundingProfiles RoundingProfileRecord[]
@@ -648,6 +649,41 @@ model PriceListRecord {
   @@unique([shopId, priceListGid])
   @@index([shopId, surfaceKind])
   @@map("price_lists")
+}
+
+/// A market change a merchant has not answered yet.
+///
+/// A market deleted or re-denominated while campaigns target it is not an error and must
+/// not fail a run (E15). It is a question -- extend the campaign, or leave it -- and the
+/// question has to survive the sync that found it, because a merchant is rarely watching
+/// when a background poll runs.
+model TopologyNotice {
+  id String @id @default(cuid())
+
+  shopId String
+
+  /// Matches TopologyChangeKind: removed, currency-changed, added.
+  kind         String
+  priceListGid String
+  name         String
+  /// The sentence shown to the merchant, rendered when the change was found so it still
+  /// names the old currency after the mirror has moved on.
+  detail       String
+
+  /// Campaigns targeting this price list when the change was found.
+  campaignIds String[] @default([])
+
+  /// Set when answered. A resolved notice is kept rather than deleted, so "asked and
+  /// dismissed" stays distinguishable from "never asked" and the next poll does not
+  /// raise it again.
+  resolvedAt DateTime?
+  resolution String?
+  createdAt  DateTime  @default(now())
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, createdAt])
+  @@map("topology_notices")
 }
 
 model RoundingProfileRecord {
