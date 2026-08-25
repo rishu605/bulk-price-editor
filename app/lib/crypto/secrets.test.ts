@@ -11,7 +11,12 @@ import fc from "fast-check";
 import { decryptToken, encryptToken, isEncrypted, keyFrom } from "./secrets";
 
 const KEY = "a-secret-of-no-particular-length";
-const TOKEN = "shpua_5aeb4f2c9d1e7b3a8f6c0d2e4b9a1c7";
+// Shaped like a Shopify token but transparently not one. The original fixture was
+// fabricated too, but it was fabricated *convincingly* — which meant every secret
+// scanner that ever looked at this repository flagged it, and anyone reading the alert
+// had to prove to themselves it was not a live credential before they could dismiss it.
+// Making it self-evidently fake costs nothing and saves that.
+const TOKEN = "shpua_EXAMPLE_NOT_A_REAL_TOKEN_0000000";
 
 describe("encryptToken / decryptToken", () => {
   it("round-trips a token exactly", () => {
