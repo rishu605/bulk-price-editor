@@ -10,6 +10,8 @@
 import type { QueryCost } from "../lib/shopify/budget";
 import type { AdminClient } from "../lib/execution/sync-executor";
 import { API_VERSION_STRING } from "../lib/shopify/api-version";
+import { decryptToken, isEncrypted } from "../lib/crypto/secrets";
+import { logger } from "../lib/logging/logger";
 
 export interface ShopifyAdminContext {
   graphql(
@@ -98,6 +100,22 @@ export async function adminClientForShop(shopDomain: string): Promise<AdminClien
   });
   if (!session?.accessToken) return null;
 
+  // Decrypted here, because this path never goes through the session storage that
+  // encrypted it. The web process gets its token from Shopify's session machinery, which
+  // wraps `EncryptedSessionStorage`; the worker reads the row directly and would
+  // otherwise send ciphertext as a bearer token. Shopify answers that with "Invalid API
+  // key or access token", which reads like a misconfigured app and sends you looking
+  // anywhere but here — it broke every scheduled run, the nightly mirror audit and the
+  // reconciliation spot check at once, and all three failed the same misleading way.
+  //
+  // Plaintext falls through unchanged so a shop installed before encryption keeps
+  // working until its token is next rewritten.
+  const accessToken = decryptedToken(session.accessToken);
+  if (!accessToken) {
+    logger.error("stored token could not be decrypted", { shop: shopDomain });
+    return null;
+  }
+
   // The same version the web process speaks. This used to read an environment variable
   // with a different default, so a scheduled run hit a different Admin API than the
   // identical run started by hand — invisible in the code, and only ever failing
@@ -110,11 +128,28 @@ export async function adminClientForShop(shopDomain: string): Promise<AdminClien
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Shopify-Access-Token": session.accessToken,
+          "X-Shopify-Access-Token": accessToken,
         },
         body: JSON.stringify({ query, variables: options?.variables ?? {} }),
       });
       return { json: () => response.json() };
     },
   });
+}
+
+
+/**
+ * A stored token, whichever form it is in.
+ *
+ * Returns null only when a token that *is* encrypted cannot be read — a wrong or missing
+ * key. Failing loudly there is right: the alternative is sending ciphertext to Shopify
+ * and reporting its authentication error, which blames the wrong thing.
+ */
+export function decryptedToken(stored: string): string | null {
+  if (!isEncrypted(stored)) return stored;
+
+  const secret = process.env.TOKEN_ENCRYPTION_KEY;
+  if (!secret) return null;
+
+  return decryptToken(stored, secret);
 }

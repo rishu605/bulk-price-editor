@@ -52,13 +52,16 @@ const BATCH = 100;
 export async function auditMirror(
   client: AdminClient,
   shopId: string,
-  options: { threshold?: number; now?: Date } = {},
+  options: { threshold?: number; now?: Date; size?: number } = {},
 ): Promise<AuditResult> {
   const threshold = options.threshold ?? ALERT_THRESHOLD;
   const now = options.now ?? new Date();
 
   const total = await prisma.variantIndex.count({ where: { shopId, deletedAt: null } });
-  const size = sampleSize(total);
+  // The nightly sweep sizes its own sample; a merchant asking "check this now" from the
+  // reconciliation view names a number instead. Same code either way, because a spot
+  // check that could disagree with the nightly audit would be worse than no spot check.
+  const size = Math.min(total, options.size ?? sampleSize(total));
 
   if (size === 0) {
     return { shopId, checked: 0, diverged: 0, rate: 0, divergences: [], alert: false, healed: 0, tombstoned: 0 };

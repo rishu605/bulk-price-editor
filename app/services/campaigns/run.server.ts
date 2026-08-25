@@ -706,6 +706,14 @@ async function recordResults(
  *
  * Without this the dashboard's "not at baseline" count stays stale until the next
  * sync, which makes the app look wrong immediately after it did the right thing.
+ *
+ * *Both* copies of the base live price, which is the part that was missing. The catalogue
+ * index carries it for search and filtering; `price_surface_entries` carries it as one
+ * uniform "live value on surface X" the resolver can read the same way for every surface.
+ * Updating only the second left the first stale after every campaign — and the nightly
+ * mirror audit compares against the first. A merchant who ran a sale over their whole
+ * catalogue would have woken up to an alert saying the pipeline was systematically
+ * broken, on the morning after it worked perfectly.
  */
 async function refreshMirror(shopId: string, rows: ExecutedRows): Promise<void> {
   for (const executed of rows) {
@@ -723,6 +731,21 @@ async function refreshMirror(shopId: string, rows: ExecutedRows): Promise<void> 
         ...(executed.row.intendedCompareAtSet
           ? {
               liveCompareAt: executed.row.intendedCompareAt
+                ? BigInt(executed.row.intendedCompareAt.amount)
+                : null,
+            }
+          : {}),
+        syncedAt: new Date(),
+      },
+    });
+
+    await prisma.variantIndex.updateMany({
+      where: { shopId, variantGid: executed.row.ref.variantGid },
+      data: {
+        price: BigInt(executed.row.intendedPrice.amount),
+        ...(executed.row.intendedCompareAtSet
+          ? {
+              compareAt: executed.row.intendedCompareAt
                 ? BigInt(executed.row.intendedCompareAt.amount)
                 : null,
             }
