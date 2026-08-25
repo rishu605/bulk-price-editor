@@ -51,6 +51,8 @@ export interface SeedOptions {
   /** Percent change the campaign applies. Negative is a discount. */
   percent?: number;
   priority?: number;
+  /** Storefront tags the campaign applies while it runs. */
+  tagKit?: string[];
 }
 
 const TAG = "chaos";
@@ -141,6 +143,7 @@ export async function seedFixture(options: SeedOptions): Promise<Fixture> {
     rounding: "none",
     ast: { groups: [{ conditions: [{ field: "tag", value: TAG }] }] },
     schedule: { kind: "manual" },
+    tagKit: options.tagKit,
   });
 
   return { shopId: shop.id, domain, campaignId: campaign.id, variantGids, productOf, baseline };

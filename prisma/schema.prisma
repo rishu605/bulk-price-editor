@@ -82,6 +82,7 @@ model Shop {
   campaigns        Campaign[]
   campaignRuns     CampaignRun[]
   variantChanges   VariantChange[]
+  tagChanges       TagChange[]
   writeIntents     WriteIntent[]
   driftEvents      DriftEvent[]
   roundingProfiles RoundingProfileRecord[]
@@ -392,8 +393,9 @@ model CampaignRun {
 
   shop     Shop                  @relation(fields: [shopId], references: [id], onDelete: Cascade)
   campaign Campaign              @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  changes  VariantChange[]
-  bulkOps  BulkOperationRecord[]
+  changes    VariantChange[]
+  tagChanges TagChange[]
+  bulkOps    BulkOperationRecord[]
 
   @@unique([campaignId, occurrenceKey, kind])
   @@index([shopId, status])
@@ -468,6 +470,45 @@ model VariantChange {
 /// Fingerprint of every write we make, so the products/update webhook can tell our
 /// own echo from a real merchant edit. Without it, drift detection would flag every
 /// one of our own writes. TTL-pruned.
+/// Tags a campaign applied to a product, and — the part that matters — which of them
+/// it is entitled to take back.
+///
+/// A campaign asking for "SALE" on a product the merchant had already tagged "SALE"
+/// adds nothing, so removing it on revert would delete the merchant's own
+/// merchandising. `addedTags` records only what was genuinely absent beforehand;
+/// `alreadyPresent` records what was deliberately left alone, so the ledger shows the
+/// app knew about it rather than merely missing it.
+model TagChange {
+  id String @id @default(cuid())
+
+  shopId     String
+  runId      String
+  campaignId String
+  productGid String
+
+  /// Ours: absent before this run, and the only tags a revert removes.
+  addedTags      String[] @default([])
+  /// The merchant's: asked for by the kit, already on the product, never touched.
+  alreadyPresent String[] @default([])
+
+  status        ChangeStatus @default(PENDING)
+  failureReason String?
+
+  appliedAt  DateTime?
+  verifiedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  shop     Shop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  run      CampaignRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  /// One row per product per run: a resumed run must update its row rather than
+  /// claim ownership of the same tags twice.
+  @@unique([runId, productGid])
+  @@index([shopId, campaignId])
+  @@index([campaignId, status])
+  @@map("tag_changes")
+}
+
 model WriteIntent {
   id String @id @default(cuid())
 

@@ -27,6 +27,7 @@ export async function createCampaign(shopId: string, input: CampaignInput) {
       status: input.schedule?.kind === "window" ? "SCHEDULED" : "DRAFT",
       priority: input.priority ?? 100,
       autoEnroll: input.autoEnroll ?? true,
+      tagKit: input.tagKit ?? [],
       ruleRows: [{ segmentIds: [], rule: input.rule }] as never,
       surfaces: { base: true } as never,
       compareAtPolicy: input.compareAtPolicy as never,

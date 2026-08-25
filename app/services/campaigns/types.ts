@@ -27,6 +27,13 @@ export interface CampaignInput {
   /** Absent means the campaign only runs when applied by hand. */
   schedule?: Schedule;
   /**
+   * Product tags added when the campaign starts and removed when it ends.
+   *
+   * The storefront hook that lets the app ship no theme code at all: a theme keys its
+   * sale badge off a tag, and nothing in the app touches the theme.
+   */
+  tagKit?: string[];
+  /**
    * Target a saved segment instead of an inline filter.
    *
    * Stored as a reference, not copied, so editing the segment updates every campaign

@@ -27,6 +27,12 @@ import type { QueryCost, ThrottleStatus } from "../../app/lib/shopify/budget";
 import type { BulkResultLine } from "../../app/lib/execution/jsonl";
 import type { BlobStore } from "./blob-store";
 
+export interface FakeProduct {
+  productGid: string;
+  /** Shopify stores tags per product, and treats them case-insensitively. */
+  tags: string[];
+}
+
 export interface FakeVariant {
   variantGid: string;
   productGid: string;
@@ -52,6 +58,9 @@ const DEFAULT_THROTTLE: ThrottleStatus = {
 
 export class FakeShopify {
   readonly variants = new Map<string, FakeVariant>();
+
+  /** Product-level state. Tags live here, not on variants, exactly as in Shopify. */
+  readonly products = new Map<string, FakeProduct>();
 
   /** Every variant write this fake has accepted, in order. Scenarios assert on it. */
   readonly writeLog: Array<{ variantGid: string; price: string }> = [];
@@ -81,6 +90,22 @@ export class FakeShopify {
 
   addVariant(variant: Omit<FakeVariant, "deleted">): void {
     this.variants.set(variant.variantGid, { ...variant, deleted: false });
+    if (!this.products.has(variant.productGid)) {
+      this.products.set(variant.productGid, { productGid: variant.productGid, tags: [] });
+    }
+  }
+
+  /** Tags currently on a product, as the storefront would see them. */
+  tagsOf(productGid: string): string[] {
+    return this.products.get(productGid)?.tags ?? [];
+  }
+
+  /** Puts a tag on a product without the app's involvement -- the merchant's own. */
+  addMerchantTag(productGid: string, tag: string): void {
+    const product = this.products.get(productGid);
+    if (product && !product.tags.some((t) => t.toLowerCase() === tag.toLowerCase())) {
+      product.tags.push(tag);
+    }
   }
 
   /**
@@ -115,8 +140,14 @@ export class FakeShopify {
     if (query.includes("currentBulkOperation")) {
       return this.currentBulkOperation() as { data?: T; extensions?: { cost?: QueryCost } };
     }
+    if (query.includes("tagsAdd")) {
+      return this.tagsAdd(variables) as { data?: T; extensions?: { cost?: QueryCost } };
+    }
+    if (query.includes("tagsRemove")) {
+      return this.tagsRemove(variables) as { data?: T; extensions?: { cost?: QueryCost } };
+    }
     if (query.includes("nodes(")) {
-      return this.nodes(variables) as { data?: T; extensions?: { cost?: QueryCost } };
+      return this.nodes(variables, query) as { data?: T; extensions?: { cost?: QueryCost } };
     }
     throw new Error(`FakeShopify has no handler for this query: ${query.slice(0, 80)}`);
   }
@@ -201,8 +232,28 @@ export class FakeShopify {
     };
   }
 
-  private nodes(variables: Record<string, unknown>) {
+  private nodes(variables: Record<string, unknown>, query = "") {
     const ids = (variables.ids ?? []) as string[];
+
+    // The same `nodes` field serves products and variants; the requested fragment is
+    // what distinguishes them, exactly as it does against the real API.
+    //
+    // Tested for `ProductVariant` first, because "... on ProductVariant" contains the
+    // substring "on Product" -- checking the shorter one first routed every price
+    // read-back to the tag handler, which answered with tags and no price, and every
+    // verified row in the suite turned unverified.
+    if (!query.includes("on ProductVariant") && query.includes("on Product")) {
+      return {
+        data: {
+          nodes: ids.map((id) => {
+            const product = this.products.get(id);
+            return product ? { id, tags: [...product.tags] } : null;
+          }),
+        },
+        extensions: this.cost(Math.max(1, ids.length)),
+      };
+    }
+
     return {
       data: {
         nodes: ids.map((id) => {
@@ -214,6 +265,42 @@ export class FakeShopify {
       },
       extensions: this.cost(Math.max(1, ids.length)),
     };
+  }
+
+  /** Case-insensitive, and a no-op for a tag already present -- as Shopify behaves. */
+  private tagsAdd(variables: Record<string, unknown>) {
+    const id = String(variables.id ?? "");
+    const tags = (variables.tags ?? []) as string[];
+    const product = this.products.get(id);
+
+    if (!product) {
+      return {
+        data: { tagsAdd: { node: null, userErrors: [{ field: ["id"], message: `Product ${id} does not exist.` }] } },
+        extensions: this.cost(10),
+      };
+    }
+
+    for (const tag of tags) {
+      if (!product.tags.some((t) => t.toLowerCase() === tag.toLowerCase())) product.tags.push(tag);
+    }
+
+    return { data: { tagsAdd: { node: { id }, userErrors: [] } }, extensions: this.cost(10) };
+  }
+
+  private tagsRemove(variables: Record<string, unknown>) {
+    const id = String(variables.id ?? "");
+    const tags = ((variables.tags ?? []) as string[]).map((t) => t.toLowerCase());
+    const product = this.products.get(id);
+
+    if (!product) {
+      return {
+        data: { tagsRemove: { node: null, userErrors: [{ field: ["id"], message: `Product ${id} does not exist.` }] } },
+        extensions: this.cost(10),
+      };
+    }
+
+    product.tags = product.tags.filter((t) => !tags.includes(t.toLowerCase()));
+    return { data: { tagsRemove: { node: { id }, userErrors: [] } }, extensions: this.cost(10) };
   }
 
   private stagedUploadsCreate() {
