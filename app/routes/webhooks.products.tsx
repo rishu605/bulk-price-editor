@@ -158,6 +158,36 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     seenVariantGids.push(variantGid);
   }
 
+  // Variants that used to be on this product and are not in the payload.
+  //
+  // `products/update` carries the product's full variant list, so anything of ours
+  // missing from it has been removed. Without this the mirror keeps a variant that no
+  // longer exists: a campaign enrolls it, every write for it fails, and the run reports
+  // failures nobody can act on — which is how a run full of noise trains people to stop
+  // reading them (E4).
+  //
+  // Guarded on a non-empty payload. A malformed or partial delivery listing no variants
+  // must not be read as "the merchant deleted all of them".
+  if (seenVariantGids.length > 0) {
+    const removed = await prisma.variantIndex.updateMany({
+      where: {
+        shopId: shop.id,
+        productGid,
+        deletedAt: null,
+        variantGid: { notIn: seenVariantGids },
+      },
+      // Tombstoned, never deleted: ledger rows still reference these variants and have
+      // to stay resolvable when a campaign reverts.
+      data: { deletedAt: new Date(), syncedAt: new Date() },
+    });
+
+    if (removed.count > 0) {
+      console.log(
+        `[webhook] ${productGid}: tombstoned ${removed.count} variant(s) no longer on the product`,
+      );
+    }
+  }
+
   // Only after the mirror is current: enrollment captures baselines from these very
   // rows, so a variant we have just learned about has something to anchor to.
   //
