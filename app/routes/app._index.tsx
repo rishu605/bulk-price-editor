@@ -14,10 +14,41 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
 
-  const [health, campaigns] = await Promise.all([
+  // Counted in parallel and as aggregates, never by loading rows. This is the landing
+  // page and it has a sub-second budget; a card that costs a table scan is a card that
+  // makes the whole app feel slow.
+  const [health, campaigns, live, upcoming, driftOpen, lastRun, recent] = await Promise.all([
     baselineHealth(shop.id),
     prisma.campaign.count({ where: { shopId: shop.id } }),
+    prisma.campaign.count({ where: { shopId: shop.id, status: { in: ["ACTIVE", "APPLYING"] } } }),
+    prisma.campaign.count({ where: { shopId: shop.id, status: "SCHEDULED" } }),
+    prisma.driftEvent.count({ where: { shopId: shop.id, resolution: "PENDING" } }),
+    prisma.campaignRun.findFirst({
+      where: { shopId: shop.id },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        kind: true,
+        status: true,
+        verifiedRows: true,
+        failedRows: true,
+        finishedAt: true,
+        campaign: { select: { id: true, name: true } },
+      },
+    }),
+    prisma.auditLogEntry.findMany({
+      where: { shopId: shop.id },
+      orderBy: { createdAt: "desc" },
+      take: 5,
+      select: { id: true, actor: true, action: true, createdAt: true },
+    }),
   ]);
+
+  // Runs that need somebody: the number a merchant should act on, distinct from how
+  // many campaigns exist.
+  const needsAttention = await prisma.campaign.count({
+    where: { shopId: shop.id, status: { in: ["PARTIAL", "HELD"] } },
+  });
 
   return {
     shopDomain: shop.domain,
@@ -27,6 +58,28 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
       oldestCapturedAt: health.oldestCapturedAt?.toISOString() ?? null,
     },
     campaigns,
+    live,
+    upcoming,
+    driftOpen,
+    needsAttention,
+    lastRun: lastRun
+      ? {
+          id: lastRun.id,
+          kind: lastRun.kind,
+          status: lastRun.status,
+          verified: lastRun.verifiedRows,
+          failed: lastRun.failedRows,
+          finishedAt: lastRun.finishedAt?.toISOString() ?? null,
+          campaignId: lastRun.campaign.id,
+          campaignName: lastRun.campaign.name,
+        }
+      : null,
+    recent: recent.map((entry) => ({
+      id: entry.id,
+      actor: entry.actor,
+      action: entry.action,
+      at: entry.createdAt.toISOString(),
+    })),
   };
 });
 
@@ -81,7 +134,18 @@ export const action = withGuard("/app", async ({ request }: ActionFunctionArgs) 
 type ActionData = { ok: boolean; message: string; errors: string[] };
 
 export default function Dashboard() {
-  const { shopDomain, syncedAt, health, campaigns } = useLoaderData<typeof loader>();
+  const {
+    shopDomain,
+    syncedAt,
+    health,
+    campaigns,
+    live,
+    upcoming,
+    driftOpen,
+    needsAttention,
+    lastRun,
+    recent,
+  } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
   const busy = fetcher.state !== "idle";
   const result = fetcher.data;
@@ -139,6 +203,16 @@ export default function Dashboard() {
             </s-box>
           </s-stack>
 
+          {health.withBaseline > health.variants ? (
+            <s-paragraph>
+              <s-text>
+                More baselines than variants is expected: baselines are kept for products
+                you have deleted, so a campaign that priced them can still be explained
+                and reverted.
+              </s-text>
+            </s-paragraph>
+          ) : null}
+
           {health.missing > 0 ? (
             <s-banner tone="warning">
               <s-paragraph>
@@ -160,6 +234,88 @@ export default function Dashboard() {
         </s-section>
       )}
 
+      {!neverSynced ? (
+        <s-section heading="What is live right now">
+          <s-stack direction="inline" gap="large">
+            <s-box>
+              <s-text>Campaigns running</s-text>
+              <s-heading>{live}</s-heading>
+            </s-box>
+            <s-box>
+              <s-text>Scheduled</s-text>
+              <s-heading>{upcoming}</s-heading>
+            </s-box>
+            <s-box>
+              <s-text>Need attention</s-text>
+              <s-heading>{needsAttention}</s-heading>
+            </s-box>
+            <s-box>
+              <s-text>Prices changed outside the app</s-text>
+              <s-heading>{driftOpen}</s-heading>
+            </s-box>
+          </s-stack>
+
+          {live === 0 && upcoming === 0 && campaigns === 0 ? (
+            <s-paragraph>
+              <s-text>
+                No campaigns yet. A <strong>campaign</strong> is a rule — “20% off
+                everything tagged Summer” — plus when it should run. Anchor computes each
+                price from that variant&rsquo;s baseline, so running it twice changes
+                nothing the second time, and ending it puts prices back exactly.
+              </s-text>
+            </s-paragraph>
+          ) : null}
+
+          {needsAttention > 0 ? (
+            <s-banner tone="warning">
+              <s-paragraph>
+                {needsAttention} campaign{needsAttention === 1 ? "" : "s"} did not finish
+                cleanly. Every row that did not complete has a reason recorded, and
+                resuming retries only those.
+              </s-paragraph>
+            </s-banner>
+          ) : null}
+
+          {driftOpen > 0 ? (
+            <s-banner tone="info">
+              <s-paragraph>
+                {driftOpen} price{driftOpen === 1 ? " was" : "s were"} changed somewhere
+                other than Anchor while a campaign was running. Those edits were
+                deliberate, so nothing has been overwritten — each is waiting on your
+                decision.
+              </s-paragraph>
+            </s-banner>
+          ) : null}
+
+          {lastRun ? (
+            <s-paragraph>
+              <s-text>
+                Last run: {lastRun.kind.toLowerCase()} of “{lastRun.campaignName}” —{" "}
+                {lastRun.status.toLowerCase()}, {lastRun.verified} verified
+                {lastRun.failed > 0 ? `, ${lastRun.failed} failed` : ""}
+                {lastRun.finishedAt
+                  ? ` on ${new Date(lastRun.finishedAt).toLocaleString()}`
+                  : " (still running)"}
+                .
+              </s-text>
+            </s-paragraph>
+          ) : (
+            <s-paragraph>
+              <s-text>
+                Nothing has been applied to your storefront yet. Every run records what it
+                changed, row by row, and stays readable for as long as you have the app.
+              </s-text>
+            </s-paragraph>
+          )}
+
+          <s-stack direction="inline" gap="base">
+            <s-link href="/app/campaigns">Campaigns</s-link>
+            <s-link href="/app/drift">Drift queue</s-link>
+            <s-link href="/app/activity">Activity log</s-link>
+          </s-stack>
+        </s-section>
+      ) : null}
+
       <s-section slot="aside" heading="Store">
         <s-paragraph>{shopDomain}</s-paragraph>
         <s-paragraph>
@@ -168,6 +324,20 @@ export default function Dashboard() {
           </s-text>
         </s-paragraph>
       </s-section>
+
+      {!neverSynced && recent.length > 0 ? (
+        <s-section slot="aside" heading="Recent activity">
+          {recent.map((entry) => (
+            <s-paragraph key={entry.id}>
+              <s-text>
+                {entry.action} · {entry.actor ?? "Scheduler"} ·{" "}
+                {new Date(entry.at).toLocaleString()}
+              </s-text>
+            </s-paragraph>
+          ))}
+          <s-link href="/app/activity">See everything</s-link>
+        </s-section>
+      ) : null}
 
       {!neverSynced ? (
         <s-section slot="aside" heading="Baselines">
