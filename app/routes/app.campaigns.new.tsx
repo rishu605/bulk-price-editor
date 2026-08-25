@@ -11,11 +11,9 @@ import { money } from "../lib/money/money";
 import { localInputToUtc, type Schedule } from "../lib/scheduling/window";
 import { describeAdjustment } from "../lib/markets/describe";
 import {
-  isRoundingProfileName,
   profileNameFor,
+  readRoundingPolicy,
   ROUNDING_LABELS,
-  type RoundingProfileName,
-  type StoredRoundingPolicy,
 } from "../lib/money/rounding-policy";
 import { FilterForm } from "../components/FilterForm";
 import { RouteBoundary } from "../components/RouteBoundary";
@@ -115,32 +113,6 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
  */
 export const SCOPE_FIELDS = ["collection", "tag", "vendor", "title", "segment"] as const;
 
-/**
- * The rounding the merchant chose, per currency.
- *
- * Read from the fields the form actually rendered rather than from a fixed currency
- * list, so a market added after this campaign was created inherits the default instead
- * of silently picking up an override nobody chose.
- */
-function readRoundingPolicy(form: FormData): StoredRoundingPolicy {
-  const byCurrency: Record<string, RoundingProfileName> = {};
-
-  for (const [field, value] of form.entries()) {
-    if (!field.startsWith("rounding.")) continue;
-    const currency = field.slice("rounding.".length);
-    if (currency === "default") continue;
-    // "inherit" is the absence of an override, not a profile.
-    if (isRoundingProfileName(value)) byCurrency[currency.toUpperCase()] = value;
-  }
-
-  const defaultName = form.get("rounding.default");
-
-  return {
-    default: isRoundingProfileName(defaultName) ? defaultName : "none",
-    byCurrency,
-  };
-}
-
 /** Builds an AST from the simple scope form: all provided conditions ANDed. */
 function astFromParams(params: URLSearchParams): FilterAst {
   // `segment` rides in the same form but is a reference, not a condition -- the
@@ -217,7 +189,7 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
     ...(practice ? { practice: true } : {}),
     rule,
     compareAtPolicy,
-    rounding: readRoundingPolicy(form),
+    rounding: readRoundingPolicy(form.entries()),
     priority: Number(form.get("priority") ?? 100) || 100,
     // An unchecked checkbox is simply absent from the form, so presence is the value.
     autoEnroll: form.get("autoEnroll") !== null,

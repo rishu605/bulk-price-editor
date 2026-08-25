@@ -11,10 +11,9 @@ import { actorFor } from "../lib/audit/actor";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import {
-  isRoundingProfileName,
   profileNameFor,
+  readRoundingPolicy,
   ROUNDING_LABELS,
-  type RoundingProfileName,
 } from "../lib/money/rounding-policy";
 
 export const loader = withGuard("/app/settings", async ({ request }: LoaderFunctionArgs) => {
@@ -75,29 +74,10 @@ export const action = withGuard("/app/settings", async ({ request }: ActionFunct
 
   if (String(form.get("intent")) === "rounding") {
     const existing = await readSettings(shop.id);
-    const byCurrency: Record<string, RoundingProfileName> = {};
-
-    // Read from the fields the form actually rendered, so a currency the store no
-    // longer sells in drops out rather than lingering as a setting nobody can see.
-    for (const [field, value] of form.entries()) {
-      if (!field.startsWith("rounding.")) continue;
-      const currency = field.slice("rounding.".length);
-      if (currency === "default") continue;
-      // "inherit" is the absence of an override, not a profile.
-      if (isRoundingProfileName(value)) byCurrency[currency.toUpperCase()] = value;
-    }
-
-    const defaultName = form.get("rounding.default");
 
     await writeSettings(
       shop.id,
-      {
-        ...existing,
-        rounding: {
-          default: isRoundingProfileName(defaultName) ? defaultName : "none",
-          byCurrency,
-        },
-      },
+      { ...existing, rounding: readRoundingPolicy(form.entries()) },
       actor,
     );
 

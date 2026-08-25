@@ -17,6 +17,7 @@ import {
   policyOf,
   profileFor,
   profileNameFor,
+  readRoundingPolicy,
   resolvePolicy,
   ROUNDING_PROFILES,
 } from "./rounding-policy";
@@ -127,5 +128,64 @@ describe("the no-rounding policy", () => {
 
     expect(profileFor(policy, "USD")).toEqual(ROUNDING_PROFILES.charm95);
     expect(profileFor(policy, "GBP")).toEqual(ROUNDING_PROFILES.charm95);
+  });
+});
+
+describe("reading a submitted rounding form", () => {
+  const form = (fields: Record<string, string>) => Object.entries(fields);
+
+  it("takes the default and each currency override", () => {
+    expect(
+      readRoundingPolicy(
+        form({ "rounding.default": "charm99", "rounding.EUR": "charm95" }),
+      ),
+    ).toEqual({ default: "charm99", byCurrency: { EUR: "charm95" } });
+  });
+
+  it("treats inherit as no override at all", () => {
+    // Not as a profile named "inherit", and not as "none" — those are three different
+    // instructions. Inherit means "whatever the default says", so it must leave the
+    // currency out of the map entirely.
+    expect(
+      readRoundingPolicy(
+        form({ "rounding.default": "charm99", "rounding.EUR": "inherit" }),
+      ),
+    ).toEqual({ default: "charm99", byCurrency: {} });
+  });
+
+  it("ignores every other field on the form", () => {
+    // Both routes submit this alongside guardrails, campaign names and scope filters.
+    // `rounding` is deliberately not the only field whose *value* is a profile name --
+    // "none" is an ordinary option value elsewhere in these forms, and without the
+    // prefix check it would be read as an override for a garbage currency.
+    expect(
+      readRoundingPolicy(
+        form({
+          name: "Summer sale",
+          minPrice: "5",
+          compareAt: "none",
+          "rounding.default": "whole",
+        }),
+      ),
+    ).toEqual({ default: "whole", byCurrency: {} });
+  });
+
+  it("normalises the currency code", () => {
+    expect(readRoundingPolicy(form({ "rounding.eur": "charm95" })).byCurrency)
+      .toEqual({ EUR: "charm95" });
+  });
+
+  it("falls back to leaving prices alone when nothing was submitted", () => {
+    expect(readRoundingPolicy(form({}))).toEqual({ default: "none", byCurrency: {} });
+  });
+
+  it("ignores a profile name it does not recognise", () => {
+    // A stale form from a rolled-back release, or a hand-crafted request. Leaving
+    // prices as calculated is the one outcome that cannot surprise anybody.
+    expect(
+      readRoundingPolicy(
+        form({ "rounding.default": "bananas", "rounding.EUR": "bananas" }),
+      ),
+    ).toEqual({ default: "none", byCurrency: {} });
   });
 });

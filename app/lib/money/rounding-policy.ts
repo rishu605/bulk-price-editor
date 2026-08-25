@@ -168,3 +168,41 @@ export function defaultPolicyFor(currencies: readonly string[]): StoredRoundingP
 
   return { default: "charm99", byCurrency };
 }
+
+
+/**
+ * The rounding a merchant chose, read from a submitted form.
+ *
+ * Shared by the settings page and the campaign wizard, which is the point: two copies
+ * of this loop is two chances for the campaign to store something the store page cannot
+ * show, or the reverse.
+ *
+ * Read from the fields the form actually rendered rather than from a fixed currency
+ * list, so a market removed from the store drops out of the policy instead of lingering
+ * as a setting nobody can see, and a market added later inherits the default instead of
+ * silently picking up an override nobody chose.
+ */
+export function readRoundingPolicy(
+  entries: Iterable<[string, FormDataEntryValue]>,
+  prefix = "rounding.",
+): StoredRoundingPolicy {
+  const byCurrency: Record<string, RoundingProfileName> = {};
+  let chosenDefault: RoundingProfileName = "none";
+
+  for (const [field, value] of entries) {
+    if (!field.startsWith(prefix)) continue;
+    const key = field.slice(prefix.length);
+
+    if (key === "default") {
+      if (isRoundingProfileName(value)) chosenDefault = value;
+      continue;
+    }
+
+    // "inherit" is the absence of an override, not a profile -- so is anything else we
+    // do not recognise. Both mean "whatever the default says", which is the only
+    // reading that cannot silently round prices the merchant left alone.
+    if (isRoundingProfileName(value)) byCurrency[key.toUpperCase()] = value;
+  }
+
+  return { default: chosenDefault, byCurrency };
+}
