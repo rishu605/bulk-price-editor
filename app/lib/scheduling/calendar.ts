@@ -230,3 +230,28 @@ export function timeOverlaps(campaigns: readonly CalendarCampaign[]): OverlapPai
 
   return pairs;
 }
+
+
+/**
+ * The datetime-local value a day on the calendar should pre-fill.
+ *
+ * Nine in the morning, not midnight. A sale that starts at midnight is a sale nobody
+ * sees start, and a merchant clicking a Saturday means "that day", not "the first
+ * instant of that day". They can still change it; this only decides what is already in
+ * the box.
+ *
+ * Anything that is not a plain `YYYY-MM-DD` yields an empty field rather than a guess.
+ * A malformed value in the URL is not worth turning into a date the merchant did not
+ * choose and might not notice.
+ */
+export function presetStartFor(date: string | null | undefined, hour = "09:00"): string {
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return "";
+
+  // Rejects 2026-02-31 and 2026-13-01: they match the shape but are not days, and the
+  // input would silently discard them anyway, leaving the field mysteriously blank.
+  const [y, m, d] = date.split("-").map(Number);
+  const parsed = new Date(Date.UTC(y, m - 1, d));
+  if (parsed.getUTCMonth() !== m - 1 || parsed.getUTCDate() !== d) return "";
+
+  return `${date}T${hour}`;
+}

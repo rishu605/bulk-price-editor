@@ -9,6 +9,7 @@ import { createCampaign } from "../services/campaigns/index.server";
 import type { AdjustmentRule, CompareAtPolicy } from "../lib/pricing/types";
 import { money } from "../lib/money/money";
 import { localInputToUtc, type Schedule } from "../lib/scheduling/window";
+import { presetStartFor } from "../lib/scheduling/calendar";
 import { describeAdjustment } from "../lib/markets/describe";
 import {
   profileNameFor,
@@ -95,12 +96,8 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
     usingSegment: segment ? { id: segment.id, name: segment.name, kind: segment.kind } : null,
     practice,
     guided,
-    // Set when the merchant arrived by clicking a day on the calendar. Nine in the
-    // morning rather than midnight: a sale that starts at midnight is a sale nobody sees
-    // start, and the merchant can still change it.
-    presetStart: url.searchParams.get("startAt")
-      ? `${url.searchParams.get("startAt")}T09:00`
-      : "",
+    // Set when the merchant arrived by clicking a day on the calendar.
+    presetStart: presetStartFor(url.searchParams.get("startAt")),
     selected: {
       collection: url.searchParams.get("collection") ?? "",
       tag: url.searchParams.get("tag") ?? "",

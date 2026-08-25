@@ -13,6 +13,8 @@ import { CAMPAIGN_TONE, toneFor } from "./tone";
  * Each day links into the wizard pre-dated, because the fastest path from "I want a sale
  * that weekend" to a campaign is clicking the weekend.
  */
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
 export function CalendarGrid({ days, today }: { days: CalendarDay[]; today: string }) {
   if (days.length === 0) {
     return <s-paragraph>Nothing scheduled in this period.</s-paragraph>;
@@ -20,6 +22,17 @@ export function CalendarGrid({ days, today }: { days: CalendarDay[]; today: stri
 
   return (
     <s-stack gap="small">
+      {/* Which column is which day. Without it the grid is seven anonymous boxes and a
+          merchant has to count from the first date to work out whether a sale lands on
+          a weekend — which is usually the thing they came to check. */}
+      <s-stack direction="inline" gap="small">
+        {WEEKDAYS.map((weekday) => (
+          <s-box key={weekday} padding="small-200">
+            <s-text tone="neutral">{weekday}</s-text>
+          </s-box>
+        ))}
+      </s-stack>
+
       {chunk(days, 7).map((week) => (
         <s-stack key={week[0].date} direction="inline" gap="small">
           {week.map((day) => (

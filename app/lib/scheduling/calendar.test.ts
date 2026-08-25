@@ -12,6 +12,7 @@ import {
   layOut,
   localDate,
   monthRange,
+  presetStartFor,
   timeOverlaps,
   weekRange,
   weekdayOf,
@@ -252,5 +253,37 @@ describe("what actually happened, as distinct from what was scheduled", () => {
     ]);
 
     expect(days.every((day) => day.runs.length === 0)).toBe(true);
+  });
+});
+
+
+describe("pre-filling the wizard from a calendar day", () => {
+  it("starts the sale in the morning, not at midnight", () => {
+    // A sale that starts at midnight is one nobody sees start. The merchant can still
+    // change it; this only decides what is already in the box.
+    expect(presetStartFor("2026-08-27")).toBe("2026-08-27T09:00");
+  });
+
+  it("leaves the field empty when no day was clicked", () => {
+    expect(presetStartFor(null)).toBe("");
+    expect(presetStartFor(undefined)).toBe("");
+    expect(presetStartFor("")).toBe("");
+  });
+
+  it("refuses a malformed date rather than guessing one", () => {
+    expect(presetStartFor("tomorrow")).toBe("");
+    expect(presetStartFor("2026-8-7")).toBe("");
+    expect(presetStartFor("2026-08-27T10:00")).toBe("");
+  });
+
+  it("refuses a date that has the right shape but is not a day", () => {
+    // The input would silently discard these, leaving the field mysteriously blank
+    // rather than obviously empty.
+    expect(presetStartFor("2026-02-31")).toBe("");
+    expect(presetStartFor("2026-13-01")).toBe("");
+  });
+
+  it("keeps a real leap day", () => {
+    expect(presetStartFor("2028-02-29")).toBe("2028-02-29T09:00");
   });
 });
