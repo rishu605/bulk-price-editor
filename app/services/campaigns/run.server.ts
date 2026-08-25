@@ -22,6 +22,7 @@ import type { RunOutcome } from "./types";
 import { transitionCampaign } from "./lifecycle.server";
 import { planResume, type LedgerState } from "../../lib/execution/resume";
 import { applyCampaignTags, removeCampaignTags } from "./tags.server";
+import { notify } from "../notifications.server";
 
 export interface RunOptions {
   revert?: boolean;
@@ -96,7 +97,8 @@ export async function runCampaign(
     });
   }
 
-  const { resolvable, ast } = await loadCampaignContext(shopId, campaignId);
+  const { campaign: campaignRecord, resolvable, ast } = await loadCampaignContext(shopId, campaignId);
+  const campaignName = campaignRecord.name;
   const [candidates, storeGuardrails] = await Promise.all([
     loadCandidates(shopId, ast, options.variantGids),
     guardrailsFor(shopId),
@@ -274,6 +276,27 @@ export async function runCampaign(
   });
 
   await refreshMirror(shopId, result.rows);
+
+  // Best-effort, and deliberately last. A campaign runs for hours; the merchant has to
+  // be able to close the tab and still learn the outcome. Nothing about a mail
+  // provider is allowed to change what happened to their prices, so this never throws
+  // and never blocks the outcome being returned.
+  void notify(shopId, {
+    kind: options.revert
+      ? "revert-completed"
+      : result.clean
+        ? "run-completed"
+        : "run-partial",
+    campaignName: campaignName ?? "Your campaign",
+    counts: {
+      verified: result.verified,
+      failed: result.failed,
+      unverified: result.unverified,
+      skipped: outcome.counts.skipped,
+      clamped: outcome.counts.clamped,
+    },
+    reasons: messages.slice(0, 5),
+  });
 
   return {
     runId: run.id,

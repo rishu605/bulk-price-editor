@@ -20,6 +20,7 @@
 import { createHash } from "node:crypto";
 
 import prisma from "../db.server";
+import { notify } from "./notifications.server";
 import { formatMinorUnits } from "../lib/money/format";
 import { holdForDrift } from "./campaigns/lifecycle.server";
 
@@ -115,7 +116,7 @@ export async function checkForDrift(
   const activeCampaign = await prisma.campaign.findFirst({
     where: { shopId, status: "ACTIVE" },
     orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
-    select: { id: true },
+    select: { id: true, name: true },
   });
   if (!activeCampaign) return false;
 
@@ -147,6 +148,8 @@ export async function checkForDrift(
       resolution: "PENDING",
     },
   });
+
+  await notifyDrift(shopId, activeCampaign.id, activeCampaign.name);
 
   // Hold the campaign as well as recording the event. Recording alone would leave the
   // campaign looking healthy while it quietly stopped controlling one of its prices.
@@ -270,4 +273,46 @@ export async function pruneWriteIntents(): Promise<number> {
     where: { writtenAt: { lt: new Date(Date.now() - INTENT_TTL_MS) } },
   });
   return result.count;
+}
+
+/**
+ * Tells the merchant that prices are being changed underneath a running campaign.
+ *
+ * Rate-limited to one email per campaign per hour, and it has to be. A bulk edit in
+ * Shopify's admin fires a webhook per product; without this, retagging a collection
+ * during a sale would put several hundred identical emails in somebody's inbox, and
+ * the next real one would arrive somewhere below them.
+ *
+ * The count is read at send time rather than incremented, so the one email that does
+ * go out reports the whole burst rather than the first of it.
+ */
+async function notifyDrift(shopId: string, campaignId: string, campaignName: string): Promise<void> {
+  const HOUR = 60 * 60_000;
+  const since = new Date(Date.now() - HOUR);
+
+  const [pending, alreadyTold] = await Promise.all([
+    prisma.driftEvent.count({ where: { shopId, campaignId, resolution: "PENDING" } }),
+    prisma.auditLogEntry.count({
+      where: {
+        shopId,
+        action: "notification.drift",
+        entityId: campaignId,
+        createdAt: { gte: since },
+      },
+    }),
+  ]);
+
+  if (alreadyTold > 0) return;
+
+  await prisma.auditLogEntry.create({
+    data: {
+      shopId,
+      action: "notification.drift",
+      entity: "campaign",
+      entityId: campaignId,
+      after: { pending },
+    },
+  });
+
+  void notify(shopId, { kind: "drift-hold", campaignName, driftedCount: pending });
 }

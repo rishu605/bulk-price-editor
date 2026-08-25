@@ -6,6 +6,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { ensureShop } from "../services/shop.server";
 import { readSettings, shopCurrency, writeSettings } from "../services/settings.server";
+import { readPreferences, writePreferences } from "../services/notifications.server";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 
@@ -13,20 +14,42 @@ export const loader = withGuard("/app/settings", async ({ request }: LoaderFunct
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
 
-  const [settings, currency, withCost, variants] = await Promise.all([
+  const [settings, currency, withCost, variants, notifications] = await Promise.all([
     readSettings(shop.id),
     shopCurrency(shop.id),
     prisma.variantIndex.count({ where: { shopId: shop.id, cost: { not: null } } }),
     prisma.variantIndex.count({ where: { shopId: shop.id, deletedAt: null } }),
+    readPreferences(shop.id),
   ]);
 
-  return { settings, currency, withCost, variants };
+  return {
+    settings,
+    currency,
+    withCost,
+    variants,
+    notifications,
+    // Whether the deployment can actually send. Shown rather than hidden: a merchant
+    // ticking boxes that silently do nothing is worse than being told why.
+    mailConfigured: Boolean(process.env.RESEND_API_KEY && process.env.NOTIFICATION_FROM_EMAIL),
+  };
 });
 
 export const action = withGuard("/app/settings", async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
   const form = await request.formData();
+
+  if (String(form.get("intent")) === "notifications") {
+    await writePreferences(shop.id, {
+      email: String(form.get("email") ?? ""),
+      onCompletion: form.get("onCompletion") === "on",
+      onPartialOrFailure: form.get("onPartialOrFailure") === "on",
+      onDrift: form.get("onDrift") === "on",
+      onRevert: form.get("onRevert") === "on",
+      weeklyDigest: form.get("weeklyDigest") === "on",
+    });
+    return { ok: true, message: "Notification preferences saved." };
+  }
 
   const saved = await writeSettings(shop.id, {
     neverBelowCost: form.get("neverBelowCost") === "on",
@@ -52,7 +75,8 @@ function asPolicy(value: FormDataEntryValue | null): "clamp" | "skip" | "block" 
 type ActionData = { ok: boolean; message: string };
 
 export default function Settings() {
-  const { settings, currency, withCost, variants } = useLoaderData<typeof loader>();
+  const { settings, currency, withCost, variants, notifications, mailConfigured } =
+    useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
   const busy = fetcher.state !== "idle";
 
@@ -138,6 +162,78 @@ export default function Settings() {
             </s-button>
           </s-stack>
         </fetcher.Form>
+      </s-section>
+
+      <s-section heading="Notifications">
+        <s-paragraph>
+          <s-text>
+            A campaign over a large catalogue runs for a while. These let you close the
+            tab and still find out what happened.
+          </s-text>
+        </s-paragraph>
+
+        {!mailConfigured ? (
+          <s-banner tone="warning">
+            <s-paragraph>
+              Email is not configured on this deployment, so nothing is sent yet. Your
+              preferences are saved and take effect once it is.
+            </s-paragraph>
+          </s-banner>
+        ) : null}
+
+        <fetcher.Form method="post">
+          <input type="hidden" name="intent" value="notifications" />
+          <s-stack gap="base">
+            <s-text-field
+              name="email"
+              label="Send to"
+              placeholder="ops@yourshop.com"
+              defaultValue={notifications.email ?? ""}
+              details="Leave blank to turn notifications off entirely."
+            />
+
+            <s-checkbox
+              name="onPartialOrFailure"
+              label="A run did not finish cleanly"
+              details="Something needs you: rows failed, or the run stopped early."
+              defaultChecked={notifications.onPartialOrFailure || undefined}
+            />
+            <s-checkbox
+              name="onDrift"
+              label="Someone changed a price outside the app"
+              details="Those edits are held for your decision rather than overwritten."
+              defaultChecked={notifications.onDrift || undefined}
+            />
+            <s-checkbox
+              name="onRevert"
+              label="A campaign was reverted"
+              defaultChecked={notifications.onRevert || undefined}
+            />
+            <s-checkbox
+              name="onCompletion"
+              label="A run finished cleanly"
+              details="Off by default. Being emailed about every success is how the one email that mattered gets skimmed past."
+              defaultChecked={notifications.onCompletion || undefined}
+            />
+            <s-checkbox
+              name="weeklyDigest"
+              label="Weekly summary"
+              defaultChecked={notifications.weeklyDigest || undefined}
+            />
+
+            <s-button type="submit" variant="primary" loading={busy || undefined}>
+              Save notification preferences
+            </s-button>
+          </s-stack>
+        </fetcher.Form>
+
+        <s-paragraph>
+          <s-text>
+            Emails carry counts only — how many variants changed, failed or were
+            skipped. No prices are ever included, because email is not a place your
+            pricing should end up.
+          </s-text>
+        </s-paragraph>
       </s-section>
 
       <s-section slot="aside" heading="Why floors are checked last">

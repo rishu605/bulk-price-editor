@@ -13,6 +13,7 @@ import { runCampaign } from "./campaigns/run.server";
 import { adminClientForShop } from "./admin-client.server";
 import { claimEnrollment, pendingEnrollments } from "./auto-enroll.server";
 import { reclaimStaleRuns } from "./campaigns/reaper.server";
+import { sendDueDigests } from "./digest.server";
 
 export interface TickResult {
   examined: number;
@@ -22,6 +23,8 @@ export interface TickResult {
   enrolled: number;
   /** Runs whose process died and which this tick marked visibly partial. */
   reclaimed: number;
+  /** Weekly summaries sent this tick. */
+  digests: number;
   failures: Array<{ campaignId: string; error: string }>;
 }
 
@@ -38,6 +41,7 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
     reverted: 0,
     enrolled: 0,
     reclaimed: 0,
+    digests: 0,
     failures: [],
   };
 
@@ -89,6 +93,14 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
   }
 
   await drainEnrollments(result, transitioned);
+
+  // Last, and never able to hold up the work above it. A digest is a courtesy; a sale
+  // starting on time is not.
+  try {
+    result.digests = await sendDueDigests(now);
+  } catch {
+    // sendDueDigests already logs per shop; a throw here would be the loop itself.
+  }
 
   return result;
 }
