@@ -9,6 +9,7 @@ import { createCampaign } from "../services/campaigns/index.server";
 import type { AdjustmentRule, CompareAtPolicy } from "../lib/pricing/types";
 import { money } from "../lib/money/money";
 import { localInputToUtc, type Schedule } from "../lib/scheduling/window";
+import { describeAdjustment } from "../lib/markets/describe";
 import { FilterForm } from "../components/FilterForm";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
@@ -42,7 +43,7 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
       })
     : astFromParams(url.searchParams);
 
-  const [available, preview, segments] = await Promise.all([
+  const [available, preview, segments, priceLists] = await Promise.all([
     facets(shop.id),
     previewMatches(shop.id, ast),
     prisma.segment.findMany({
@@ -50,10 +51,18 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
       select: { id: true, name: true, kind: true },
       orderBy: { name: "asc" },
     }),
+    // Markets the shop actually has. Offered rather than assumed: a single-market
+    // store sees no market section at all, which is most stores.
+    prisma.priceListRecord.findMany({
+      where: { shopId: shop.id, surfaceKind: "MARKET" },
+      select: { priceListGid: true, name: true, currency: true, adjustmentBps: true },
+      orderBy: { name: "asc" },
+    }),
   ]);
 
   return {
     timeZone: shop.timezone,
+    priceLists,
     facets: available,
     preview,
     segments,
@@ -137,6 +146,13 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
       }
     : undefined;
 
+  // Every checked market. `getAll` rather than `get`, because a campaign priced into
+  // three markets sends the field three times and `get` would keep only the first.
+  const priceLists = form
+    .getAll("priceList")
+    .map((value) => String(value))
+    .filter(Boolean);
+
   const segmentId = String(form.get("segment") ?? "").trim();
   const practice = String(form.get("practice") ?? "") === "1";
 
@@ -155,6 +171,7 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
       .split(",")
       .map((tag) => tag.trim())
       .filter(Boolean),
+    priceLists,
     schedule,
   });
 
@@ -162,8 +179,17 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
 });
 
 export default function NewCampaign() {
-  const { facets: available, preview, selected, segments, usingSegment, practice, guided, timeZone } =
-    useLoaderData<typeof loader>();
+  const {
+    facets: available,
+    preview,
+    selected,
+    segments,
+    usingSegment,
+    practice,
+    guided,
+    timeZone,
+    priceLists,
+  } = useLoaderData<typeof loader>();
 
   return (
     <s-page heading={practice ? "Practice campaign" : guided ? "Your first campaign" : "New campaign"}>
@@ -325,6 +351,36 @@ export default function NewCampaign() {
               defaultChecked
               details="A product you add to the sale later is priced from its own normal price, not the sale price."
             />
+
+            {priceLists.length > 0 ? (
+              <>
+                <s-divider />
+
+                <s-heading>Markets</s-heading>
+                <s-paragraph>
+                  <s-text>
+                    Your base price always changes. Tick a market to run this campaign
+                    there too &mdash; each market is priced from{" "}
+                    <s-text>its own normal price in its own currency</s-text>, not
+                    converted from the base sale price.
+                  </s-text>
+                </s-paragraph>
+
+                {priceLists.map((list) => (
+                  <s-checkbox
+                    key={list.priceListGid}
+                    name="priceList"
+                    value={list.priceListGid}
+                    label={`${list.name} (${list.currency})`}
+                    details={
+                      list.adjustmentBps === null
+                        ? "Prices set per product on this market."
+                        : `Normally ${describeAdjustment(list.adjustmentBps)} the base price.`
+                    }
+                  />
+                ))}
+              </>
+            ) : null}
 
             <s-divider />
 

@@ -18,6 +18,7 @@
  */
 
 import prisma from "../../app/db.server";
+import { parseMoney } from "../../app/lib/money/money";
 import type { FakeShopify } from "./fake-shopify";
 import type { Fixture } from "./seed";
 
@@ -29,6 +30,10 @@ export interface Verdict {
   violations: string[];
   counts: Record<string, number>;
 }
+
+/** Identifies one promise: this variant, on this surface. Base prices key as "". */
+const surfaceKey = (variantGid: string, priceListGid: string | null) =>
+  `${variantGid}@${priceListGid ?? ""}`;
 
 /** Rows the merchant does not have to act on; settled, not outstanding. */
 const SETTLED = new Set(["VERIFIED", "SKIPPED", "REVERTED"]);
@@ -52,14 +57,16 @@ export async function judge(
   // scenario that applies then reverts then reverts one variant has writes spread
   // across several runs. Checking one run's rows against every write ever made
   // reported the earlier runs' perfectly-ledgered writes as violations.
+  // Keyed by surface as well as variant. A campaign writing the same variant to the
+  // base price and to two markets makes three independent promises to three different
+  // shoppers, and the base row must not be allowed to vouch for the other two.
   const everLedgered = new Set(
     (
       await prisma.variantChange.findMany({
         where: { shopId: fixture.shopId },
-        select: { variantGid: true },
-        distinct: ["variantGid"],
+        select: { variantGid: true, priceListGid: true },
       })
-    ).map((row) => row.variantGid),
+    ).map((row) => surfaceKey(row.variantGid, row.priceListGid)),
   );
 
   const counts: Record<string, number> = {};
@@ -75,20 +82,27 @@ export async function judge(
   for (const row of rows) {
     if (row.status !== "VERIFIED") continue;
 
-    const live = fake.priceOf(row.variantGid);
     if (row.intendedPrice === null) continue;
+
+    // Read back from the surface the row was written to. A market row's price lives on
+    // its price list, not on the variant, so checking every row against the variant's
+    // own price both missed wrong market prices and reported correct ones as wrong.
+    const live = fake.priceOf(row.variantGid, row.priceListGid || null);
+    const where = row.priceListGid ? ` on ${row.priceListGid}` : "";
 
     if (live === undefined) {
       violations.push(
-        `${row.variantGid} is VERIFIED but does not exist in the store.`,
+        `${row.variantGid} is VERIFIED but has no price${where} in the store.`,
       );
       continue;
     }
 
-    const liveMinor = Math.round(Number(live) * 100);
+    // Parsed in the surface's own currency. A market list prices in its own money,
+    // and JPY has no decimal places at all.
+    const liveMinor = parseMoney(live, fake.currencyOf(row.priceListGid || null)).amount;
     if (liveMinor !== Number(row.intendedPrice)) {
       violations.push(
-        `${row.variantGid} is VERIFIED at ${row.intendedPrice} minor units ` +
+        `${row.variantGid} is VERIFIED at ${row.intendedPrice} minor units${where} ` +
           `but the store says ${liveMinor}.`,
       );
     }
@@ -99,9 +113,10 @@ export async function judge(
   // Every price the store accepted must have had a row committed first. A write with
   // no ledger row is a storefront change we cannot explain, attribute or revert.
   for (const write of fake.writeLog) {
-    if (!everLedgered.has(write.variantGid)) {
+    if (!everLedgered.has(surfaceKey(write.variantGid, write.priceListGid))) {
       violations.push(
-        `${write.variantGid} was written to the store with no ledger row behind it (I4).`,
+        `${write.variantGid} was written to ` +
+          `${write.priceListGid ?? "the base price"} with no ledger row behind it (I4).`,
       );
     }
   }

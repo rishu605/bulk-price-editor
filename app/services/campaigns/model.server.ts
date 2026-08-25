@@ -29,7 +29,7 @@ export async function createCampaign(shopId: string, input: CampaignInput) {
       autoEnroll: input.autoEnroll ?? true,
       tagKit: input.tagKit ?? [],
       ruleRows: [{ segmentIds: [], rule: input.rule }] as never,
-      surfaces: { base: true } as never,
+      surfaces: { base: true, priceLists: input.priceLists ?? [] } as never,
       compareAtPolicy: input.compareAtPolicy as never,
       compareAtViolationPolicy: "clear",
       guardrails: (input.guardrails ?? {}) as never,

@@ -23,6 +23,7 @@ import type { RunOutcome } from "./types";
 import { transitionCampaign } from "./lifecycle.server";
 import { planResume, type LedgerState } from "../../lib/execution/resume";
 import { applyCampaignTags, removeCampaignTags } from "./tags.server";
+import { applyMarketSurfaces, revertMarketSurfaces } from "./market-surfaces.server";
 import { notify } from "../notifications.server";
 import { metric } from "../../lib/telemetry/metrics";
 
@@ -259,6 +260,44 @@ export async function runCampaign(
   // sale that has not landed.
   const tagOutcome = await syncTags(shopId, campaignId, run.id, writable, products, client, options);
   if (tagOutcome) messages.push(...tagOutcome.messages);
+
+  // Markets, after the base surface. A campaign that only ever touched the base price
+  // does nothing for a merchant selling into four markets — their EUR and JPY customers
+  // see the old price for the whole sale. Failures here are reported and never fail the
+  // run: the base prices already landed, and the ledger names every market row that did
+  // not.
+  try {
+    const markets = options.variantGids
+      ? // Scoped runs leave markets alone: one variant coming out of a sale does not
+        // change what the other surfaces should show for the rest of them.
+        []
+      : options.revert
+        ? await revertMarketSurfaces(shopId, campaignId, client)
+        : await applyMarketSurfaces(
+            shopId,
+            campaignId,
+            run.id,
+            resolvable,
+            writable.map((row) => row.ref.variantGid),
+            client,
+            storeGuardrails,
+          );
+
+    for (const market of markets) {
+      if (market.failed > 0) {
+        messages.push(
+          `${market.name} (${market.currency}): ${market.failed} price(s) did not apply.`,
+        );
+      }
+      messages.push(...market.messages);
+    }
+  } catch (error) {
+    messages.push(
+      `Base prices were applied, but market prices did not finish: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 
   await prisma.campaignRun.update({
     where: { id: run.id },

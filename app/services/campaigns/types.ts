@@ -42,6 +42,15 @@ export interface CampaignInput {
    */
   practice?: boolean;
   /**
+   * Markets this campaign prices, alongside the base price.
+   *
+   * Empty means the base price only, which is what a single-market store wants and
+   * what every campaign did before markets existed. Each entry is a price list gid;
+   * the campaign computes each market's price from that market's own baseline, so a
+   * market is a surface the campaign runs on, not a copy of the base result.
+   */
+  priceLists?: string[];
+  /**
    * Target a saved segment instead of an inline filter.
    *
    * Stored as a reference, not copied, so editing the segment updates every campaign
