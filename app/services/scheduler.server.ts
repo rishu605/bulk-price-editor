@@ -14,6 +14,8 @@ import { adminClientForShop } from "./admin-client.server";
 import { claimEnrollment, pendingEnrollments } from "./auto-enroll.server";
 import { reclaimStaleRuns } from "./campaigns/reaper.server";
 import { sendDueDigests } from "./digest.server";
+import { auditMirror } from "./mirror-audit.server";
+import { logger } from "../lib/logging/logger";
 
 export interface TickResult {
   examined: number;
@@ -25,6 +27,8 @@ export interface TickResult {
   reclaimed: number;
   /** Weekly summaries sent this tick. */
   digests: number;
+  /** Shops whose mirror was sampled and checked against Shopify this tick. */
+  audited: number;
   failures: Array<{ campaignId: string; error: string }>;
 }
 
@@ -42,6 +46,7 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
     enrolled: 0,
     reclaimed: 0,
     digests: 0,
+    audited: 0,
     failures: [],
   };
 
@@ -102,7 +107,70 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
     // sendDueDigests already logs per shop; a throw here would be the loop itself.
   }
 
+  try {
+    result.audited = await auditDueMirrors(now);
+  } catch {
+    // Per-shop failures are already logged; a throw here would be the loop itself.
+  }
+
   return result;
+}
+
+/**
+ * Samples each shop's mirror against Shopify, once a day, off-peak.
+ *
+ * Off-peak because it spends rate-limit budget: an audit that throttled a merchant's own
+ * campaign to check up on itself would be a poor trade. The window is judged in the
+ * shop's own timezone rather than the server's, or every shop on the platform would be
+ * audited in the same hour.
+ */
+async function auditDueMirrors(now: Date): Promise<number> {
+  const DAY = 24 * 60 * 60_000;
+  const shops = await prisma.shop.findMany({
+    where: { uninstalledAt: null, initialSyncCompletedAt: { not: null } },
+    select: { id: true, domain: true, timezone: true },
+  });
+
+  let audited = 0;
+
+  for (const shop of shops) {
+    try {
+      if (!isOffPeak(now, shop.timezone)) continue;
+
+      const last = await prisma.auditLogEntry.findFirst({
+        where: { shopId: shop.id, action: "mirror.audit" },
+        orderBy: { createdAt: "desc" },
+        select: { createdAt: true },
+      });
+      if (last && now.getTime() - last.createdAt.getTime() < DAY) continue;
+
+      const client = await adminClientForShop(shop.domain);
+      if (!client) continue;
+
+      await auditMirror(client, shop.id, { now });
+      audited++;
+    } catch (error) {
+      logger.warn("mirror audit failed", {
+        shop: shop.domain,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return audited;
+}
+
+/** Between 2am and 5am in the shop's own zone. */
+function isOffPeak(now: Date, timeZone: string): boolean {
+  try {
+    const hour = Number(
+      new Intl.DateTimeFormat("en-GB", { timeZone, hour: "numeric", hour12: false }).format(now),
+    );
+    return hour >= 2 && hour < 5;
+  } catch {
+    // An unrecognised zone must not exclude a shop from ever being audited.
+    return now.getUTCHours() >= 2 && now.getUTCHours() < 5;
+  }
 }
 
 /**
