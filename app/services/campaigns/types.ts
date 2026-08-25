@@ -7,6 +7,7 @@
 
 import type { AdjustmentRule, CompareAtPolicy, Guardrails } from "../../lib/pricing/types";
 import type { PlannedRow } from "../../lib/planning/types";
+import type { StoredRoundingPolicy } from "../../lib/money/rounding-policy";
 import type { Schedule } from "../../lib/scheduling/window";
 import type { FilterAst } from "../segments.server";
 
@@ -15,7 +16,14 @@ export interface CampaignInput {
   ast: FilterAst;
   rule: AdjustmentRule;
   compareAtPolicy: CompareAtPolicy;
-  rounding: "none" | "charm99";
+  /**
+   * Rounding, per currency.
+   *
+   * Not a single choice: a campaign pricing into three markets prices in three
+   * currencies, and the charm ending that reads as considered in one reads as broken in
+   * another (E9).
+   */
+  rounding: StoredRoundingPolicy;
   guardrails?: Guardrails;
   priority?: number;
   /**
@@ -67,6 +75,22 @@ export interface PreviewRow {
   compareAt: string | null;
   status: PlannedRow["status"];
   reason?: string;
+  /**
+   * What this variant does on each targeted market, keyed by price list gid.
+   *
+   * Absent for a base-only campaign. Present but missing a market means that market
+   * has no price for this variant at all — a real state, and different from "no
+   * change", which is why it is an absent key rather than a null price.
+   */
+  surfaces?: Record<string, SurfaceCell>;
+}
+
+/** One variant on one market, as the review step shows it. */
+export interface SurfaceCell {
+  after: string | null;
+  compareAt: string | null;
+  status: PlannedRow["status"];
+  reason?: string;
 }
 
 /** How one market will be written, and why, in the merchant's own terms. */
@@ -81,6 +105,16 @@ export interface MarketPreview {
    */
   path: "market-wide" | "per-product" | "unknown";
   explanation: string;
+  /**
+   * Products this market would skip or clamp, counted separately from the base
+   * surface.
+   *
+   * A guardrail is per-currency: a floor that leaves every dollar price alone can
+   * clamp half a market whose prices sit lower. Rolling the counts together would hide
+   * exactly the market that needs looking at.
+   */
+  clamped: number;
+  skipped: number;
 }
 
 export interface CampaignPreview {

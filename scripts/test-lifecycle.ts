@@ -61,7 +61,7 @@ async function main() {
     priority: 950,
     rule: { kind: "percent-change", percent: -25 },
     compareAtPolicy: { kind: "leave" },
-    rounding: "none",
+    rounding: { default: "none", byCurrency: {} },
     ast: { groups: [{ conditions: [{ field: "tag", value: TAG }] }] },
     schedule: { kind: "manual" },
   });

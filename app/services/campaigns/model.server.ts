@@ -10,7 +10,11 @@
 import type { Campaign } from "@prisma/client";
 
 import prisma from "../../db.server";
-import { charm99, NO_ROUNDING, type RoundingProfile } from "../../lib/money/rounding";
+import {
+  parseRoundingPolicy,
+  resolvePolicy,
+  type RoundingPolicy,
+} from "../../lib/money/rounding-policy";
 import type {
   CompareAtPolicy,
   Guardrails,
@@ -57,8 +61,14 @@ export async function createCampaign(shopId: string, input: CampaignInput) {
   });
 }
 
-export function roundingFor(name: unknown): RoundingProfile {
-  return name === "charm99" ? charm99 : NO_ROUNDING;
+/**
+ * A campaign's rounding policy as stored.
+ *
+ * Kept here rather than inlined so every reader -- resolver, preview, run report and
+ * the wizard -- agrees about what an old campaign's bare `"charm99"` string means.
+ */
+export function roundingFor(raw: unknown): RoundingPolicy {
+  return resolvePolicy(parseRoundingPolicy(raw));
 }
 
 /** The filter that defines a campaign's scope, or an empty AST matching everything. */
@@ -146,7 +156,7 @@ export function toResolvable(
     ruleRows: campaign.ruleRows as unknown as ResolvableCampaign["ruleRows"],
     compareAtPolicy: campaign.compareAtPolicy as unknown as CompareAtPolicy,
     compareAtViolationPolicy: "clear",
-    roundingProfile: roundingFor(schedule.rounding),
+    roundingPolicy: roundingFor(schedule.rounding),
     guardrails: (campaign.guardrails ?? undefined) as unknown as Guardrails | undefined,
     guardrailViolationPolicy: "clamp",
     // Variants reverted out of this campaign individually. Carried into resolution

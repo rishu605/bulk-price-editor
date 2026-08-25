@@ -10,22 +10,42 @@ import { readPreferences, writePreferences } from "../services/notifications.ser
 import { actorFor } from "../lib/audit/actor";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
+import {
+  isRoundingProfileName,
+  profileNameFor,
+  ROUNDING_LABELS,
+  type RoundingProfileName,
+} from "../lib/money/rounding-policy";
 
 export const loader = withGuard("/app/settings", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
 
-  const [settings, currency, withCost, variants, notifications] = await Promise.all([
-    readSettings(shop.id),
-    shopCurrency(shop.id),
-    prisma.variantIndex.count({ where: { shopId: shop.id, cost: { not: null } } }),
-    prisma.variantIndex.count({ where: { shopId: shop.id, deletedAt: null } }),
-    readPreferences(shop.id),
-  ]);
+  const [settings, currency, withCost, variants, notifications, marketCurrencies] =
+    await Promise.all([
+      readSettings(shop.id),
+      shopCurrency(shop.id),
+      prisma.variantIndex.count({ where: { shopId: shop.id, cost: { not: null } } }),
+      prisma.variantIndex.count({ where: { shopId: shop.id, deletedAt: null } }),
+      readPreferences(shop.id),
+      prisma.priceListRecord.findMany({
+        where: { shopId: shop.id },
+        select: { currency: true },
+        distinct: ["currency"],
+      }),
+    ]);
+
+  // Every currency this store actually prices in. Only these are offered: a list of
+  // all 180 world currencies would bury the two or three that matter.
+  const currencies = [
+    ...new Set([currency, ...marketCurrencies.map((row) => row.currency)].filter(Boolean)),
+  ].sort();
 
   return {
     settings,
     currency,
+    currencies,
+    roundingOptions: Object.entries(ROUNDING_LABELS).map(([value, label]) => ({ value, label })),
     withCost,
     variants,
     notifications,
@@ -53,9 +73,43 @@ export const action = withGuard("/app/settings", async ({ request }: ActionFunct
     return { ok: true, message: "Notification preferences saved." };
   }
 
+  if (String(form.get("intent")) === "rounding") {
+    const existing = await readSettings(shop.id);
+    const byCurrency: Record<string, RoundingProfileName> = {};
+
+    // Read from the fields the form actually rendered, so a currency the store no
+    // longer sells in drops out rather than lingering as a setting nobody can see.
+    for (const [field, value] of form.entries()) {
+      if (!field.startsWith("rounding.")) continue;
+      const currency = field.slice("rounding.".length);
+      if (currency === "default") continue;
+      // "inherit" is the absence of an override, not a profile.
+      if (isRoundingProfileName(value)) byCurrency[currency.toUpperCase()] = value;
+    }
+
+    const defaultName = form.get("rounding.default");
+
+    await writeSettings(
+      shop.id,
+      {
+        ...existing,
+        rounding: {
+          default: isRoundingProfileName(defaultName) ? defaultName : "none",
+          byCurrency,
+        },
+      },
+      actor,
+    );
+
+    return { ok: true, message: "Rounding saved. New campaigns start with these." };
+  }
+
+  const existing = await readSettings(shop.id);
+
   const saved = await writeSettings(
     shop.id,
     {
+      ...existing,
       neverBelowCost: form.get("neverBelowCost") === "on",
       minMarginPercent: emptyToNull(form.get("minMarginPercent")),
       minPrice: emptyToNull(form.get("minPrice")),
@@ -81,8 +135,16 @@ function asPolicy(value: FormDataEntryValue | null): "clamp" | "skip" | "block" 
 type ActionData = { ok: boolean; message: string };
 
 export default function Settings() {
-  const { settings, currency, withCost, variants, notifications, mailConfigured } =
-    useLoaderData<typeof loader>();
+  const {
+    settings,
+    currency,
+    currencies,
+    roundingOptions,
+    withCost,
+    variants,
+    notifications,
+    mailConfigured,
+  } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
   const busy = fetcher.state !== "idle";
 
@@ -165,6 +227,79 @@ export default function Settings() {
 
             <s-button type="submit" variant="primary" loading={busy || undefined}>
               Save guardrails
+            </s-button>
+          </s-stack>
+        </fetcher.Form>
+      </s-section>
+
+      <s-section heading="Rounding">
+        <s-paragraph>
+          <s-text>
+            How campaign prices are tidied up after the discount is calculated. Set
+            once here; each campaign can override it.
+          </s-text>
+        </s-paragraph>
+
+        <fetcher.Form method="post">
+          <input type="hidden" name="intent" value="rounding" />
+
+          <s-stack gap="base">
+            <label htmlFor="rounding.default">Everywhere, unless overridden</label>
+            <select
+              id="rounding.default"
+              name="rounding.default"
+              defaultValue={settings.rounding.default}
+            >
+              {roundingOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+
+            {currencies.length > 1 ? (
+              <>
+                <s-paragraph>
+                  <s-text>
+                    A price ending that looks considered in one currency can look like
+                    a mistake in another, and some currencies have no cents to end in.
+                  </s-text>
+                </s-paragraph>
+
+                {currencies.map((code) => {
+                  // What this currency will actually do, which is not always what the
+                  // default says: a .99 ending has nowhere to go in a currency with no
+                  // decimal places, so it shows as the step rounding it becomes.
+                  const effective = profileNameFor(settings.rounding, code);
+
+                  return (
+                    <s-stack key={code} gap="small">
+                      <label htmlFor={`rounding.${code}`}>
+                        {code}
+                        {code === currency ? " (your store's currency)" : ""}
+                      </label>
+                      <select
+                        id={`rounding.${code}`}
+                        name={`rounding.${code}`}
+                        defaultValue={settings.rounding.byCurrency[code] ?? "inherit"}
+                      >
+                        <option value="inherit">
+                          Use the setting above ({ROUNDING_LABELS[effective].toLowerCase()})
+                        </option>
+                        {roundingOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </s-stack>
+                  );
+                })}
+              </>
+            ) : null}
+
+            <s-button type="submit" variant="primary" loading={busy || undefined}>
+              Save rounding
             </s-button>
           </s-stack>
         </fetcher.Form>

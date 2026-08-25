@@ -11,6 +11,10 @@
  */
 
 import prisma from "../db.server";
+import {
+  parseRoundingPolicy,
+  type StoredRoundingPolicy,
+} from "../lib/money/rounding-policy";
 import { decimalsFor } from "../lib/money/format";
 import { money } from "../lib/money/money";
 import type { Guardrails } from "../lib/pricing/types";
@@ -26,6 +30,14 @@ export interface StoreSettings {
   violationPolicy: "clamp" | "skip" | "block";
   /** What to do when a cost-dependent guardrail meets a variant with no cost. */
   missingCostPolicy: "skip" | "error";
+  /**
+   * The store's rounding, per currency.
+   *
+   * A store default rather than only a per-campaign one, because the answer is a
+   * property of how the merchant sells — .99 in dollars, tidy tens in yen — and not of
+   * any one sale. Campaigns inherit it and may override it.
+   */
+  rounding: StoredRoundingPolicy;
 }
 
 export const DEFAULT_SETTINGS: StoreSettings = {
@@ -37,6 +49,9 @@ export const DEFAULT_SETTINGS: StoreSettings = {
   minPrice: null,
   violationPolicy: "clamp",
   missingCostPolicy: "skip",
+  // No rounding until a merchant asks for it. A store that has never opened the
+  // setting should get exactly the prices the campaign calculated.
+  rounding: { default: "none", byCurrency: {} },
 };
 
 /** Reads settings, filling anything absent or malformed with a default. */
@@ -61,6 +76,7 @@ export function parseSettings(raw: unknown): StoreSettings {
         ? value.violationPolicy
         : "clamp",
     missingCostPolicy: value.missingCostPolicy === "error" ? "error" : "skip",
+    rounding: parseRoundingPolicy(value.rounding),
   };
 }
 

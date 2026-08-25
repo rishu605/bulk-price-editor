@@ -23,6 +23,7 @@ import { downloadCsv, filenameSlug } from "../lib/reporting/csv";
 import { rollbackReportCsv } from "../lib/reporting/rollback";
 import { PreviewTable } from "../components/PreviewTable";
 import { RunHistoryTable } from "../components/RunHistoryTable";
+import { previewCsv } from "../lib/reporting/preview-csv";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { reportError } from "../services/error-report.server";
 import { withGuard } from "../lib/errors/guard.server";
@@ -279,6 +280,14 @@ export default function CampaignDetail() {
             {preview.markets.map((market) => (
               <s-paragraph key={market.priceListGid}>
                 <s-text>{market.explanation}</s-text>
+                {market.clamped > 0 || market.skipped > 0 ? (
+                  <s-text tone="caution">
+                    {" "}
+                    A guardrail affects {market.clamped + market.skipped} of them here
+                    {market.clamped > 0 ? ` (${market.clamped} raised to the floor)` : ""}
+                    {market.skipped > 0 ? ` (${market.skipped} left alone)` : ""}.
+                  </s-text>
+                ) : null}
               </s-paragraph>
             ))}
           </s-section>
@@ -293,7 +302,20 @@ export default function CampaignDetail() {
           </s-banner>
         ) : null}
 
-        <PreviewTable rows={preview.rows} />
+        <PreviewTable rows={preview.rows} markets={preview.markets} />
+
+        <s-button
+          type="button"
+          variant="tertiary"
+          onClick={() =>
+            downloadCsv(
+              `preview-${filenameSlug(preview.name) || "campaign"}.csv`,
+              previewCsv(preview.rows, preview.markets),
+            )
+          }
+        >
+          Export this preview (CSV)
+        </s-button>
       </s-section>
 
       {runs.length > 0 ? (

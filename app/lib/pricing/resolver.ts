@@ -17,6 +17,7 @@
  * value actually written.
  */
 
+import { profileFor } from "../money/rounding-policy";
 import { applyRounding } from "../money/rounding";
 import { isPositive, lessThanOrEqual, max, type Money } from "../money/money";
 import {
@@ -115,7 +116,10 @@ export function resolve(input: ResolveInput): Resolution {
     throw error;
   }
 
-  const rounded = applyRounding(unrounded, winner.roundingProfile);
+  // Rounded in the currency actually being written, not the store's. The same campaign
+  // rounds dollars to .99 and yen to the nearest ten, because that is what each looks
+  // right in — which is the entire point of pricing per market.
+  const rounded = applyRounding(unrounded, profileFor(winner.roundingPolicy, currency));
 
   let floor: Money | undefined;
   try {

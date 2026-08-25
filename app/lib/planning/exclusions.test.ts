@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 
 import { money } from "../money/money";
 import { NO_ROUNDING } from "../money/rounding";
+import { policyOf } from "../money/rounding-policy";
 import type { ResolvableCampaign } from "../pricing/types";
 import { planRun } from "./plan";
 import type { PlanCandidate, SurfaceRef } from "./types";
@@ -38,7 +39,7 @@ function campaign(over: Partial<ResolvableCampaign> = {}): ResolvableCampaign {
     ruleRows: [{ segmentIds: [], rule: { kind: "percent-change", percent: -30 } }],
     compareAtPolicy: { kind: "leave" },
     compareAtViolationPolicy: "clear",
-    roundingProfile: NO_ROUNDING,
+    roundingPolicy: policyOf(NO_ROUNDING),
     guardrailViolationPolicy: "clamp",
     ...over,
   };
