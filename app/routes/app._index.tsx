@@ -8,6 +8,7 @@ import { ensureShop, markSyncComplete } from "../services/shop.server";
 import { fetchShopBasics, syncCatalog } from "../services/catalog-sync.server";
 import { baselineHealth, captureBaselines } from "../services/baselines.server";
 import { syncMarkets } from "../services/markets-sync.server";
+import { syncCatalogViaBulk } from "../services/catalog-bulk-sync.server";
 import { toAdminClient } from "../services/admin-client.server";
 import { OnboardingCard } from "../components/OnboardingCard";
 import { RouteBoundary } from "../components/RouteBoundary";
@@ -112,11 +113,23 @@ export const action = withGuard("/app", async ({ request }: ActionFunctionArgs) 
       data: { timezone: basics.timezone },
     });
 
-    const sync = await syncCatalog(admin, shop.id, basics.currency);
+    // Bulk first. One operation and a streamed result beats ten thousand paginated
+    // round trips against a rate limit that allows a couple a second — and the
+    // paginated path holds nothing back on a catalogue that does not fit in memory.
+    const client = toAdminClient(admin);
+    const bulk = await syncCatalogViaBulk(client, shop.id, basics.currency);
+
+    // Falling back rather than failing. A shop already running a bulk operation, or a
+    // catalogue Shopify declines to build a file for, still deserves a sync — and on a
+    // small store the paginated path is perfectly adequate, which is what it is for.
+    const sync =
+      bulk.errors.length === 0 && bulk.written > 0
+        ? { variants: bulk.written, products: bulk.products, errors: [] as string[] }
+        : await syncCatalog(admin, shop.id, basics.currency);
 
     // After the catalogue, never alongside it: Shopify allows one bulk operation per
     // shop, and the market sync checks for a running one rather than racing it.
-    const markets = await syncMarkets(toAdminClient(admin), shop.id);
+    const markets = await syncMarkets(client, shop.id);
 
     // Capture baselines immediately: a variant with no baseline cannot be priced by
     // a campaign, and capturing at sync time is the only moment we can be confident
