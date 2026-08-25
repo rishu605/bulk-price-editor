@@ -24,6 +24,8 @@ import { ensureShop } from "../services/shop.server";
 import { baselineHistory, browseBaselines } from "../services/baseline-browser.server";
 import { BaselineTable } from "../components/BaselineTable";
 import { FilterForm } from "../components/FilterForm";
+import { baselinesCsv } from "../lib/reporting/baselines-csv";
+import { downloadCsv } from "../lib/reporting/csv";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 
@@ -122,6 +124,17 @@ export default function Baselines() {
                 {total} variants · showing {rows.length}
               </s-text>
             </s-paragraph>
+
+            {/* Exports what the filters currently show, not the whole catalogue. A
+                merchant who narrowed to one vendor means that vendor, and handing them
+                500K rows instead is not being generous. */}
+            <s-button
+              type="button"
+              variant="tertiary"
+              onClick={() => downloadCsv("anchor-baselines.csv", baselinesCsv(rows))}
+            >
+              Export these baselines (CSV)
+            </s-button>
 
             <BaselineTable rows={rows} onShowHistory={show} />
 
