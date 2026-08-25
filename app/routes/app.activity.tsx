@@ -69,31 +69,30 @@ export default function Activity() {
       <s-section>
         <FilterForm fields={FILTER_FIELDS}>
           <s-stack gap="base">
-            <label htmlFor="actor">Who</label>
-            <select id="actor" name="actor" defaultValue={filters.actor ?? ""}>
-              <option value="">Anyone</option>
+            <s-select name="actor" label="Who">
+              <s-option value="" defaultSelected={!filters.actor}>
+                Anyone
+              </s-option>
               {actors.map((actor) => (
-                <option key={actor} value={actor}>
+                <s-option key={actor} value={actor} defaultSelected={filters.actor === actor}>
                   {describeActor(actor)}
-                </option>
+                </s-option>
               ))}
-            </select>
+            </s-select>
 
-            <label htmlFor="action">What</label>
-            <select id="action" name="action" defaultValue={filters.action ?? ""}>
-              <option value="">Any action</option>
+            <s-select name="action" label="What">
+              <s-option value="" defaultSelected={!filters.action}>
+                Any action
+              </s-option>
               {actions.map((action) => (
-                <option key={action} value={action}>
+                <s-option key={action} value={action} defaultSelected={filters.action === action}>
                   {action}
-                </option>
+                </s-option>
               ))}
-            </select>
+            </s-select>
 
-            <label htmlFor="from">From</label>
-            <input id="from" type="date" name="from" defaultValue={filters.from ?? ""} />
-
-            <label htmlFor="to">To</label>
-            <input id="to" type="date" name="to" defaultValue={filters.to ?? ""} />
+            <s-date-field name="from" label="From" defaultValue={filters.from ?? ""} />
+            <s-date-field name="to" label="To" defaultValue={filters.to ?? ""} />
 
             <s-button type="submit">Filter</s-button>
           </s-stack>

@@ -203,6 +203,29 @@ export function describeSchedule(schedule: Schedule, timeZone: string): string {
  * zone, not the viewer's and not UTC. Reading it with `new Date()` would silently
  * use whatever zone the merchant's laptop happens to be in.
  */
+/**
+ * Recombines a separate date field and time field into a `datetime-local` value.
+ *
+ * They are separate in the interface because Polaris has no datetime component —
+ * `s-date-field` is date-only — and two Polaris fields beat one native input that would
+ * style itself differently from everything around it. This is where that seam closes.
+ *
+ * A date with no time is not an error: the merchant said which day and left the hour to
+ * us, so it takes the caller's default. A time with no date is nothing at all, because
+ * an hour on no particular day cannot be scheduled.
+ */
+export function joinDateAndTime(
+  date: string | null | undefined,
+  time: string | null | undefined,
+  fallbackTime: string,
+): string {
+  const day = String(date ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return "";
+
+  const at = String(time ?? "").trim();
+  return `${day}T${/^\d{2}:\d{2}$/.test(at) ? at : fallbackTime}`;
+}
+
 export function localInputToUtc(value: string, timeZone: string): string | null {
   if (!value) return null;
 

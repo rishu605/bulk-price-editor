@@ -220,41 +220,47 @@ export default function Segments() {
           <s-stack gap="base">
             <s-text-field name="name" label="Name" placeholder="Summer collection" required />
 
-            <label htmlFor="collection">Collection</label>
-            <select id="collection" name="collection" defaultValue="">
-              <option value="">Any collection</option>
+            <s-select name="collection" label="Collection">
+              <s-option value="" defaultSelected>
+                Any collection
+              </s-option>
               {available.collections.map((c) => (
-                <option key={c} value={c}>
+                <s-option key={c} value={c}>
                   {c}
-                </option>
+                </s-option>
               ))}
-            </select>
+            </s-select>
 
-            <label htmlFor="tag">Tag</label>
-            <select id="tag" name="tag" defaultValue="">
-              <option value="">Any tag</option>
+            <s-select name="tag" label="Tag">
+              <s-option value="" defaultSelected>
+                Any tag
+              </s-option>
               {available.tags.map((t) => (
-                <option key={t} value={t}>
+                <s-option key={t} value={t}>
                   {t}
-                </option>
+                </s-option>
               ))}
-            </select>
+            </s-select>
 
-            <label htmlFor="vendor">Vendor</label>
-            <select id="vendor" name="vendor" defaultValue="">
-              <option value="">Any vendor</option>
+            <s-select name="vendor" label="Vendor">
+              <s-option value="" defaultSelected>
+                Any vendor
+              </s-option>
               {available.vendors.map((v) => (
-                <option key={v} value={v}>
+                <s-option key={v} value={v}>
                   {v}
-                </option>
+                </s-option>
               ))}
-            </select>
+            </s-select>
 
-            <label htmlFor="kind">How it should behave</label>
-            <select id="kind" name="kind" defaultValue="DYNAMIC">
-              <option value="DYNAMIC">Dynamic — re-check the filter every time</option>
-              <option value="FROZEN">Frozen — pin the products it matches right now</option>
-            </select>
+            <s-select name="kind" label="How it should behave">
+              <s-option value="DYNAMIC" defaultSelected>
+                Dynamic &mdash; re-check the filter every time
+              </s-option>
+              <s-option value="FROZEN">
+                Frozen &mdash; pin the products it matches right now
+              </s-option>
+            </s-select>
 
             <s-button type="submit" variant="primary" loading={busy || undefined}>
               Create segment
@@ -275,14 +281,12 @@ export default function Segments() {
           <input type="hidden" name="intent" value="create-from-csv" />
           <s-stack gap="base">
             <s-text-field name="name" label="Name" placeholder="Clearance list" required />
-            {/* Native, like the selects above it — a plain element that is certain
-                to serialise a pasted list into the form. */}
-            <label htmlFor="segment-csv">SKUs, barcodes or IDs</label>
-            <textarea
-              id="segment-csv"
+            <s-text-area
               name="csv"
+              label="SKUs, barcodes or IDs"
               rows={8}
-              style={{ width: "100%", fontFamily: "monospace" }}
+              placeholder={"SKU-1\nSKU-2\n9781234567897"}
+              details="One per line. Anything we cannot match is reported rather than skipped."
             />
             <s-button type="submit" variant="primary" loading={busy || undefined}>
               Match and create

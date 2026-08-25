@@ -77,36 +77,34 @@ export default function Baselines() {
           <s-stack gap="base">
             <s-text-field name="q" label="Title, SKU or variant ID" defaultValue={filters.q ?? ""} />
 
-            <label htmlFor="vendor">Vendor</label>
-            <select id="vendor" name="vendor" defaultValue={filters.vendor ?? ""}>
-              <option value="">Any vendor</option>
+            <s-select name="vendor" label="Vendor">
+              <s-option value="" defaultSelected={!filters.vendor}>
+                Any vendor
+              </s-option>
               {vendors.map((vendor) => (
-                <option key={vendor} value={vendor}>
+                <s-option key={vendor} value={vendor} defaultSelected={filters.vendor === vendor}>
                   {vendor}
-                </option>
+                </s-option>
               ))}
-            </select>
+            </s-select>
 
-            <label htmlFor="source">Where the baseline came from</label>
-            <select id="source" name="source" defaultValue={filters.source ?? ""}>
-              <option value="">Any source</option>
+            <s-select name="source" label="Where the baseline came from">
+              <s-option value="" defaultSelected={!filters.source}>
+                Any source
+              </s-option>
               {sources.map((source) => (
-                <option key={source} value={source}>
+                <s-option key={source} value={source} defaultSelected={filters.source === source}>
                   {source.toLowerCase().replace(/_/g, " ")}
-                </option>
+                </s-option>
               ))}
-            </select>
+            </s-select>
 
-            <label htmlFor="diverged">
-              <input
-                id="diverged"
-                type="checkbox"
-                name="diverged"
-                value="1"
-                defaultChecked={filters.divergedOnly}
-              />{" "}
-              Only variants whose live price differs from their baseline
-            </label>
+            <s-checkbox
+              name="diverged"
+              value="1"
+              label="Only variants whose live price differs from their baseline"
+              defaultChecked={filters.divergedOnly || undefined}
+            />
 
             <s-button type="submit">Filter</s-button>
           </s-stack>

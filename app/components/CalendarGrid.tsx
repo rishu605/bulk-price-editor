@@ -25,16 +25,19 @@ export function CalendarGrid({ days, today }: { days: CalendarDay[]; today: stri
       {/* Which column is which day. Without it the grid is seven anonymous boxes and a
           merchant has to count from the first date to work out whether a sale lands on
           a weekend — which is usually the thing they came to check. */}
-      <s-stack direction="inline" gap="small">
+      <s-grid gridTemplateColumns="repeat(7, 1fr)" gap="small-200">
         {WEEKDAYS.map((weekday) => (
           <s-box key={weekday} padding="small-200">
             <s-text tone="neutral">{weekday}</s-text>
           </s-box>
         ))}
-      </s-stack>
+      </s-grid>
 
+      {/* A real grid rather than rows of boxes, so every day is the same width and the
+          columns line up under their weekday. Stacked boxes sized themselves to their
+          contents, which put a busy Tuesday under Wednesday's heading. */}
       {chunk(days, 7).map((week) => (
-        <s-stack key={week[0].date} direction="inline" gap="small">
+        <s-grid key={week[0].date} gridTemplateColumns="repeat(7, 1fr)" gap="small-200">
           {week.map((day) => (
             <s-box key={day.date} padding="small-200" borderWidth="base" borderRadius="base">
               <s-stack gap="small-500">
@@ -78,7 +81,7 @@ export function CalendarGrid({ days, today }: { days: CalendarDay[]; today: stri
               </s-stack>
             </s-box>
           ))}
-        </s-stack>
+        </s-grid>
       ))}
     </s-stack>
   );
