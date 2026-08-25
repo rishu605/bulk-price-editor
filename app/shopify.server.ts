@@ -6,6 +6,7 @@ import {
 } from "@shopify/shopify-app-react-router/server";
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
 import prisma from "./db.server";
+import { EncryptedSessionStorage } from "./services/encrypted-session-storage.server";
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
@@ -14,7 +15,10 @@ const shopify = shopifyApp({
   scopes: process.env.SCOPES?.split(","),
   appUrl: process.env.SHOPIFY_APP_URL || "",
   authPathPrefix: "/auth",
-  sessionStorage: new PrismaSessionStorage(prisma),
+  // Wrapped, not replaced. The library owns the session lifecycle and gets it right;
+  // the only thing wrong with the default is that a database dump of the session table
+  // yields working access tokens for every connected store.
+  sessionStorage: new EncryptedSessionStorage(new PrismaSessionStorage(prisma)),
   distribution: AppDistribution.AppStore,
   future: {
     expiringOfflineAccessTokens: true,
