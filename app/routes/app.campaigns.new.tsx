@@ -8,7 +8,7 @@ import { facets, previewMatches, type FilterAst } from "../services/segments.ser
 import { createCampaign } from "../services/campaigns/index.server";
 import type { AdjustmentRule, CompareAtPolicy } from "../lib/pricing/types";
 import { money } from "../lib/money/money";
-import { localInputToUtc, type Schedule } from "../lib/scheduling/window";
+import { joinDateAndTime, localInputToUtc, type Schedule } from "../lib/scheduling/window";
 import { presetStartFor } from "../lib/scheduling/calendar";
 import { describeAdjustment } from "../lib/markets/describe";
 import {
@@ -160,8 +160,16 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
         ? { kind: "clear" }
         : { kind: "leave" };
 
-  const startLocal = String(form.get("startAt") ?? "").trim();
-  const endLocal = String(form.get("endAt") ?? "").trim();
+  const startLocal = joinDateAndTime(
+    String(form.get("startDate") ?? ""),
+    String(form.get("startTime") ?? ""),
+    "09:00",
+  );
+  const endLocal = joinDateAndTime(
+    String(form.get("endDate") ?? ""),
+    String(form.get("endTime") ?? ""),
+    "23:59",
+  );
   const startUtc = startLocal ? localInputToUtc(startLocal, shop.timezone) : null;
 
   // A schedule needs a valid start. Anything else stays manual rather than being
@@ -253,15 +261,20 @@ export default function NewCampaign() {
         </s-paragraph>
         <FilterForm fields={SCOPE_FIELDS}>
           <s-stack gap="base">
-            <label htmlFor="segment">Saved segment</label>
-            <select id="segment" name="segment" defaultValue={selected.segment}>
-              <option value="">Build a filter below instead</option>
+            <s-select name="segment" label="Saved segment">
+              <s-option value="" defaultSelected={!selected.segment}>
+                Build a filter below instead
+              </s-option>
               {segments.map((segment) => (
-                <option key={segment.id} value={segment.id}>
+                <s-option
+                  key={segment.id}
+                  value={segment.id}
+                  defaultSelected={selected.segment === segment.id}
+                >
                   {segment.name} ({segment.kind === "DYNAMIC" ? "dynamic" : "frozen"})
-                </option>
+                </s-option>
               ))}
-            </select>
+            </s-select>
 
             {usingSegment ? (
               <s-banner tone="info">
@@ -275,33 +288,36 @@ export default function NewCampaign() {
               </s-banner>
             ) : null}
 
-            <label htmlFor="collection">Collection</label>
-            <select id="collection" name="collection" defaultValue={selected.collection}>
-              <option value="">Any collection</option>
+            <s-select name="collection" label="Collection">
+              <s-option value="" defaultSelected={!selected.collection}>
+                Any collection
+              </s-option>
               {available.collections.map((c) => (
-                <option key={c} value={c}>
+                <s-option key={c} value={c} defaultSelected={selected.collection === c}>
                   {c}
-                </option>
+                </s-option>
               ))}
-            </select>
-            <label htmlFor="vendor">Vendor</label>
-            <select id="vendor" name="vendor" defaultValue={selected.vendor}>
-              <option value="">Any vendor</option>
+            </s-select>
+            <s-select name="vendor" label="Vendor">
+              <s-option value="" defaultSelected={!selected.vendor}>
+                Any vendor
+              </s-option>
               {available.vendors.map((v) => (
-                <option key={v} value={v}>
+                <s-option key={v} value={v} defaultSelected={selected.vendor === v}>
                   {v}
-                </option>
+                </s-option>
               ))}
-            </select>
-            <label htmlFor="tag">Tag</label>
-            <select id="tag" name="tag" defaultValue={selected.tag}>
-              <option value="">Any tag</option>
+            </s-select>
+            <s-select name="tag" label="Tag">
+              <s-option value="" defaultSelected={!selected.tag}>
+                Any tag
+              </s-option>
               {available.tags.map((t) => (
-                <option key={t} value={t}>
+                <s-option key={t} value={t} defaultSelected={selected.tag === t}>
                   {t}
-                </option>
+                </s-option>
               ))}
-            </select>
+            </s-select>
             <s-text-field name="title" label="Title contains" defaultValue={selected.title} />
             <s-button type="submit">Update match count</s-button>
           </s-stack>
@@ -335,12 +351,13 @@ export default function NewCampaign() {
           <s-stack gap="base">
             <s-text-field name="name" label="Campaign name" defaultValue="Sale" required />
 
-            <label htmlFor="ruleKind">Adjustment</label>
-            <select id="ruleKind" name="ruleKind" defaultValue="percent-change">
-              <option value="percent-change">Percent change from baseline</option>
-              <option value="fixed-change">Fixed change from baseline</option>
-              <option value="set-exact">Set an exact price</option>
-            </select>
+            <s-select name="ruleKind" label="Adjustment">
+              <s-option value="percent-change" defaultSelected>
+                Percent change from baseline
+              </s-option>
+              <s-option value="fixed-change">Fixed change from baseline</s-option>
+              <s-option value="set-exact">Set an exact price</s-option>
+            </s-select>
 
             <s-number-field
               name="ruleValue"
@@ -349,27 +366,25 @@ export default function NewCampaign() {
               details="Negative discounts. -20 means 20% off the baseline."
             />
 
-            <label htmlFor="compareAt">Compare-at price</label>
-            <select id="compareAt" name="compareAt" defaultValue="set-to-baseline">
-              <option value="set-to-baseline">
+            <s-select name="compareAt" label="Compare-at price">
+              <s-option value="set-to-baseline" defaultSelected>
                 Set to baseline (shows a strike-through)
-              </option>
-              <option value="leave">Leave unchanged</option>
-              <option value="clear">Clear it</option>
-            </select>
+              </s-option>
+              <s-option value="leave">Leave unchanged</s-option>
+              <s-option value="clear">Clear it</s-option>
+            </s-select>
 
-            <label htmlFor="rounding.default">Rounding</label>
-            <select
-              id="rounding.default"
-              name="rounding.default"
-              defaultValue={storeRounding.default}
-            >
+            <s-select name="rounding.default" label="Rounding">
               {roundingOptions.map((option) => (
-                <option key={option.value} value={option.value}>
+                <s-option
+                  key={option.value}
+                  value={option.value}
+                  defaultSelected={option.value === storeRounding.default}
+                >
                   {option.label}
-                </option>
+                </s-option>
               ))}
-            </select>
+            </s-select>
             <s-paragraph>
               <s-text>
                 Starts from your store setting. Change it here to round this campaign
@@ -436,24 +451,24 @@ export default function NewCampaign() {
                 </s-paragraph>
 
                 {currencies.map((code) => (
-                  <s-stack key={code} gap="small">
-                    <label htmlFor={`rounding.${code}`}>Rounding for {code}</label>
-                    <select
-                      id={`rounding.${code}`}
-                      name={`rounding.${code}`}
-                      defaultValue={storeRounding.byCurrency[code] ?? "inherit"}
+                  <s-select key={code} name={`rounding.${code}`} label={`Rounding for ${code}`}>
+                    <s-option
+                      value="inherit"
+                      defaultSelected={!storeRounding.byCurrency[code]}
                     >
-                      <option value="inherit">
-                        Same as this campaign&rsquo;s rounding (
-                        {ROUNDING_LABELS[profileNameFor(storeRounding, code)].toLowerCase()})
-                      </option>
-                      {roundingOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </s-stack>
+                      Same as this campaign&rsquo;s rounding (
+                      {ROUNDING_LABELS[profileNameFor(storeRounding, code)].toLowerCase()})
+                    </s-option>
+                    {roundingOptions.map((option) => (
+                      <s-option
+                        key={option.value}
+                        value={option.value}
+                        defaultSelected={storeRounding.byCurrency[code] === option.value}
+                      >
+                        {option.label}
+                      </s-option>
+                    ))}
+                  </s-select>
                 ))}
               </>
             ) : null}
@@ -468,16 +483,34 @@ export default function NewCampaign() {
               </s-text>
             </s-paragraph>
 
-            <label htmlFor="startAt">Start</label>
-            <input
-              id="startAt"
-              type="datetime-local"
-              name="startAt"
-              defaultValue={presetStart}
-            />
+            {/* Date and time as two fields, because Polaris has no datetime component:
+                `s-date-field` is date-only. Two Polaris fields beat one native
+                datetime-local that would style itself differently from everything
+                around it, and the two are recombined server-side. */}
+            <s-stack direction="inline" gap="base">
+              <s-date-field
+                name="startDate"
+                label="Start"
+                defaultValue={presetStart.slice(0, 10)}
+              />
+              <s-text-field
+                name="startTime"
+                label="Start time"
+                placeholder="09:00"
+                defaultValue={presetStart.slice(11)}
+                details="24-hour, in your store's zone."
+              />
+            </s-stack>
 
-            <label htmlFor="endAt">End (optional)</label>
-            <input id="endAt" type="datetime-local" name="endAt" />
+            <s-stack direction="inline" gap="base">
+              <s-date-field name="endDate" label="End (optional)" />
+              <s-text-field
+                name="endTime"
+                label="End time"
+                placeholder="23:59"
+                details="Defaults to the end of that day."
+              />
+            </s-stack>
 
             <s-number-field
               name="revertBuffer"

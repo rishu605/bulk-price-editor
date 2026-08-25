@@ -128,12 +128,12 @@ export default function ImportBaselines() {
               same rows and duplicating the textarea would let them drift apart. */}
           <input type="hidden" name="intent" ref={intent} value="dry-run" readOnly />
           <s-stack gap="base">
-            {/* A native textarea rather than `s-text-area`, for the same reason the
-                selects on this page are native: a plain element that is certain to
-                serialise into the form, with no web-component behaviour between the
-                merchant's paste and the request. */}
-            <label htmlFor="csv">Rows</label>
-            <textarea id="csv" name="csv" rows={12} style={{ width: "100%", fontFamily: "monospace" }} />
+                        <s-text-area
+              name="csv"
+              label="Rows"
+              rows={12}
+              details="One variant per line. Paste straight from a spreadsheet."
+            />
             <s-stack direction="inline" gap="base">
               <s-button
                 type="button"

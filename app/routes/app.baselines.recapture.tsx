@@ -115,15 +115,20 @@ export default function Recapture() {
 
         <fetcher.Form method="get">
           <s-stack gap="base">
-            <label htmlFor="segment">Scope</label>
-            <select id="segment" name="segment" defaultValue={segmentId}>
-              <option value="">The whole catalogue</option>
+            <s-select name="segment" label="Scope">
+              <s-option value="" defaultSelected={!segmentId}>
+                The whole catalogue
+              </s-option>
               {segments.map((segment) => (
-                <option key={segment.id} value={segment.id}>
+                <s-option
+                  key={segment.id}
+                  value={segment.id}
+                  defaultSelected={segmentId === segment.id}
+                >
                   {segment.name} ({segment.kind === "DYNAMIC" ? "dynamic" : "frozen"})
-                </option>
+                </s-option>
               ))}
-            </select>
+            </s-select>
             <s-button type="submit">Check this scope</s-button>
           </s-stack>
         </fetcher.Form>

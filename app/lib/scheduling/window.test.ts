@@ -4,6 +4,7 @@ import fc from "fast-check";
 import {
   DEFAULT_REVERT_BUFFER_MINUTES,
   describeSchedule,
+  joinDateAndTime,
   dueTransition,
   effectiveBufferMs,
   scheduleWarnings,
@@ -229,5 +230,35 @@ describe("revert buffer capping", () => {
   it("has nothing to warn about for a manual schedule or a sane window", () => {
     expect(scheduleWarnings({ kind: "manual" })).toEqual([]);
     expect(scheduleWarnings(window())).toEqual([]);
+  });
+});
+
+
+describe("recombining a date field and a time field", () => {
+  it("joins them into a datetime-local value", () => {
+    expect(joinDateAndTime("2026-08-27", "14:30", "09:00")).toBe("2026-08-27T14:30");
+  });
+
+  it("takes the default hour when only a date was given", () => {
+    // Not an error. The merchant said which day and left the hour to us — refusing
+    // would lose a schedule they meant to set.
+    expect(joinDateAndTime("2026-08-27", "", "09:00")).toBe("2026-08-27T09:00");
+    expect(joinDateAndTime("2026-08-27", null, "23:59")).toBe("2026-08-27T23:59");
+  });
+
+  it("is nothing at all when only a time was given", () => {
+    // An hour on no particular day cannot be scheduled, and inventing a day would
+    // schedule a sale the merchant never asked for.
+    expect(joinDateAndTime("", "14:30", "09:00")).toBe("");
+    expect(joinDateAndTime(null, "14:30", "09:00")).toBe("");
+  });
+
+  it("ignores a malformed time rather than producing a malformed datetime", () => {
+    expect(joinDateAndTime("2026-08-27", "2pm", "09:00")).toBe("2026-08-27T09:00");
+    expect(joinDateAndTime("2026-08-27", "9:00", "09:00")).toBe("2026-08-27T09:00");
+  });
+
+  it("ignores a malformed date entirely", () => {
+    expect(joinDateAndTime("27/08/2026", "14:30", "09:00")).toBe("");
   });
 });

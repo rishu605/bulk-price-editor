@@ -159,14 +159,11 @@ export default function Settings() {
 
         <fetcher.Form method="post">
           <s-stack gap="base">
-            <label>
-              <input
-                type="checkbox"
-                name="neverBelowCost"
-                defaultChecked={settings.neverBelowCost}
-              />{" "}
-              Never price at or below cost
-            </label>
+            <s-checkbox
+              name="neverBelowCost"
+              label="Never price at or below cost"
+              defaultChecked={settings.neverBelowCost || undefined}
+            />
 
             <s-number-field
               name="minMarginPercent"
@@ -182,28 +179,29 @@ export default function Settings() {
               details="An absolute floor, whatever the rule computes. Leave blank for none."
             />
 
-            <label htmlFor="violationPolicy">When a price would breach a floor</label>
-            <select
-              id="violationPolicy"
-              name="violationPolicy"
-              defaultValue={settings.violationPolicy}
-            >
-              <option value="clamp">Clamp it to the floor and carry on</option>
-              <option value="skip">Skip that variant, price the rest</option>
-              <option value="block">Block the whole campaign</option>
-            </select>
+            <s-select name="violationPolicy" label="When a price would breach a floor">
+              <s-option value="clamp" defaultSelected={settings.violationPolicy === "clamp"}>
+                Clamp it to the floor and carry on
+              </s-option>
+              <s-option value="skip" defaultSelected={settings.violationPolicy === "skip"}>
+                Skip that variant, price the rest
+              </s-option>
+              <s-option value="block" defaultSelected={settings.violationPolicy === "block"}>
+                Block the whole campaign
+              </s-option>
+            </s-select>
 
-            <label htmlFor="missingCostPolicy">
-              When a cost-based floor meets a variant with no cost
-            </label>
-            <select
-              id="missingCostPolicy"
+            <s-select
               name="missingCostPolicy"
-              defaultValue={settings.missingCostPolicy}
+              label="When a cost-based floor meets a variant with no cost"
             >
-              <option value="skip">Skip that variant</option>
-              <option value="error">Fail the campaign</option>
-            </select>
+              <s-option value="skip" defaultSelected={settings.missingCostPolicy === "skip"}>
+                Skip that variant
+              </s-option>
+              <s-option value="error" defaultSelected={settings.missingCostPolicy === "error"}>
+                Fail the campaign
+              </s-option>
+            </s-select>
 
             <s-button type="submit" variant="primary" loading={busy || undefined}>
               Save guardrails
@@ -224,18 +222,17 @@ export default function Settings() {
           <input type="hidden" name="intent" value="rounding" />
 
           <s-stack gap="base">
-            <label htmlFor="rounding.default">Everywhere, unless overridden</label>
-            <select
-              id="rounding.default"
-              name="rounding.default"
-              defaultValue={settings.rounding.default}
-            >
+            <s-select name="rounding.default" label="Everywhere, unless overridden">
               {roundingOptions.map((option) => (
-                <option key={option.value} value={option.value}>
+                <s-option
+                  key={option.value}
+                  value={option.value}
+                  defaultSelected={option.value === settings.rounding.default}
+                >
                   {option.label}
-                </option>
+                </s-option>
               ))}
-            </select>
+            </s-select>
 
             {currencies.length > 1 ? (
               <>
@@ -253,26 +250,27 @@ export default function Settings() {
                   const effective = profileNameFor(settings.rounding, code);
 
                   return (
-                    <s-stack key={code} gap="small">
-                      <label htmlFor={`rounding.${code}`}>
-                        {code}
-                        {code === currency ? " (your store's currency)" : ""}
-                      </label>
-                      <select
-                        id={`rounding.${code}`}
-                        name={`rounding.${code}`}
-                        defaultValue={settings.rounding.byCurrency[code] ?? "inherit"}
+                    <s-select
+                      key={code}
+                      name={`rounding.${code}`}
+                      label={`${code}${code === currency ? " (your store's currency)" : ""}`}
+                    >
+                      <s-option
+                        value="inherit"
+                        defaultSelected={!settings.rounding.byCurrency[code]}
                       >
-                        <option value="inherit">
-                          Use the setting above ({ROUNDING_LABELS[effective].toLowerCase()})
-                        </option>
-                        {roundingOptions.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </s-stack>
+                        Use the setting above ({ROUNDING_LABELS[effective].toLowerCase()})
+                      </s-option>
+                      {roundingOptions.map((option) => (
+                        <s-option
+                          key={option.value}
+                          value={option.value}
+                          defaultSelected={settings.rounding.byCurrency[code] === option.value}
+                        >
+                          {option.label}
+                        </s-option>
+                      ))}
+                    </s-select>
                   );
                 })}
               </>
