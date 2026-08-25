@@ -56,6 +56,8 @@ export interface ChaosContext {
 export interface ChaosSpec {
   catalog: CatalogSpec;
   percent?: number;
+  /** Storefront tags the campaign applies while it runs. */
+  tagKit?: string[];
   /** Polls a bulk operation stays RUNNING. Higher exercises the fallback harder. */
   pollsBeforeComplete?: number;
 }
@@ -82,6 +84,7 @@ export async function withChaos(
     fake: server.fake,
     catalog: spec.catalog,
     percent: spec.percent,
+    tagKit: spec.tagKit,
   });
 
   const client = chaosAdminClient(server.endpoint());

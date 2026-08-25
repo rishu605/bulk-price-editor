@@ -21,6 +21,7 @@ import { guardrailsFor } from "../settings.server";
 import type { RunOutcome } from "./types";
 import { transitionCampaign } from "./lifecycle.server";
 import { planResume, type LedgerState } from "../../lib/execution/resume";
+import { applyCampaignTags, removeCampaignTags } from "./tags.server";
 
 export interface RunOptions {
   revert?: boolean;
@@ -230,6 +231,12 @@ export async function runCampaign(
 
   const messages = await recordResults(run.id, shopId, result.rows);
 
+  // Tags after prices, deliberately. A badge on a product still showing full price is
+  // worse than a price change nobody has badged yet, so the storefront never claims a
+  // sale that has not landed.
+  const tagOutcome = await syncTags(shopId, campaignId, run.id, writable, products, client, options);
+  if (tagOutcome) messages.push(...tagOutcome.messages);
+
   await prisma.campaignRun.update({
     where: { id: run.id },
     data: {
@@ -296,6 +303,79 @@ export async function runCampaign(
       ...messages.slice(0, 5),
     ],
   };
+}
+
+/**
+ * Adds or removes the campaign's tag kit alongside the price write.
+ *
+ * Failures are reported but never fail the run. A price that landed and a badge that
+ * did not is a visibly incomplete campaign the merchant can retry; throwing here would
+ * discard a successful price write over a cosmetic one, and the ledger already records
+ * exactly which products are missing their tags.
+ */
+async function syncTags(
+  shopId: string,
+  campaignId: string,
+  runId: string,
+  rows: PlannedRow[],
+  products: Map<string, string>,
+  client: AdminClient,
+  options: RunOptions,
+): Promise<{ messages: string[] } | null> {
+  const campaign = await prisma.campaign.findUnique({
+    where: { id: campaignId },
+    select: { tagKit: true },
+  });
+  if (!campaign?.tagKit.length) return null;
+
+  try {
+    if (options.revert) {
+      // Scoped reverts leave tags alone: one variant coming out of a sale does not
+      // un-badge the product, whose other variants are still in it.
+      if (options.variantGids) return null;
+      const outcome = await removeCampaignTags(shopId, campaignId, client);
+      return {
+        messages:
+          outcome.failed > 0
+            ? [`${outcome.failed} product(s) kept their campaign tags — see the run for why.`]
+            : [],
+      };
+    }
+
+    const productGids = [
+      ...new Set(rows.map((row) => products.get(row.ref.variantGid)).filter((gid): gid is string => !!gid)),
+    ];
+
+    const outcome = await applyCampaignTags(
+      shopId,
+      campaignId,
+      runId,
+      productGids,
+      campaign.tagKit,
+      client,
+    );
+
+    const notes: string[] = [];
+    if (outcome.failed > 0) {
+      notes.push(`${outcome.failed} product(s) could not be tagged — prices were still applied.`);
+    }
+    if (outcome.leftAlone > 0) {
+      // Said out loud, because the alternative reading is that the app failed to tag
+      // them. It did not: they were already tagged, and they are the merchant's.
+      notes.push(
+        `${outcome.leftAlone} tag(s) were already on their products and were left as they are.`,
+      );
+    }
+    return { messages: notes };
+  } catch (error) {
+    return {
+      messages: [
+        `Prices were applied, but tagging did not finish: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      ],
+    };
+  }
 }
 
 /** Prisma's unique-constraint violation, which here means somebody else got there first. */

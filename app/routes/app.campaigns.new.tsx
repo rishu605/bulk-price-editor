@@ -145,6 +145,10 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
     priority: Number(form.get("priority") ?? 100) || 100,
     // An unchecked checkbox is simply absent from the form, so presence is the value.
     autoEnroll: form.get("autoEnroll") !== null,
+    tagKit: String(form.get("tagKit") ?? "")
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter(Boolean),
     schedule,
   });
 
@@ -279,6 +283,13 @@ export default function NewCampaign() {
               label="Priority"
               defaultValue="100"
               details="Higher wins when two campaigns cover the same variant. They never stack."
+            />
+
+            <s-text-field
+              name="tagKit"
+              label="Storefront tags (optional)"
+              placeholder="SALE, SUMMER"
+              details="Comma separated. Added to each product while the campaign runs and removed when it ends, so your theme can badge sale items. Tags a product already has are never removed."
             />
 
             <s-checkbox
