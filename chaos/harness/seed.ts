@@ -68,6 +68,12 @@ export async function seedFixture(options: SeedOptions): Promise<Fixture> {
   const shop = await prisma.shop.create({
     data: {
       domain,
+      // Entitled by default. These scenarios exist to test the pricing engine, not the
+      // billing gates, and a fixture on the free plan would fail every market scenario
+      // for a reason that has nothing to do with what it is testing. The downgrade
+      // scenarios set their own tier.
+      planTier: "WHOLESALE",
+      subscriptionStatus: "ACTIVE",
       scopes: "write_products",
       timezone: "UTC",
       initialSyncCompletedAt: new Date(),

@@ -16,7 +16,8 @@ import type { PlannedRow } from "../../lib/planning/types";
 import { planRun } from "../../lib/planning/plan";
 import { recordWriteIntents } from "../drift.server";
 import { loadCandidates, productMapFor } from "./candidates.server";
-import { isPractice, loadCampaignContext } from "./model.server";
+import { isPractice, loadCampaignContext, scopeOf } from "./model.server";
+import { astToWhere } from "../segments.server";
 import { AppError } from "../../lib/errors/app-error";
 import { guardrailsFor } from "../settings.server";
 import type { RunOutcome } from "./types";
@@ -112,6 +113,35 @@ export async function runCampaign(
   // Scoped runs are exempt: reverting one variant out of a four-thousand-variant sale
   // says nothing about the campaign, and moving it to APPLYING would misreport the
   // other 3,999.
+  // ---------------------------------------------------------- the plan gate (E8)
+  //
+  // Applies only. A revert is never gated on any plan, ever: a merchant who downgrades
+  // mid-campaign must still get their scheduled revert, and a store left at 40% off
+  // because we stopped reverting is a revenue incident we caused. No amount of "they
+  // downgraded" makes that defensible.
+  //
+  // Checked here rather than only in the wizard because a catalogue grows and a plan can
+  // lapse between a campaign being created and the scheduler running it, and the
+  // scheduler never goes near the wizard.
+  if (!options.revert) {
+    const refusal = await refusedByPlan(shopId, campaignId, options.variantGids?.length);
+    if (refusal) {
+      return {
+        runId: "",
+        planned: 0,
+        verified: 0,
+        failed: 0,
+        unverified: 0,
+        // Clean, because nothing is half-done: no price moved and no ledger row exists.
+        // Reporting this as unclean would put a campaign into the "needs attention"
+        // queue for a reason the merchant cannot resolve by attending to it.
+        clean: true,
+        messages: [refusal],
+        refusedByPlan: refusal,
+      };
+    }
+  }
+
   if (!options.variantGids) {
     await transitionCampaign(shopId, campaignId, options.revert ? "REVERTING" : "APPLYING", {
       reason: options.resume ? "resume requested" : options.revert ? "revert requested" : "apply requested",
@@ -754,4 +784,62 @@ async function refreshMirror(shopId: string, rows: ExecutedRows): Promise<void> 
       },
     });
   }
+}
+
+
+/**
+ * Whether the shop's plan refuses to start this campaign, and why.
+ *
+ * Returns a merchant-facing sentence rather than throwing, because a scheduled run that
+ * threw would surface as a failed run — and "your sale failed" is a much worse thing to
+ * read than "your plan does not cover this campaign, here is the one that does".
+ *
+ * Called for applies only. There is a chaos scenario asserting that a downgraded shop
+ * still reverts, which is the whole of edge case E8.
+ */
+async function refusedByPlan(
+  shopId: string,
+  campaignId: string,
+  scopedCount: number | undefined,
+): Promise<string | null> {
+  const { billingFor } = await import("../billing.server");
+  const { canStart } = await import("../../lib/billing/plans");
+  const { parseSurfaces } = await import("./market-surfaces.server");
+
+  const [{ plan, exempt }, campaign] = await Promise.all([
+    billingFor(shopId),
+    prisma.campaign.findFirst({
+      where: { id: campaignId, shopId },
+      select: { surfaces: true, schedule: true },
+    }),
+  ]);
+
+  if (exempt || !campaign) return null;
+
+  const surfaces = parseSurfaces(campaign.surfaces);
+  const lists = surfaces.priceLists.length
+    ? await prisma.priceListRecord.findMany({
+        where: { shopId, priceListGid: { in: surfaces.priceLists } },
+        select: { surfaceKind: true },
+      })
+    : [];
+
+  // Counted from the campaign's own scope rather than the whole catalogue: the plan
+  // meters variants *under management*, and a campaign targeting forty products on a
+  // 500K store is forty variants under management.
+  const variants =
+    scopedCount ??
+    (await prisma.variantIndex.count({
+      // Through `scopeOf`, so a campaign targeting a segment is metered on what the
+      // segment matches now — the same set its run will price.
+      where: astToWhere(shopId, await scopeOf(shopId, campaign)),
+    }));
+
+  const verdict = canStart(plan, {
+    variants,
+    markets: lists.some((list) => list.surfaceKind !== "B2B"),
+    b2b: lists.some((list) => list.surfaceKind === "B2B"),
+  });
+
+  return verdict.allowed ? null : verdict.message;
 }

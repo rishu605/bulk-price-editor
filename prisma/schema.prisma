@@ -61,6 +61,17 @@ model Shop {
   planTier   PlanTier @default(FREE)
   variantCap Int?
 
+  /// The Shopify subscription behind the tier, and what state it is in. Without these a
+  /// downgrade is indistinguishable from a webhook we missed.
+  subscriptionGid    String?
+  subscriptionStatus String?
+  trialEndsAt        DateTime?
+  planChangedAt      DateTime?
+
+  /// Dev and partner stores are exempt from billing. Not a fifth tier: such a store is
+  /// not on a plan at all, it is testing whichever tier it has selected.
+  developerStore Boolean @default(false)
+
   /// IANA zone, e.g. "America/Toronto". Campaign times are stored UTC and rendered
   /// in this zone; the UI always shows which zone it is displaying.
   timezone String @default("UTC")
