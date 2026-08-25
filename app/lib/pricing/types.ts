@@ -127,6 +127,21 @@ export interface ResolvableCampaign {
   /** Tightens the store guardrails for this campaign only. */
   guardrails?: Guardrails;
   guardrailViolationPolicy: GuardrailViolationPolicy;
+  /**
+   * Variants this campaign no longer prices, because someone reverted them out of it
+   * individually.
+   *
+   * Not a filter applied before resolution -- an input to it. Removing the campaign
+   * for one variant lets the next campaign in priority order take over, which is the
+   * whole point: a variant pulled out of a 30% sale that also sits in a 10% one
+   * should land on 10%, not on full price. Filtering the candidate out upstream would
+   * silently produce the latter.
+   *
+   * The resolver itself never sees this, because it has no variant identity by
+   * design. The planner applies it per candidate, in the same place it applies a
+   * campaign-level revert, so preview and execution cannot disagree.
+   */
+  excludedVariantGids?: string[];
 }
 
 // ------------------------------------------------------------------ results

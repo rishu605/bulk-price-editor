@@ -43,6 +43,26 @@ export interface RunOptions {
    * second one. Defaults to the current instant, which is right for a manual apply.
    */
   occurrenceKey?: string;
+  /**
+   * Restricts the run to these variants.
+   *
+   * A variant-level revert would otherwise replan the entire campaign to fix one row,
+   * which on a large catalogue costs more than the operation it is performing. The
+   * planner still resolves against every campaign, so the row lands where full
+   * resolution would have put it -- the scope narrows what is examined, never how it
+   * is decided.
+   */
+  variantGids?: string[];
+  /**
+   * Variants to leave exactly as they are, recorded rather than silently dropped.
+   *
+   * This is the rollback report's "keep the merchant's edit". Somebody changed the
+   * price by hand while the campaign was running, and reverting would overwrite a
+   * deliberate decision. The rows still land in the ledger as SKIPPED with the reason
+   * attached, because "we chose not to touch these" is exactly the kind of thing that
+   * has to be explainable six weeks later.
+   */
+  skipVariantGids?: string[];
 }
 
 export async function runCampaign(
@@ -53,7 +73,7 @@ export async function runCampaign(
 ): Promise<RunOutcome> {
   const { resolvable, ast } = await loadCampaignContext(shopId, campaignId);
   const [candidates, storeGuardrails] = await Promise.all([
-    loadCandidates(shopId, ast),
+    loadCandidates(shopId, ast, options.variantGids),
     guardrailsFor(shopId),
   ]);
 
@@ -72,7 +92,20 @@ export async function runCampaign(
   }
 
   const kind = options.revert ? "REVERT" : "APPLY";
-  let writable = outcome.rows.filter((row) => row.status !== "skipped");
+  const leaveAlone = new Set(options.skipVariantGids ?? []);
+
+  let writable = outcome.rows.filter(
+    (row) => row.status !== "skipped" && !leaveAlone.has(row.ref.variantGid),
+  );
+
+  // Planned, then deliberately not written. Kept separate from `writable` so nothing
+  // downstream can accidentally execute them, and still ledgered below.
+  const spared =
+    leaveAlone.size === 0
+      ? []
+      : outcome.rows.filter(
+          (row) => row.status !== "skipped" && leaveAlone.has(row.ref.variantGid),
+        );
 
   // Resuming: drop rows a previous attempt already verified. The resolver would reach
   // the same answer for them anyway, but re-sending costs rate limit and, worse, the
@@ -136,6 +169,7 @@ export async function runCampaign(
   }
 
   await writeLedgerRows(run.id, shopId, writable);
+  await writeSparedRows(run.id, shopId, spared);
 
   // Record intents before writing: every price we write produces a products/update
   // webhook moments later, and without this the drift detector would flag our own
@@ -182,6 +216,15 @@ export async function runCampaign(
       finishedAt: new Date(),
     },
   });
+
+  // A run over a named handful of variants says nothing about the campaign as a
+  // whole. Reverting one variant out of a four-thousand-variant sale must not mark
+  // the sale COMPLETED -- it is still running, for everything else. The ledger records
+  // what happened to those rows; the campaign's own state is left alone.
+  if (options.variantGids) {
+    await refreshMirror(shopId, result.rows);
+    return scopedOutcome(run.id, outcome.counts.planned, result, messages);
+  }
 
   // Through the state machine, not a direct write: it enforces which moves are legal
   // and records how the campaign got here. A run that finishes late must not clobber a
@@ -269,6 +312,61 @@ function heartbeat(runId: string, everyMs = 5_000) {
       // Liveness is a hint, never a reason to fail a run that is otherwise working.
     }
   };
+}
+
+/** The outcome shape for a scoped run, which reports rows without judging the campaign. */
+function scopedOutcome(
+  runId: string,
+  planned: number,
+  result: Awaited<ReturnType<typeof executeRows>>,
+  messages: string[],
+): RunOutcome {
+  return {
+    runId,
+    planned,
+    verified: result.verified,
+    failed: result.failed,
+    unverified: result.unverified,
+    clean: result.clean,
+    messages: messages.slice(0, 5),
+  };
+}
+
+/**
+ * Ledgers the rows a person chose not to touch.
+ *
+ * Written as SKIPPED and already settled, so they never look like outstanding work to
+ * a resume, and never count against a clean run. The reason is stored on the row
+ * because the run view is where somebody asks why a variant they expected to change
+ * did not.
+ */
+async function writeSparedRows(
+  runId: string,
+  shopId: string,
+  rows: PlannedRow[],
+): Promise<void> {
+  if (rows.length === 0) return;
+
+  await prisma.variantChange.createMany({
+    data: rows.map((row) => ({
+      runId,
+      shopId,
+      variantGid: row.ref.variantGid,
+      surfaceKind: "BASE" as const,
+      priceListGid: "",
+      currency: row.ref.currency,
+      beforePrice: row.beforePrice ? BigInt(row.beforePrice.amount) : null,
+      beforeCompareAt: row.beforeCompareAt ? BigInt(row.beforeCompareAt.amount) : null,
+      intendedPrice: row.intendedPrice ? BigInt(row.intendedPrice.amount) : null,
+      intendedCompareAt: row.intendedCompareAt ? BigInt(row.intendedCompareAt.amount) : null,
+      intendedCompareAtSet: row.intendedCompareAtSet,
+      status: "SKIPPED" as const,
+      failureReason:
+        "Left as it is: this price was changed outside the app and you chose to keep that edit.",
+      appliedAt: new Date(),
+    })),
+    skipDuplicates: true,
+  });
 }
 
 /** Write-ahead ledger. Chunked so a large plan does not build one giant statement. */

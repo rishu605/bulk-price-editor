@@ -64,7 +64,14 @@ export function astOf(campaign: Pick<Campaign, "schedule">): FilterAst {
 export function toResolvable(
   campaign: Pick<
     Campaign,
-    "id" | "priority" | "ruleRows" | "compareAtPolicy" | "guardrails" | "schedule" | "createdAt"
+    | "id"
+    | "priority"
+    | "ruleRows"
+    | "compareAtPolicy"
+    | "guardrails"
+    | "schedule"
+    | "createdAt"
+    | "excludedVariantGids"
   >,
 ): ResolvableCampaign {
   const schedule = (campaign.schedule ?? {}) as { rounding?: string };
@@ -83,6 +90,10 @@ export function toResolvable(
     roundingProfile: roundingFor(schedule.rounding),
     guardrails: (campaign.guardrails ?? undefined) as unknown as Guardrails | undefined,
     guardrailViolationPolicy: "clamp",
+    // Variants reverted out of this campaign individually. Carried into resolution
+    // rather than filtered out beforehand, so an excluded variant falls through to
+    // whatever else still controls it instead of jumping to full price.
+    excludedVariantGids: campaign.excludedVariantGids,
   };
 }
 

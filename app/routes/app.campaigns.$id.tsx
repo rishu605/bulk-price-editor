@@ -9,12 +9,16 @@ import { toAdminClient } from "../services/admin-client.server";
 import {
   campaignRuns,
   previewCampaign,
+  reinstateVariant,
+  revertVariant,
+  rollbackReport,
   runCampaign,
   runLedger,
 } from "../services/campaigns/index.server";
 import { describeSchedule, parseSchedule, scheduleWarnings } from "../lib/scheduling/window";
 import { CountsRow } from "../components/CountsRow";
 import { LedgerTable } from "../components/LedgerTable";
+import { RollbackReportTable } from "../components/RollbackReportTable";
 import { PreviewTable } from "../components/PreviewTable";
 import { RunHistoryTable } from "../components/RunHistoryTable";
 import { RouteBoundary } from "../components/RouteBoundary";
@@ -61,7 +65,17 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
   const selectedRunId = requested ?? runs[0]?.id ?? null;
   const ledger = selectedRunId ? await runLedger(shop.id, selectedRunId) : [];
 
+  // Only for a campaign that has actually written something and could still be
+  // reverted. It costs a full plan, and on a draft it would be a report about
+  // nothing -- the honest answer there is that there is nothing to roll back.
+  const revertable = state === "ACTIVE" || state === "PARTIAL" || state === "HELD";
+  const rollback =
+    revertable && runs.some((run) => run.kind === "APPLY")
+      ? await rollbackReport(shop.id, campaignId)
+      : null;
+
   return {
+    rollback,
     preview,
     runs,
     ledger,
@@ -80,10 +94,32 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
 export const action = withGuard("/app/campaigns/$id", async ({ request, params }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
-  const intent = String((await request.formData()).get("intent"));
+  const form = await request.formData();
+  const intent = String(form.get("intent"));
   const reverting = intent === "revert";
 
   try {
+    // Reverting one variant out of a running campaign, rather than ending the whole
+    // thing. The exclusion is durable, so tonight's scheduled run leaves it alone too.
+    if (intent === "revert-variant" || intent === "reinstate-variant") {
+      const variantGid = String(form.get("variantGid"));
+      const result =
+        intent === "revert-variant"
+          ? await revertVariant(shop.id, String(params.id), variantGid, toAdminClient(admin), {
+              actor: session.shop,
+              excludeOnly: form.get("excludeOnly") === "1",
+            })
+          : await reinstateVariant(shop.id, String(params.id), variantGid, toAdminClient(admin), {
+              actor: session.shop,
+            });
+
+      return {
+        ok: result.outcome ? result.outcome.clean : true,
+        message: result.message,
+        details: result.outcome?.messages ?? [],
+      };
+    }
+
     // Resume is an ordinary apply. The resolver is idempotent, so rows already at the
     // campaign price are planned as "already correct" and cost nothing — only the ones
     // that failed last time are written again. A separate retry path would be a second
@@ -91,6 +127,9 @@ export const action = withGuard("/app/campaigns/$id", async ({ request, params }
     const result = await runCampaign(shop.id, String(params.id), toAdminClient(admin), {
       revert: reverting,
       resume: intent === "resume",
+      // Rows the merchant ticked "leave as it is" in the rollback report. Only
+      // meaningful on a revert; an apply has no drifted-row conversation to honour.
+      skipVariantGids: reverting ? form.getAll("keep").map(String) : undefined,
     });
 
     const verb = reverting ? "Reverted" : intent === "resume" ? "Resumed" : "Applied";
@@ -141,6 +180,7 @@ type ActionData = {
 
 export default function CampaignDetail() {
   const {
+    rollback,
     preview,
     runs,
     ledger,
@@ -224,15 +264,70 @@ export default function CampaignDetail() {
         </s-section>
       ) : null}
 
+      {rollback && rollback.counts.total > 0 ? (
+        <s-section heading="If you revert this campaign">
+          <s-paragraph>
+            <s-text>
+              {rollback.straightforward
+                ? `All ${rollback.counts.total} variants are still at the price this campaign set. Reverting recomputes each one without it.`
+                : `${rollback.counts.drifted} of ${rollback.counts.total} variants have been changed since this campaign set them. Someone edited those on purpose — tick any you want left alone, then revert.`}
+            </s-text>
+          </s-paragraph>
+
+          {rollback.counts.deleted > 0 ? (
+            <s-paragraph>
+              <s-text>
+                {rollback.counts.deleted} variant
+                {rollback.counts.deleted === 1 ? " was" : "s were"} deleted in Shopify.
+                Nothing is written for {rollback.counts.deleted === 1 ? "it" : "them"}.
+              </s-text>
+            </s-paragraph>
+          ) : null}
+
+          <fetcher.Form method="post">
+            <input type="hidden" name="intent" value="revert" />
+            <RollbackReportTable rows={rollback.rows} />
+            <s-stack direction="inline" gap="base">
+              <s-button type="submit" tone="critical" loading={busy || undefined}>
+                Revert, keeping the ticked edits
+              </s-button>
+              <s-link href={`/app/campaigns/${rollback.campaignId}/rollback`}>
+                Export this report (CSV)
+              </s-link>
+            </s-stack>
+          </fetcher.Form>
+        </s-section>
+      ) : null}
+
       {ledger.length > 0 ? (
         <s-section heading="Ledger">
           <s-paragraph>
             <s-text>
               Every row we wrote, with what it was and what we intended. Retained
-              indefinitely on every plan.
+              indefinitely on every plan. Reverting a single variant takes it out of
+              this campaign for good — including future scheduled runs — and recomputes
+              its price without it.
             </s-text>
           </s-paragraph>
-          <LedgerTable rows={ledger} />
+          <LedgerTable
+            rows={ledger}
+            renderAction={(row) =>
+              // Only rows this campaign actually wrote. Offering to revert a row that
+              // failed or was skipped would promise to undo something that never
+              // happened.
+              row.status === "VERIFIED" || row.status === "APPLIED" ? (
+                <fetcher.Form method="post">
+                  <input type="hidden" name="intent" value="revert-variant" />
+                  <input type="hidden" name="variantGid" value={row.variantGid} />
+                  <s-button type="submit" variant="tertiary" loading={busy || undefined}>
+                    Revert this variant
+                  </s-button>
+                </fetcher.Form>
+              ) : (
+                <s-text>—</s-text>
+              )
+            }
+          />
         </s-section>
       ) : null}
 
@@ -259,12 +354,27 @@ export default function CampaignDetail() {
             </fetcher.Form>
           ) : null}
 
-          <fetcher.Form method="post">
-            <input type="hidden" name="intent" value="revert" />
-            <s-button type="submit" tone="critical" loading={busy || undefined}>
-              Revert
-            </s-button>
-          </fetcher.Form>
+          {rollback && !rollback.straightforward ? (
+            // Deliberately not a button. There are edits to decide about, and a
+            // one-click revert here would silently overwrite them -- the decision
+            // belongs in the report, where the merchant can see what they are
+            // choosing between.
+            <s-paragraph>
+              <s-text>
+                {rollback.counts.drifted} variant
+                {rollback.counts.drifted === 1 ? " has" : "s have"} been changed since
+                this campaign set {rollback.counts.drifted === 1 ? "it" : "them"}.
+                Review them above before reverting.
+              </s-text>
+            </s-paragraph>
+          ) : (
+            <fetcher.Form method="post">
+              <input type="hidden" name="intent" value="revert" />
+              <s-button type="submit" tone="critical" loading={busy || undefined}>
+                Revert
+              </s-button>
+            </fetcher.Form>
+          )}
         </s-stack>
 
         <s-paragraph>

@@ -39,7 +39,7 @@ export interface ChaosContext {
   /** Applies the campaign in-process, through the real run path. */
   apply(options?: RunOptions): Promise<RunOutcome>;
   /** Reverts it, likewise -- `resolve(without C)`, not a restore. */
-  revert(): Promise<RunOutcome>;
+  revert(options?: RunOptions): Promise<RunOutcome>;
 
   /** What the store says right now, per variant. */
   livePrices(): Map<string, string | undefined>;
@@ -109,13 +109,14 @@ export async function withChaos(
       });
     },
 
-    revert: async () => {
+    revert: async (options = {}) => {
       await transitionCampaign(fixture.shopId, fixture.campaignId, "REVERTING", {
         reason: `chaos/${scenario}: reset`,
       });
       return runCampaign(fixture.shopId, fixture.campaignId, client, {
         revert: true,
         verifySampleRate: 1,
+        ...options,
       });
     },
 

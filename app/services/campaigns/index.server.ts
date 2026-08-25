@@ -10,6 +10,15 @@ export { loadCandidates, productMapFor, titleMapFor } from "./candidates.server"
 export { previewCampaign, type PreviewOptions } from "./preview.server";
 export { runCampaign, type RunOptions } from "./run.server";
 export { campaignRuns, runLedger } from "./history.server";
+export { revertVariant, reinstateVariant } from "./variant-revert.server";
+export {
+  rollbackReport,
+  rollbackReportCsv,
+  classifyRollbackRow,
+  type RollbackReport,
+  type RollbackRow,
+  type RollbackRowKind,
+} from "./rollback-report.server";
 export type {
   CampaignInput,
   CampaignPreview,
