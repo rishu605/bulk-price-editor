@@ -8,6 +8,11 @@
  * Debug-grade polish is deliberate at this stage: the audience is us and, later,
  * support. It grows into the merchant-facing reconciliation view (P5.6), which is the
  * same question asked more politely.
+ *
+ * Named `_index` rather than `app.baselines`, because flat routes would otherwise make
+ * this file the *layout* for everything under /app/baselines — and a layout with no
+ * `<Outlet />` renders itself in place of its children. Naming it `app.baselines` broke
+ * both the import and recapture pages into showing this table instead.
  */
 
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
