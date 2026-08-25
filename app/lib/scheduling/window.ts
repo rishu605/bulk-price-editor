@@ -264,3 +264,46 @@ export function utcToLocalInput(iso: string | undefined, timeZone: string): stri
   const hour = get("hour") === "24" ? "00" : get("hour");
   return `${get("year")}-${get("month")}-${get("day")}T${hour}:${get("minute")}`;
 }
+
+/**
+ * Which occurrence a scheduled run is for.
+ *
+ * `campaign_runs` carries a unique index on (campaign, occurrence, kind), documented as
+ * making recurring runs idempotent so a duplicate scheduler tick cannot double-apply.
+ * That only works if the key identifies the *occurrence*. It used to be
+ * `${kind}-${Date.now()}`, which identifies the instant a run happened to start — so two
+ * ticks two milliseconds apart produced two different keys and two runs, and the index
+ * fired only on an exact-millisecond collision, which is the one case where it was least
+ * useful.
+ *
+ * A windowed campaign has a real answer: the window's own start or end. Two ticks that
+ * both find the same window due now produce the same key, the second loses the insert,
+ * and the loser stands down instead of applying a second time.
+ *
+ * Manual runs keep the instant, deliberately. Deduplicating those is not what the index
+ * is for — a merchant clicking Apply is watching the screen, the button disables itself,
+ * and collapsing two deliberate applies seconds apart would break the ordinary
+ * apply/revert/apply-again rhythm for no safety gained.
+ */
+export function occurrenceKeyFor(
+  schedule: Schedule,
+  transition: Transition,
+  now: Date = new Date(),
+): string {
+  const kind = transition === "apply" ? "APPLY" : "REVERT";
+
+  if (schedule.kind !== "window") return `${kind}-${now.getTime()}`;
+
+  // Normalised through Date, so "2026-08-26T10:00:00Z" and "2026-08-26T10:00:00.000Z"
+  // are the same occurrence rather than two.
+  const instant =
+    transition === "apply"
+      ? new Date(schedule.startAt).toISOString()
+      : schedule.endAt
+        ? new Date(schedule.endAt).toISOString()
+        // A window with no end is reverted by hand, so the occurrence is the moment it
+        // was asked for. There is no scheduled instant to name.
+        : new Date(now).toISOString();
+
+  return `${kind}@${instant}`;
+}

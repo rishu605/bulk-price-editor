@@ -8,7 +8,12 @@
  */
 
 import prisma from "../db.server";
-import { dueTransition, parseSchedule, type Transition } from "../lib/scheduling/window";
+import {
+  dueTransition,
+  occurrenceKeyFor,
+  parseSchedule,
+  type Transition,
+} from "../lib/scheduling/window";
 import { runCampaign } from "./campaigns/run.server";
 import { adminClientForShop } from "./admin-client.server";
 import { claimEnrollment, pendingEnrollments } from "./auto-enroll.server";
@@ -79,7 +84,16 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
     if (!transition) continue;
 
     try {
-      await runTransition(campaign.shop.id, campaign.shop.domain, campaign.id, transition);
+      await runTransition(
+        campaign.shop.id,
+        campaign.shop.domain,
+        campaign.id,
+        transition,
+        // The occurrence this tick is acting on, not the instant it happened to run.
+        // Two ticks that both find this window due produce the same key, and the unique
+        // index turns the second into a no-op rather than a second apply.
+        occurrenceKeyFor(parseSchedule(campaign.schedule), transition, now),
+      );
       if (transition === "apply") {
         result.applied++;
         transitioned.add(campaign.id);
@@ -216,6 +230,7 @@ async function runTransition(
   shopDomain: string,
   campaignId: string,
   transition: Transition,
+  occurrenceKey: string,
 ): Promise<void> {
   const client = await adminClientForShop(shopDomain);
   if (!client) throw new Error(`No usable session for ${shopDomain}`);
@@ -233,7 +248,10 @@ async function runTransition(
 
   if (claimed.count === 0) return; // someone else took it
 
-  await runCampaign(shopId, campaignId, client, { revert: transition === "revert" });
+  await runCampaign(shopId, campaignId, client, {
+    revert: transition === "revert",
+    occurrenceKey,
+  });
 }
 
 /** Campaigns with a schedule that has not yet fired, for the UI. */
