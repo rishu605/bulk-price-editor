@@ -21,6 +21,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "worker": "tsx scripts/worker.ts",
+    "feedback": "tsx scripts/feedback-review.ts",
     "test:chaos": "vitest run --config vitest.chaos.config.ts"
   },
   "type": "module",
