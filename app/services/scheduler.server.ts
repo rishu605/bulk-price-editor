@@ -12,6 +12,7 @@ import { dueTransition, parseSchedule, type Transition } from "../lib/scheduling
 import { runCampaign } from "./campaigns/run.server";
 import { adminClientForShop } from "./admin-client.server";
 import { claimEnrollment, pendingEnrollments } from "./auto-enroll.server";
+import { reclaimStaleRuns } from "./campaigns/reaper.server";
 
 export interface TickResult {
   examined: number;
@@ -19,6 +20,8 @@ export interface TickResult {
   reverted: number;
   /** Campaigns re-applied because products entered their scope while running. */
   enrolled: number;
+  /** Runs whose process died and which this tick marked visibly partial. */
+  reclaimed: number;
   failures: Array<{ campaignId: string; error: string }>;
 }
 
@@ -34,8 +37,15 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
     applied: 0,
     reverted: 0,
     enrolled: 0,
+    reclaimed: 0,
     failures: [],
   };
+
+  // First, before anything is scheduled. A run whose process died still holds its
+  // campaign in APPLYING, and a campaign in APPLYING is invisible to the query below
+  // -- so without reclaiming first, a dead run would block every future occurrence of
+  // that campaign forever, not merely display wrongly.
+  result.reclaimed = (await reclaimStaleRuns(now)).reclaimed;
 
   const candidates = await prisma.campaign.findMany({
     where: { status: { in: ["SCHEDULED", "ACTIVE", "PARTIAL"] } },

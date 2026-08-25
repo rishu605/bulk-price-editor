@@ -80,6 +80,14 @@ export interface ExecuteOptions {
   verifySampleRate?: number;
   /** Estimated cost per variant write, for budget reservation. */
   costPerVariant?: number;
+  /**
+   * Called as each product group settles.
+   *
+   * The caller uses it to stamp liveness: a run that cannot say it is still alive is
+   * indistinguishable from one whose process died, and the reaper has to be able to
+   * tell those apart (P2.8).
+   */
+  onProgress?: (done: number, total: number) => void | Promise<void>;
   /** Deterministic sampling hook for tests. */
   random?: () => number;
   sleep?: (ms: number) => Promise<void>;
@@ -143,6 +151,7 @@ export async function executeSync(
     productOf,
     verifySampleRate = 0.1,
     costPerVariant = 100,
+    onProgress,
     random = Math.random,
     sleep,
     maxAttempts = 5,
@@ -171,6 +180,7 @@ export async function executeSync(
     else byProduct.set(product, [row]);
   }
 
+  let settled = 0;
   for (const [productId, group] of byProduct) {
     await budget.reserve(costPerVariant * group.length);
 
@@ -260,9 +270,14 @@ export async function executeSync(
       // stay PENDING, so a resume after the fix picks them up untouched.
       if (stopsTheRun(classified)) {
         terminalRunFailure = classified.message;
+        settled += group.length;
+        await onProgress?.(settled, writable.length);
         break;
       }
     }
+
+    settled += group.length;
+    await onProgress?.(settled, writable.length);
   }
 
   await verifyRows(results, { client, budget, verifySampleRate, random, sleep, maxAttempts });

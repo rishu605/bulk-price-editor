@@ -36,6 +36,14 @@ export interface ExecuteContext {
   verifySampleRate?: number;
   /** Overrides the automatic choice. Only used by tests and diagnostics. */
   forcePath?: "sync" | "bulk";
+  /**
+   * Liveness signal, called as work settles on either path.
+   *
+   * Both paths report it, and they have to: a bulk run spends almost all its time
+   * waiting on a poll, so a heartbeat that only fired on sync writes would let the
+   * reaper declare every long bulk run dead.
+   */
+  onProgress?: (done: number, total: number) => void | Promise<void>;
 }
 
 /** Uploads a JSONL body to a staged target using multipart form data. */
@@ -65,6 +73,7 @@ export async function executeRows(
       budget: new RateLimitBudget(),
       productOf: context.productOf,
       verifySampleRate: context.verifySampleRate ?? 1,
+      onProgress: context.onProgress,
     });
     return { ...result, path: "sync" };
   }
@@ -97,7 +106,17 @@ async function executeBulk(
 
   // The finish webhook is faster when it arrives, but it is documented to go
   // missing; polling is the fallback that stops a run hanging forever (E13).
-  const finished = await pollUntilTerminal({ client: context.client });
+  //
+  // The heartbeat rides on the poll interval. A bulk operation is almost entirely
+  // waiting, so this is the only place a long one can prove it is still alive --
+  // without it the reaper would mistake every large run for a dead process.
+  const finished = await pollUntilTerminal({
+    client: context.client,
+    sleep: async (ms) => {
+      await context.onProgress?.(0, writable.length);
+      await new Promise<void>((resolve) => setTimeout(resolve, ms));
+    },
+  });
   const finalState = finished ?? operation;
 
   const submittedGids = writable.map((row) => row.ref.variantGid);
