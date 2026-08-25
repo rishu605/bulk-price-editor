@@ -24,7 +24,7 @@
 import prisma from "../db.server";
 import { captureBaselines } from "./baselines.server";
 import { astToWhere } from "./segments.server";
-import { astOf, toResolvable } from "./campaigns/model.server";
+import { scopeOf, toResolvable } from "./campaigns/model.server";
 import { assignEnrollments, type CampaignMatch } from "../lib/enrollment/assign";
 
 export interface EnrollResult {
@@ -57,7 +57,12 @@ export async function enrollNewVariants(
     // Let the database apply the filter rather than re-implementing the AST here.
     const matched = await prisma.variantIndex.findMany({
       where: {
-        AND: [astToWhere(shopId, astOf(campaign)), { variantGid: { in: variantGids } }],
+        AND: [
+          // Resolved, so a campaign targeting a segment enrolls against the segment's
+          // current definition rather than a copy taken when it was created.
+          astToWhere(shopId, await scopeOf(shopId, campaign)),
+          { variantGid: { in: variantGids } },
+        ],
       },
       select: { variantGid: true },
     });

@@ -26,6 +26,13 @@ export interface CampaignInput {
   autoEnroll?: boolean;
   /** Absent means the campaign only runs when applied by hand. */
   schedule?: Schedule;
+  /**
+   * Target a saved segment instead of an inline filter.
+   *
+   * Stored as a reference, not copied, so editing the segment updates every campaign
+   * using it -- which is what makes a segment reusable rather than a template.
+   */
+  segmentId?: string;
 }
 
 export interface PreviewRow {

@@ -25,11 +25,20 @@ export type ConditionField =
   | "inventoryMin"
   | "inventoryMax"
   | "hasCompareAt"
-  | "hasCost";
+  | "hasCost"
+  /**
+   * An explicit list of variants.
+   *
+   * What a frozen segment compiles to. Expressing it as an ordinary condition rather
+   * than as a special case means preview, planning, enrollment and the run path all
+   * handle a pinned variant list without knowing segments exist.
+   */
+  | "variantGid";
 
 export interface Condition {
   field: ConditionField;
-  value: string | number | boolean;
+  /** A list only for `variantGid`, which is inherently plural. */
+  value: string | number | boolean | string[];
 }
 
 /** AND of conditions. */
@@ -77,6 +86,13 @@ function conditionToWhere(condition: Condition): Prisma.VariantIndexWhereInput |
       return value ? { compareAt: { not: null } } : { compareAt: null };
     case "hasCost":
       return value ? { cost: { not: null } } : { cost: null };
+    case "variantGid": {
+      const gids = (Array.isArray(value) ? value : [text]).filter(Boolean);
+      // An empty pinned list matches nothing, which is not the same as matching
+      // everything. A frozen segment whose variants were all deleted must price zero
+      // variants, not the entire catalogue.
+      return { variantGid: { in: gids } };
+    }
     default:
       return null;
   }
@@ -177,4 +193,27 @@ export async function facets(shopId: string): Promise<{
     tags: sorted(tags),
     collections: sorted(collections),
   };
+}
+
+// ------------------------------------------------------------------ segments
+
+/**
+ * Compiles a segment to a filter.
+ *
+ * The dynamic/frozen distinction lives here and nowhere else. A dynamic segment is
+ * its filter, re-evaluated every time it is asked; a frozen one is the list of
+ * variants that filter matched when the merchant reviewed it. Both come out as an
+ * AST, so everything downstream stays unaware of the difference.
+ */
+export function segmentToAst(segment: {
+  kind: "DYNAMIC" | "FROZEN";
+  filterAst: unknown;
+  frozenVariantGids: string[];
+}): FilterAst {
+  if (segment.kind === "FROZEN") {
+    return { groups: [{ conditions: [{ field: "variantGid", value: segment.frozenVariantGids }] }] };
+  }
+  return ((segment.filterAst as FilterAst) ?? EMPTY_AST).groups
+    ? (segment.filterAst as FilterAst)
+    : EMPTY_AST;
 }
