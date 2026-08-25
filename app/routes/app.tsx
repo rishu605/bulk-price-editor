@@ -23,6 +23,7 @@ export default function App() {
       <s-app-nav>
         <s-link href="/app">Dashboard</s-link>
         <s-link href="/app/campaigns">Campaigns</s-link>
+        <s-link href="/app/calendar">Calendar</s-link>
         <s-link href="/app/segments">Segments</s-link>
         <s-link href="/app/catalog">Catalogue</s-link>
         <s-link href="/app/baselines">Baselines</s-link>

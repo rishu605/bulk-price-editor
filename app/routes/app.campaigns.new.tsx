@@ -9,6 +9,7 @@ import { createCampaign } from "../services/campaigns/index.server";
 import type { AdjustmentRule, CompareAtPolicy } from "../lib/pricing/types";
 import { money } from "../lib/money/money";
 import { localInputToUtc, type Schedule } from "../lib/scheduling/window";
+import { presetStartFor } from "../lib/scheduling/calendar";
 import { describeAdjustment } from "../lib/markets/describe";
 import {
   profileNameFor,
@@ -95,6 +96,8 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
     usingSegment: segment ? { id: segment.id, name: segment.name, kind: segment.kind } : null,
     practice,
     guided,
+    // Set when the merchant arrived by clicking a day on the calendar.
+    presetStart: presetStartFor(url.searchParams.get("startAt")),
     selected: {
       collection: url.searchParams.get("collection") ?? "",
       tag: url.searchParams.get("tag") ?? "",
@@ -218,6 +221,7 @@ export default function NewCampaign() {
     currencies,
     storeRounding,
     roundingOptions,
+    presetStart,
   } = useLoaderData<typeof loader>();
 
   return (
@@ -465,7 +469,12 @@ export default function NewCampaign() {
             </s-paragraph>
 
             <label htmlFor="startAt">Start</label>
-            <input id="startAt" type="datetime-local" name="startAt" />
+            <input
+              id="startAt"
+              type="datetime-local"
+              name="startAt"
+              defaultValue={presetStart}
+            />
 
             <label htmlFor="endAt">End (optional)</label>
             <input id="endAt" type="datetime-local" name="endAt" />
