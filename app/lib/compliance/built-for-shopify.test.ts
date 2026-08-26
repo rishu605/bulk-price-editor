@@ -16,6 +16,8 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { API_VERSION_STRING, supportedUntil } from "../shopify/api-version";
+
 const ROOT = process.cwd();
 
 function sourceFiles(dir: string, match: RegExp): string[] {
@@ -166,6 +168,28 @@ describe("integration — API, auth and webhooks", () => {
     );
   });
 
+  it("pins an API version Shopify still supports", () => {
+    // Versions are supported for twelve months. Built for Shopify requires a supported
+    // one, and without this the discovery moment is the API refusing calls one morning
+    // with nothing in the repo having changed.
+    //
+    // This test is meant to fail. When it does, the fix is to bump the pin, regenerate
+    // types against the new schema and read the diff — not to move the deadline.
+    const deadline = supportedUntil();
+
+    expect(
+      deadline.getTime(),
+      `API ${API_VERSION_STRING} is unsupported as of ${deadline.toISOString().slice(0, 10)}. ` +
+        `Bump the pin in app/lib/shopify/api-version.ts and re-run graphql-codegen.`,
+    ).toBeGreaterThan(Date.now());
+  });
+
+  it("derives the support deadline from the version, not from a hand-kept date", () => {
+    expect(supportedUntil("2025-10").toISOString().slice(0, 10)).toBe("2026-10-01");
+    expect(supportedUntil("2026-01").toISOString().slice(0, 10)).toBe("2027-01-01");
+    expect(() => supportedUntil("october-2025")).toThrow();
+  });
+
   it("authenticates every webhook route", () => {
     // The HMAC check lives inside authenticate.webhook. A route without it accepts
     // anything anyone sends.
@@ -268,5 +292,67 @@ describe("integration — API, auth and webhooks", () => {
       offenders,
       "a market mutation needs write_markets, which the manifest no longer asks for",
     ).toEqual([]);
+  });
+});
+
+/**
+ * The submission evidence sheet and the tests that back it, kept in step.
+ *
+ * `docs/built-for-shopify.md` is what gets handed over at submission. Its value is
+ * entirely in each row naming the test that proves it — and a name in a document is
+ * exactly the kind of reference that rots silently when somebody renames a test. Then the
+ * sheet still reads as complete while proving nothing, which is worse than having no
+ * sheet, because it is the version somebody trusts.
+ */
+describe("the pre-audit sheet names evidence that exists", () => {
+  const sheet = readFileSync(join(ROOT, "docs/built-for-shopify.md"), "utf8");
+  const suite = readFileSync(join(ROOT, "app/lib/compliance/built-for-shopify.test.ts"), "utf8");
+
+  /** Test names as this file declares them. */
+  const declared = new Set(
+    [...suite.matchAll(/^\s*it\("([^"]+)"/gm)].map((match) => match[1]),
+  );
+
+  /** Test names the sheet cites, written in backticks in the Evidence column. */
+  const cited = [...sheet.matchAll(/\|\s*`([^`]+)`\s*\|/g)].map((match) => match[1]);
+
+  it("cites something at all", () => {
+    // Without this the two assertions below pass vacuously on an empty table.
+    expect(cited.length).toBeGreaterThan(8);
+  });
+
+  it("cites only tests that exist", () => {
+    for (const name of cited) {
+      // A command rather than a test name is fine — those are cited as commands.
+      if (name.startsWith("npm ")) continue;
+
+      expect(declared.has(name), `the sheet cites "${name}", which is not a test here`).toBe(true);
+    }
+  });
+
+  it("cites every test in this file, so nothing is proved but unlisted", () => {
+    const exempt = new Set([
+      // Meta-tests about the sheet itself; listing them on the sheet would be circular.
+      "cites something at all",
+      "cites only tests that exist",
+      "cites every test in this file, so nothing is proved but unlisted",
+      "derives the support deadline from the version, not from a hand-kept date",
+      "does not quietly drop the gaps",
+    ]);
+
+    for (const name of declared) {
+      if (exempt.has(name)) continue;
+
+      expect(cited.includes(name), `"${name}" proves a criterion the sheet does not list`).toBe(
+        true,
+      );
+    }
+  });
+
+  it("does not quietly drop the gaps", () => {
+    // A checklist that only contains passes is a checklist nobody checked. If the two
+    // known design gaps get closed, this test should be updated deliberately — not by
+    // deleting the rows.
+    expect(sheet).toMatch(/\|\s*gap\s*\|/);
   });
 });
