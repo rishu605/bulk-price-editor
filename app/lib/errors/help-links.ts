@@ -12,9 +12,6 @@
 
 import type { ErrorCode } from "./app-error";
 
-/** Where the published help lives. Overridable so staging can point at itself. */
-export const HELP_BASE = process.env.HELP_BASE_URL ?? "https://help.anchorpricing.app";
-
 /**
  * The doc for each error.
  *
@@ -34,16 +31,36 @@ const HELP_PATHS: Record<ErrorCode, string> = {
   UNKNOWN: "/failures/unexpected",
 };
 
+/** Where the app serves its own copy of the docs. */
+export const HELP_ROUTE = "/help";
+
 /**
  * Takes a plain string, not an `ErrorCode`.
  *
  * The boundary receives the code as a string across the serialisation boundary, and an
- * unrecognised one must not produce `https://help…/undefined` — a broken link under an
- * error message is worse than no link, because it confirms the merchant's suspicion that
- * nobody is looking after this.
+ * unrecognised one must not produce `…/undefined` — a broken link under an error message
+ * is worse than no link, because it confirms the merchant's suspicion that nobody is
+ * looking after this.
  */
-export function helpUrlFor(code: string): string {
-  return `${HELP_BASE}${HELP_PATHS[code as ErrorCode] ?? HELP_PATHS.UNKNOWN}`;
+export function helpPathOf(code: string): string {
+  return HELP_PATHS[code as ErrorCode] ?? HELP_PATHS.UNKNOWN;
+}
+
+/**
+ * A link to the docs that is safe to render in the browser.
+ *
+ * Root-relative on purpose. The absolute base is built from environment variables, and
+ * Vite replaces `process.env` with an empty object in the client bundle — so a component
+ * computing it there would render `http://localhost:3000/...` on a merchant's screen. The
+ * app document is served from the app's own origin, inside the admin's iframe as well as
+ * outside it, so a root-relative path resolves to this deploy either way.
+ *
+ * This means `HELP_BASE_URL` does not redirect links rendered in the browser. That is a
+ * deliberate limit rather than an oversight: the reason to move the docs elsewhere is so
+ * they survive the app being down, and nothing rendered by the app is on screen then.
+ */
+export function helpPathFor(code: string): string {
+  return `${HELP_ROUTE}${helpPathOf(code)}`;
 }
 
 /** What the link should say. Never "click here", and never the URL. */
