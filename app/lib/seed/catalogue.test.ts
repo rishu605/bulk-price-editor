@@ -277,3 +277,45 @@ describe("distributions that make a perf number mean something", () => {
     expect(JSON.stringify(again)).toBe(JSON.stringify(products));
   });
 });
+
+describe("option values Shopify will accept", () => {
+  /**
+   * The rule: a product declares a set of options, and every variant must supply exactly
+   * one value for each of them. Break it and `productSet` rejects the whole product.
+   *
+   * This went unnoticed because the rejection is invisible. `productSet` runs inside a
+   * bulk operation, so the per-row `userErrors` land in a result file the seeder never
+   * read — Shopify reported `COMPLETED — 1 objects` and the script printed it. Every
+   * product over 48 variants failed in total silence, which at the default fifty is every
+   * product in the catalogue.
+   *
+   * `total` values chosen around the boundaries: the one-option branch, either side of
+   * colour × size running out at 48, and the ceiling.
+   */
+  for (const total of [1, 2, 6, 7, 20, 47, 48, 49, 50, 200, MAX_VARIANTS_PER_PRODUCT]) {
+    it(`gives every variant one value per option at ${total} variants`, () => {
+      const perVariant = Array.from({ length: total }, (_, index) => optionsFor(index, total));
+
+      // What the product ends up declaring: the union of every option name used, which is
+      // exactly how the uploader builds `productOptions`.
+      const declared = new Set(perVariant.flatMap((o) => o.map((v) => v.optionName)));
+
+      for (const options of perVariant) {
+        expect(options.map((o) => o.optionName).sort()).toEqual([...declared].sort());
+      }
+    });
+
+    it(`gives every variant a distinct combination at ${total} variants`, () => {
+      // Shopify's other rule, and the one that decides whether 2,048 is reachable at all:
+      // two variants cannot share an option combination. Three axes of 8 × 6 × 43 leaves
+      // just enough room.
+      const combinations = Array.from({ length: total }, (_, index) =>
+        optionsFor(index, total)
+          .map((option) => `${option.optionName}=${option.name}`)
+          .join("/"),
+      );
+
+      expect(new Set(combinations).size).toBe(total);
+    });
+  }
+});

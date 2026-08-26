@@ -352,7 +352,7 @@ export type SeedBulkRunMutation = { bulkOperationRunMutation?: AdminTypes.Maybe<
 export type SeedBulkStatusQueryVariables = AdminTypes.Exact<{ [key: string]: never; }>;
 
 
-export type SeedBulkStatusQuery = { currentBulkOperation?: AdminTypes.Maybe<Pick<AdminTypes.BulkOperation, 'id' | 'status' | 'objectCount' | 'errorCode'>> };
+export type SeedBulkStatusQuery = { currentBulkOperation?: AdminTypes.Maybe<Pick<AdminTypes.BulkOperation, 'id' | 'status' | 'objectCount' | 'errorCode' | 'url' | 'partialDataUrl'>> };
 
 interface GeneratedQueryTypes {
   "#graphql\n  query AnchorCurrentBulkOperation {\n    currentBulkOperation(type: MUTATION) {\n      id status url partialDataUrl objectCount errorCode\n    }\n  }\n": {return: AnchorCurrentBulkOperationQuery, variables: AnchorCurrentBulkOperationQueryVariables},
@@ -370,7 +370,7 @@ interface GeneratedQueryTypes {
   "#graphql\n  query AnchorAuditVariants($ids: [ID!]!) {\n    nodes(ids: $ids) {\n      ... on ProductVariant { id price compareAtPrice }\n    }\n  }\n": {return: AnchorAuditVariantsQuery, variables: AnchorAuditVariantsQueryVariables},
   "#graphql\n          query SeedExisting($cursor: String) {\n            products(first: 250, after: $cursor, query: \"handle:anchor-perf-*\") {\n              nodes { handle }\n              pageInfo { hasNextPage endCursor }\n            }\n          }\n        ": {return: SeedExistingQuery, variables: SeedExistingQueryVariables},
   "#graphql\n        query SeedCollectionByHandle($handle: String!) {\n          collectionByHandle(handle: $handle) { id }\n        }\n      ": {return: SeedCollectionByHandleQuery, variables: SeedCollectionByHandleQueryVariables},
-  "#graphql\n        query SeedBulkStatus {\n          currentBulkOperation(type: MUTATION) { id status objectCount errorCode }\n        }\n      ": {return: SeedBulkStatusQuery, variables: SeedBulkStatusQueryVariables},
+  "#graphql\n        query SeedBulkStatus {\n          currentBulkOperation(type: MUTATION) {\n            id status objectCount errorCode url partialDataUrl\n          }\n        }\n      ": {return: SeedBulkStatusQuery, variables: SeedBulkStatusQueryVariables},
 }
 
 interface GeneratedMutationTypes {
