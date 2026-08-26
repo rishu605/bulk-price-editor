@@ -1,4 +1,4 @@
-import { formatDay, formatWhen } from "../lib/format/display";
+import { formatCount, formatDay, formatWhen } from "../lib/format/display";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -243,19 +243,19 @@ export default function Dashboard() {
           <s-stack direction="inline" gap="large">
             <s-box>
               <s-text>Variants</s-text>
-              <s-heading>{health.variants}</s-heading>
+              <s-heading>{formatCount(health.variants)}</s-heading>
             </s-box>
             <s-box>
               <s-text>With baseline</s-text>
-              <s-heading>{health.withBaseline}</s-heading>
+              <s-heading>{formatCount(health.withBaseline)}</s-heading>
             </s-box>
             <s-box>
               <s-text>Not at baseline</s-text>
-              <s-heading>{health.drifted}</s-heading>
+              <s-heading>{formatCount(health.drifted)}</s-heading>
             </s-box>
             <s-box>
               <s-text>Campaigns</s-text>
-              <s-heading>{campaigns}</s-heading>
+              <s-heading>{formatCount(campaigns)}</s-heading>
             </s-box>
           </s-stack>
 
@@ -337,19 +337,19 @@ export default function Dashboard() {
           <s-stack direction="inline" gap="large">
             <s-box>
               <s-text>Campaigns running</s-text>
-              <s-heading>{live}</s-heading>
+              <s-heading>{formatCount(live)}</s-heading>
             </s-box>
             <s-box>
               <s-text>Scheduled</s-text>
-              <s-heading>{upcoming}</s-heading>
+              <s-heading>{formatCount(upcoming)}</s-heading>
             </s-box>
             <s-box>
               <s-text>Need attention</s-text>
-              <s-heading>{needsAttention}</s-heading>
+              <s-heading>{formatCount(needsAttention)}</s-heading>
             </s-box>
             <s-box>
               <s-text>Prices changed outside the app</s-text>
-              <s-heading>{driftOpen}</s-heading>
+              <s-heading>{formatCount(driftOpen)}</s-heading>
             </s-box>
           </s-stack>
 

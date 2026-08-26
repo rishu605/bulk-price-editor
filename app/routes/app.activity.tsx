@@ -6,6 +6,7 @@
  * sale?" or "who turned the cost floor off?" without opening a database client.
  */
 
+import { formatCount } from "../lib/format/display";
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useLoaderData, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -109,7 +110,7 @@ export default function Activity() {
             <s-stack direction="inline" gap="base">
               <s-paragraph>
                 <s-text>
-                  {total} entr{total === 1 ? "y" : "ies"} · times shown in {timeZone}
+                  {formatCount(total)} entr{total === 1 ? "y" : "ies"} · times shown in {timeZone}
                 </s-text>
               </s-paragraph>
               <s-button
