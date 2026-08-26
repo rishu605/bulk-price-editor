@@ -32,6 +32,8 @@ import {
   UnconvertedMarketError,
 } from "./market-plan.server";
 import { applyMarketWide, revertMarketWide } from "./market-wide.server";
+import { readDerivedPrices } from "../../lib/execution/market-executor";
+import { parseMoney } from "../../lib/money/money";
 import {
   deleteMarketPrices,
   writeMarketPrices,
@@ -122,13 +124,15 @@ export async function captureMarketBaselinesFirst(
   campaignId: string,
   variantGids: readonly string[],
   client: AdminClient,
-): Promise<string[]> {
+): Promise<{ messages: string[]; refused: string[] }> {
   const campaign = await prisma.campaign.findUnique({
     where: { id: campaignId },
     select: { surfaces: true },
   });
   const surfaces = parseSurfaces(campaign?.surfaces);
-  if (surfaces.priceLists.length === 0 || variantGids.length === 0) return [];
+  if (surfaces.priceLists.length === 0 || variantGids.length === 0) {
+    return { messages: [], refused: [] };
+  }
 
   const lists = await prisma.priceListRecord.findMany({
     where: { shopId, priceListGid: { in: surfaces.priceLists } },
@@ -136,16 +140,29 @@ export async function captureMarketBaselinesFirst(
 
   const messages: string[] = [];
 
+  // Markets that cannot be baselined, so they must not be priced later either.
+  //
+  // Refusing here and forgetting was the hole: the run reported "not converted", then the
+  // market loop planned the same list again a few steps later. By then the base price had
+  // moved, so the mirror was stale, the unconverted check no longer matched, and the
+  // market was priced from a baseline derived after the campaign — the very contamination
+  // #259 was about, reintroduced for exactly the market we had just declared unsafe.
+  //
+  // It hid because the shortcut writes a parent adjustment rather than fixed prices, and
+  // the scenario counted fixed prices. Zero of them looked like "refused".
+  const refused: string[] = [];
+
   for (const list of lists) {
     try {
       await marketBaselines(shopId, list, [...variantGids], client);
     } catch (error) {
       if (!(error instanceof UnconvertedMarketError)) throw error;
       messages.push(error.message);
+      refused.push(list.priceListGid);
     }
   }
 
-  return messages;
+  return { messages, refused };
 }
 
 export async function applyMarketSurfaces(
@@ -156,6 +173,7 @@ export async function applyMarketSurfaces(
   variantGids: readonly string[],
   client: AdminClient,
   storeGuardrails?: Guardrails,
+  refusedPriceListGids: readonly string[] = [],
 ): Promise<MarketSurfaceOutcome[]> {
   const campaign = await prisma.campaign.findUnique({
     where: { id: campaignId },
@@ -202,7 +220,28 @@ export async function applyMarketSurfaces(
     });
   }
 
+  const refused = new Set(refusedPriceListGids);
+
   for (const list of lists) {
+    // A market already refused before the base surface moved. Pricing it now would use a
+    // baseline derived from the post-campaign base price, which is the contamination
+    // #259 fixed — so it is skipped rather than re-attempted, and the reason was already
+    // reported by the pre-write capture that refused it.
+    if (refused.has(list.priceListGid)) {
+      outcomes.push({
+        priceListGid: list.priceListGid,
+        name: list.name,
+        currency: list.currency,
+        verified: 0,
+        failed: 0,
+        chunks: 0,
+        messages: [],
+        path: "per-product",
+        pathReason: "this market's prices were not converted",
+      });
+      continue;
+    }
+
     // One market's failure is one market's failure.
     //
     // An unconverted price list is refused rather than priced (#257) — the number Shopify
@@ -266,11 +305,98 @@ export async function applyMarketSurfaces(
 
     if (rows.length === 0) continue;
 
+    // What this market already shows, before deciding to write anything.
+    //
+    // A relative price list tracks the base price, and the base surface was written
+    // several steps ago — so Shopify has already moved every variant on this list by the
+    // campaign's own percentage. For an ordinary percentage campaign that lands exactly
+    // on the intended market price, and the correct number of mutations is none.
+    //
+    // Writing anyway is what made #260: the market-wide path composed the campaign's
+    // percentage into the parent adjustment on top of a base price that had already moved
+    // by it, so a European shopper paid 36% off a 20% sale. Asking the store first
+    // removes the whole class — there is no percentage to compose if there is nothing
+    // left to change.
+    //
+    // Read back and compared, never inferred from the rule. That is the standard rule 5
+    // sets for a write, applied to a non-write: "we did nothing" must not become a way to
+    // report success without having checked.
+    const settled = await alreadyCorrect(client, list, rows);
+
+    if (settled.size > 0) {
+      // Ledgered even though nothing is written, because the campaign *is* the reason
+      // these prices changed — it moved the base price they follow. Without a row the
+      // reconciliation view cannot say which campaign put Germany on sale, and overlap
+      // resolution cannot see that this campaign touched the surface at all.
+      //
+      // Revert needs nothing extra: reverting the base restores the market, which is the
+      // same reason no write was needed here.
+      const already = rows.filter((row) => settled.has(row.variantGid));
+      await ledgerChunk(runId, shopId, list, already, 0);
+      await prisma.variantChange.updateMany({
+        where: {
+          runId,
+          priceListGid: list.priceListGid,
+          variantGid: { in: already.map((row) => row.variantGid) },
+        },
+        data: { status: "VERIFIED", appliedAt: new Date(), verifiedAt: new Date() },
+      });
+    }
+
+    const remaining = rows.filter((row) => !settled.has(row.variantGid));
+
+    if (remaining.length === 0) {
+      outcomes.push({
+        priceListGid: list.priceListGid,
+        name: list.name,
+        currency: list.currency,
+        verified: settled.size,
+        failed: 0,
+        chunks: 0,
+        messages: [
+          `${list.name}: already at the campaign's prices, because this market follows ` +
+            `the base price. ${settled.size} verified, nothing written.`,
+        ],
+        path: "market-wide",
+        pathReason: "this market follows the base price and was already correct",
+      });
+      continue;
+    }
+
     // The same decision the review step showed the merchant, taken by the same
     // function, so the run cannot quietly do something else.
     const decision = await decideMarketPath(plan, client);
 
-    if (decision.path === "market-wide") {
+    // A parent adjustment cannot express these prices once the base surface has moved.
+    //
+    // The shortcut works by setting one percentage and letting Shopify derive every
+    // price. But Shopify derives from the *current* base price, which this campaign has
+    // already changed by its own percentage — so the only parent adjustment that
+    // reproduces the intended prices is the list's existing one, unchanged. Writing
+    // anything else applies the campaign twice, which is what put a European shopper on a
+    // 36% discount off a 20% sale (#260).
+    //
+    // And leaving it unchanged is what `alreadyCorrect` above has just tested against.
+    // Whatever it did not settle differs by rounding — our intended price comes from a
+    // baseline that was rounded once already, Shopify's comes from rounding the whole
+    // conversion at the end — and a percentage cannot close a one-minor-unit gap. Those
+    // rows need explicit prices, and a parent write before them is a wrong price briefly
+    // live for no benefit.
+    //
+    // The shortcut keeps its whole value for a markets-only campaign, which is the case
+    // it was designed for and the case where the base price has not moved underneath it.
+    const baseAlreadyMoved = surfaces.base;
+
+    if (decision.path === "market-wide" && baseAlreadyMoved) {
+      logger.info("market-wide skipped: base surface moved this list already", {
+        runId,
+        priceListGid: list.priceListGid,
+        settled: settled.size,
+        remaining: remaining.length,
+      });
+    }
+
+    if (decision.path === "market-wide" && !baseAlreadyMoved) {
       // Write-ahead for every row first, exactly as the chunked path does. The
       // shortcut is in the number of requests, not in the ledger.
       await ledgerChunk(runId, shopId, list, rows, 0);
@@ -299,16 +425,31 @@ export async function applyMarketSurfaces(
       continue;
     }
 
+    // `remaining`, not `rows`: anything `alreadyCorrect` settled is already at the right
+    // price and already ledgered as verified. Writing it again would spend a request to
+    // set a value to itself, and would re-ledger a row that is done.
     const result = await writeMarketPrices(
       client,
       list.priceListGid,
       list.currency,
-      rows,
+      remaining,
       (chunk, index) => ledgerChunk(runId, shopId, list, chunk, index),
     );
 
     await recordResults(runId, shopId, list.priceListGid, result);
-    outcomes.push({ ...summarise(list, result), path: "per-product", pathReason: decision.reason });
+
+    const summary = summarise(list, result);
+    outcomes.push({
+      ...summary,
+      // Rows settled without a write count as verified — they were read back from Shopify
+      // and matched, which is the same evidence a written row needs.
+      verified: summary.verified + settled.size,
+      path: "per-product",
+      pathReason:
+        decision.path === "market-wide"
+          ? "this market already follows the base price, so a percentage would apply the campaign twice"
+          : decision.reason,
+    });
   }
 
   return outcomes;
@@ -392,6 +533,54 @@ function wideOutcomes(messages: string[]): MarketSurfaceOutcome[] {
 }
 
 /** Write-ahead, per chunk. A chunk is the smallest thing that can independently fail. */
+/**
+ * The rows this market already shows at the campaign's intended price.
+ *
+ * Only for a list with a parent adjustment: a fixed list stores its own numbers and does
+ * not move when the base price does, so there is nothing to have happened already.
+ *
+ * Only for rows wanting no strike-through, and that exclusion is the important one. A
+ * relative list has no per-variant compare-at — the parent adjustment either scales the
+ * compare-at or nullifies it, and neither is "set it to what the price used to be". A row
+ * needing a strike-through cannot be satisfied by doing nothing however right its price
+ * looks, and treating it as settled would report a sale that shows no sale.
+ */
+async function alreadyCorrect(
+  client: AdminClient,
+  list: { priceListGid: string; currency: string; adjustmentBps: number | null },
+  rows: readonly MarketPriceRow[],
+): Promise<Set<string>> {
+  const settled = new Set<string>();
+  if (list.adjustmentBps === null) return settled;
+
+  const candidates = rows.filter((row) => !row.compareAt);
+  if (candidates.length === 0) return settled;
+
+  const derived = await readDerivedPrices(
+    client,
+    list.priceListGid,
+    candidates.map((row) => row.variantGid),
+  );
+
+  for (const row of candidates) {
+    const live = derived.get(row.variantGid);
+    if (live === undefined) continue;
+
+    // A price we cannot parse is a price we have not verified. Skipping it here sends the
+    // row down the ordinary write path, which is the safe direction.
+    let amount: number;
+    try {
+      amount = parseMoney(live, list.currency).amount;
+    } catch {
+      continue;
+    }
+
+    if (amount === row.price.amount) settled.add(row.variantGid);
+  }
+
+  return settled;
+}
+
 async function ledgerChunk(
   runId: string,
   shopId: string,

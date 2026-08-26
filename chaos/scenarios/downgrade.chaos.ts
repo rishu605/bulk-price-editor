@@ -110,10 +110,28 @@ describe("chaos: downgrading while a campaign is live", () => {
         // What this scenario is actually about is the downgrade, so it asks the
         // path-agnostic question: is the market carrying our prices now, and is it clean
         // afterwards.
-        const priced =
-          chaos.fake.fixedPricesOn("gid://shopify/PriceList/eu").size > 0 ||
-          chaos.fake.parentWrites.some((w) => w.priceListGid === "gid://shopify/PriceList/eu");
-        expect(priced, "the campaign did not reach the market at all").toBe(true);
+        //
+        // Asked of the ledger rather than of the write log, because "reached the market"
+        // and "wrote to the market" stopped being the same thing. A market that already
+        // follows the base price is at the campaign's prices with no mutation at all
+        // (#260), and counting writes reported that correct outcome as a failure — on one
+        // chaos seed and not another, because whether the arithmetic lands exactly depends
+        // on the prices the fixture happened to generate.
+        //
+        // The ledger is the record of what the campaign did, which is the question.
+        const ledgered = await prisma.variantChange.findMany({
+          where: {
+            shopId,
+            priceListGid: "gid://shopify/PriceList/eu",
+            surfaceKind: "MARKET",
+            status: "VERIFIED",
+          },
+          select: { variantGid: true },
+        });
+        expect(
+          ledgered.length,
+          "the campaign did not reach the market at all",
+        ).toBeGreaterThan(0);
 
         // Down to a plan with no markets at all. The market prices we wrote are still
         // ours to undo — refusing here would strand a whole market on sale prices, which
