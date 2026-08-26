@@ -13,6 +13,7 @@
 import Redis from "ioredis";
 
 import { initSentry } from "../app/lib/observability/sentry.server";
+import { initOtel, shutdownOtel } from "../app/lib/observability/otel.server";
 import { tick } from "../app/services/scheduler.server";
 import { reportDepths, runtimeFor } from "../app/worker/queue-runtime.server";
 import { handleJob } from "../app/worker/handlers.server";
@@ -34,6 +35,7 @@ for (const key of ["DATABASE_URL"]) {
 }
 
 initSentry({ process: "worker" });
+void initOtel({ process: "worker" });
 
 const redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
   maxRetriesPerRequest: 3,
@@ -132,7 +134,9 @@ async function shutdown(signal: string): Promise<void> {
     // The lock expires on its own; a failure here must not block exit.
   }
 
-  await Promise.allSettled([redis.quit(), prisma.$disconnect()]);
+  // Flushed before exit, so the last interval's metrics are not lost — which is the
+  // interval covering whatever made somebody restart the worker.
+  await Promise.allSettled([shutdownOtel(), queues.close(), redis.quit(), prisma.$disconnect()]);
   process.exit(0);
 }
 

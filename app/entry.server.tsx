@@ -6,11 +6,15 @@ import { type EntryContext } from "react-router";
 import { isbot } from "isbot";
 import { addDocumentResponseHeaders } from "./shopify.server";
 import { initSentry } from "./lib/observability/sentry.server";
+import { initOtel } from "./lib/observability/otel.server";
 
 // Once per process, at import time, before any request is handled. Initialising lazily
 // on the first error would miss the errors that happen during startup, which are the ones
 // most likely to be about configuration.
 initSentry({ process: "web" });
+// Not awaited: the SDK starts in the background and metrics recorded before it is ready
+// fall through to the log sink, which is where they were going anyway.
+void initOtel({ process: "web" });
 
 export const streamTimeout = 5000;
 

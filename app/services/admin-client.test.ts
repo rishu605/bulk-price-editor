@@ -11,7 +11,7 @@
 import { describe, expect, it } from "vitest";
 
 import { encryptToken } from "../lib/crypto/secrets";
-import { decryptedToken } from "./admin-client.server";
+import { decryptedToken, operationName } from "./admin-client.server";
 
 const KEY = "a-test-key-for-this-file-only";
 
@@ -48,5 +48,32 @@ describe("reading a stored token", () => {
     process.env.TOKEN_ENCRYPTION_KEY = "a-different-key-entirely";
 
     expect(decryptedToken(stored)).toBeNull();
+  });
+});
+
+
+describe("naming a GraphQL operation for a span", () => {
+  it("takes the operation name from the document", () => {
+    expect(operationName("#graphql\n  mutation AnchorPriceListUpdate($id: ID!) { … }")).toBe(
+      "AnchorPriceListUpdate",
+    );
+    expect(operationName("query AnchorPriceLists($cursor: String) { … }")).toBe(
+      "AnchorPriceLists",
+    );
+  });
+
+  it("never returns the document itself", () => {
+    // A price mutation's variables are exactly what must not be exported, and a query
+    // body as a span attribute is both enormous and unhelpful.
+    const document = "mutation AnchorX { productVariantsBulkUpdate(price: \"19.99\") { id } }";
+
+    expect(operationName(document)).toBe("AnchorX");
+    expect(operationName(document)).not.toContain("19.99");
+  });
+
+  it("names an anonymous document rather than returning undefined", () => {
+    // An attribute of "undefined" makes a dashboard filter on something that looks
+    // present and is not.
+    expect(operationName("{ shop { name } }")).toBe("anonymous");
   });
 });
