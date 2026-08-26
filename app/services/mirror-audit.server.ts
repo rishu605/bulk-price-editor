@@ -235,6 +235,10 @@ export async function auditMirror(
         rate: verdict.rate,
         healed: result.healed,
         alert: verdict.alert,
+        // What the audit could not repair, not what it found. Everything it healed is
+        // already priceable again by the time this row is written, and alerting on the
+        // number it fixed would page somebody for the system working.
+        unpriceable: result.unpriceable - result.unpriceableHealed,
       } as never,
     },
   });

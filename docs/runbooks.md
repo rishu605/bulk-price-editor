@@ -58,6 +58,61 @@ worth waking somebody for, because the lock will not expire while it is being re
 
 ---
 
+## Alert: variants that cannot be priced
+
+**Metric:** `mirror.unpriceable` · **Severity:** page
+
+**What it means.** Live variants exist in `variant_index` with no `BASE` row in
+`price_surface_entries`. Baselines are captured from the surface table, so those variants
+cannot be baselined, and a variant with no baseline is silently skipped by every campaign.
+
+The count is what the nightly audit **could not repair**. It heals what it can from the
+index, so anything left is a variant whose index row has no price to heal from.
+
+**Why it pages.** This is the failure mode where everything looks right. The variants are
+mirrored, counted, and listed in the catalogue; the merchant sees them and includes them in
+a campaign; the run reports success and quietly prices fewer products than they asked for.
+It once affected an entire catalogue — the bulk import wrote `variant_index` and not
+`price_surface_entries`, so every store large enough to use the bulk path could import
+cleanly and price nothing (#252).
+
+Note what it is *not*: divergence is the mirror disagreeing with **Shopify**. This is the
+mirror disagreeing with **itself**, which the divergence check cannot see because the
+mirror is perfectly accurate about what Shopify holds.
+
+**Diagnose.**
+
+1. Find them:
+
+   ```sql
+   SELECT vi."variantGid", vi."price", vi."currency"
+   FROM variant_index vi
+   WHERE vi."shopId" = $1 AND vi."deletedAt" IS NULL
+     AND NOT EXISTS (
+       SELECT 1 FROM price_surface_entries pse
+       WHERE pse."shopId" = vi."shopId" AND pse."variantGid" = vi."variantGid"
+         AND pse."surfaceKind" = 'BASE' AND pse."priceListGid" = ''
+     )
+   LIMIT 50;
+   ```
+
+2. **If `price` is null on those rows**, the audit could not heal them because there was
+   nothing to write — a surface row with a null price is the same dead end one table
+   further along. A full re-sync is the remedy; the variants have no price in our mirror at
+   all.
+
+3. **If `price` is populated**, the audit should have healed them and did not. That is a
+   bug in the healing path rather than in an import path, and the count will not fall on
+   its own overnight.
+
+**Remediate.** Re-sync the catalogue for the shop. Then re-run the audit and confirm the
+count is zero — do not assume, because the whole character of this fault is looking fine.
+
+**Then find the writer.** A non-zero count means some path wrote an index row without a
+surface row. Six code paths write both, and the invariant only holds because each of them
+does; the fix is in whichever one stopped, not in healing harder. `git log -S
+"priceSurfaceEntry" -- app/services` is the fastest way to see which one changed.
+
 ## Alert: queue depth rising
 
 **Metric:** `queue.depth`, per queue

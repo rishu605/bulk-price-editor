@@ -61,7 +61,9 @@ export async function gather(now: Date = new Date()): Promise<SignalWindow> {
       )
     : null;
 
-  const divergence = (lastAudit?.after ?? null) as { rate?: number } | null;
+  const audit = (lastAudit?.after ?? null) as
+    | { rate?: number; unpriceable?: number }
+    | null;
 
   return {
     // Null when nothing has ever run, which is a new install rather than a dead
@@ -75,7 +77,11 @@ export async function gather(now: Date = new Date()): Promise<SignalWindow> {
     // whether or not a merchant has the app open, so it does not fall to zero overnight
     // and turn every error into a spike.
     requests: webhooks.length,
-    divergenceRate: typeof divergence?.rate === "number" ? divergence.rate : null,
+    divergenceRate: typeof audit?.rate === "number" ? audit.rate : null,
+    // Null until an audit has run, for the same reason as the tick: "we have not looked"
+    // and "we looked and found none" are different statements, and only one of them is
+    // worth staying asleep over.
+    unpriceableVariants: typeof audit?.unpriceable === "number" ? audit.unpriceable : null,
     executionQueueDepth: null,
   };
 }
