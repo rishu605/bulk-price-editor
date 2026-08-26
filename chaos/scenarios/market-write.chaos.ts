@@ -32,6 +32,12 @@ import { withChaos, type ChaosContext } from "../harness/scenario";
  * the conversion agrees with itself no matter what the engine did; asking the store
  * what the shopper would otherwise have paid is the only version of this assertion
  * that can actually fail.
+ *
+ * **Call it before the campaign runs.** It reports what the market shows *now*, and once
+ * the base price has been written that is no longer the baseline — it is the sale price
+ * with the market's rule on top. Calling it afterwards is what let #259 hide: the test
+ * computed its expectation from the same contaminated number the engine was using, so
+ * the two agreed and the assertion could not fail.
  */
 function derivedBaseline(chaos: ChaosContext, gid: string, priceListGid: string): number {
   const list = chaos.fake.priceLists.find((l) => l.id === priceListGid)!;
@@ -89,6 +95,21 @@ describe("chaos: writing campaign prices to markets", () => {
           },
         });
 
+        // What each market shows *before* the campaign runs, captured now because that
+        // is the only moment it is observable.
+        //
+        // This used to be read after the apply, which meant the test computed its
+        // expectation from the same already-discounted base price the engine was wrongly
+        // using — so the assertion agreed with the bug and could never have caught it
+        // (#259). The helper's own comment claimed to be asking "what the shopper would
+        // otherwise have paid"; it was asking what they would pay now.
+        const before = new Map<string, number>();
+        for (const listGid of ["gid://shopify/PriceList/eu", "gid://shopify/PriceList/jp"]) {
+          for (const gid of variantGids) {
+            before.set(`${listGid}|${gid}`, derivedBaseline(chaos, gid, listGid));
+          }
+        }
+
         const applied = await chaos.apply();
         await chaos.expectHonest(applied.runId);
 
@@ -99,7 +120,7 @@ describe("chaos: writing campaign prices to markets", () => {
         expect(eu.size).toBe(variantGids.length);
 
         for (const gid of variantGids) {
-          const euBaseline = derivedBaseline(chaos, gid, "gid://shopify/PriceList/eu");
+          const euBaseline = before.get(`gid://shopify/PriceList/eu|${gid}`)!;
           const row = eu.get(gid)!;
           expect(row.amount).toBe(at(chaos, Math.round(euBaseline * 0.8), "gid://shopify/PriceList/eu"));
           // The strike-through is this market's own number, so a shopper in the EU sees
@@ -116,7 +137,7 @@ describe("chaos: writing campaign prices to markets", () => {
         // direction of the adjustment is exercised too.
         const jp = chaos.fake.fixedPricesOn("gid://shopify/PriceList/jp");
         for (const gid of variantGids) {
-          const jpBaseline = derivedBaseline(chaos, gid, "gid://shopify/PriceList/jp");
+          const jpBaseline = before.get(`gid://shopify/PriceList/jp|${gid}`)!;
           const price = jp.get(gid)!;
 
           expect(price.amount).toBe(at(chaos, Math.round(jpBaseline * 0.8), "gid://shopify/PriceList/jp"));
@@ -266,6 +287,149 @@ describe("chaos: writing campaign prices to markets", () => {
         // The variants the rule still governs were priced too, so preferring overrides
         // did not cost the ordinary path.
         expect(jp.size).toBe(variantGids.length);
+      },
+    );
+  });
+
+  it("refuses a market whose prices came back unconverted, and prices the rest", async () => {
+    /**
+     * The dev store returned an EUR list and a JPY list with byte-identical amounts — the
+     * base price with the list's percentage applied and no currency conversion at all
+     * (#257). The cause is still open; refusing is right whichever way it resolves.
+     *
+     * The yen half of that would have been caught anyway, because `parseMoney` will not
+     * accept fractional yen. **The euro half is why this scenario exists.** €797.36 is an
+     * entirely ordinary-looking price that happens to be wrong by an exchange rate, and
+     * nothing downstream would ever have questioned it — a plausible wrong price on a live
+     * storefront is the failure this whole product is built to prevent.
+     *
+     * The fake reproduces it without being taught to: an unregistered currency falls back
+     * to a rate of 1, which is precisely what "unconverted" means.
+     */
+    await withChaos(
+      "market-unconverted",
+      { catalog: { products: 3, variantsPerProduct: 1 }, percent: -20 },
+      async (chaos) => {
+        const { shopId, campaignId, variantGids } = chaos.fixture;
+
+        // A rate of exactly 1 is what "unconverted" means: the base price with the
+        // list's percentage applied and nothing else. Set rather than deleted, because
+        // deleting only falls back to 1 if nothing else supplies a rate, and saying it
+        // outright is both clearer and immune to the fixture changing its mind.
+        chaos.fake.rates.set("EUR", 1);
+
+        chaos.fake.addPriceList({
+          id: "gid://shopify/PriceList/eu",
+          name: "Europe",
+          currency: "EUR",
+          adjustment: { type: "PERCENTAGE_DECREASE", value: 10 },
+          catalog: { id: "gid://shopify/MarketCatalog/eu", title: "EU", __typename: "MarketCatalog" },
+          prices: [],
+        });
+
+        const { syncMarkets } = await import("../../app/services/markets-sync.server");
+        const { chaosAdminClient } = await import("../harness/http-client");
+        await syncMarkets(chaosAdminClient(chaos.server.endpoint()), shopId);
+
+        await prisma.campaign.update({
+          where: { id: campaignId },
+          data: { surfaces: { base: true, priceLists: ["gid://shopify/PriceList/eu"] } as never },
+        });
+
+        const applied = await chaos.apply();
+        await chaos.expectHonest(applied.runId);
+
+        // Nothing written to the market. A price wrong by an exchange rate is worse than
+        // no price, because the merchant cannot see that it is wrong.
+        expect(chaos.fake.fixedPricesOn("gid://shopify/PriceList/eu").size).toBe(0);
+
+        // The base surface still ran. One misconfigured market must not turn a campaign
+        // into something that did nothing and explained little.
+        for (const gid of variantGids) {
+          const base = chaos.fake.variants.get(gid)!;
+          expect(Number(base.price)).toBeGreaterThan(0);
+        }
+        expect(applied.verified).toBeGreaterThan(0);
+
+        // And the merchant is told which market, and what to do about it. The run
+        // reports rather than silently pricing three of four surfaces.
+        const said = applied.messages.join(" ");
+        expect(said).toContain("Europe");
+        expect(said).toMatch(/not been converted/);
+        expect(said).toMatch(/Settings → Markets/);
+      },
+    );
+  });
+
+  it("records a market baseline from the price before the campaign, not after", async () => {
+    /**
+     * #259, pinned to numbers.
+     *
+     * The run wrote the base surface, then tags, then markets — and a market's baseline is
+     * captured by asking Shopify for its derived price, which Shopify computes from the
+     * base price the run had just changed. So the first campaign to touch a market
+     * recorded its own sale price as that market's normal one.
+     *
+     * Every later run inherits it. `set-to-baseline` puts the strike-through at a figure
+     * that was never the normal price — a false reference price on a live storefront — and
+     * a second campaign, a recurrence or an overlap resolves against it and compounds,
+     * which is the precise behaviour baselines exist to make impossible.
+     *
+     * A relative list half-hides it, because reverting deletes the fixed prices and the
+     * list goes back to tracking the restored base. The storefront recovers while the
+     * recorded baseline stays wrong, which is worse than a visible failure.
+     */
+    await withChaos(
+      "market-baseline-ordering",
+      { catalog: { products: 2, variantsPerProduct: 1 }, percent: -20 },
+      async (chaos) => {
+        const { shopId, campaignId, variantGids } = chaos.fixture;
+
+        chaos.fake.addPriceList({
+          id: "gid://shopify/PriceList/eu",
+          name: "Europe",
+          currency: "EUR",
+          adjustment: { type: "PERCENTAGE_DECREASE", value: 10 },
+          catalog: { id: "gid://shopify/MarketCatalog/eu", title: "EU", __typename: "MarketCatalog" },
+          prices: [],
+        });
+
+        const { syncMarkets } = await import("../../app/services/markets-sync.server");
+        const { chaosAdminClient } = await import("../harness/http-client");
+        await syncMarkets(chaosAdminClient(chaos.server.endpoint()), shopId);
+
+        await prisma.campaign.update({
+          where: { id: campaignId },
+          data: { surfaces: { base: true, priceLists: ["gid://shopify/PriceList/eu"] } as never },
+        });
+
+        // Taken before anything runs, which is the whole point.
+        const untouched = new Map(
+          variantGids.map((gid) => [gid, derivedBaseline(chaos, gid, "gid://shopify/PriceList/eu")]),
+        );
+
+        await chaos.apply();
+
+        for (const gid of variantGids) {
+          const baseline = await prisma.baseline.findFirstOrThrow({
+            where: {
+              shopId,
+              variantGid: gid,
+              surfaceKind: "MARKET",
+              priceListGid: "gid://shopify/PriceList/eu",
+              supersededAt: null,
+            },
+          });
+
+          expect(Number(baseline.basePrice)).toBe(untouched.get(gid));
+
+          // And spelled out, because "equal to a number I captured earlier" would still
+          // pass if both were the sale price. The baseline must be strictly above what a
+          // 20%-off campaign would have produced from it.
+          expect(Number(baseline.basePrice)).toBeGreaterThan(
+            Math.round(untouched.get(gid)! * 0.8),
+          );
+        }
       },
     );
   });

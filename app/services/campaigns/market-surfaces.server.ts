@@ -25,7 +25,12 @@
 
 import prisma from "../../db.server";
 import type { MarketWritePath } from "../../lib/execution/price-list-parent";
-import { decideMarketPath, planMarket } from "./market-plan.server";
+import {
+  decideMarketPath,
+  marketBaselines,
+  planMarket,
+  UnconvertedMarketError,
+} from "./market-plan.server";
 import { applyMarketWide, revertMarketWide } from "./market-wide.server";
 import {
   deleteMarketPrices,
@@ -91,6 +96,58 @@ export interface MarketSurfaceOutcome {
  * the campaign. Re-resolving gets guardrails, rounding and the compare-at policy applied
  * per surface for free, which is the whole reason the resolver was written surface-first.
  */
+/**
+ * Records every targeted market's untouched price, before anything is written.
+ *
+ * This has to happen first, and it did not. The run executed the base surface, then tags,
+ * then markets — and a market's baseline is captured by asking Shopify for its derived
+ * price, which Shopify computes from the base price the run had just changed. So the
+ * first campaign to touch a market recorded the *sale* price as that market's normal one:
+ * a -20% campaign on a -10% EUR market stored €69.84 where €87.30 was the truth.
+ *
+ * Everything downstream then inherits it. `set-to-baseline` puts the strike-through at a
+ * figure that was never the normal price, which is a false reference price on a live
+ * storefront. A second campaign, a recurrence or an overlap resolves against it and
+ * compounds — the precise behaviour baselines exist to make impossible.
+ *
+ * A relative list half-hides this, because reverting deletes the fixed prices and the
+ * list goes back to tracking the restored base price. The storefront recovers and the
+ * recorded baseline stays wrong, which is worse than a visible failure.
+ *
+ * Failures are collected rather than thrown: a market we cannot baseline is a market that
+ * will not be priced, and that is not a reason to stop the base surface from running.
+ */
+export async function captureMarketBaselinesFirst(
+  shopId: string,
+  campaignId: string,
+  variantGids: readonly string[],
+  client: AdminClient,
+): Promise<string[]> {
+  const campaign = await prisma.campaign.findUnique({
+    where: { id: campaignId },
+    select: { surfaces: true },
+  });
+  const surfaces = parseSurfaces(campaign?.surfaces);
+  if (surfaces.priceLists.length === 0 || variantGids.length === 0) return [];
+
+  const lists = await prisma.priceListRecord.findMany({
+    where: { shopId, priceListGid: { in: surfaces.priceLists } },
+  });
+
+  const messages: string[] = [];
+
+  for (const list of lists) {
+    try {
+      await marketBaselines(shopId, list, [...variantGids], client);
+    } catch (error) {
+      if (!(error instanceof UnconvertedMarketError)) throw error;
+      messages.push(error.message);
+    }
+  }
+
+  return messages;
+}
+
 export async function applyMarketSurfaces(
   shopId: string,
   campaignId: string,
@@ -146,7 +203,36 @@ export async function applyMarketSurfaces(
   }
 
   for (const list of lists) {
-    const plan = await planMarket(shopId, list, variantGids, campaigns, client, storeGuardrails);
+    // One market's failure is one market's failure.
+    //
+    // An unconverted price list is refused rather than priced (#257) — the number Shopify
+    // returned is wrong by an exchange rate, and in a two-decimal currency it is wrong
+    // while looking entirely ordinary. Letting that throw out of here would take the base
+    // surface and every other market down with it, which turns one misconfigured market
+    // into a campaign that did nothing and said little.
+    //
+    // Reported the same way a deleted market is, a few lines above: the campaign carries
+    // on, and the merchant is told which market was skipped and why.
+    let plan;
+    try {
+      plan = await planMarket(shopId, list, variantGids, campaigns, client, storeGuardrails);
+    } catch (error) {
+      if (!(error instanceof UnconvertedMarketError)) throw error;
+
+      outcomes.push({
+        priceListGid: list.priceListGid,
+        name: list.name,
+        currency: list.currency,
+        verified: 0,
+        failed: 0,
+        chunks: 0,
+        messages: [error.message],
+        path: "per-product",
+        pathReason: "this market's prices were not converted",
+      });
+      continue;
+    }
+
     if (!plan) continue;
 
     const { outcome } = plan;

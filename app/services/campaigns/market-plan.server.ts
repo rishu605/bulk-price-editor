@@ -9,6 +9,7 @@
 
 import prisma from "../../db.server";
 import { readDerivedPrices } from "../../lib/execution/market-executor";
+import { looksUnconverted, unconvertedMessage } from "../../lib/markets/conversion-check";
 import {
   readParentState,
   type MarketWritePath,
@@ -170,9 +171,9 @@ export type { MarketWritePath };
  * that rate is not ours to know — it moves daily and a merchant can pin it. Deriving it
  * was wrong by a factor of a hundred on the first zero-decimal market it met.
  */
-async function marketBaselines(
+export async function marketBaselines(
   shopId: string,
-  list: { priceListGid: string; currency: string; adjustmentBps: number | null },
+  list: MarketList,
   variantGids: string[],
   client: AdminClient,
 ): Promise<Map<string, Money>> {
@@ -210,9 +211,16 @@ async function marketBaselines(
  * derive it. Either way this runs once per variant per market, before the campaign has
  * changed anything — which is the only moment the untouched price is observable.
  */
+export class UnconvertedMarketError extends Error {
+  constructor(readonly priceListGid: string, readonly currency: string, message: string) {
+    super(message);
+    this.name = "UnconvertedMarketError";
+  }
+}
+
 async function captureMarketBaselines(
   shopId: string,
-  list: { priceListGid: string; currency: string; adjustmentBps: number | null },
+  list: MarketList,
   variantGids: string[],
   client: AdminClient,
 ): Promise<Map<string, Money>> {
@@ -254,7 +262,49 @@ async function captureMarketBaselines(
 
     if (remaining.length > 0) {
       const derived = await readDerivedPrices(client, list.priceListGid, remaining);
+
+      // What the base surface holds for these variants, so an unconverted answer can be
+      // recognised as one. Read once for the batch rather than per row.
+      const base = new Map(
+        (
+          await prisma.variantIndex.findMany({
+            where: { shopId, variantGid: { in: [...derived.keys()] } },
+            select: { variantGid: true, price: true, currency: true },
+          })
+        ).map((row) => [row.variantGid, row]),
+      );
+
       for (const [variantGid, amount] of derived) {
+        // Refuse a price Shopify never converted, before parsing it.
+        //
+        // A relative list is meant to answer with the base price converted into the
+        // market's currency and then adjusted. When it answers with the base price merely
+        // adjusted, the number is wrong by an exchange rate — and in a two-decimal
+        // currency it is wrong while looking entirely ordinary. €797.36 would sail
+        // through every check below it and land on a live storefront.
+        //
+        // Checked here rather than after `parseMoney` because parsing is where the yen
+        // case dies, and it dies complaining about decimal places — which sends a
+        // merchant to look at their prices when the problem is their market. Cause still
+        // open in #257; refusing is right regardless of what it turns out to be.
+        const row = base.get(variantGid);
+        if (
+          row?.price != null &&
+          looksUnconverted({
+            listCurrency: list.currency,
+            shopCurrency: row.currency ?? list.currency,
+            baseMinorUnits: Number(row.price),
+            adjustmentBps: list.adjustmentBps,
+            derivedAmount: amount,
+          })
+        ) {
+          throw new UnconvertedMarketError(
+            list.priceListGid,
+            list.currency,
+            unconvertedMessage(list.name, list.currency),
+          );
+        }
+
         found.set(variantGid, parseMoney(amount, list.currency));
       }
     }

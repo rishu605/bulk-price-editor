@@ -24,7 +24,11 @@ import type { RunOutcome } from "./types";
 import { transitionCampaign } from "./lifecycle.server";
 import { planResume, type LedgerState } from "../../lib/execution/resume";
 import { applyCampaignTags, removeCampaignTags } from "./tags.server";
-import { applyMarketSurfaces, revertMarketSurfaces } from "./market-surfaces.server";
+import {
+  applyMarketSurfaces,
+  captureMarketBaselinesFirst,
+  revertMarketSurfaces,
+} from "./market-surfaces.server";
 import { notify } from "../notifications.server";
 import { metric } from "../../lib/telemetry/metrics";
 
@@ -293,6 +297,28 @@ export async function runCampaign(
   // `writable`, not `outcome.rows`: skipped rows were never going to be written, and
   // on a resume this is the filtered set. Passing the unfiltered plan here would make
   // the resume silently re-send every row it had just decided to leave alone.
+  const messagesBeforeExecution: string[] = [];
+
+  // Market baselines before any surface is written, never after.
+  //
+  // This used to happen down with the market writes, which meant a market's "untouched"
+  // price was read from Shopify *after* the base price had been changed — so the first
+  // campaign to touch a market recorded its own sale price as that market's normal one.
+  // A -20% campaign on a -10% EUR market stored €69.84 where €87.30 was the truth, and
+  // every later run, revert and strike-through inherited it.
+  //
+  // Nothing is written here; it only records what the markets look like now, which is
+  // exactly the moment that is about to stop being observable.
+  if (!options.revert && !options.variantGids) {
+    const baselineMessages = await captureMarketBaselinesFirst(
+      shopId,
+      campaignId,
+      writable.map((row) => row.ref.variantGid),
+      client,
+    );
+    messagesBeforeExecution.push(...baselineMessages);
+  }
+
   const result = await executeRows(writable, {
     client,
     productOf: (gid) => products.get(gid) ?? gid,
@@ -301,6 +327,7 @@ export async function runCampaign(
   });
 
   const messages = await recordResults(run.id, shopId, result.rows);
+  messages.unshift(...messagesBeforeExecution);
 
   // Tags after prices, deliberately. A badge on a product still showing full price is
   // worse than a price change nobody has badged yet, so the storefront never claims a
