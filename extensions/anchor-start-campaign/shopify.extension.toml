@@ -11,7 +11,7 @@ handle = "start-campaign"
 type = "flow_action"
 uid = "fd8b7033-d33a-12f2-0b57-dca2a841f8b50d99715b"
 description = "Applies a campaign exactly as the Apply button does, including your guardrails and your plan's limits."
-runtime_url = "https://increasingly-functioning-funk-firm.trycloudflare.com/flow/actions/start-campaign"
+runtime_url = "https://bulk-price-editor-production-eb91.up.railway.app/flow/actions/start-campaign"
 
 [settings]
 

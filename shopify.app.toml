@@ -1,8 +1,18 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
+# `application_url` and `redirect_urls` below are the deployed app on Railway.
+#
+# `automatically_update_urls_on_dev` is true, so `shopify app dev` rewrites them to its
+# tunnel for the duration of a dev session and leaves the tunnel here afterwards. That is
+# the dev loop working as intended, but it means this file drifts: check these two values
+# point at Railway before running `shopify app deploy`, or the deploy will publish a dead
+# tunnel as the app's real URL.
+#
+# The proper fix is a second app record for production, so dev and deploy stop sharing one
+# set of URLs. Until somebody makes that call, this comment is the guardrail.
 client_id = "5401aeddaf37aac5c9e1650bf6abb462"
 name = "bulk-price-editor"
-application_url = "https://olympic-hit-forum-thomas.trycloudflare.com"
+application_url = "https://bulk-price-editor-production-eb91.up.railway.app"
 embedded = true
 
 [build]
@@ -39,4 +49,4 @@ optional_scopes = [ ]
 use_legacy_install_flow = false
 
 [auth]
-redirect_urls = [ "https://olympic-hit-forum-thomas.trycloudflare.com/auth/callback", "https://olympic-hit-forum-thomas.trycloudflare.com/auth/shopify/callback", "https://olympic-hit-forum-thomas.trycloudflare.com/api/auth/callback" ]
+redirect_urls = [ "https://bulk-price-editor-production-eb91.up.railway.app/auth/callback", "https://bulk-price-editor-production-eb91.up.railway.app/auth/shopify/callback", "https://bulk-price-editor-production-eb91.up.railway.app/api/auth/callback" ]
