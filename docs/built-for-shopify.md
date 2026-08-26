@@ -15,13 +15,18 @@ that only contains passes is a checklist nobody checked.
 | Criterion | Evidence | Status |
 |---|---|---|
 | No storefront speed impact | `ships no theme app extension` | met |
-| Admin performance measured | `npm run measure:admin` against a real catalogue | met, see note |
+| Admin performance measured | `npm run measure:admin` against 102,132 variants | met |
 
-**Note on admin performance.** `scripts/measure-admin.ts` times the catalogue and
-reconciliation queries and prints an offset-scaling curve. It has been run against the
-3,670-variant development store. It has **not** been run against 100K variants, because
-that store does not exist yet (#50). The measurement is real; its coverage is not the
-scale the criteria care about.
+**Note on admin performance.** Measured against a real 102,132-variant store: the
+catalogue's first page is 26 ms, its last page 292 ms at offset 101,100, and reconciliation
+stays under 10 ms throughout. Full numbers in `docs/perf/README.md`.
+
+Building that store found a defect the smaller one could not: `variants(first: 100)` in the
+catalogue sync silently dropped 1,948 of a 2,048-variant product, so a campaign covering it
+would have priced 100 variants and reported clean. Fixed in #291.
+
+What these numbers do not cover is concurrency — every measurement is one request at a time
+against an idle store, which makes them a floor rather than a forecast.
 
 ## Design
 
