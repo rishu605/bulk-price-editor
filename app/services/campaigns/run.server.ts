@@ -408,6 +408,10 @@ export async function runCampaign(
     reasons: messages.slice(0, 5),
   });
 
+  // Told after the fact, never awaited for correctness. A campaign must not fail because
+  // an automation could not be notified about it.
+  await fireCampaignTrigger(shopId, campaignId, campaignRecord.name, options, outcome, result);
+
   return {
     runId: run.id,
     planned: outcome.counts.planned,
@@ -880,4 +884,48 @@ async function refusedByPlan(
   });
 
   return verdict.allowed ? null : verdict.message;
+}
+
+
+/**
+ * Tells Shopify Flow what this run did.
+ *
+ * Never throws and never blocks. A trigger is a notification about work that already
+ * happened; failing a campaign because an automation could not be told about it would be
+ * the tail wagging the dog.
+ */
+async function fireCampaignTrigger(
+  shopId: string,
+  campaignId: string,
+  campaignName: string,
+  options: RunOptions,
+  outcome: Extract<ReturnType<typeof planRun>, { kind: "ok" }>,
+  result: { verified: number; clean: boolean },
+): Promise<void> {
+  try {
+    const { fireTriggerForShop } = await import("../flow.server");
+
+    if (options.revert) {
+      await fireTriggerForShop(shopId, "campaign-ended", {
+        campaign_id: campaignId,
+        campaign_name: campaignName,
+        outcome: result.clean ? "clean" : "partial",
+        products_reverted: result.verified,
+      });
+      return;
+    }
+
+    await fireTriggerForShop(shopId, "campaign-started", {
+      campaign_id: campaignId,
+      campaign_name: campaignName,
+      products_affected: outcome.counts.planned,
+    });
+  } catch (error) {
+    const { logger } = await import("../../lib/logging/logger");
+    logger.info("could not fire a campaign trigger", {
+      shopId,
+      campaignId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }

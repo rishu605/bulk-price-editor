@@ -1,0 +1,17 @@
+api_version = "2025-10"
+
+[[extensions]]
+type = "flow_action"
+name = "Capture baselines for a segment"
+handle = "capture-baselines"
+description = "Records today's prices as the reference every campaign computes from."
+runtime_url = "https://{{app_url}}/flow/actions/capture-baselines"
+
+  [settings]
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "segment_id"
+    name = "Segment ID"
+    description = "Leave blank for the whole catalogue."
+    required = false

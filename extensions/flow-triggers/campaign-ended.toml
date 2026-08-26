@@ -1,0 +1,34 @@
+api_version = "2025-10"
+
+[[extensions]]
+type = "flow_trigger"
+name = "Campaign ended"
+handle = "campaign-ended"
+description = "A price campaign finished and its prices were reverted."
+
+  [settings]
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "campaign_id"
+    name = "Campaign ID"
+    required = true
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "campaign_name"
+    name = "Campaign name"
+    required = true
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "outcome"
+    name = "Outcome"
+    description = "clean, partial or failed."
+    required = true
+
+    [[settings.fields]]
+    type = "number_integer"
+    key = "products_reverted"
+    name = "Products reverted"
+    required = true
