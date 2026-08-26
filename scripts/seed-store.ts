@@ -25,6 +25,7 @@
  */
 
 import prisma from "../app/db.server";
+import { chooseShop, shopArg } from "../app/lib/seed/target-shop";
 import { adminClientForShop } from "../app/services/admin-client.server";
 import {
   buildCatalogue,
@@ -432,7 +433,17 @@ async function main() {
   const variants = Number(args[args.indexOf("--variants") + 1] ?? 50);
   const locationId = locationFrom(args);
 
-  const shop = await prisma.shop.findFirstOrThrow({ select: { domain: true } });
+  // Named, never guessed. This script writes a hundred thousand products; picking the
+  // first row when two stores are installed is a coin toss whose losing side cannot be
+  // undone quickly.
+  const installed = await prisma.shop.findMany({
+    where: { uninstalledAt: null },
+    select: { domain: true },
+    orderBy: { domain: "asc" },
+  });
+  const shop = chooseShop(installed, shopArg(args));
+  console.log(`Target store: ${shop.domain}\n`);
+
   const client = await adminClientForShop(shop.domain);
   if (!client) throw new Error(`No usable session for ${shop.domain}. Open the app first.`);
 

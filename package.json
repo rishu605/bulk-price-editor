@@ -26,7 +26,8 @@
     "seed:store": "tsx scripts/seed-store.ts",
     "test:chaos": "vitest run --config vitest.chaos.config.ts",
     "scope:probe": "tsx scripts/scope-probe.ts",
-    "measure:admin": "tsx scripts/measure-admin.ts"
+    "measure:admin": "tsx scripts/measure-admin.ts",
+    "measure:import": "tsx scripts/measure-import.ts"
   },
   "type": "module",
   "engines": {
