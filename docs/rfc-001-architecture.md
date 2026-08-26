@@ -146,11 +146,24 @@ resolve(variant, surface) -> {price, compareAt, meta}:
 | Surface | Mutations | Caps and gotchas |
 |---|---|---|
 | Base price | `productVariantsBulkUpdate`, directly or inside `bulkOperationRunMutation` + staged JSONL | Per-product mutation. `compareAtPrice` **is** updatable independently of `price`. |
-| Markets (fixed) | `priceListFixedPricesAdd` / `priceListFixedPricesDelete` | ≤250 prices per request. Supports `compareAtPrice` — this is the per-market strike-through wedge. **Do not** use `priceListFixedPricesByProductUpdate`; it has no compare-at. |
+| Markets (fixed) | `priceListFixedPricesAdd` / `priceListFixedPricesDelete` | ≤250 prices per request. Supports `compareAtPrice`. **Do not** use `priceListFixedPricesByProductUpdate`: it takes one price per *product*, and a campaign resolves per variant. It gained `compareAtPrice` in API 2026-07 — see the note below. |
 | Markets (relative) | `priceListCreate/Update` with a `PriceListParent` % adjustment | One mutation per market, but coarse. Used only when the rule is a uniform % and the list has no fixed overrides. |
 | B2B | `catalogCreate/Update`, `priceListFixedPricesAdd`, `quantityPricingByVariantUpdate` | The quantity mutation is all-or-nothing per request → chunk == transaction. |
 | Reads / sync | `bulkOperationRunQuery`, `products/*` webhooks, price list queries | One concurrent bulk **query** per shop; serialized against campaign bulk mutations via `bulk_ops`. |
 | Tags kit | `tagsAdd` / `tagsRemove` | Ledgered like price rows, so revert provably removes them. |
+
+**The compare-at wedge closed in API 2026-07.** `priceListFixedPricesByProductUpdate` had
+no `compareAtPrice` field at all, which is almost certainly why the ecosystem believed
+Shopify could not do per-market strike-throughs, and it was this product's differentiator.
+`PriceListProductPriceInput` now carries the field. `scope-probe.test.ts` was written to
+fail on exactly that change and did so on the version bump — a red build rather than a
+competitor's release note.
+
+Nothing in the engine changes. The app writes per-variant because a campaign resolves per
+variant, and a product-level mutation still takes one price for a whole product. What
+changed is the commercial claim: per-market strike-through is a head start now, not a
+moat, and the positioning that rests on it (`docs/decisions.md`) should lean on the
+campaign model rather than on a Shopify gap that has closed.
 
 ---
 
