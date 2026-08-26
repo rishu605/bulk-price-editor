@@ -21,3 +21,26 @@ export const API_VERSION = ApiVersion.October25;
 
 /** The same value as a plain string, for URL construction and codegen config. */
 export const API_VERSION_STRING: string = API_VERSION;
+
+/**
+ * When Shopify stops supporting the pinned version.
+ *
+ * Admin API versions are released quarterly and supported for twelve months, so a pin is
+ * a dated thing whether or not anybody writes the date down. Built for Shopify requires a
+ * supported version, and the failure mode without a check is the worst kind: nothing in
+ * the repo changes, and one morning the API starts refusing calls.
+ *
+ * Derived from the version string rather than maintained by hand, so bumping the pin
+ * moves the deadline automatically.
+ */
+export function supportedUntil(version: string = API_VERSION_STRING): Date {
+  const match = /^(\d{4})-(\d{2})$/.exec(version);
+  if (!match) throw new Error(`Not a Shopify API version: ${version}`);
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+
+  // Twelve months after release, at the start of that month. UTC, because the deadline
+  // is Shopify's and does not move with the machine running the test.
+  return new Date(Date.UTC(year + 1, month - 1, 1));
+}
