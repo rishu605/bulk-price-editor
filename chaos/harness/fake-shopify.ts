@@ -273,6 +273,9 @@ export class FakeShopify {
     if (query.includes("priceListFixedPricesAdd")) {
       return this.priceListFixedPricesAdd(variables) as { data?: T; extensions?: { cost?: QueryCost } };
     }
+    if (query.includes("quantityPricingByVariantUpdate")) {
+      return this.quantityPricingUpdate(variables) as { data?: T; extensions?: { cost?: QueryCost } };
+    }
     if (query.includes("priceListFixedPricesDelete")) {
       return this.priceListFixedPricesDelete(variables) as { data?: T; extensions?: { cost?: QueryCost } };
     }
@@ -832,6 +835,104 @@ export class FakeShopify {
    * is the whole reason the mirror has to look at `originType` rather than storing
    * whatever it is handed.
    */
+  /**
+   * Quantity price breaks, keyed by `priceListId|variantId`.
+   *
+   * Separate from `prices` because a variant can have a ladder without the campaign
+   * having set its single price, and because that is how the read query reaches them —
+   * through the price, not instead of it.
+   */
+  readonly ladders = new Map<string, Array<{ minimumQuantity: number; amount: string }>>();
+
+  /**
+   * All-or-nothing, exactly as Shopify documents it: deletes run before creates, and if
+   * any part is invalid nothing is applied at all. A fake that applied the valid half
+   * would let a chunk-as-transaction bug through.
+   */
+  private quantityPricingUpdate(variables: Record<string, unknown>) {
+    const list = this.priceLists.find((l) => l.id === String(variables.priceListId ?? ""));
+    if (!list) {
+      return {
+        data: {
+          quantityPricingByVariantUpdate: {
+            productVariants: [],
+            userErrors: [{ field: ["priceListId"], message: "Price list does not exist." }],
+          },
+        },
+        extensions: this.cost(10),
+      };
+    }
+
+    const input = (variables.input ?? {}) as {
+      quantityPriceBreaksToAdd?: Array<{
+        variantId: string;
+        minimumQuantity: number;
+        price: { amount: string };
+      }>;
+      quantityPriceBreaksToDeleteByVariantId?: string[];
+    };
+
+    const toAdd = input.quantityPriceBreaksToAdd ?? [];
+
+    // Validated before anything is applied, so a bad rung takes the whole request with it.
+    const invalid = toAdd.find(
+      (rung) => !Number.isInteger(rung.minimumQuantity) || rung.minimumQuantity < 1,
+    );
+    if (invalid) {
+      return {
+        data: {
+          quantityPricingByVariantUpdate: {
+            productVariants: [],
+            userErrors: [
+              {
+                field: ["input", "quantityPriceBreaksToAdd"],
+                message: `Minimum quantity ${invalid.minimumQuantity} is invalid.`,
+              },
+            ],
+          },
+        },
+        extensions: this.cost(10),
+      };
+    }
+
+    for (const variantId of input.quantityPriceBreaksToDeleteByVariantId ?? []) {
+      this.ladders.delete(`${list.id}|${variantId}`);
+    }
+
+    for (const rung of toAdd) {
+      const key = `${list.id}|${rung.variantId}`;
+      const stored = this.distortStoredPrice
+        ? this.distortStoredPrice(rung.price.amount, rung.variantId, list.id)
+        : rung.price.amount;
+
+      const rungs = this.ladders.get(key) ?? [];
+      rungs.push({ minimumQuantity: rung.minimumQuantity, amount: stored });
+      this.ladders.set(key, rungs);
+
+      // A ladder needs a price row to hang off, or the read query cannot reach it.
+      if (!list.prices.some((entry) => entry.variantGid === rung.variantId)) {
+        list.prices.push({
+          variantGid: rung.variantId,
+          amount: stored,
+          compareAt: null,
+          originType: "FIXED" as const,
+        });
+      }
+    }
+
+    const touched = [...new Set(toAdd.map((rung) => rung.variantId))];
+
+    return {
+      data: {
+        quantityPricingByVariantUpdate: {
+          productVariants: touched.map((id) => ({ id })),
+          userErrors: [],
+        },
+      },
+      extensions: this.cost(10 * Math.max(1, touched.length)),
+    };
+  }
+
   private priceListPrices(variables: Record<string, unknown>) {
     const list = this.priceLists.find((l) => l.id === String(variables.id ?? ""));
     if (!list) return { data: { priceList: null }, extensions: this.cost(1) };
@@ -849,6 +950,13 @@ export class FakeShopify {
               compareAtPrice: entry.compareAt
                 ? { amount: entry.compareAt, currencyCode: list.currency }
                 : null,
+              // Ladders hang off the price they belong to, as Shopify models them.
+              quantityPriceBreaks: {
+                nodes: (this.ladders.get(`${list.id}|${entry.variantGid}`) ?? []).map((rung) => ({
+                  minimumQuantity: rung.minimumQuantity,
+                  price: { amount: rung.amount, currencyCode: list.currency },
+                })),
+              },
             })),
           },
         },

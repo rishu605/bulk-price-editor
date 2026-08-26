@@ -39,8 +39,8 @@ export const MAX_VARIANTS_PER_QUANTITY_REQUEST = 100;
  * rule reshapes a tier without raising a single userError.
  */
 export const PRICE_LIST_QUANTITY_BREAKS = `#graphql
-  query AnchorPriceListQuantityBreaks($priceListId: ID!, $after: String) {
-    priceList(id: $priceListId) {
+  query AnchorPriceListQuantityBreaks($id: ID!, $after: String) {
+    priceList(id: $id) {
       prices(first: 100, after: $after) {
         nodes {
           variant { id }
@@ -216,7 +216,7 @@ export async function readLadders(
   let after: string | null = null;
   for (let page = 0; page < 50; page += 1) {
     const response: { data?: BreaksResponse } = await withRetry(
-      () => client.request<BreaksResponse>(PRICE_LIST_QUANTITY_BREAKS, { priceListId: priceListGid, after }),
+      () => client.request<BreaksResponse>(PRICE_LIST_QUANTITY_BREAKS, { id: priceListGid, after }),
       isThrottledError,
     );
 

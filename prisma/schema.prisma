@@ -478,6 +478,15 @@ model VariantChange {
   appliedPrice  BigInt?
   verifiedPrice BigInt?
 
+  /// The wholesale ladder this row intends to write, as
+  /// `[{ minimumQuantity, amount }]` in integer minor units of `currency`.
+  ///
+  /// Only ever set on a B2B surface. Invariant I4 says nothing is written without a
+  /// ledger row already committed, and for a tiered price the row is only a record of
+  /// what will be written if it carries the rungs -- `intendedPrice` alone describes the
+  /// first rung and silently loses the rest.
+  quantityBreaks Json?
+
   status        ChangeStatus @default(PENDING)
   failureReason String?
   attempt       Int          @default(0)
