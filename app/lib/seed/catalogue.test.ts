@@ -1,0 +1,206 @@
+/**
+ * The shapes a perf catalogue has to contain.
+ *
+ * A generator that quietly produced 47 variants where it claimed 50, or skipped the
+ * awkward cases under some seed, would make every perf number built on it wrong — and
+ * nobody would find out, because a seeding script that runs without erroring looks like
+ * it worked.
+ */
+
+import { describe, expect, it } from "vitest";
+
+import {
+  buildCatalogue,
+  buildMaxVariantProduct,
+  marketPriceLists,
+  MAX_VARIANTS_PER_PRODUCT,
+  optionsFor,
+  prng,
+} from "./catalogue";
+
+describe("determinism", () => {
+  it("produces the identical catalogue for the same seed", () => {
+    // What makes the seeder idempotent, and what makes Tuesday's perf number comparable
+    // with Friday's.
+    const a = buildCatalogue({ products: 50, variantsPerProduct: 5, seed: 7 });
+    const b = buildCatalogue({ products: 50, variantsPerProduct: 5, seed: 7 });
+
+    expect(JSON.stringify(a)).toBe(JSON.stringify(b));
+  });
+
+  it("produces a different catalogue for a different seed", () => {
+    const a = buildCatalogue({ products: 20, seed: 1 });
+    const b = buildCatalogue({ products: 20, seed: 2 });
+
+    expect(JSON.stringify(a)).not.toBe(JSON.stringify(b));
+  });
+
+  it("derives handles from the index, not the title", () => {
+    // A handle derived from a random title creates a second copy of everything on every
+    // run, which is how a "100K store" quietly becomes a 400K one.
+    const catalogue = buildCatalogue({ products: 5, seed: 3 });
+
+    expect(catalogue.map((product) => product.handle)).toEqual([
+      "anchor-perf-0",
+      "anchor-perf-1",
+      "anchor-perf-2",
+      "anchor-perf-3",
+      "anchor-perf-4",
+    ]);
+  });
+
+  it("gives every variant a unique SKU across the catalogue", () => {
+    // Duplicate SKUs make every import ambiguous, which would make the perf store
+    // useless for testing the importers.
+    const catalogue = buildCatalogue({ products: 100, variantsPerProduct: 8, seed: 11 });
+    const skus = catalogue.flatMap((product) => product.variants.map((v) => v.sku));
+
+    expect(new Set(skus).size).toBe(skus.length);
+  });
+});
+
+describe("scale", () => {
+  it("averages close to the requested variants per product", () => {
+    const catalogue = buildCatalogue({ products: 400, variantsPerProduct: 50, seed: 5 });
+    const total = catalogue.reduce((sum, product) => sum + product.variants.length, 0);
+    const average = total / catalogue.length;
+
+    expect(average).toBeGreaterThan(40);
+    expect(average).toBeLessThan(60);
+  });
+
+  it("varies the count rather than sitting on it", () => {
+    // A catalogue where every product has the same variant count exercises the chunker's
+    // easy path only.
+    const catalogue = buildCatalogue({ products: 200, variantsPerProduct: 50, seed: 5 });
+    const counts = new Set(catalogue.map((product) => product.variants.length));
+
+    expect(counts.size).toBeGreaterThan(5);
+  });
+
+  it("never exceeds Shopify's per-product ceiling", () => {
+    const catalogue = buildCatalogue({ products: 100, variantsPerProduct: 3_000, seed: 5 });
+
+    for (const product of catalogue) {
+      expect(product.variants.length).toBeLessThanOrEqual(MAX_VARIANTS_PER_PRODUCT);
+    }
+  });
+});
+
+describe("the 2,048-variant product", () => {
+  it("is exactly at the ceiling", () => {
+    // Where per-product chunking assumptions break, where __parentId reassembly is
+    // actually exercised, and where "we page at 250" meets "this product is nine pages".
+    expect(buildMaxVariantProduct().variants).toHaveLength(MAX_VARIANTS_PER_PRODUCT);
+  });
+
+  it("gives every variant a distinct option combination", () => {
+    // Shopify rejects a product with two identical option combinations, so a generator
+    // that repeated them would fail at upload after generating two thousand rows.
+    const product = buildMaxVariantProduct();
+    const combinations = product.variants.map((variant) =>
+      variant.optionValues.map((option) => `${option.optionName}:${option.name}`).join("|"),
+    );
+
+    expect(new Set(combinations).size).toBe(combinations.length);
+  });
+
+  it("uses more than one option, because 2,048 is only reachable by combination", () => {
+    const product = buildMaxVariantProduct();
+
+    expect(product.variants[100].optionValues.length).toBeGreaterThan(1);
+  });
+});
+
+describe("the awkward cases (P0.7.4)", () => {
+  const catalogue = buildCatalogue({ products: 500, variantsPerProduct: 4, seed: 42 });
+  const variants = catalogue.flatMap((product) => product.variants);
+
+  it("includes variants with no cost", () => {
+    // The case that makes cost-based guardrails skip rather than price at zero.
+    expect(variants.some((variant) => variant.cost === undefined)).toBe(true);
+  });
+
+  it("includes variants with no compare-at", () => {
+    expect(variants.some((variant) => variant.compareAtPrice === undefined)).toBe(true);
+  });
+
+  it("includes compare-at already at or below price (E11)", () => {
+    // Invalid for a strike-through, and the thing that must be caught rather than
+    // written.
+    expect(
+      variants.some(
+        (variant) =>
+          variant.compareAtPrice !== undefined &&
+          Number(variant.compareAtPrice) <= Number(variant.price),
+      ),
+    ).toBe(true);
+  });
+
+  it("includes sub-major-unit prices", () => {
+    // Where charm rounding once produced a negative price.
+    expect(variants.some((variant) => Number(variant.price) < 1)).toBe(true);
+  });
+
+  it("includes draft and archived products", () => {
+    const statuses = new Set(catalogue.map((product) => product.status));
+
+    expect(statuses.has("DRAFT")).toBe(true);
+    expect(statuses.has("ARCHIVED")).toBe(true);
+  });
+
+  it("includes variants with no barcode", () => {
+    expect(variants.some((variant) => variant.barcode === undefined)).toBe(true);
+  });
+
+  it("spreads tags and vendors widely enough for filter perf to mean anything", () => {
+    expect(new Set(catalogue.flatMap((p) => p.tags)).size).toBeGreaterThan(5);
+    expect(new Set(catalogue.map((p) => p.vendor)).size).toBeGreaterThan(5);
+  });
+});
+
+describe("market price lists (P0.7.3)", () => {
+  const lists = marketPriceLists();
+
+  it("includes a zero-decimal currency", () => {
+    // JPY is here deliberately: it is what breaks naive rounding (E9), and a perf store
+    // with only USD and EUR would let a whole class of bug through while looking
+    // multi-currency.
+    expect(lists.some((list) => list.currency === "JPY")).toBe(true);
+  });
+
+  it("includes both a fixed-price list and percentage-adjusted ones", () => {
+    // The read paths differ — a relative list is stored as its rule, a fixed one as rows
+    // — so a store with only one kind exercises half the code.
+    expect(lists.some((list) => list.adjustmentBps === null)).toBe(true);
+    expect(lists.some((list) => list.adjustmentBps !== null)).toBe(true);
+  });
+
+  it("includes a market above the base price as well as below it", () => {
+    // Direction matters: a percentage increase and a percentage decrease compose
+    // differently with a campaign, and only testing decreases hides that.
+    expect(lists.some((list) => (list.adjustmentBps ?? 0) > 0)).toBe(true);
+    expect(lists.some((list) => (list.adjustmentBps ?? 0) < 0)).toBe(true);
+  });
+});
+
+describe("options", () => {
+  it("uses one option while sizes are enough", () => {
+    expect(optionsFor(0, 4)).toEqual([{ optionName: "Size", name: "XS" }]);
+  });
+
+  it("adds a third axis once colour and size run out", () => {
+    expect(optionsFor(500, 2_048).length).toBe(3);
+  });
+});
+
+describe("the PRNG", () => {
+  it("stays inside [0, 1)", () => {
+    const random = prng(1);
+    for (let i = 0; i < 10_000; i++) {
+      const value = random();
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThan(1);
+    }
+  });
+});
