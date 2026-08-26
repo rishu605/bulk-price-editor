@@ -77,7 +77,7 @@ export default function Baselines() {
       <s-section>
         <FilterForm fields={FILTER_FIELDS}>
           <s-stack gap="base">
-            <s-text-field name="q" label="Title, SKU or variant ID" defaultValue={filters.q ?? ""} />
+            <s-text-field name="q" label="Title, SKU or variant ID" value={filters.q ?? ""} />
 
             <s-select name="vendor" label="Vendor">
               <s-option value="" defaultSelected={!filters.vendor}>
@@ -105,7 +105,7 @@ export default function Baselines() {
               name="diverged"
               value="1"
               label="Only variants whose live price differs from their baseline"
-              defaultChecked={filters.divergedOnly || undefined}
+              checked={filters.divergedOnly || undefined}
             />
 
             <s-button type="submit">Filter</s-button>

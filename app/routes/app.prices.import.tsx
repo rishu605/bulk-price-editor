@@ -134,7 +134,7 @@ export default function ImportPrices() {
         <fetcher.Form method="post" ref={form}>
           <input type="hidden" name="intent" ref={intent} value="dry-run" readOnly />
           <s-stack gap="base">
-            <s-text-field name="name" label="Call this" defaultValue="Imported prices" />
+            <s-text-field name="name" label="Call this" value="Imported prices" />
             <s-text-area
               name="csv"
               label="Rows"
