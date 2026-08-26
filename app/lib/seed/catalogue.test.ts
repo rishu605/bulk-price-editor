@@ -16,6 +16,8 @@ import {
   MAX_VARIANTS_PER_PRODUCT,
   optionsFor,
   prng,
+  TAGS,
+  type SeedProduct,
 } from "./catalogue";
 
 describe("determinism", () => {
@@ -202,5 +204,76 @@ describe("the PRNG", () => {
       expect(value).toBeGreaterThanOrEqual(0);
       expect(value).toBeLessThan(1);
     }
+  });
+});
+
+describe("distributions that make a perf number mean something", () => {
+  // Two thousand products, which is the shape the perf store is actually seeded at. A
+  // smaller sample makes the rare end of each distribution a coin flip, and an assertion
+  // that passes on a lucky draw is worse than no assertion.
+  const products = buildCatalogue({ products: 2000, variantsPerProduct: 3 });
+
+  const countBy = (pick: (product: SeedProduct) => string[]) => {
+    const counts = new Map<string, number>();
+    for (const product of products) {
+      for (const value of pick(product)) counts.set(value, (counts.get(value) ?? 0) + 1);
+    }
+    return counts;
+  };
+
+  it("puts products in collections at all", () => {
+    // The generator produced none, for as long as it existed. `collection` is a targeting
+    // field with a GIN index behind it, so every perf number for the most-used filter in
+    // the product would have been measured against zero matching rows — fast, and fast
+    // for entirely the wrong reason.
+    const counts = countBy((product) => product.collections);
+
+    expect(counts.get("all-products")).toBeGreaterThan(1_500);
+    expect(products.filter((product) => product.collections.length === 0).length)
+      .toBeLessThan(products.length * 0.15);
+  });
+
+  it("skews collection membership rather than spreading it evenly", () => {
+    // The question worth measuring is what happens on the collection holding 90,000
+    // variants, and a catalogue where every collection is the same size has no such
+    // collection. The tail matters too: a filter matching almost nothing exercises the
+    // planner's empty path, which is where an off-by-one surfaces as a silent no-op.
+    const counts = countBy((product) => product.collections);
+
+    expect(counts.get("all-products")!).toBeGreaterThan(counts.get("pro-only")! * 50);
+    expect(counts.get("pro-only")).toBeGreaterThan(0);
+  });
+
+  it("makes the common tags common and the rare ones rare", () => {
+    // The assertion that catches the bug this test was written after. The first draft
+    // drew tags with `Math.sqrt`, which biases towards the *end* of the list and
+    // inverted the whole thing: `discontinued` on 650 products, `core` on 24. Every
+    // summary statistic still showed a power law. It was just measuring the wrong tags.
+    const counts = countBy((product) => product.tags);
+    const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+
+    expect(ranked[0][0]).toBe(TAGS[0]);
+    expect(ranked[0][1]).toBeGreaterThan(ranked[ranked.length - 1][1] * 3);
+  });
+
+  it("leaves a fifth of variants out of stock, and a few oversold", () => {
+    // `inventoryMin` is a targeting field. A catalogue where everything is in stock never
+    // exercises it, and one where nothing is negative lets a naive `qty > 0` check look
+    // correct — Shopify permits overselling into negative, and the difference between
+    // "none" and "minus three" is a campaign that skips a variant it should have priced.
+    const variants = products.flatMap((product) => product.variants);
+
+    const zero = variants.filter((variant) => variant.inventoryQty === 0).length;
+    const negative = variants.filter((variant) => variant.inventoryQty < 0).length;
+
+    expect(zero / variants.length).toBeGreaterThan(0.1);
+    expect(zero / variants.length).toBeLessThan(0.35);
+    expect(negative).toBeGreaterThan(0);
+  });
+
+  it("stays deterministic, so Tuesday's number is comparable with Friday's", () => {
+    const again = buildCatalogue({ products: 2000, variantsPerProduct: 3 });
+
+    expect(JSON.stringify(again)).toBe(JSON.stringify(products));
   });
 });

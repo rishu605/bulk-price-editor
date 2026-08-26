@@ -27,6 +27,11 @@ export interface SeedVariant {
   cost?: string;
   sku: string;
   barcode?: string;
+  /**
+   * Starting stock. Zero for a meaningful share, because `inventoryMin` is a targeting
+   * field and a catalogue where everything is in stock never exercises it.
+   */
+  inventoryQty: number;
 }
 
 export interface SeedProduct {
@@ -35,6 +40,8 @@ export interface SeedProduct {
   vendor: string;
   productType: string;
   tags: string[];
+  /** Collection handles this product belongs to. See `COLLECTIONS`. */
+  collections: string[];
   status: "ACTIVE" | "DRAFT" | "ARCHIVED";
   variants: SeedVariant[];
 }
@@ -44,9 +51,45 @@ const VENDORS = [
   "Ember Works", "Fjord Outfitters", "Granite Lane", "Harbourlight", "Ironwood",
 ];
 const TYPES = ["Snowboard", "Jacket", "Gloves", "Goggles", "Boots", "Helmet", "Wax", "Backpack"];
-const TAGS = [
-  "sale", "new", "clearance", "seasonal", "bestseller", "limited", "bundle",
-  "outlet", "premium", "core",
+/**
+ * Tags, ordered most common first.
+ *
+ * The order is load-bearing: membership is drawn from a power law, so `core` lands on
+ * roughly a third of products and `discontinued` on a handful. A uniform spread — which
+ * is what the first version had — makes every tag equally selective, and a filter that is
+ * equally selective on every value is the one case a real catalogue never presents. The
+ * perf question is what happens on the tag that matches 30,000 variants, and a uniform
+ * catalogue has no such tag.
+ */
+export const TAGS = [
+  "core", "seasonal", "new", "sale", "bestseller", "premium", "bundle",
+  "clearance", "outlet", "limited", "staff-pick", "final-sale", "preorder",
+  "gift", "exclusive", "restock", "discontinued",
+];
+
+/**
+ * Collections, ordered largest first.
+ *
+ * `collection` is a targeting field with a GIN index behind it, and the generator used to
+ * produce none at all — so a perf number for the most-used filter in the product would
+ * have been measured against zero matching rows. An index over an empty array column is
+ * fast, and fast for entirely the wrong reason.
+ *
+ * The distribution is deliberately lopsided. "All products" holds nearly everything,
+ * which is the case that decides whether collection targeting is usable at 100K variants;
+ * the long tail exists so the planner is also exercised on filters that match almost
+ * nothing.
+ */
+export const COLLECTIONS = [
+  { handle: "all-products", share: 0.92 },
+  { handle: "winter-2026", share: 0.34 },
+  { handle: "outerwear", share: 0.21 },
+  { handle: "hardgoods", share: 0.18 },
+  { handle: "accessories", share: 0.12 },
+  { handle: "sale-eligible", share: 0.08 },
+  { handle: "new-arrivals", share: 0.04 },
+  { handle: "clearance-2025", share: 0.015 },
+  { handle: "pro-only", share: 0.004 },
 ];
 const ADJECTIVES = [
   "Alpine", "Arctic", "Basecamp", "Cascade", "Drift", "Everest", "Frost",
@@ -106,20 +149,46 @@ function buildProduct(index: number, targetVariants: number, random: () => numbe
   const spread = targetVariants > 1 ? Math.round((random() - 0.5) * targetVariants * 0.6) : 0;
   const variantCount = Math.max(1, Math.min(MAX_VARIANTS_PER_PRODUCT, targetVariants + spread));
 
-  const tags = [TAGS[index % TAGS.length]];
-  if (random() > 0.6) tags.push(TAGS[(index * 7) % TAGS.length]);
+  const tags = tagsFor(random);
+  const collections = COLLECTIONS.filter((collection) => random() < collection.share).map(
+    (collection) => collection.handle,
+  );
 
   return {
     handle: `anchor-perf-${index}`,
     title: `${adjective} ${type} ${index}`,
     vendor: VENDORS[index % VENDORS.length],
     productType: type,
-    tags: [...new Set(tags)],
+    tags,
+    collections,
     // A few draft and archived, because a catalogue of only active products never
     // exercises the filter that excludes them.
     status: index % 97 === 0 ? "ARCHIVED" : index % 41 === 0 ? "DRAFT" : "ACTIVE",
     variants: buildVariants(index, variantCount, random),
   };
+}
+
+/**
+ * A product's tags, drawn from a power law.
+ *
+ * Squaring the draw biases it towards the front of the list, where the common tags live:
+ * `core` lands on about a quarter of products and `discontinued` on about one in thirty.
+ * Two to four tags each, which is what a real catalogue looks like — one broad category
+ * tag and a couple of merchandising ones.
+ *
+ * The first version used `Math.sqrt`, which biases the other way and inverted the whole
+ * list — `discontinued` on 650 products and `core` on 24. It looked like a power law in
+ * every summary statistic, and every one of them was measuring the wrong tag.
+ */
+function tagsFor(random: () => number): string[] {
+  const count = 2 + Math.floor(random() * 3);
+  const tags = new Set<string>();
+
+  while (tags.size < count) {
+    tags.add(TAGS[Math.floor(random() ** 2 * TAGS.length)]);
+  }
+
+  return [...tags];
 }
 
 export function buildVariants(
@@ -146,6 +215,10 @@ export function buildVariants(
       // A quarter have no cost at all — the case that makes cost-based guardrails skip
       // rather than price at zero.
       ...(random() > 0.25 ? { cost: (price * (0.3 + random() * 0.4)).toFixed(2) } : {}),
+      // A fifth are out of stock and a few oversold into negative, which Shopify permits
+      // and which turns a naive `inventoryQty > 0` check into a wrong answer rather than
+      // an empty one.
+      inventoryQty: inventoryFor(random),
       sku: `APF-${productIndex}-${v}`,
       // Most but not all, so matching has to cope with a missing barcode.
       ...(random() > 0.2 ? { barcode: String(50_000_000_000 + productIndex * 4096 + v) } : {}),
@@ -153,6 +226,13 @@ export function buildVariants(
   }
 
   return variants;
+}
+
+function inventoryFor(random: () => number): number {
+  const roll = random();
+  if (roll < 0.03) return -Math.ceil(random() * 5);
+  if (roll < 0.22) return 0;
+  return Math.ceil(random() * 400);
 }
 
 /**
@@ -203,6 +283,10 @@ export function buildMaxVariantProduct(seed = 20260817): SeedProduct {
     vendor: "Northwind",
     productType: "Jacket",
     tags: ["core", "perf"],
+    // In the big collection deliberately: a collection filter that matches this product
+    // matches 2,048 variants from one row, which is the shape that makes a preview's
+    // "how many will this touch" count arrive late.
+    collections: ["all-products", "outerwear"],
     status: "ACTIVE",
     variants: buildVariants(999_000, MAX_VARIANTS_PER_PRODUCT, random),
   };

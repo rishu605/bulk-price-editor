@@ -8,6 +8,7 @@
  * catalogue it produced means anything.
  *
  *   npx tsx scripts/seed-store.ts 2000 --variants 50   # ~100K variants
+ *   npx tsx scripts/seed-store.ts 2000 --location gid://shopify/Location/123  # with stock
  *   npx tsx scripts/seed-store.ts --max-variant-product
  *   npx tsx scripts/seed-store.ts --markets
  *
@@ -28,6 +29,7 @@ import { adminClientForShop } from "../app/services/admin-client.server";
 import {
   buildCatalogue,
   buildMaxVariantProduct,
+  COLLECTIONS,
   marketPriceLists,
   type SeedProduct,
 } from "../app/lib/seed/catalogue";
@@ -69,8 +71,108 @@ async function existingHandles(client: AdminClient): Promise<Set<string>> {
   return handles;
 }
 
+/**
+ * The location seeded stock lands at, passed in rather than discovered.
+ *
+ * Inventory has to be attached to a location — there is no shop-wide quantity — and both
+ * routes to finding one are closed. `locations` answers "Access denied for locations
+ * field"; going the long way round through a variant's `inventoryLevels` answers
+ * "Required access: `read_inventory`". Both were checked against the store rather than
+ * assumed.
+ *
+ * Neither scope belongs in the manifest. D4 keeps the set to what the *product* uses, and
+ * no feature reads a location or an inventory level — the mirror gets `inventoryQuantity`
+ * from the product graph, which `read_products` covers. Adding a scope so a developer
+ * tool could be more convenient would put an extra permission checkbox in front of every
+ * merchant.
+ *
+ * So the id is pasted in by whoever runs this, from Settings → Locations in admin:
+ *
+ *   npx tsx scripts/seed-store.ts 2000 --variants 50 --location gid://shopify/Location/123
+ *
+ * Without it the catalogue seeds without stock, and every variant reads
+ * `inventoryQuantity: null` — which means "not tracked" rather than "none", and makes
+ * `inventoryMin` untestable. The script says so loudly rather than seeding quietly and
+ * leaving somebody to discover it from a filter that matches nothing.
+ */
+function locationFrom(args: string[]): string | null {
+  const flag = args.indexOf("--location");
+  if (flag === -1) return null;
+
+  const value = args[flag + 1];
+  if (!value?.startsWith("gid://shopify/Location/")) {
+    throw new Error(
+      `--location wants a location gid, got ${value ?? "nothing"}. ` +
+        "Settings → Locations in admin; the id is in the URL.",
+    );
+  }
+
+  return value;
+}
+
+/**
+ * Creates the perf collections if they are not already there, and maps handle to id.
+ *
+ * `productSet` takes collection *ids*, so this has to run before any product is uploaded.
+ * Idempotent by handle for the same reason the products are: a re-run that made a second
+ * "winter-2026" would leave the filter matching half of what it should, and a perf number
+ * measured against half a collection is worse than no number.
+ */
+async function ensureCollections(client: AdminClient): Promise<Map<string, string>> {
+  const ids = new Map<string, string>();
+
+  for (const { handle } of COLLECTIONS) {
+    const found = await client.request<{ collectionByHandle?: { id: string } | null }>(
+      `#graphql
+        query SeedCollectionByHandle($handle: String!) {
+          collectionByHandle(handle: $handle) { id }
+        }
+      `,
+      { handle },
+    );
+
+    const existing = found.data?.collectionByHandle?.id;
+    if (existing) {
+      ids.set(handle, existing);
+      continue;
+    }
+
+    const created = await client.request<{
+      collectionCreate?: {
+        collection?: { id: string } | null;
+        userErrors?: Array<{ message?: string }>;
+      };
+    }>(
+      `#graphql
+        mutation SeedCollectionCreate($input: CollectionInput!) {
+          collectionCreate(input: $input) {
+            collection { id }
+            userErrors { field message }
+          }
+        }
+      `,
+      { input: { handle, title: handle.replace(/-/g, " ") } },
+    );
+
+    const error = created.data?.collectionCreate?.userErrors?.[0]?.message;
+    if (error) {
+      console.log(`  collection ${handle}: ${error}`);
+      continue;
+    }
+
+    const id = created.data?.collectionCreate?.collection?.id;
+    if (id) ids.set(handle, id);
+  }
+
+  return ids;
+}
+
 /** One product as the bulk mutation's JSONL line. */
-function toInput(product: SeedProduct): string {
+function toInput(
+  product: SeedProduct,
+  collectionIds: Map<string, string>,
+  locationId: string | null,
+): string {
   const optionNames = [...new Set(product.variants.flatMap((v) => v.optionValues.map((o) => o.optionName)))];
 
   return JSON.stringify({
@@ -81,6 +183,12 @@ function toInput(product: SeedProduct): string {
       productType: product.productType,
       tags: product.tags,
       status: product.status,
+      // Silently dropping a collection we failed to create would leave the filter
+      // matching fewer products than the generator says it should, which is exactly the
+      // kind of discrepancy that makes a perf number quietly wrong.
+      collections: product.collections
+        .map((handle) => collectionIds.get(handle))
+        .filter((id): id is string => Boolean(id)),
       productOptions: optionNames.map((name) => ({
         name,
         values: [
@@ -97,19 +205,40 @@ function toInput(product: SeedProduct): string {
         ...(variant.compareAtPrice ? { compareAtPrice: variant.compareAtPrice } : {}),
         sku: variant.sku,
         ...(variant.barcode ? { barcode: variant.barcode } : {}),
-        ...(variant.cost ? { inventoryItem: { cost: variant.cost } } : {}),
+        // `tracked` is required alongside a quantity — an untracked item has no stock to
+        // set, and Shopify rejects the pair rather than inferring it.
+        ...(variant.cost || locationId
+          ? {
+              inventoryItem: {
+                ...(variant.cost ? { cost: variant.cost } : {}),
+                ...(locationId ? { tracked: true } : {}),
+              },
+            }
+          : {}),
+        ...(locationId
+          ? {
+              inventoryQuantities: [
+                { locationId, name: "available", quantity: variant.inventoryQty },
+              ],
+            }
+          : {}),
       })),
     },
   });
 }
 
-async function upload(client: AdminClient, products: SeedProduct[]): Promise<void> {
+async function upload(
+  client: AdminClient,
+  products: SeedProduct[],
+  collectionIds: Map<string, string>,
+  locationId: string | null,
+): Promise<void> {
   if (products.length === 0) {
     console.log("  nothing to create — every handle already exists");
     return;
   }
 
-  const jsonl = `${products.map(toInput).join("\n")}\n`;
+  const jsonl = `${products.map((product) => toInput(product, collectionIds, locationId)).join("\n")}\n`;
   console.log(`  payload: ${products.length} products, ${(jsonl.length / 1024).toFixed(0)} KB`);
 
   const staged = await client.request<{
@@ -233,6 +362,7 @@ async function main() {
   const args = process.argv.slice(2);
   const count = Number(args.find((a) => /^\d+$/.test(a)) ?? 2_000);
   const variants = Number(args[args.indexOf("--variants") + 1] ?? 50);
+  const locationId = locationFrom(args);
 
   const shop = await prisma.shop.findFirstOrThrow({ select: { domain: true } });
   const client = await adminClientForShop(shop.domain);
@@ -247,10 +377,23 @@ async function main() {
   const existing = await existingHandles(client);
   console.log(`  ${existing.size} already there`);
 
+  const collectionIds = await ensureCollections(client);
+  console.log(`  ${collectionIds.size}/${COLLECTIONS.length} collections ready`);
+
+  // Never silent. A run that seeded no stock looks identical to one that did, right up
+  // until somebody reads an inventory-filter timing off a catalogue that has no
+  // inventory.
+  if (!locationId) {
+    console.log(
+      "  NO STOCK — pass --location gid://shopify/Location/… to seed inventory.\n" +
+        "  Without it every variant reads as untracked and inventoryMin is untestable.",
+    );
+  }
+
   if (args.includes("--max-variant-product")) {
     const product = buildMaxVariantProduct();
     console.log(`The 2,048-variant product: ${product.title}`);
-    await upload(client, existing.has(product.handle) ? [] : [product]);
+    await upload(client, existing.has(product.handle) ? [] : [product], collectionIds, locationId);
     return;
   }
 
@@ -258,7 +401,12 @@ async function main() {
   const total = catalogue.reduce((sum, product) => sum + product.variants.length, 0);
   console.log(`Generated ${catalogue.length} products, ${total} variants`);
 
-  await upload(client, catalogue.filter((product) => !existing.has(product.handle)));
+  await upload(
+    client,
+    catalogue.filter((product) => !existing.has(product.handle)),
+    collectionIds,
+    locationId,
+  );
 }
 
 main()
