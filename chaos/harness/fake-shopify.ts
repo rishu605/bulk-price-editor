@@ -104,6 +104,19 @@ export class FakeShopify {
   shopCurrency = "USD";
 
   /**
+   * Stores a different price than the one requested, and reports the stored one.
+   *
+   * Models a shop that quietly adjusts what it is given — a rounding rule, a currency
+   * setting, a price list that reshapes the number. Shopify returns no error for this:
+   * the mutation succeeds and the storefront simply shows something else. Verification
+   * that only checks for `userError`s cannot see it, which is the point.
+   *
+   * Takes and returns the decimal string Shopify deals in, so a scenario can model
+   * rounding to whole units without this file knowing about currency precision.
+   */
+  distortStoredPrice: ((requested: string, variantGid: string) => string) | null = null;
+
+  /**
    * Exchange rates from the shop currency, per market currency.
    *
    * Present so the fake can derive a relative list's prices the way Shopify does:
@@ -329,8 +342,12 @@ export class FakeShopify {
       }
 
       if (typeof input.price === "string") {
-        variant.price = input.price;
-        this.writeLog.push({ variantGid: id, price: input.price, priceListGid: null });
+        // What the shop ends up holding, which is not always what was asked for.
+        const stored = this.distortStoredPrice
+          ? this.distortStoredPrice(input.price, id)
+          : input.price;
+        variant.price = stored;
+        this.writeLog.push({ variantGid: id, price: stored, priceListGid: null });
       }
       if ("compareAtPrice" in input) {
         variant.compareAtPrice = input.compareAtPrice === null ? null : String(input.compareAtPrice);

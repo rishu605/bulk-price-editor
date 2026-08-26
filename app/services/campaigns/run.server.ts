@@ -36,10 +36,18 @@ export interface RunOptions {
   revert?: boolean;
   /**
    * Fraction of applied rows to read back. Defaults to full verification, which
-   * suits the catalogue sizes the sync path handles; the bulk path gets per-row
-   * confirmation from its result file instead.
+   * suits the catalogue sizes the sync path handles; the bulk path compares every row
+   * against the price its result file reports, so it does not sample.
    */
   verifySampleRate?: number;
+  /**
+   * Forces the write path instead of choosing it by row count.
+   *
+   * For tests and diagnostics only. Both paths must behave identically on the things
+   * that matter, and the cheapest way to keep that true is to be able to run the same
+   * scenario down each of them without seeding a thousand variants.
+   */
+  forcePath?: "sync" | "bulk";
   /**
    * Continue an interrupted run instead of starting fresh.
    *
@@ -326,6 +334,7 @@ export async function runCampaign(
     client,
     productOf: (gid) => products.get(gid) ?? gid,
     verifySampleRate: options.verifySampleRate ?? 1,
+    forcePath: options.forcePath,
     onProgress: heartbeat(run.id),
   });
 
@@ -811,6 +820,17 @@ async function recordResults(
         failureReason: executed.guidance
           ? `${executed.guidance} (Shopify said: ${executed.failureReason})`
           : executed.failureReason,
+        // The number the store actually holds, when the read-back found a different
+        // one. The failure reason says it in prose; this says it in a column, so
+        // reconciliation and support can act on it without parsing English.
+        //
+        // Only set on divergence: for a verified row the observed price equals the
+        // intended one by definition, and writing it back per row would cost a query
+        // each to record something already in `intendedPrice`.
+        appliedPrice:
+          executed.observedPrice !== undefined
+            ? BigInt(executed.observedPrice.amount)
+            : undefined,
         // Counts toward quarantine: a row that has burned its attempts is left alone
         // by the next resume rather than retried forever.
         attempt: { increment: 1 },
