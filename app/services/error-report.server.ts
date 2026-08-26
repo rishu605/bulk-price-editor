@@ -16,6 +16,7 @@ import type { ReportedError } from "../lib/errors/report";
 import { newErrorId } from "../lib/errors/error-id";
 import { logger } from "../lib/logging/logger";
 import { redact, redactText } from "../lib/logging/redact";
+import { captureError, setShopContext } from "../lib/observability/sentry.server";
 
 export interface ReportContext {
   shopId?: string | null;
@@ -48,6 +49,18 @@ export async function reportError(
     retryable: appError.retryable,
     ...merged,
     error: appError.cause ?? appError,
+  });
+
+  // To Sentry as well as the table, and after the log for the same reason. The table
+  // answers "is this one merchant or all of them" as a query; Sentry answers "is this
+  // happening right now" without anybody asking. Different questions, both worth having,
+  // and neither is allowed to fail the other.
+  setShopContext(shopId ?? null, shop);
+  captureError(appError.cause ?? appError, {
+    errorId,
+    code: appError.code,
+    route,
+    ...merged,
   });
 
   try {

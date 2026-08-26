@@ -5,6 +5,12 @@ import { createReadableStreamFromReadable } from "@react-router/node";
 import { type EntryContext } from "react-router";
 import { isbot } from "isbot";
 import { addDocumentResponseHeaders } from "./shopify.server";
+import { initSentry } from "./lib/observability/sentry.server";
+
+// Once per process, at import time, before any request is handled. Initialising lazily
+// on the first error would miss the errors that happen during startup, which are the ones
+// most likely to be about configuration.
+initSentry({ process: "web" });
 
 export const streamTimeout = 5000;
 
