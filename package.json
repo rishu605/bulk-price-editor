@@ -27,7 +27,8 @@
     "test:chaos": "vitest run --config vitest.chaos.config.ts",
     "scope:probe": "tsx scripts/scope-probe.ts",
     "measure:admin": "tsx scripts/measure-admin.ts",
-    "measure:import": "tsx scripts/measure-import.ts"
+    "measure:import": "tsx scripts/measure-import.ts",
+    "drill:mirror": "tsx scripts/drill-mirror.ts"
   },
   "type": "module",
   "engines": {
