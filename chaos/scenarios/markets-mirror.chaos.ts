@@ -166,4 +166,70 @@ describe("chaos: mirroring market and B2B price lists", () => {
       },
     );
   });
+
+  it("mirrors a hand-set override on a list that also has a rule", async () => {
+    /**
+     * A list can be both, and this scenario is the case the file's opening argument
+     * misses. Shopify lets a fixed price shadow the parent adjustment for one variant —
+     * how a merchant says "10% off Japan, except this one product at ¥1,200" — and the
+     * sync used to skip straight past those the moment a list had an adjustment.
+     *
+     * What made it costly is that the two reads which could have caught it both look the
+     * other way. `readDerivedPrices` asks `originType: RELATIVE`, so an overridden variant
+     * does not come back at all; the campaign concluded it was not priced on that market
+     * and left it alone. A merchant's "20% off in Japan" then skipped exactly the products
+     * they had cared enough about to price by hand.
+     *
+     * The absence assertion this file was built on still holds — the rule is not expanded
+     * — so both are asserted together, because the fix is only correct if it adds the
+     * overrides *without* expanding the rule.
+     */
+    await withChaos(
+      "markets-mirror-override",
+      { catalog: { products: 4, variantsPerProduct: 2 }, percent: -10 },
+      async (chaos) => {
+        const { shopId, variantGids } = chaos.fixture;
+        const client = chaosAdminClient(chaos.server.endpoint());
+
+        const overridden = variantGids[0];
+
+        chaos.fake.addPriceList({
+          id: "gid://shopify/PriceList/jp",
+          name: "Japan",
+          currency: "JPY",
+          adjustment: { type: "PERCENTAGE_DECREASE", value: 10 },
+          catalog: { id: "gid://shopify/MarketCatalog/jp", title: "Japan", __typename: "MarketCatalog" },
+          prices: variantGids.map((gid) => ({
+            variantGid: gid,
+            // Whole yen, because JPY has no decimal places — a compare-at of 1800 against
+            // a price of 1200 is the per-market strike-through the product exists for.
+            amount: gid === overridden ? "1200" : "1.00",
+            compareAt: gid === overridden ? "1800" : null,
+            originType: gid === overridden ? ("FIXED" as const) : ("RELATIVE" as const),
+          })),
+        });
+
+        const result = await syncMarkets(client, shopId);
+        expect(result.errors).toEqual([]);
+
+        const mirrored = await prisma.priceSurfaceEntry.findMany({
+          where: { shopId, priceListGid: "gid://shopify/PriceList/jp" },
+        });
+
+        // Exactly the hand-set one. Not zero, which is what the bug produced, and not one
+        // per variant, which is what expanding the rule would produce.
+        expect(mirrored).toHaveLength(1);
+        expect(mirrored[0].variantGid).toBe(overridden);
+        expect(mirrored[0].livePrice).toBe(1_200n);
+        expect(mirrored[0].liveCompareAt).toBe(1_800n);
+        expect(mirrored[0].currency).toBe("JPY");
+
+        // And the rule is still stored as a rule.
+        const list = await prisma.priceListRecord.findFirstOrThrow({
+          where: { shopId, priceListGid: "gid://shopify/PriceList/jp" },
+        });
+        expect(list.adjustmentBps).toBe(-1_000);
+      },
+    );
+  });
 });

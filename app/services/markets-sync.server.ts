@@ -201,10 +201,26 @@ export async function syncMarkets(
       // Derived. The rule is the mirror; expanding it would restate one percentage
       // once per variant per market.
       result.relative++;
-      continue;
+    } else {
+      result.fixed++;
     }
 
-    result.fixed++;
+    // Overrides are mirrored either way, and this used to `continue` past them.
+    //
+    // A list can carry a parent adjustment *and* per-variant fixed prices — Shopify lets a
+    // fixed price shadow the parent for one variant, which is how a merchant says "10% off
+    // Japan, except this one product at ¥1,200". Skipping those left the mirror asserting
+    // that every variant on the list sat at the rule, when three of them did not.
+    //
+    // It hid because the two reads that could have caught it both look past it.
+    // `readDerivedPrices` asks `originType: RELATIVE`, so an overridden variant simply
+    // does not come back — the campaign then treats it as unpriced on that market and
+    // silently leaves it alone, which is the opposite of what the merchant asked for.
+    //
+    // Not a cost concern: `mirrorFixedPrices` already stores only `FIXED` rows, so a
+    // derived list with no overrides still writes nothing. The comment at the top of this
+    // file is the justification — those are the entries carrying information the rule does
+    // not already have.
     try {
       result.entries += await mirrorFixedPrices(client, shopId, list, surfaceKind);
     } catch (error) {

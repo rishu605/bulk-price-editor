@@ -189,4 +189,84 @@ describe("chaos: writing campaign prices to markets", () => {
       },
     );
   });
+
+  it("prices a variant the merchant had hand-set on an adjusted market", async () => {
+    /**
+     * The case where a market list carries a rule *and* a hand-set price for one variant.
+     * Shopify allows it — a fixed price shadows the parent adjustment — and it is how a
+     * merchant says "10% off Japan, except this one product at ¥1,200".
+     *
+     * The campaign used to skip that variant entirely. Baselines for an adjusted list came
+     * only from `readDerivedPrices`, which asks `originType: RELATIVE`; an overridden
+     * variant has origin FIXED, so Shopify returned nothing for it and the planner
+     * concluded it was not priced on that market at all. A merchant's "20% off in Japan"
+     * therefore skipped precisely the products they had cared enough to price by hand —
+     * and the run reported them as unpriced there rather than as missed.
+     *
+     * Asserted as "was it priced, and from the right baseline", because pricing it from
+     * the *derived* number would be worse than skipping it: that is a discount off a
+     * price the merchant had explicitly overridden.
+     */
+    await withChaos(
+      "market-override-priced",
+      { catalog: { products: 3, variantsPerProduct: 1 }, percent: -20 },
+      async (chaos) => {
+        const { shopId, campaignId, variantGids } = chaos.fixture;
+        const overridden = variantGids[0];
+
+        chaos.fake.addPriceList({
+          id: "gid://shopify/PriceList/jp",
+          name: "Japan",
+          currency: "JPY",
+          adjustment: { type: "PERCENTAGE_DECREASE", value: 10 },
+          catalog: { id: "gid://shopify/MarketCatalog/jp", title: "JP", __typename: "MarketCatalog" },
+          prices: [
+            {
+              variantGid: overridden,
+              // Whole yen: JPY has no decimal places.
+              amount: "1200",
+              compareAt: null,
+              originType: "FIXED" as const,
+            },
+          ],
+        });
+
+        const { syncMarkets } = await import("../../app/services/markets-sync.server");
+        const { chaosAdminClient } = await import("../harness/http-client");
+        await syncMarkets(chaosAdminClient(chaos.server.endpoint()), shopId);
+
+        await prisma.campaign.update({
+          where: { id: campaignId },
+          data: { surfaces: { base: true, priceLists: ["gid://shopify/PriceList/jp"] } as never },
+        });
+
+        const applied = await chaos.apply();
+        await chaos.expectHonest(applied.runId);
+
+        // The baseline is the merchant's own ¥1,200, not whatever the rule would have
+        // derived. This is the assertion that matters: a baseline taken from the rule
+        // would discount a price the merchant had deliberately overridden.
+        const baseline = await prisma.baseline.findFirstOrThrow({
+          where: {
+            shopId,
+            variantGid: overridden,
+            surfaceKind: "MARKET",
+            priceListGid: "gid://shopify/PriceList/jp",
+            supersededAt: null,
+          },
+        });
+        expect(baseline.basePrice).toBe(1_200n);
+        expect(baseline.currency).toBe("JPY");
+
+        // And it was actually repriced rather than quietly passed over — 20% off ¥1,200.
+        const jp = chaos.fake.fixedPricesOn("gid://shopify/PriceList/jp");
+        expect(jp.has(overridden), "the hand-set variant was skipped").toBe(true);
+        expect(jp.get(overridden)!.amount).toBe("960");
+
+        // The variants the rule still governs were priced too, so preferring overrides
+        // did not cost the ordinary path.
+        expect(jp.size).toBe(variantGids.length);
+      },
+    );
+  });
 });
