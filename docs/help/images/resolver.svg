@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 300" width="640" height="300" role="img" aria-labelledby="title desc">
+  <title id="title">How a live price is computed</title>
+  <desc id="desc">The baseline and the campaigns covering a variant go into the resolver, which picks one winning campaign by priority and produces the live price. Campaigns never stack.</desc>
+  <style>
+    text { font-family: Inter, -apple-system, "Segoe UI", sans-serif; fill: #1a1a1a; }
+    .label { font-size: 13px; }
+    .small { font-size: 11px; fill: #4a4a4a; }
+    .box { fill: #f6f6f7; stroke: #c9c9c9; }
+    .winner { fill: #e8f5ee; stroke: #2f7d54; }
+    .muted { fill: #fafafa; stroke: #dcdcdc; }
+    .arrow { stroke: #8a8a8a; fill: none; }
+    @media (prefers-color-scheme: dark) {
+      text { fill: #e3e3e3; }
+      .small { fill: #b5b5b5; }
+      .box { fill: #2a2a2a; stroke: #4a4a4a; }
+      .winner { fill: #1e3a2b; stroke: #4aa878; }
+      .muted { fill: #232323; stroke: #3a3a3a; }
+    }
+  </style>
+  <defs>
+    <marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8a8a8a"/>
+    </marker>
+  </defs>
+
+  <rect class="box" x="10" y="120" width="140" height="56" rx="6"/>
+  <text class="label" x="80" y="145" text-anchor="middle">Baseline</text>
+  <text class="small" x="80" y="163" text-anchor="middle">£100.00</text>
+
+  <rect class="winner" x="220" y="40" width="180" height="52" rx="6"/>
+  <text class="label" x="310" y="63" text-anchor="middle">Summer sale · −20%</text>
+  <text class="small" x="310" y="80" text-anchor="middle">priority 10 — wins</text>
+
+  <rect class="muted" x="220" y="118" width="180" height="52" rx="6"/>
+  <text class="label" x="310" y="141" text-anchor="middle">Clearance · −30%</text>
+  <text class="small" x="310" y="158" text-anchor="middle">priority 5</text>
+
+  <rect class="muted" x="220" y="196" width="180" height="52" rx="6"/>
+  <text class="label" x="310" y="219" text-anchor="middle">Bundle · −10%</text>
+  <text class="small" x="310" y="236" text-anchor="middle">priority 1</text>
+
+  <rect class="box" x="470" y="120" width="160" height="56" rx="6"/>
+  <text class="label" x="550" y="145" text-anchor="middle">Live price</text>
+  <text class="small" x="550" y="163" text-anchor="middle">£80.00</text>
+
+  <path class="arrow" marker-end="url(#head)" d="M150,148 L214,148"/>
+  <path class="arrow" marker-end="url(#head)" d="M150,142 C185,142 185,66 214,66"/>
+  <path class="arrow" marker-end="url(#head)" d="M150,154 C185,154 185,222 214,222"/>
+  <path class="arrow" marker-end="url(#head)" d="M400,66 C440,66 440,142 464,142"/>
+
+  <text class="small" x="550" y="200" text-anchor="middle">one winner,</text>
+  <text class="small" x="550" y="216" text-anchor="middle">never stacked</text>
+</svg>

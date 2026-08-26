@@ -24,6 +24,25 @@ const ROOT = join(process.cwd(), "docs", "help");
 /** The page served when no slug is given — the curated index, not a generated list. */
 export const INDEX_SLUG = "index";
 
+/**
+ * Image types the help centre will serve, and what to send them as.
+ *
+ * An allowlist rather than a lookup: this route hands bytes to an unauthenticated caller
+ * from a path they supplied, and the set of things a help page legitimately needs is
+ * small. Anything not named here is not served, whatever its extension says.
+ */
+const IMAGE_TYPES: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".svg": "image/svg+xml",
+};
+
+export interface HelpImage {
+  body: Buffer;
+  contentType: string;
+}
+
 export interface HelpPage {
   /** The `#` heading, used as the document title. */
   title: string;
@@ -79,14 +98,18 @@ export function escapesRoot(candidate: string): boolean {
  * help page whose every onward link is dead.
  */
 export function rewriteHelpHref(href: string, fromSlug: string): string {
-  if (!href.startsWith(".") && !/^[a-z0-9][a-z0-9-]*\.md([#?].*)?$/i.test(href)) {
+  if (!href.startsWith(".") && !/^[a-z0-9][a-z0-9-]*\.(md|png|jpe?g|svg)([#?].*)?$/i.test(href)) {
     return href;
   }
 
   const [path, fragment = ""] = splitFragment(href);
-  if (!path.endsWith(".md")) return href;
+  const isPage = path.endsWith(".md");
+  const isAsset = /\.(png|jpe?g|svg)$/i.test(path);
+  if (!isPage && !isAsset) return href;
 
   const dir = posix.dirname(fromSlug);
+  // Pages lose their extension because that is how they are routed; an asset keeps its,
+  // because that is how it is served and how the type is decided.
   const resolved = posix
     .normalize(posix.join(dir === "." ? "" : dir, path))
     .replace(/\.md$/, "");
@@ -101,6 +124,45 @@ export function rewriteHelpHref(href: string, fromSlug: string): string {
 function splitFragment(href: string): [string, string] {
   const at = href.search(/[#?]/);
   return at === -1 ? [href, ""] : [href.slice(0, at), href.slice(at)];
+}
+
+/**
+ * An image belonging to a help page.
+ *
+ * Screenshots and diagrams live beside the prose they explain, which is what lets a doc
+ * and its picture be updated in one commit. Serving them needs the same path checks the
+ * pages get — the alphabet is widened only by the dot in the extension, and the extension
+ * has to be one we publish.
+ *
+ * Three independent refusals, and mutation testing says each is individually redundant:
+ * remove any one and the traversal cases are still refused by the other two. That is the
+ * intended shape rather than an accident. The extension allowlist is the one doing the
+ * visible work; the alphabet check and `escapesRoot` are there so that widening the
+ * allowlist later — a PDF, a font — cannot quietly become a file server.
+ */
+export async function readHelpImage(path: string): Promise<HelpImage | null> {
+  const cleaned = path.replace(/^\/+|\/+$/g, "");
+
+  const dot = cleaned.lastIndexOf(".");
+  if (dot === -1) return null;
+
+  const extension = cleaned.slice(dot).toLowerCase();
+  const contentType = IMAGE_TYPES[extension];
+  if (!contentType) return null;
+
+  // Reuse the page resolver on the name without its extension, so the traversal rules
+  // are the ones already tested rather than a second set written for images.
+  const asSlug = cleaned.slice(0, dot);
+  if (!SLUG_ALPHABET.test(asSlug)) return null;
+
+  const candidate = normalize(join(ROOT, cleaned));
+  if (escapesRoot(candidate)) return null;
+
+  try {
+    return { body: await readFile(candidate), contentType };
+  } catch {
+    return null;
+  }
 }
 
 export async function readHelpPage(slug: string): Promise<HelpPage | null> {
@@ -130,6 +192,13 @@ export async function readHelpPage(slug: string): Promise<HelpPage | null> {
       if (token.type === "link") {
         const link = token as Tokens.Link;
         link.href = rewriteHelpHref(link.href, slug);
+      }
+      // Images the same way. A browser would resolve `../images/x.svg` correctly from
+      // this URL by accident; rewriting it means the answer does not depend on whether
+      // the page was reached with a trailing slash.
+      if (token.type === "image") {
+        const image = token as Tokens.Image;
+        image.href = rewriteHelpHref(image.href, slug);
       }
     },
   });

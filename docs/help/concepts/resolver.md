@@ -11,6 +11,8 @@ For each product, exactly one campaign controls the price. The winner is:
 
 Everything else is ignored for that product — not applied on top.
 
+![How a live price is computed: the baseline and every campaign covering a variant go into the resolver, which picks one winner by priority. The £100 baseline with a winning 20% campaign gives a £80 live price; the other two campaigns are ignored rather than added on top.](../images/resolver.svg)
+
 ## Why not stack?
 
 Because stacking is how merchants end up giving away 60% by accident. Two 20% campaigns
