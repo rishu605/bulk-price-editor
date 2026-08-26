@@ -132,22 +132,37 @@ export function uniformAdjustment(inputs: UniformInputs): UniformVerdict {
     priced.push({ baseline, to });
   }
 
-  // Derived from the *dearest* product, then verified against every other one.
+  // Every basis-point value that reproduces every row, found exactly rather than guessed.
   //
-  // Not the first, which is what this did originally and which made the whole
-  // optimisation a coin flip on catalogue order. Recovering a percentage from a cheap
-  // product is imprecise: at a baseline of 7 minor units a 20% cut is 6, and the only
-  // percentage that reproduces 6 from 7 is -14.29%, which then fails to reproduce
-  // anything else. The dearest product carries the most significant digits, so the
-  // percentage it implies is the one most likely to be the campaign's actual intent.
+  // The obvious approach — recover a percentage from one row and check the others —
+  // cannot work, because the row's price was rounded to a minor unit before we saw it and
+  // the rounding is amplified back into the percentage. A clean 20% off a baseline of
+  // 7,088 is 5,670.4, stored as 5,670, which recovers as -20.01% and then reproduces
+  // almost nothing else. Picking the dearest row narrowed that error; it did not remove
+  // it, and one basis point out is as useless as a hundred.
   //
-  // It is still only a candidate. Every row has to reproduce exactly, so a wrong guess
-  // costs the optimisation and never a wrong price.
-  const strongest = priced.reduce((best, row) => (row.baseline > best.baseline ? row : best));
-  const bps = Math.round(((strongest.to - strongest.baseline) * 10_000) / strongest.baseline);
+  // So take the question the other way round. `applyBps` rounds, so for a given row the
+  // set of values that map its baseline to its target is an *interval*:
+  //
+  //     round(baseline × (10000 + bps) / 10000) == to
+  //       ⟺  to - 0.5  ≤  baseline × (10000 + bps) / 10000  <  to + 0.5
+  //
+  // For the row above that interval is [-2001, -2000] — it holds the wrong answer and the
+  // right one. Intersecting the intervals across every row leaves only values that
+  // reproduce all of them at once. Exact, one pass, and no heuristic about which product
+  // to trust.
+  let lo = Number.NEGATIVE_INFINITY;
+  let hi = Number.POSITIVE_INFINITY;
 
   for (const row of priced) {
-    if (applyBps(row.baseline, bps) !== row.to) {
+    const span = feasibleBps(row.baseline, row.to);
+    lo = Math.max(lo, span.lo);
+    hi = Math.min(hi, span.hi);
+
+    // An empty intersection means no single percentage produces these prices, which is
+    // what a plan perturbed by charm rounding or a guardrail actually looks like. The
+    // optimisation is lost and the prices are still right, which is the correct trade.
+    if (lo > hi) {
       return {
         eligible: false,
         reason: "the change is not the same percentage on every product",
@@ -155,11 +170,76 @@ export function uniformAdjustment(inputs: UniformInputs): UniformVerdict {
     }
   }
 
+  // Any value in the range reproduces every row, so the choice is about meaning rather
+  // than correctness. It still matters: this number is written to the merchant's price
+  // list and they read it in the Shopify admin, where "-14.74%" next to a campaign they
+  // set up as "15% off" is alarming in a way that takes a support ticket to settle.
+  const strongest = priced.reduce((best, row) => (row.baseline > best.baseline ? row : best));
+  const intent = ((strongest.to - strongest.baseline) * 10_000) / strongest.baseline;
+  const bps = roundestWithin(lo, hi, intent);
+
   if (bps === 0) {
     return { eligible: false, reason: "the campaign does not change this market's prices" };
   }
 
   return { eligible: true, bps };
+}
+
+/**
+ * The value in `[lo, hi]` a person would recognise as the percentage they asked for.
+ *
+ * Merchants set whole percentages, so a whole percentage in range is almost certainly
+ * what this campaign is. Nearest-to-implied is not good enough on its own: five prices
+ * that all round up push the implied figure well off the real one — a clean 15% off a
+ * catalogue of 110 to 190 minor units implies -14.74%, and every price still reproduces
+ * exactly from -15%.
+ *
+ * Coarsest step that lands in range wins, then nearest to the implied value among the
+ * multiples of that step. Correctness is not at stake here — every value in the range
+ * reproduces every row, which is what makes preferring the legible one free.
+ */
+function roundestWithin(lo: number, hi: number, intent: number): number {
+  for (const step of [100, 50, 25, 10, 5, 1]) {
+    const first = Math.ceil(lo / step) * step;
+    const last = Math.floor(hi / step) * step;
+    if (first > last) continue;
+
+    return Math.min(last, Math.max(first, Math.round(intent / step) * step));
+  }
+
+  // Unreachable: a non-empty range always contains a multiple of 1. Present so the
+  // function has a total return rather than relying on the reader to prove it.
+  return Math.min(hi, Math.max(lo, Math.round(intent)));
+}
+
+/**
+ * The basis-point values that map `baseline` to `to`, as an inclusive integer range.
+ *
+ * Derived from `applyBps`'s rounding rather than assumed, so the two cannot drift apart:
+ * a target price of `to` is produced by any adjustment landing in [to - 0.5, to + 0.5),
+ * and that band in prices is a band in basis points.
+ *
+ * The upper bound is exclusive in prices, so an adjustment landing exactly on `to + 0.5`
+ * rounds up and away. Handled explicitly because it is reachable — a baseline of 6 with a
+ * target of 4 admits -2500 unless the boundary is excluded, and -2500 turns 6 into 4.5,
+ * which rounds to 5. One minor unit, on every product in a market.
+ *
+ * Exported for its own tests. The market fixtures cannot reach this cleanly: the
+ * intersection of several rows almost always excludes the boundary anyway, and
+ * `roundestWithin` prefers a legible value over an extreme one — so a market test can
+ * pass with the bound wrong. A boundary this exact deserves to be checked exactly.
+ */
+export function feasibleBps(baseline: number, to: number): { lo: number; hi: number } {
+  // Floored at -100%. Below that the arithmetic keeps working and stops meaning
+  // anything: the price goes negative, `applyBps` reflects it through zero, and a
+  // baseline of 1 with a target of 0 acquires a "feasible" band stretching to -150%.
+  // Shopify has no such adjustment either, so the floor costs nothing real.
+  const lo = Math.max(-10_000, Math.ceil(((to - 0.5) * 10_000) / baseline - 10_000));
+
+  const exclusive = ((to + 0.5) * 10_000) / baseline - 10_000;
+  const hi = Number.isInteger(exclusive) ? exclusive - 1 : Math.floor(exclusive);
+
+  return { lo, hi };
 }
 
 /**
