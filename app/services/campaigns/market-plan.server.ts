@@ -218,24 +218,45 @@ async function captureMarketBaselines(
 ): Promise<Map<string, Money>> {
   const found = new Map<string, Money>();
 
-  if (list.adjustmentBps === null) {
-    const entries = await prisma.priceSurfaceEntry.findMany({
-      where: {
-        shopId,
-        priceListGid: list.priceListGid,
-        variantGid: { in: variantGids },
-        livePrice: { not: null },
-      },
-      select: { variantGid: true, livePrice: true, currency: true },
-    });
+  // Hand-set prices first, whether or not the list also carries a rule.
+  //
+  // This used to be an either/or on `adjustmentBps`, and a list can be both: Shopify lets
+  // a fixed price shadow the parent adjustment for one variant, which is how a merchant
+  // says "10% off Japan, except this one product at ¥1,200". Asking only for derived
+  // prices on such a list gets nothing back for the overridden variants — the query is
+  // `originType: RELATIVE` and their origin is FIXED — so the campaign concluded they were
+  // not priced on that market and left them alone. The merchant's "20% off in Japan" then
+  // skipped exactly the products they had cared enough about to price by hand.
+  const entries = await prisma.priceSurfaceEntry.findMany({
+    where: {
+      shopId,
+      priceListGid: list.priceListGid,
+      variantGid: { in: variantGids },
+      livePrice: { not: null },
+    },
+    select: { variantGid: true, livePrice: true, currency: true },
+  });
 
-    for (const entry of entries) {
-      found.set(entry.variantGid, money(Number(entry.livePrice), entry.currency || list.currency));
-    }
-  } else {
-    const derived = await readDerivedPrices(client, list.priceListGid, variantGids);
-    for (const [variantGid, amount] of derived) {
-      found.set(variantGid, parseMoney(amount, list.currency));
+  for (const entry of entries) {
+    found.set(entry.variantGid, money(Number(entry.livePrice), entry.currency || list.currency));
+  }
+
+  if (list.adjustmentBps !== null) {
+    // Everything the rule still governs.
+    //
+    // Narrowing to the variants without an override saves round trips and nothing else:
+    // Shopify does not return a relative price for an overridden variant in the first
+    // place — its origin is FIXED — so asking for all of them would produce the same
+    // answers more slowly. Deliberately not relied on for correctness, because a filter
+    // that silently became the only thing preventing an override being overwritten would
+    // be a bad thing to depend on.
+    const remaining = variantGids.filter((gid) => !found.has(gid));
+
+    if (remaining.length > 0) {
+      const derived = await readDerivedPrices(client, list.priceListGid, remaining);
+      for (const [variantGid, amount] of derived) {
+        found.set(variantGid, parseMoney(amount, list.currency));
+      }
     }
   }
 
