@@ -91,8 +91,8 @@ export default function Activity() {
               ))}
             </s-select>
 
-            <s-date-field name="from" label="From" defaultValue={filters.from ?? ""} />
-            <s-date-field name="to" label="To" defaultValue={filters.to ?? ""} />
+            <s-date-field name="from" label="From" value={filters.from ?? ""} />
+            <s-date-field name="to" label="To" value={filters.to ?? ""} />
 
             <s-button type="submit">Filter</s-button>
           </s-stack>

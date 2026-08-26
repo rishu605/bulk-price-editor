@@ -189,7 +189,7 @@ export default function Costs() {
             <s-number-field
               name="value"
               label={`Amount (percent, or ${currency})`}
-              defaultValue="4"
+              value="4"
               details="Products with no cost are skipped by the first two rules rather than treated as zero."
             />
 

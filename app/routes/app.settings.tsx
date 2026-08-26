@@ -162,20 +162,20 @@ export default function Settings() {
             <s-checkbox
               name="neverBelowCost"
               label="Never price at or below cost"
-              defaultChecked={settings.neverBelowCost || undefined}
+              checked={settings.neverBelowCost || undefined}
             />
 
             <s-number-field
               name="minMarginPercent"
               label="Minimum margin (%)"
-              defaultValue={settings.minMarginPercent?.toString() ?? ""}
+              value={settings.minMarginPercent?.toString() ?? ""}
               details="Share of the selling price. 25 means a price of at least cost ÷ 0.75. Leave blank for none."
             />
 
             <s-number-field
               name="minPrice"
               label={`Minimum price (${currency})`}
-              defaultValue={settings.minPrice?.toString() ?? ""}
+              value={settings.minPrice?.toString() ?? ""}
               details="An absolute floor, whatever the rule computes. Leave blank for none."
             />
 
@@ -307,7 +307,7 @@ export default function Settings() {
               name="email"
               label="Send to"
               placeholder="ops@yourshop.com"
-              defaultValue={notifications.email ?? ""}
+              value={notifications.email ?? ""}
               details="Leave blank to turn notifications off entirely."
             />
 
@@ -315,29 +315,29 @@ export default function Settings() {
               name="onPartialOrFailure"
               label="A run did not finish cleanly"
               details="Something needs you: rows failed, or the run stopped early."
-              defaultChecked={notifications.onPartialOrFailure || undefined}
+              checked={notifications.onPartialOrFailure || undefined}
             />
             <s-checkbox
               name="onDrift"
               label="Someone changed a price outside the app"
               details="Those edits are held for your decision rather than overwritten."
-              defaultChecked={notifications.onDrift || undefined}
+              checked={notifications.onDrift || undefined}
             />
             <s-checkbox
               name="onRevert"
               label="A campaign was reverted"
-              defaultChecked={notifications.onRevert || undefined}
+              checked={notifications.onRevert || undefined}
             />
             <s-checkbox
               name="onCompletion"
               label="A run finished cleanly"
               details="Off by default. Being emailed about every success is how the one email that mattered gets skimmed past."
-              defaultChecked={notifications.onCompletion || undefined}
+              checked={notifications.onCompletion || undefined}
             />
             <s-checkbox
               name="weeklyDigest"
               label="Weekly summary"
-              defaultChecked={notifications.weeklyDigest || undefined}
+              checked={notifications.weeklyDigest || undefined}
             />
 
             <s-button type="submit" variant="primary" loading={busy || undefined}>

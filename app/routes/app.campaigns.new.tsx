@@ -342,7 +342,7 @@ export default function NewCampaign() {
                 </s-option>
               ))}
             </s-select>
-            <s-text-field name="title" label="Title contains" defaultValue={selected.title} />
+            <s-text-field name="title" label="Title contains" value={selected.title} />
             <s-button type="submit">Update match count</s-button>
           </s-stack>
         </FilterForm>
@@ -373,7 +373,7 @@ export default function NewCampaign() {
           <input type="hidden" name="title" value={selected.title} />
 
           <s-stack gap="base">
-            <s-text-field name="name" label="Campaign name" defaultValue="Sale" required />
+            <s-text-field name="name" label="Campaign name" value="Sale" required />
 
             <s-select name="ruleKind" label="Adjustment">
               <s-option value="percent-change" defaultSelected>
@@ -386,7 +386,7 @@ export default function NewCampaign() {
             <s-number-field
               name="ruleValue"
               label="Value"
-              defaultValue="-20"
+              value="-20"
               details="Negative discounts. -20 means 20% off the baseline."
             />
 
@@ -419,7 +419,7 @@ export default function NewCampaign() {
             <s-number-field
               name="priority"
               label="Priority"
-              defaultValue="100"
+              value="100"
               details="Higher wins when two campaigns cover the same variant. They never stack."
             />
 
@@ -433,7 +433,7 @@ export default function NewCampaign() {
             <s-checkbox
               name="autoEnroll"
               label="Price products that join this campaign while it runs"
-              defaultChecked
+              checked
               details="A product you add to the sale later is priced from its own normal price, not the sale price."
             />
 
@@ -533,13 +533,13 @@ export default function NewCampaign() {
               <s-date-field
                 name="startDate"
                 label="Start"
-                defaultValue={presetStart.slice(0, 10)}
+                value={presetStart.slice(0, 10)}
               />
               <s-text-field
                 name="startTime"
                 label="Start time"
                 placeholder="09:00"
-                defaultValue={presetStart.slice(11)}
+                value={presetStart.slice(11)}
                 details="24-hour, in your store's zone."
               />
             </s-stack>
@@ -557,7 +557,7 @@ export default function NewCampaign() {
             <s-number-field
               name="revertBuffer"
               label="Revert this many minutes early"
-              defaultValue="5"
+              value="5"
               details="A busy bulk queue takes time; starting early means prices are back before the window closes."
             />
 

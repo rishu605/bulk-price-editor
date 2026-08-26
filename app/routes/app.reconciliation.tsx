@@ -106,7 +106,7 @@ export default function Reconciliation() {
 
         <FilterForm fields={RECONCILE_FIELDS}>
           <s-stack gap="base">
-            <s-text-field name="q" label="Title, SKU or variant ID" defaultValue={selected.q} />
+            <s-text-field name="q" label="Title, SKU or variant ID" value={selected.q} />
 
             <s-select name="surface" label="Surface">
               <s-option value="any" defaultSelected={selected.surface === "any"}>
@@ -177,7 +177,7 @@ export default function Reconciliation() {
         <fetcher.Form method="post">
           <input type="hidden" name="intent" value="spot-check" />
           <s-stack direction="inline" gap="base">
-            <s-number-field name="size" label="How many to check" defaultValue="100" />
+            <s-number-field name="size" label="How many to check" value="100" />
             <s-button type="submit" loading={busy || undefined}>
               Check now
             </s-button>

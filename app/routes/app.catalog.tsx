@@ -109,7 +109,7 @@ export default function Catalog() {
               label="Search"
               labelAccessibilityVisibility="exclusive"
               placeholder="Search by title or SKU"
-              defaultValue={query}
+              value={query}
             />
             <s-button type="submit">Search</s-button>
           </s-stack>

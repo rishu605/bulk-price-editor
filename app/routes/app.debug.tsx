@@ -69,7 +69,7 @@ export default function Debug() {
 
         <Form method="get">
           <s-stack direction="inline" gap="base">
-            <s-text-field name="id" label="Reference" defaultValue={query} />
+            <s-text-field name="id" label="Reference" value={query} />
             <s-button type="submit" variant="primary">
               Find
             </s-button>
