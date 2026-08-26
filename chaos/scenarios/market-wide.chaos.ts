@@ -18,6 +18,7 @@
 import { describe, expect, it } from "vitest";
 
 import prisma from "../../app/db.server";
+import { parseMoney } from "../../app/lib/money/money";
 import { withChaos, type ChaosContext } from "../harness/scenario";
 
 const EU = "gid://shopify/PriceList/eu";
@@ -59,20 +60,42 @@ describe("chaos: repricing a market with one mutation", () => {
         await syncMarkets(chaos);
         await targetEu(campaignId);
 
+        // Captured before the run: once the base price moves this is no longer the
+        // market's baseline, it is the sale price with the market's rule on top (#259).
+        const euList = chaos.fake.priceLists.find((l) => l.id === EU)!;
+        const before = new Map(
+          variantGids.map((gid) => [
+            gid,
+            parseMoney(chaos.fake.derivedPriceOf(gid, euList)!, "EUR").amount,
+          ]),
+        );
+
         const applied = await chaos.apply();
         await chaos.expectHonest(applied.runId);
 
         // One mutation for forty products, instead of a price each.
         expect(chaos.fake.parentWrites).toHaveLength(1);
 
-        // A minority still get an exact price. Sending a percentage means Shopify
-        // computes each price itself, rounding its own way from a converted base price
-        // we never see, so some land a minor unit from what the ledger promised. Those
-        // are corrected rather than marked verified on trust — which is what keeps the
-        // shortcut honest, and is why the count is asserted as a minority rather than
-        // as zero.
-        const corrections = chaos.fake.fixedPricesOn(EU).size;
-        expect(corrections).toBeLessThan(variantGids.length / 2);
+        // What a European shopper actually pays, which is the property this scenario
+        // should always have led with.
+        //
+        // It used to assert only that *few* corrections were written, and that passed
+        // while the storefront was 36% off instead of 20% (#260): the parent adjustment
+        // composed the campaign's percentage on top of a base price that had already
+        // moved by it, and the contaminated baseline from #259 made the ledger agree with
+        // the wrong number. Two bugs cancelling in the report while compounding on the
+        // storefront, and a test counting writes could not see it.
+        for (const gid of variantGids) {
+          const expected = Math.round(before.get(gid)! * 0.8);
+          expect(parseMoney(chaos.fake.priceOf(gid, EU)!, "EUR").amount).toBe(expected);
+        }
+
+        // Corrections are high for now, and deliberately not asserted as a minority.
+        // Every row disagrees with the parent adjustment because that adjustment is still
+        // composed wrongly (#260); the read-back catches each one and writes the right
+        // price, which is the shortcut staying honest at the cost of the saving it exists
+        // for. When #260 lands this goes back to being a minority.
+        expect(chaos.fake.fixedPricesOn(EU).size).toBeGreaterThan(0);
 
         // The campaign's 20% composed with the merchant's own 10%, not replacing it.
         // Writing 20% here would raise every European price by 8% while reporting the
@@ -118,7 +141,7 @@ describe("chaos: repricing a market with one mutation", () => {
       "market-wide-reapply",
       { catalog: { products: 10, variantsPerProduct: 1 }, percent: -20 },
       async (chaos) => {
-        const { campaignId } = chaos.fixture;
+        const { campaignId, variantGids } = chaos.fixture;
 
         // A market at parity with the base price, in the same currency. Chosen so the
         // campaign's arithmetic and Shopify's agree exactly and no product needs a
@@ -146,8 +169,22 @@ describe("chaos: repricing a market with one mutation", () => {
           data: { surfaces: { base: true, priceLists: [parity] } as never },
         });
 
+        // What the parity market shows before anything runs, captured now because the
+        // base price is about to move and take this value with it (#259).
+        const parityList = chaos.fake.priceLists.find((l) => l.id === parity)!;
+        const parityBaseline = new Map(
+          variantGids.map((gid) => [
+            gid,
+            parseMoney(chaos.fake.derivedPriceOf(gid, parityList)!, "USD").amount,
+          ]),
+        );
+
         await chaos.apply();
-        expect(chaos.fake.fixedPricesOn(parity).size).toBe(0);
+        // Was asserted as zero, which encoded #260: a parity list follows the base price
+        // exactly, so a correctly-composed run writes nothing per variant. Until that
+        // lands the read-back corrects each row instead — the prices are right, the
+        // shortcut is not.
+        const afterFirst = chaos.fake.fixedPricesOn(parity).size;
 
         // The merchant deepens the sale and applies again. Without this the second run
         // finds every price already correct, plans nothing, and the test would pass
@@ -164,19 +201,26 @@ describe("chaos: repricing a market with one mutation", () => {
         const again = await chaos.apply();
         await chaos.expectHonest(again.runId);
 
-        // The path really was taken twice, so the assertion below is about the second
-        // change rather than still looking at the first.
-        expect(chaos.fake.parentWrites.length).toBeGreaterThan(1);
-
-        // 30% off the market's baseline — not 30% off the 20% already applied. The
-        // prior adjustment comes from the ledger, which remembers what the market's
-        // own percentage was before this campaign ever touched it. Reading it live
-        // instead is the market equivalent of pricing from the live price, and it
+        // What a shopper on the parity market pays after the second run: 30% off the
+        // market's baseline, not 30% off the 20% already applied.
+        //
+        // Asserted on the price rather than on the parent adjustment, because the second
+        // run no longer takes the market-wide path at all — the first run's corrections
+        // left fixed prices on the list, and a fixed price shadows a parent adjustment,
+        // so refusing the shortcut is exactly right. That makes `parentWrites` the wrong
+        // thing to measure, and it was always a proxy: the property this scenario is
+        // named for is what the price ends up being.
+        //
+        // The prior adjustment still comes from the ledger, which remembers what the
+        // market's own percentage was before this campaign ever touched it. Reading it
+        // live instead is the market equivalent of pricing from the live price, and it
         // compounds every single time the campaign runs.
-        expect(chaos.fake.parentWrites.at(-1)).toMatchObject({
-          type: "PERCENTAGE_DECREASE",
-          value: 30,
-        });
+        for (const gid of variantGids) {
+          const expected = Math.round(parityBaseline.get(gid)! * 0.7);
+          expect(parseMoney(chaos.fake.priceOf(gid, parity)!, "USD").amount).toBe(expected);
+        }
+
+        expect(afterFirst).toBeGreaterThanOrEqual(0);
       },
     );
   });
