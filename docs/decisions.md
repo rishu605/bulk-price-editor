@@ -73,7 +73,29 @@ inventory level, and the mirror gets `inventoryQuantity` from the product graph,
 from admin by whoever runs it. A permission checkbox in front of every merchant is not a
 reasonable price for a developer tool being easier to run.
 
-**Still open: `write_markets` is over-broad.** Nothing in the app writes a market. The
+**Resolved: `write_markets` narrowed to `read_markets`.** Nothing in the app writes a
+market. Every mutation it sends is a price list, catalog, product, tag, staged upload or
+bulk operation — all covered by `write_products` — and the only markets access ever
+exercised is reading which markets exist.
+
+That could not be settled by probing, and the attempt showed why twice over. A scope that
+is present is never exercised as absent, so with `write_markets` granted every probe
+passes whether or not it needs the scope. And **narrowing the manifest does not narrow an
+existing install**: after the change the CLI reported `Access scopes auto-granted:
+read_markets, write_products`, while the stored grant still read `write_markets,
+write_products`. A smaller ask needs no new consent, so the old grant simply persists.
+Only a reinstall would settle it, and uninstalling a store to prove a scope is not a
+reasonable trade.
+
+So the argument is static, and enforced rather than asserted: a test in
+`app/lib/compliance/built-for-shopify.test.ts` fails if any market mutation is ever added.
+Adding one is a legitimate thing to want — doing it without widening the manifest is a run
+that fails on every merchant store, and doing it with one is a re-authorisation prompt for
+every existing install. Either way it should be a decision rather than a surprise.
+
+The install screen now asks to *view* the merchant's markets rather than to *manage* them.
+
+**Previously open, for the record: `write_markets` was over-broad.** Nothing in the app writes a market. The
 market surface works by creating and updating *price lists*, which `write_products`
 covers; the only markets access ever exercised is reading which markets exist. The install
 screen currently asks to *manage* the merchant's markets when it only needs to *view*

@@ -181,16 +181,66 @@ describe("integration — API, auth and webhooks", () => {
     // review. Both were established empirically by `npm run scope:probe` — all thirteen
     // mutations in RFC §6 pass under `write_products` alone, and markets needs its own.
     //
-    // `read_markets` was dropped: Shopify implies it from `write_markets` and had already
-    // collapsed the pair in its record of what the shop granted, so declaring it was a
-    // checkbox that bought nothing. See D4 in docs/decisions.md, which also records the
-    // one narrowing still open — nothing in the app writes a market.
+    // `read_markets` rather than `write_markets`: nothing in the app writes a market, and
+    // the test below keeps that true. The install screen asks to *view* the merchant's
+    // markets instead of to *manage* them, which is not a small difference in a sentence
+    // somebody reads before handing a pricing app access to their store.
     const toml = readFileSync(join(ROOT, "shopify.app.toml"), "utf8");
     const match = /scopes\s*=\s*"([^"]*)"/.exec(toml);
 
     expect(match).not.toBeNull();
     const scopes = (match?.[1] ?? "").split(",").map((scope) => scope.trim()).filter(Boolean);
 
-    expect(scopes.sort()).toEqual(["write_markets", "write_products"]);
+    expect(scopes.sort()).toEqual(["read_markets", "write_products"]);
+  });
+
+  it("sends no mutation that would need write access to markets", () => {
+    /**
+     * The evidence behind asking for `read_markets` rather than `write_markets`.
+     *
+     * The market surface works entirely through *price lists* — created, adjusted and
+     * populated under `write_products` — plus a read of which markets exist. No market
+     * itself is ever created, renamed, deleted or reconfigured by this app.
+     *
+     * That cannot be proven by probing, because a scope that is present is never
+     * exercised as absent: with `write_markets` granted, every probe passes whether or not
+     * it needs the scope. And narrowing the manifest does not narrow an existing install —
+     * the granted set still read `write_markets` after the change, because a smaller ask
+     * needs no new consent. So the argument has to be static, and static arguments rot.
+     *
+     * This is the argument, enforced. Adding a market mutation is a legitimate thing to
+     * want; doing it without widening the manifest would be a run that fails on every
+     * merchant store, and doing it *with* one is a re-authorisation prompt for every
+     * existing install. Either way it should be a decision, not a surprise.
+     */
+    const roots = ["app/lib", "app/services", "app/routes", "scripts"];
+    const offenders: string[] = [];
+
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(join(ROOT, dir), { withFileTypes: true })) {
+        const path = `${dir}/${entry.name}`;
+        if (entry.isDirectory()) {
+          walk(path);
+          continue;
+        }
+        if (!/\.(ts|tsx)$/.test(entry.name)) continue;
+
+        const source = readFileSync(join(ROOT, path), "utf8");
+        // A mutation field on the root Mutation type whose name begins with `market`.
+        // Deliberately not matching `marketing…` or a `markets` query.
+        for (const [match] of source.matchAll(
+          /\bmarket(?:Create|Update|Delete|CurrencySettingsUpdate|RegionsDelete|RegionCreate|LocalConditionsUpdate|WebPresence\w*)\s*\(/g,
+        )) {
+          offenders.push(`${path}: ${match.trim()}`);
+        }
+      }
+    };
+
+    for (const root of roots) walk(root);
+
+    expect(
+      offenders,
+      "a market mutation needs write_markets, which the manifest no longer asks for",
+    ).toEqual([]);
   });
 });
