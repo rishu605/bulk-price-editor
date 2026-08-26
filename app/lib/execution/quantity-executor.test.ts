@@ -10,7 +10,12 @@
 import { describe, expect, it } from "vitest";
 
 import { money } from "../money/money";
-import { chunkQuantityRows, writeQuantityBreaks, type QuantityRow } from "./quantity-executor";
+import {
+  chunkQuantityRows,
+  readLadders,
+  writeQuantityBreaks,
+  type QuantityRow,
+} from "./quantity-executor";
 
 const gbp = (minor: number) => money(minor, "GBP");
 
@@ -235,5 +240,93 @@ describe("accepted is not the same as stored", () => {
     const result = await writeQuantityBreaks(readFails, "gid://PriceList/1", [row(1)]);
 
     expect(result.rows[0]!.status).toBe("verified");
+  });
+});
+
+describe("reading the ladders a catalogue already holds", () => {
+  /**
+   * The same read serves two purposes: checking what a run just wrote, and capturing what
+   * a catalogue had before a campaign touched it. A ladder observed after the write and
+   * one observed before it are the same kind of fact, so there is one implementation.
+   */
+  function listWith(nodes: unknown[], pages = 1) {
+    let page = 0;
+    return {
+      async request<T>() {
+        page += 1;
+        return {
+          data: {
+            priceList: {
+              prices: {
+                nodes: page === 1 ? nodes : [],
+                pageInfo: { hasNextPage: page < pages, endCursor: `cursor-${page}` },
+              },
+            },
+          } as T,
+        };
+      },
+    };
+  }
+
+  it("returns the rungs for the variants asked about", async () => {
+    const client = listWith([
+      {
+        variant: { id: "gid://v/1" },
+        quantityPriceBreaks: {
+          nodes: [
+            { minimumQuantity: 12, price: { amount: "36.00" } },
+            { minimumQuantity: 1, price: { amount: "40.00" } },
+          ],
+        },
+      },
+    ]);
+
+    const ladders = await readLadders(client, "gid://PriceList/1", ["gid://v/1"]);
+
+    // Sorted, whatever order the connection returned them in.
+    expect(ladders.get("gid://v/1")).toEqual([
+      { minimumQuantity: 1, amount: "40.00" },
+      { minimumQuantity: 12, amount: "36.00" },
+    ]);
+  });
+
+  it("ignores variants nobody asked about", async () => {
+    const client = listWith([
+      {
+        variant: { id: "gid://v/999" },
+        quantityPriceBreaks: { nodes: [{ minimumQuantity: 1, price: { amount: "40.00" } }] },
+      },
+    ]);
+
+    expect(await readLadders(client, "gid://PriceList/1", ["gid://v/1"])).toEqual(new Map());
+  });
+
+  it("leaves out a variant with no breaks rather than recording an empty ladder", async () => {
+    // "No breaks" is the absence of an entry here, and null in the baseline column. Two
+    // encodings of one state is how a query ends up missing rows.
+    const client = listWith([
+      { variant: { id: "gid://v/1" }, quantityPriceBreaks: { nodes: [] } },
+    ]);
+
+    expect(await readLadders(client, "gid://PriceList/1", ["gid://v/1"]).then((m) => m.size)).toBe(0);
+  });
+
+  it("follows pagination rather than reading only the first page", async () => {
+    let pages = 0;
+    const client = {
+      async request<T>() {
+        pages += 1;
+        return {
+          data: {
+            priceList: {
+              prices: { nodes: [], pageInfo: { hasNextPage: pages < 3, endCursor: `c${pages}` } },
+            },
+          } as T,
+        };
+      },
+    };
+
+    await readLadders(client, "gid://PriceList/1", ["gid://v/1"]);
+    expect(pages).toBe(3);
   });
 });
