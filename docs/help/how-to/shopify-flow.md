@@ -1,6 +1,11 @@
 # Wiring pricing into Shopify Flow
 
-Anchor adds three triggers and three actions to Flow, so pricing can be part of the
+> **Not available yet.** This page describes an integration that is built but not yet
+> switched on. If you open Flow today you will not find these triggers and actions. It is
+> here so you can see what is coming and tell us whether it is the right shape — not so you
+> can set it up.
+
+Anchor will add three triggers and three actions to Flow, so pricing can be part of the
 automations you already have rather than something you remember to do separately.
 
 ## Triggers
