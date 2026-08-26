@@ -306,15 +306,40 @@ describe("integration — API, auth and webhooks", () => {
  */
 describe("the pre-audit sheet names evidence that exists", () => {
   const sheet = readFileSync(join(ROOT, "docs/built-for-shopify.md"), "utf8");
-  const suite = readFileSync(join(ROOT, "app/lib/compliance/built-for-shopify.test.ts"), "utf8");
 
-  /** Test names as this file declares them. */
+  /**
+   * Test and group names declared anywhere in the compliance suite.
+   *
+   * Widened from this one file when the WCAG criteria gained evidence of their own: a
+   * criterion proved in `help-contrast.test.ts` is no less proved for living next door,
+   * and a citation check that only knew about one file would have pushed the evidence
+   * into the wrong place to keep itself happy.
+   */
   const declared = new Set(
-    [...suite.matchAll(/^\s*it\("([^"]+)"/gm)].map((match) => match[1]),
+    readdirSync(join(ROOT, "app/lib/compliance"))
+      .filter((name) => name.endsWith(".test.ts"))
+      .flatMap((name) => {
+        const source = readFileSync(join(ROOT, "app/lib/compliance", name), "utf8");
+        return [...source.matchAll(/^\s*(?:it|describe)\("([^"]+)"/gm)].map((match) => match[1]!);
+      }),
   );
 
-  /** Test names the sheet cites, written in backticks in the Evidence column. */
-  const cited = [...sheet.matchAll(/\|\s*`([^`]+)`\s*\|/g)].map((match) => match[1]);
+  /**
+   * Test names the sheet cites, in backticks in the Evidence column.
+   *
+   * Every backticked token in the column, not one per cell: a criterion proved by two
+   * tests names both, and an earlier version that required the cell to hold exactly one
+   * silently stopped checking those rows — which mutation testing caught by renaming a
+   * cited test and watching nothing fail.
+   */
+  const cited = sheet
+    .split("\n")
+    .filter((row) => /^\|/.test(row))
+    .flatMap((row) => {
+      const cells = row.split("|");
+      // Column 2 is Evidence in every table on the sheet.
+      return [...(cells[2] ?? "").matchAll(/`([^`]+)`/g)].map((match) => match[1]!);
+    });
 
   it("cites something at all", () => {
     // Without this the two assertions below pass vacuously on an empty table.
@@ -330,17 +355,20 @@ describe("the pre-audit sheet names evidence that exists", () => {
     }
   });
 
-  it("cites every test in this file, so nothing is proved but unlisted", () => {
+  it("cites every criterion test in this file, so nothing is proved but unlisted", () => {
+    const suite = readFileSync(join(ROOT, "app/lib/compliance/built-for-shopify.test.ts"), "utf8");
+    const here = [...suite.matchAll(/^\s*it\("([^"]+)"/gm)].map((match) => match[1]!);
+
     const exempt = new Set([
       // Meta-tests about the sheet itself; listing them on the sheet would be circular.
       "cites something at all",
       "cites only tests that exist",
-      "cites every test in this file, so nothing is proved but unlisted",
+      "cites every criterion test in this file, so nothing is proved but unlisted",
       "derives the support deadline from the version, not from a hand-kept date",
-      "does not quietly drop the gaps",
+      "claims nothing without naming what proves it",
     ]);
 
-    for (const name of declared) {
+    for (const name of here) {
       if (exempt.has(name)) continue;
 
       expect(cited.includes(name), `"${name}" proves a criterion the sheet does not list`).toBe(
@@ -349,10 +377,23 @@ describe("the pre-audit sheet names evidence that exists", () => {
     }
   });
 
-  it("does not quietly drop the gaps", () => {
-    // A checklist that only contains passes is a checklist nobody checked. If the two
-    // known design gaps get closed, this test should be updated deliberately — not by
-    // deleting the rows.
-    expect(sheet).toMatch(/\|\s*gap\s*\|/);
+  it("claims nothing without naming what proves it", () => {
+    // Replaces an earlier test that required a `gap` row to exist, which stopped making
+    // sense once the two design gaps were genuinely closed. The durable rule is the one
+    // that test was really about: a row may say "met" only if it cites evidence.
+    const rows = sheet
+      .split("\n")
+      .filter((row) => /^\|/.test(row) && !/^\|\s*-+/.test(row) && !/\| Status \|/.test(row));
+
+    expect(rows.length).toBeGreaterThan(8);
+
+    for (const row of rows) {
+      if (!/\bmet\b/.test(row)) continue;
+
+      expect(
+        /`[^`]+`/.test(row),
+        `a row claims "met" while naming no evidence: ${row.trim()}`,
+      ).toBe(true);
+    }
   });
 });
