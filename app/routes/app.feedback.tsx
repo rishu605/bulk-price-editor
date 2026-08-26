@@ -6,6 +6,7 @@
  * here is what we decided" is the cheapest way to show that.
  */
 
+import { formatDay } from "../lib/format/display";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -25,6 +26,7 @@ export const loader = withGuard("/app/feedback", async ({ request }: LoaderFunct
   const sent = await feedbackFor(shop.id);
 
   return {
+    timeZone: shop.timezone,
     sent: sent.map((entry) => ({
       id: entry.id,
       message: entry.message,
@@ -55,7 +57,7 @@ export const action = withGuard("/app/feedback", async ({ request }: ActionFunct
 });
 
 export default function FeedbackPage() {
-  const { sent } = useLoaderData<typeof loader>();
+  const { sent, timeZone } = useLoaderData<typeof loader>();
 
   return (
     <s-page heading="Feedback">
@@ -74,7 +76,7 @@ export default function FeedbackPage() {
               {sent.map((entry) => (
                 <s-table-row key={entry.id}>
                   <s-table-cell>
-                    {new Date(entry.createdAt).toLocaleDateString()}
+                    {formatDay(entry.createdAt, timeZone)}
                   </s-table-cell>
                   <s-table-cell>{entry.sentiment}</s-table-cell>
                   <s-table-cell>

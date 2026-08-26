@@ -15,6 +15,7 @@
  * both the import and recapture pages into showing this table instead.
  */
 
+import { formatWhen } from "../lib/format/display";
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useLoaderData, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -51,11 +52,11 @@ export const loader = withGuard("/app/baselines", async ({ request }: LoaderFunc
   const variantGid = url.searchParams.get("variant");
   const history = variantGid ? await baselineHistory(shop.id, variantGid) : [];
 
-  return { ...result, page, filters, variantGid, history };
+  return { ...result, page, filters, variantGid, history, timeZone: shop.timezone };
 });
 
 export default function Baselines() {
-  const { rows, total, vendors, sources, page, filters, variantGid, history } =
+  const { rows, total, vendors, sources, page, filters, variantGid, history, timeZone } =
     useLoaderData<typeof loader>();
   const [, setSearchParams] = useSearchParams();
 
@@ -177,9 +178,9 @@ export default function Baselines() {
                   </s-table-cell>
                   <s-table-cell>{entry.compareAt ?? "—"}</s-table-cell>
                   <s-table-cell>{entry.source.toLowerCase().replace(/_/g, " ")}</s-table-cell>
-                  <s-table-cell>{new Date(entry.capturedAt).toLocaleString()}</s-table-cell>
+                  <s-table-cell>{formatWhen(entry.capturedAt, timeZone)}</s-table-cell>
                   <s-table-cell>
-                    {entry.supersededAt ? new Date(entry.supersededAt).toLocaleString() : "—"}
+                    {entry.supersededAt ? formatWhen(entry.supersededAt, timeZone) : "—"}
                   </s-table-cell>
                 </s-table-row>
               ))}

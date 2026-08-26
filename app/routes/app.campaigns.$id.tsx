@@ -102,6 +102,7 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     result,
     selectedRunId,
     scheduleText,
+    timeZone: shop.timezone,
     warnings,
     autoEnroll: record.autoEnroll,
     enrollPendingAt: record.enrollPendingAt !== null,
@@ -253,6 +254,7 @@ export default function CampaignDetail() {
     result: runResult,
     selectedRunId,
     scheduleText,
+    timeZone,
     warnings,
     autoEnroll,
     enrollPendingAt,
@@ -468,7 +470,7 @@ export default function CampaignDetail() {
 
       {runs.length > 0 ? (
         <s-section heading="Run history">
-          <RunHistoryTable runs={runs} selectedRunId={selectedRunId} />
+          <RunHistoryTable runs={runs} selectedRunId={selectedRunId} timeZone={timeZone} />
         </s-section>
       ) : null}
 
