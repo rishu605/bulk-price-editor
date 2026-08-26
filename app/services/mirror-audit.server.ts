@@ -44,6 +44,10 @@ export interface AuditResult extends AuditVerdict {
   healed: number;
   /** Variants Shopify no longer knows about, tombstoned rather than deleted. */
   tombstoned: number;
+  /** Variants with no base surface row — mirrored, but impossible to price. */
+  unpriceable: number;
+  /** How many of those this run rebuilt from the index. */
+  unpriceableHealed: number;
 }
 
 /** Read in batches Shopify will accept, and small enough not to dominate the budget. */
@@ -64,7 +68,10 @@ export async function auditMirror(
   const size = Math.min(total, options.size ?? sampleSize(total));
 
   if (size === 0) {
-    return { shopId, checked: 0, diverged: 0, rate: 0, divergences: [], alert: false, healed: 0, tombstoned: 0 };
+    return {
+      shopId, checked: 0, diverged: 0, rate: 0, divergences: [], alert: false,
+      healed: 0, tombstoned: 0, unpriceable: 0, unpriceableHealed: 0,
+    };
   }
 
   // Random rows rather than the first N. Ordering by id would check the same variants
@@ -113,7 +120,9 @@ export async function auditMirror(
   }
 
   const verdict = auditSample(sample, live, threshold);
-  const result: AuditResult = { shopId, ...verdict, healed: 0, tombstoned: 0 };
+  const result: AuditResult = {
+    shopId, ...verdict, healed: 0, tombstoned: 0, unpriceable: 0, unpriceableHealed: 0,
+  };
 
   // Healed as they are found. The point of the audit is a mirror that is right
   // afterwards, not a report saying it was wrong.
@@ -142,6 +151,19 @@ export async function auditMirror(
     result.healed++;
   }
 
+  // The other way the mirror can be wrong, and the one the sample above cannot see.
+  //
+  // Everything so far compares us against Shopify. This compares us against ourselves:
+  // `variant_index` and `price_surface_entries` are written together by six code paths,
+  // and nothing checked that they agreed. When the bulk import stopped writing the second
+  // one, a whole catalogue was mirrored, counted and displayed — and could not be priced,
+  // because baselines are captured from the surface table. The nightly audit found
+  // nothing, correctly: the mirror was right about what Shopify held. The disagreement
+  // was between our own two tables.
+  const unpriceable = await healUnpriceable(shopId);
+  result.unpriceable = unpriceable.found;
+  result.unpriceableHealed = unpriceable.healed;
+
   // Recorded whether or not it alerted. A rate that is fine tonight and fine tomorrow
   // and creeping the week after is the signal worth having, and it only exists if the
   // quiet nights are written down too.
@@ -158,6 +180,7 @@ export async function auditMirror(
         ratePercent: Number((verdict.rate * 100).toFixed(2)),
         healed: result.healed,
         tombstoned: result.tombstoned,
+        unpriceable: result.unpriceable,
         alert: verdict.alert,
       },
     },
@@ -170,9 +193,24 @@ export async function auditMirror(
     ratePercent: Number((verdict.rate * 100).toFixed(2)),
     healed: result.healed,
     tombstoned: result.tombstoned,
+    unpriceable: result.unpriceable,
   };
 
   metric("mirror.divergence_rate", verdict.rate, { shopId, checked: verdict.checked });
+  metric("mirror.unpriceable", result.unpriceable, { shopId });
+
+  // Separate from the divergence alert because it is a different fault with a different
+  // remedy. Divergence above threshold means re-sync; this means an import path has
+  // stopped writing surface rows, and re-syncing through that same path is exactly what
+  // will not fix it.
+  if (unpriceable.found > unpriceable.healed) {
+    logger.error("variants cannot be priced: no base surface row", {
+      shopId,
+      unpriceable: unpriceable.found,
+      healed: unpriceable.healed,
+      remaining: unpriceable.found - unpriceable.healed,
+    });
+  }
 
   if (verdict.alert) {
     // Systematic. One missed webhook is a row; half a percent of a sample is a
@@ -202,4 +240,55 @@ export async function auditMirror(
   });
 
   return result;
+}
+
+/**
+ * Rebuilds base surface rows for live variants that have none.
+ *
+ * Heals from `variant_index` rather than from Shopify: the index row already holds the
+ * price this row should carry, and a variant that is merely missing its surface row is
+ * not evidence that our price is stale. Re-reading Shopify for it would spend budget to
+ * learn something we already know.
+ *
+ * A variant whose index row has no price cannot be healed — there is nothing to write —
+ * so it stays in the count and the caller alerts on the difference. Writing a surface row
+ * with a null price would clear the symptom and leave the variant exactly as unpriceable,
+ * one table further along.
+ */
+async function healUnpriceable(shopId: string): Promise<{ found: number; healed: number }> {
+  const orphans = await prisma.$queryRaw<Array<{ variantGid: string; price: bigint | null; compareAt: bigint | null; currency: string | null }>>`
+    SELECT vi."variantGid", vi."price", vi."compareAt", vi."currency"
+    FROM variant_index vi
+    WHERE vi."shopId" = ${shopId}
+      AND vi."deletedAt" IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM price_surface_entries pse
+        WHERE pse."shopId" = vi."shopId"
+          AND pse."variantGid" = vi."variantGid"
+          AND pse."surfaceKind" = 'BASE'
+          AND pse."priceListGid" = ''
+      )
+    LIMIT 5000
+  `;
+
+  let healed = 0;
+
+  for (const orphan of orphans) {
+    if (orphan.price === null || !orphan.currency) continue;
+
+    await prisma.priceSurfaceEntry.create({
+      data: {
+        shopId,
+        variantGid: orphan.variantGid,
+        surfaceKind: "BASE",
+        priceListGid: "",
+        currency: orphan.currency,
+        livePrice: orphan.price,
+        liveCompareAt: orphan.compareAt,
+      },
+    });
+    healed++;
+  }
+
+  return { found: orphans.length, healed };
 }

@@ -31,6 +31,14 @@ export type Metric =
   | "webhook.lag_ms"
   /** Fraction of a sampled mirror that disagreed with Shopify. */
   | "mirror.divergence_rate"
+  /**
+   * Live variants with no base surface row — mirrored, but impossible to price.
+   *
+   * A count rather than a rate, because the healthy value is zero and any other value
+   * means an import path has stopped writing surface rows. A rate would make one broken
+   * path on a large catalogue look like a rounding error.
+   */
+  | "mirror.unpriceable"
   /** That the scheduler is alive and doing work. */
   | "scheduler.tick"
   /** How much of a shop's rate-limit budget a run consumed. */

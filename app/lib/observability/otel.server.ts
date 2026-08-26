@@ -37,6 +37,10 @@ export const INSTRUMENTS: Record<Metric, "counter" | "histogram" | "gauge"> = {
   "run.rows": "counter",
   "webhook.lag_ms": "histogram",
   "mirror.divergence_rate": "gauge",
+  // A gauge, not a counter: the question is "how many are broken right now", and the
+  // healthy answer is zero. A counter would accumulate across nights and never come back
+  // down after a fix.
+  "mirror.unpriceable": "gauge",
   "scheduler.tick": "counter",
   "budget.saturation": "gauge",
   "queue.depth": "gauge",
