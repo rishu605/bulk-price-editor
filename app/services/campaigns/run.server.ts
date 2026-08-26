@@ -924,18 +924,18 @@ async function fireCampaignTrigger(
 
     if (options.revert) {
       await fireTriggerForShop(shopId, "campaign-ended", {
-        campaign_id: campaignId,
-        campaign_name: campaignName,
+        "campaign id": campaignId,
+        "campaign name": campaignName,
         outcome: result.clean ? "clean" : "partial",
-        products_reverted: result.verified,
+        "products reverted": result.verified,
       });
       return;
     }
 
     await fireTriggerForShop(shopId, "campaign-started", {
-      campaign_id: campaignId,
-      campaign_name: campaignName,
-      products_affected: outcome.counts.planned,
+      "campaign id": campaignId,
+      "campaign name": campaignName,
+      "products affected": outcome.counts.planned,
     });
   } catch (error) {
     const { logger } = await import("../../lib/logging/logger");

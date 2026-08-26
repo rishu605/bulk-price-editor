@@ -39,11 +39,20 @@ export type TriggerHandle = "campaign-started" | "campaign-ended" | "campaign-he
  * added "just this once".
  */
 export interface TriggerPayload {
-  campaign_id: string;
-  campaign_name: string;
-  products_affected?: number;
-  products_reverted?: number;
-  products_drifted?: number;
+  /**
+   * Keys are spaced words, not snake_case.
+   *
+   * Flow validates a field key as alphabetic characters and spaces only, and the CLI
+   * refuses to start at all if an extension breaks that — which is how the first version
+   * of these definitions took down `npm run dev` while passing CI, since CI never runs
+   * the Shopify CLI. The payload keys must match the extension's field keys exactly or
+   * the trigger arrives with empty fields.
+   */
+  "campaign id": string;
+  "campaign name": string;
+  "products affected"?: number;
+  "products reverted"?: number;
+  "products drifted"?: number;
   outcome?: "clean" | "partial" | "failed";
 }
 

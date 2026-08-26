@@ -30,7 +30,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (!shop) return new Response("Unknown shop", { status: 404 });
 
   const campaignId = String(
-    (payload as { properties?: Record<string, unknown> }).properties?.campaign_id ?? "",
+    (payload as { properties?: Record<string, unknown> }).properties?.["campaign id"] ?? "",
   );
 
   const campaign = await prisma.campaign.findFirst({
