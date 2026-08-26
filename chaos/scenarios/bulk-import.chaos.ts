@@ -17,6 +17,7 @@ import { describe, expect, it } from "vitest";
 
 import prisma from "../../app/db.server";
 import type { AdminClient } from "../../app/lib/execution/sync-executor";
+import { captureBaselines } from "../../app/services/baselines.server";
 import { syncCatalogViaBulk } from "../../app/services/catalog-bulk-sync.server";
 import { withChaos } from "../harness/scenario";
 
@@ -162,6 +163,74 @@ describe("chaos: the catalogue bulk import", () => {
 
         expect(result.errors[0]).toMatch(/already running/i);
         expect(result.written).toBe(0);
+      },
+    );
+  });
+
+  it("leaves every imported variant priceable, not merely mirrored", async () => {
+    /**
+     * The property that matters, and the one the count assertions above all missed.
+     *
+     * A variant is not usable because it is in `variant_index`. It is usable when it has
+     * a baseline, and baselines are captured from `price_surface_entries` — a second
+     * table the bulk path did not write. So an imported variant was mirrored, counted,
+     * listed in the catalogue, and could not be put in a campaign.
+     *
+     * The dashboard's remedy pointed the wrong way: "N variants have no baseline yet —
+     * re-sync to capture them" ran the bulk path again and wrote no surface row again.
+     * The warning could not be cleared by the only action offered for clearing it.
+     *
+     * It stayed hidden because the paginated path writes both tables and takes over
+     * whenever the bulk path errors or returns nothing. Only a catalogue big enough for
+     * the bulk path to succeed was affected — which is to say, the app was broken
+     * specifically on the stores it exists for.
+     *
+     * Asserted as "can this variant be priced" rather than "does this row exist",
+     * because the row is an implementation detail and the campaign is the point.
+     */
+    await withChaos(
+      "bulk-import-priceable",
+      { catalog: { products: 1, variantsPerProduct: 1 }, percent: -10 },
+      async (chaos) => {
+        const { shopId } = chaos.fixture;
+
+        await syncCatalogViaBulk(
+          bulkClient("https://example.invalid/file.jsonl"),
+          shopId,
+          "USD",
+          {
+            fetchResult: chunked([product("A"), variant("a1", "A", "10.00")]) as never,
+            sleep: async () => {},
+          },
+        );
+
+        const imported = "gid://shopify/ProductVariant/a1";
+
+        const surface = await prisma.priceSurfaceEntry.findUnique({
+          where: {
+            shopId_variantGid_surfaceKind_priceListGid: {
+              shopId,
+              variantGid: imported,
+              surfaceKind: "BASE",
+              priceListGid: "",
+            },
+          },
+        });
+
+        expect(surface, "imported variant has no base surface row").not.toBeNull();
+        // The price came through the surface row too, not just the index row — a surface
+        // entry with a null price captures a null baseline, which is the same dead end
+        // one table further along.
+        expect(surface?.livePrice).toBe(1_000n);
+
+        await captureBaselines(shopId);
+
+        const baseline = await prisma.baseline.findFirst({
+          where: { shopId, variantGid: imported, supersededAt: null },
+        });
+
+        expect(baseline, "imported variant cannot be priced by a campaign").not.toBeNull();
+        expect(baseline?.basePrice).toBe(1_000n);
       },
     );
   });
