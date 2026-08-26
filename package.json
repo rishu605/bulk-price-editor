@@ -25,7 +25,8 @@
     "alerts": "tsx scripts/test-alert-routing.ts",
     "seed:store": "tsx scripts/seed-store.ts",
     "test:chaos": "vitest run --config vitest.chaos.config.ts",
-    "scope:probe": "tsx scripts/scope-probe.ts"
+    "scope:probe": "tsx scripts/scope-probe.ts",
+    "measure:admin": "tsx scripts/measure-admin.ts"
   },
   "type": "module",
   "engines": {

@@ -55,13 +55,55 @@ quickly by construction.
 
 ---
 
+## Admin performance, measured
+
+Measured against the development store as it actually stands — **3,670 variants across
+1,037 products**, including one at Shopify's 2,048-variant ceiling — rather than against an
+empty database, where every query is fast and nothing is learned.
+
+Server-side query time, warm, p50 of five runs:
+
+| Page | p50 | max |
+|---|---|---|
+| Catalogue, page 1 | 8ms | 10ms |
+| Catalogue, page 70 | 22ms | 28ms |
+| Catalogue, text search | 4ms | 4ms |
+| Reconciliation, page 1, every surface | 4ms | 5ms |
+| Reconciliation, page 20 | 4ms | 5ms |
+
+Comfortably inside the criteria. Two things are worth reading off it rather than only the
+headline number.
+
+**Reconciliation does not care which page you ask for.** 4ms at page 1 and 4ms at page 20,
+over 3,696 variant × surface rows. That is the `DISTINCT ON` query and its indexes doing
+their job, and it is the page most likely to be opened in anger.
+
+**Catalogue pagination is offset-based, and the cost grows with the offset:**
+
+```
+page   1 (offset     0)   5ms
+page  10 (offset   450)  10ms
+page  30 (offset  1450)  19ms
+page  50 (offset  2450)  21ms
+page  73 (offset  3600)  20ms
+```
+
+Roughly 4× from the first page to the thirtieth, then flat — at this size the whole table
+is cached, so the scan stops being the cost. **The plateau is a property of 3,670 rows, not
+a property of the query**, and reading it as "offset pagination is fine" would be reading
+it wrong. A skip of 50,000 has no cache to hide behind.
+
+Whether that matters is a measurement nobody has taken, which is exactly what #66 is for —
+the method is above, and the only missing ingredient is the 100K store. Switching to keyset
+pagination is the known remedy and is deliberately not being done on a hypothesis.
+
 ## Still open before submission
 
 These need a person, an account, or a deployed environment, and none of them can be closed
 from the codebase:
 
 - [ ] **Accessibility pass by a human** — keyboard-only and screen-reader, half an hour. The one gap above that automation cannot substitute for.
-- [ ] **Admin performance against real thresholds** — needs the 100K-variant store (#50, #66).
+- [ ] **Admin performance at 100K variants** — measured at 3,670 above and comfortable; the open question is offset pagination at scale, not the pages themselves (#50, #66).
 - [ ] **Listing assets and copy** (#172) and **review submission** (#173).
 - [ ] **Staging drills with alerting live** (#161, #92) — confirming each alert fires and reaches a human.
 
