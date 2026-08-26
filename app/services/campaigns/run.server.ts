@@ -124,6 +124,23 @@ export async function runCampaign(
   // lapse between a campaign being created and the scheduler running it, and the
   // scheduler never goes near the wizard.
   if (!options.revert) {
+    // Approval before plan. A campaign nobody has signed off should say so rather than
+    // being refused for a plan reason the merchant would then go and fix, only to hit the
+    // approval afterwards.
+    const { blockedPendingApproval } = await import("../approvals.server");
+    const unapproved = await blockedPendingApproval(shopId, campaignId);
+    if (unapproved) {
+      return {
+        runId: "",
+        planned: 0,
+        verified: 0,
+        failed: 0,
+        unverified: 0,
+        clean: true,
+        messages: [unapproved],
+      };
+    }
+
     const refusal = await refusedByPlan(shopId, campaignId, options.variantGids?.length);
     if (refusal) {
       return {

@@ -37,6 +37,7 @@ import {
   type CampaignState,
 } from "../lib/lifecycle/transitions";
 import { transitionHistory } from "../services/campaigns/lifecycle.server";
+import { approvalFor, decideApproval, requestApproval, SelfApprovalError } from "../services/approvals.server";
 
 export const loader = withGuard("/app/campaigns/$id", async ({ request, params }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
@@ -60,6 +61,7 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     }),
   ]);
 
+  const approval = await approvalFor(shop.id, campaignId);
   const state = record.status as CampaignState;
   const practice = isPractice(record);
   const lifecycle = describeState(state);
@@ -98,6 +100,19 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     state,
     practice,
     lifecycle,
+    approval: {
+      required: approval.required,
+      state: approval.required ? approval.state : "none",
+      who:
+        approval.required && approval.state === "approved"
+          ? approval.approvedBy
+          : approval.required && approval.state === "declined"
+            ? approval.declinedBy
+            : approval.required && approval.state === "pending"
+              ? approval.requestedBy
+              : null,
+      note: approval.required && approval.state === "declined" ? approval.note : null,
+    },
     needsAttention: needsAttention(state),
     history,
   };
@@ -108,7 +123,34 @@ export const action = withGuard("/app/campaigns/$id", async ({ request, params }
   const shop = await ensureShop(session.shop);
   const actor = actorFor(sessionToken, session.shop);
   const form = await request.formData();
-  const intent = String(form.get("intent"));
+  const intent = String(form.get("intent") ?? "");
+  const campaignId = String(params.id);
+
+  if (intent === "request-approval") {
+    await requestApproval(shop.id, campaignId, actor);
+    return { ok: true, message: "Approval requested. Somebody else needs to sign this off." };
+  }
+
+  if (intent === "approve" || intent === "decline") {
+    try {
+      await decideApproval(
+        shop.id,
+        campaignId,
+        actor,
+        intent === "approve" ? "approve" : "decline",
+        String(form.get("note") ?? "") || undefined,
+      );
+      return {
+        ok: true,
+        message: intent === "approve" ? "Approved." : "Declined, and the campaign cannot run.",
+      };
+    } catch (error) {
+      if (error instanceof SelfApprovalError) {
+        return { ok: false, message: error.message };
+      }
+      throw error;
+    }
+  }
   const reverting = intent === "revert";
 
   try {
@@ -204,6 +246,7 @@ export default function CampaignDetail() {
     autoEnroll,
     enrollPendingAt,
     lifecycle,
+    approval,
     state,
     needsAttention: attention,
     history,
@@ -268,6 +311,50 @@ export default function CampaignDetail() {
             Write path: {preview.writePath} — {preview.writePathReason}
           </s-text>
         </s-paragraph>
+
+        {approval.required ? (
+          <s-section heading="Approval">
+            <s-paragraph>
+              <s-text>
+                {approval.state === "approved"
+                  ? `Approved by ${approval.who}.`
+                  : approval.state === "declined"
+                    ? `Declined by ${approval.who}${approval.note ? `: ${approval.note}` : "."}`
+                    : approval.state === "pending"
+                      ? `${approval.who} asked for approval. Somebody else has to sign it off — including you, if you were not the one who asked.`
+                      : "This campaign changes enough products to need a second person's approval before it can run."}
+              </s-text>
+            </s-paragraph>
+
+            <s-stack direction="inline" gap="base">
+              {approval.state === "none" || approval.state === "declined" ? (
+                <fetcher.Form method="post">
+                  <input type="hidden" name="intent" value="request-approval" />
+                  <s-button type="submit" loading={busy || undefined}>
+                    Ask for approval
+                  </s-button>
+                </fetcher.Form>
+              ) : null}
+
+              {approval.state === "pending" ? (
+                <>
+                  <fetcher.Form method="post">
+                    <input type="hidden" name="intent" value="approve" />
+                    <s-button type="submit" variant="primary" loading={busy || undefined}>
+                      Approve
+                    </s-button>
+                  </fetcher.Form>
+                  <fetcher.Form method="post">
+                    <input type="hidden" name="intent" value="decline" />
+                    <s-button type="submit" tone="critical" loading={busy || undefined}>
+                      Decline
+                    </s-button>
+                  </fetcher.Form>
+                </>
+              ) : null}
+            </s-stack>
+          </s-section>
+        ) : null}
 
         {preview.margin ? (
           <s-section heading="What this does to your margins">

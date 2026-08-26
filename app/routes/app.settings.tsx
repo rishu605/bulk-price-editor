@@ -91,6 +91,7 @@ export const action = withGuard("/app/settings", async ({ request }: ActionFunct
     {
       ...existing,
       neverBelowCost: form.get("neverBelowCost") === "on",
+      approvalThreshold: emptyToNull(form.get("approvalThreshold")),
       minMarginPercent: emptyToNull(form.get("minMarginPercent")),
       minPrice: emptyToNull(form.get("minPrice")),
       violationPolicy: asPolicy(form.get("violationPolicy")),

@@ -98,6 +98,7 @@ model Shop {
   topologyNotices  TopologyNotice[]
   feedback         Feedback[]
   priceImports     PriceImport[]
+  approvals        Approval[]
   writeIntents     WriteIntent[]
   driftEvents      DriftEvent[]
   roundingProfiles RoundingProfileRecord[]
@@ -349,6 +350,7 @@ model Campaign {
   @@index([shopId, startAt])
   @@index([shopId, endAt])
   @@map("campaigns")
+  approvals Approval[]
 }
 
 enum RunKind {
@@ -781,6 +783,40 @@ model PriceImportRow {
   /// A file naming a variant twice is a question, not two instructions.
   @@unique([importId, variantGid])
   @@map("price_import_rows")
+}
+
+/// A two-person rule for high-blast-radius campaigns.
+///
+/// The point is not the record -- the audit log already has that. It is that a campaign
+/// above the threshold physically cannot run until somebody other than its author says
+/// so.
+model Approval {
+  id String @id @default(cuid())
+
+  shopId     String
+  campaignId String
+
+  /// Separate columns rather than a list, because the whole value of a two-person rule
+  /// is that they are two different people, and a schema that could not express "the
+  /// same person twice" as an error would let it happen.
+  requestedBy String
+  requestedAt DateTime @default(now())
+
+  /// What the campaign would change when approval was asked for, so an approver is
+  /// judging the campaign they were shown rather than one edited since.
+  variantsAtRequest Int
+
+  approvedBy String?
+  approvedAt DateTime?
+  declinedBy String?
+  declinedAt DateTime?
+  note       String?
+
+  shop     Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, requestedAt])
+  @@map("approvals")
 }
 
 model RoundingProfileRecord {
