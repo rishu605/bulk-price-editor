@@ -23,6 +23,8 @@ import { downloadCsv, filenameSlug } from "../lib/reporting/csv";
 import { rollbackReportCsv } from "../lib/reporting/rollback";
 import { PreviewTable } from "../components/PreviewTable";
 import { RunHistoryTable } from "../components/RunHistoryTable";
+import { RunResultSection } from "../components/RunResultSection";
+import { campaignResult } from "../services/campaigns/result.server";
 import { ledgerCsv } from "../lib/reporting/ledger-csv";
 import { previewCsv } from "../lib/reporting/preview-csv";
 import { RouteBoundary } from "../components/RouteBoundary";
@@ -78,6 +80,11 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
   const selectedRunId = requested ?? runs[0]?.id ?? null;
   const ledger = selectedRunId ? await runLedger(shop.id, selectedRunId) : [];
 
+  // What that run actually did, as opposed to what the preview said it would. The ledger
+  // is the evidence; the preview is the intention, and a partial run is exactly where the
+  // two stop agreeing.
+  const result = selectedRunId ? await campaignResult(shop.id, selectedRunId) : null;
+
   // Only for a campaign that has actually written something and could still be
   // reverted. It costs a full plan, and on a draft it would be a report about
   // nothing -- the honest answer there is that there is nothing to roll back.
@@ -92,6 +99,7 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     preview,
     runs,
     ledger,
+    result,
     selectedRunId,
     scheduleText,
     warnings,
@@ -240,6 +248,9 @@ export default function CampaignDetail() {
     preview,
     runs,
     ledger,
+    // Renamed: `result` in this component is the fetcher's reply to the last action,
+    // and two different "results" on one page is how the wrong one gets rendered.
+    result: runResult,
     selectedRunId,
     scheduleText,
     warnings,
@@ -452,6 +463,8 @@ export default function CampaignDetail() {
           Export this preview (CSV)
         </s-button>
       </s-section>
+
+      {runResult ? <RunResultSection result={runResult} /> : null}
 
       {runs.length > 0 ? (
         <s-section heading="Run history">
