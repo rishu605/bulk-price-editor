@@ -22,6 +22,7 @@
     "test:watch": "vitest",
     "worker": "tsx scripts/worker.ts",
     "feedback": "tsx scripts/feedback-review.ts",
+    "alerts": "tsx scripts/test-alert-routing.ts",
     "test:chaos": "vitest run --config vitest.chaos.config.ts"
   },
   "type": "module",

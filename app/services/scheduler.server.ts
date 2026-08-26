@@ -18,6 +18,7 @@ import { runCampaign } from "./campaigns/run.server";
 import { adminClientForShop } from "./admin-client.server";
 import { claimEnrollment, pendingEnrollments } from "./auto-enroll.server";
 import { reclaimStaleRuns } from "./campaigns/reaper.server";
+import { checkAlerts } from "./alerting.server";
 import { sendDueDigests } from "./digest.server";
 import { auditMirror } from "./mirror-audit.server";
 import { logger } from "../lib/logging/logger";
@@ -35,6 +36,8 @@ export interface TickResult {
   digests: number;
   /** Shops whose mirror was sampled and checked against Shopify this tick. */
   audited: number;
+  /** Operator alerts delivered this tick. Not merchant notifications. */
+  alerts: number;
   failures: Array<{ campaignId: string; error: string }>;
 }
 
@@ -53,6 +56,7 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
     reclaimed: 0,
     digests: 0,
     audited: 0,
+    alerts: 0,
     failures: [],
   };
 
@@ -61,6 +65,12 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
   // -- so without reclaiming first, a dead run would block every future occurrence of
   // that campaign forever, not merely display wrongly.
   result.reclaimed = (await reclaimStaleRuns(now)).reclaimed;
+
+  // Before the work rather than after it. A tick that spends four minutes on a large
+  // campaign and then checks alerts would report a stopped scheduler four minutes late,
+  // every time — which is four minutes of a sale running past its end.
+  const alerts = await checkAlerts(now);
+  result.alerts = alerts.sent;
 
   const candidates = await prisma.campaign.findMany({
     where: { status: { in: ["SCHEDULED", "ACTIVE", "PARTIAL"] } },
