@@ -1,29 +1,43 @@
 # Extensions
 
-Empty, deliberately.
+Six, all Flow. See `docs/help/how-to/shopify-flow.md` for what each does.
 
-## Flow (#177)
+## They are generated, not hand-written
 
-The server side of the Flow integration is built and tested — trigger emission with the
-no-prices guarantee in `app/services/flow.server.ts`, and three action endpoints under
-`app/routes/flow.actions.*`. What is missing is the extension manifests that declare the
-triggers and actions to Shopify.
+```shell
+npx shopify app generate extension --template flow_trigger --name anchor-campaign-started
+npx shopify app generate extension --template flow_action  --name anchor-start-campaign
+```
 
-They were written and then removed, because they could not be validated here. The Shopify
-CLI rejected them with `is invalid` and no indication of which field, across several
-shapes: `number_integer` is explicitly unsupported on triggers, `number_decimal` and
-`single_line_text_field` both failed too, and splitting one extension per directory did not
-help either.
+Then the generated manifest is filled in. That matters: an earlier attempt hand-wrote them
+and the CLI rejected every shape with `is invalid` and no field named — because the current
+format wraps everything in an `[[extensions]]` array-of-tables and carries a generated
+`uid`, neither of which is obvious from the error or the docs.
 
-**A manifest that fails validation stops `npm run dev` from starting at all**, which blocks
-every other piece of work in the repo. That is a much worse outcome than the manifests
-being absent, so they are absent until somebody can author them against a Partner app with
-Flow enabled and get the CLI to say what it actually wants.
+**A manifest the CLI rejects stops `npm run dev` starting at all**, and CI never runs the
+CLI, so a bad one passes every check in the repo and breaks every developer. Generating the
+scaffold is what stops that happening again.
 
-The field keys the server side sends are spaced words — `"campaign id"`, not
-`campaign_id` — because Flow validates keys as alphabetic characters and spaces only.
-Whatever the manifests end up looking like, their field keys have to match those exactly
-or the trigger arrives with empty fields.
+## Field keys differ between triggers and actions
+
+| | Keys look like | Example |
+|---|---|---|
+| Trigger | alphabetic characters and spaces | `"campaign id"` |
+| Action | an identifier | `"campaign-id"` |
+
+The CLI's own scaffolds show both, which is how the difference was settled. Trigger keys
+must match `TriggerPayload` in `app/services/flow.server.ts` **exactly**, or the trigger
+arrives with every field empty and nothing complains.
+
+## What is still missing
+
+A release. `shopify app deploy` publishes extensions, and it also publishes whatever
+`application_url` is in `shopify.app.toml` — which is currently a dead development tunnel.
+Deploying before that points at the real hosted URL would take the app down for anything
+that is not a `shopify app dev` session.
+
+So: set `application_url` to the Railway domain, then deploy, then remove the "not
+available yet" notice from the help page.
 
 ## No theme app extension, ever
 
