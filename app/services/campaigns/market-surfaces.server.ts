@@ -566,11 +566,17 @@ async function alreadyCorrect(
     const live = derived.get(row.variantGid);
     if (live === undefined) continue;
 
+    // Only a price Shopify stated in this market's own currency can be compared with what
+    // the plan intends. A `RELATIVE` price comes back in the *shop's* currency (#257), and
+    // comparing 18.00 USD against ¥2,629 would settle nothing — or, with the currency
+    // assumed rather than read, would settle it wrongly.
+    if (live.currency !== list.currency) continue;
+
     // A price we cannot parse is a price we have not verified. Skipping it here sends the
     // row down the ordinary write path, which is the safe direction.
     let amount: number;
     try {
-      amount = parseMoney(live, list.currency).amount;
+      amount = parseMoney(live.amount, live.currency).amount;
     } catch {
       continue;
     }

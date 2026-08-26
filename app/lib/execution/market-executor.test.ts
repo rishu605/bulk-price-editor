@@ -299,7 +299,10 @@ describe("reading what a market currently derives", () => {
     ]);
 
     expect(prices.size).toBe(2);
-    expect(prices.get("gid://shopify/ProductVariant/2")).toBe("2960");
+    expect(prices.get("gid://shopify/ProductVariant/2")).toEqual({
+      amount: "2960",
+      currency: "JPY",
+    });
   });
 
   it("batches large scopes into several queries", async () => {
@@ -327,5 +330,70 @@ describe("reading what a market currently derives", () => {
     // has nothing to compute against on this market, and the honest response is to
     // leave the variant unpriced there.
     expect(prices.has("gid://shopify/ProductVariant/2")).toBe(false);
+  });
+
+  it("keeps the currency Shopify stated, which is not always the list's", async () => {
+    /**
+     * The distinction that cost the most to find. `priceList.prices(originType: RELATIVE)`
+     * answers in the **shop's** currency with the list's adjustment applied, while a
+     * `FIXED` price on the same list answers in the list's own currency.
+     *
+     * On the store: a JPY list at -10% returned `{"amount":"18.0","currencyCode":"USD"}`
+     * for a $20 variant, whose real market price is ¥2,921. Reading the amount and
+     * assuming the list's currency recorded a baseline of ¥18 — wrong by the exchange
+     * rate, on the surface a merchant is least able to check.
+     *
+     * So the currency travels with the amount, and the caller compares it rather than
+     * assuming. Dropping it here is what let the mistake happen once already.
+     */
+    const { client } = reader([
+      {
+        priceList: {
+          currency: "JPY",
+          prices: {
+            nodes: [
+              {
+                variant: { id: "gid://shopify/ProductVariant/1" },
+                price: { amount: "18.0", currencyCode: "USD" },
+              },
+            ],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      },
+    ]);
+
+    const prices = await readDerivedPrices(client, "gid://shopify/PriceList/jp", [
+      "gid://shopify/ProductVariant/1",
+    ]);
+
+    expect(prices.get("gid://shopify/ProductVariant/1")).toEqual({
+      amount: "18.0",
+      currency: "USD",
+    });
+  });
+
+  it("drops a price with no stated currency rather than guessing one", async () => {
+    // Guessing is the whole bug. A row left out goes down the ordinary write path, which
+    // is the safe direction; a row guessed at goes to a storefront.
+    const { client } = reader([
+      {
+        priceList: {
+          currency: "JPY",
+          prices: {
+            nodes: [
+              { variant: { id: "gid://shopify/ProductVariant/1" }, price: { amount: "18.0" } },
+            ],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      },
+    ]);
+
+    const prices = await readDerivedPrices(client, "gid://shopify/PriceList/jp", [
+      "gid://shopify/ProductVariant/1",
+    ]);
+
+    expect(prices.size).toBe(0);
   });
 });
