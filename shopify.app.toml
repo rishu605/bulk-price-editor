@@ -7,7 +7,7 @@ embedded = true
 
 [build]
 automatically_update_urls_on_dev = true
-dev_store_url = "boltify-apps.myshopify.com"
+dev_store_url = "anchor-perf.myshopify.com"
 
 [webhooks]
 api_version = "2026-07"
