@@ -269,6 +269,17 @@ export type AnchorCurrentBulkQueryQueryVariables = AdminTypes.Exact<{ [key: stri
 
 export type AnchorCurrentBulkQueryQuery = { currentBulkOperation?: AdminTypes.Maybe<Pick<AdminTypes.BulkOperation, 'id' | 'status' | 'url' | 'partialDataUrl' | 'objectCount' | 'errorCode'>> };
 
+export type AnchorProductVariantsPageQueryVariables = AdminTypes.Exact<{
+  id: AdminTypes.Scalars['ID']['input'];
+  cursor?: AdminTypes.InputMaybe<AdminTypes.Scalars['String']['input']>;
+}>;
+
+
+export type AnchorProductVariantsPageQuery = { product?: AdminTypes.Maybe<{ variants: { pageInfo: Pick<AdminTypes.PageInfo, 'hasNextPage' | 'endCursor'>, nodes: Array<(
+        Pick<AdminTypes.ProductVariant, 'id' | 'title' | 'sku' | 'barcode' | 'price' | 'compareAtPrice' | 'inventoryQuantity'>
+        & { inventoryItem: { unitCost?: AdminTypes.Maybe<Pick<AdminTypes.MoneyV2, 'amount' | 'currencyCode'>> } }
+      )> } }> };
+
 export type AnchorCatalogPageQueryVariables = AdminTypes.Exact<{
   cursor?: AdminTypes.InputMaybe<AdminTypes.Scalars['String']['input']>;
 }>;
@@ -276,7 +287,7 @@ export type AnchorCatalogPageQueryVariables = AdminTypes.Exact<{
 
 export type AnchorCatalogPageQuery = { products: { pageInfo: Pick<AdminTypes.PageInfo, 'hasNextPage' | 'endCursor'>, nodes: Array<(
       Pick<AdminTypes.Product, 'id' | 'title' | 'vendor' | 'productType' | 'status' | 'tags' | 'updatedAt'>
-      & { collections: { nodes: Array<Pick<AdminTypes.Collection, 'id'>> }, variants: { nodes: Array<(
+      & { collections: { nodes: Array<Pick<AdminTypes.Collection, 'id'>> }, variants: { pageInfo: Pick<AdminTypes.PageInfo, 'hasNextPage' | 'endCursor'>, nodes: Array<(
           Pick<AdminTypes.ProductVariant, 'id' | 'title' | 'sku' | 'barcode' | 'price' | 'compareAtPrice' | 'inventoryQuantity'>
           & { inventoryItem: { unitCost?: AdminTypes.Maybe<Pick<AdminTypes.MoneyV2, 'amount' | 'currencyCode'>> } }
         )> } }
@@ -396,7 +407,8 @@ interface GeneratedQueryTypes {
   "#graphql\n      query AnchorProbeCompanies {\n        companies(first: 1) { nodes { id } }\n      }\n    ": {return: AnchorProbeCompaniesQuery, variables: AnchorProbeCompaniesQueryVariables},
   "#graphql\n  query AnchorProductTags($ids: [ID!]!) {\n    nodes(ids: $ids) {\n      ... on Product { id tags }\n    }\n  }\n": {return: AnchorProductTagsQuery, variables: AnchorProductTagsQueryVariables},
   "#graphql\n  query AnchorCurrentBulkQuery {\n    currentBulkOperation(type: QUERY) {\n      id status url partialDataUrl objectCount errorCode\n    }\n  }\n": {return: AnchorCurrentBulkQueryQuery, variables: AnchorCurrentBulkQueryQueryVariables},
-  "#graphql\n  query AnchorCatalogPage($cursor: String) {\n    products(first: 50, after: $cursor) {\n      pageInfo { hasNextPage endCursor }\n      nodes {\n        id\n        title\n        vendor\n        productType\n        status\n        tags\n        updatedAt\n        collections(first: 20) { nodes { id } }\n        variants(first: 100) {\n          nodes {\n            id\n            title\n            sku\n            barcode\n            price\n            compareAtPrice\n            inventoryQuantity\n            inventoryItem { unitCost { amount currencyCode } }\n          }\n        }\n      }\n    }\n  }\n": {return: AnchorCatalogPageQuery, variables: AnchorCatalogPageQueryVariables},
+  "#graphql\n  query AnchorProductVariantsPage($id: ID!, $cursor: String) {\n    product(id: $id) {\n      variants(first: 250, after: $cursor) {\n        pageInfo { hasNextPage endCursor }\n        nodes {\n          id\n          title\n          sku\n          barcode\n          price\n          compareAtPrice\n          inventoryQuantity\n          inventoryItem { unitCost { amount currencyCode } }\n        }\n      }\n    }\n  }\n": {return: AnchorProductVariantsPageQuery, variables: AnchorProductVariantsPageQueryVariables},
+  "#graphql\n  query AnchorCatalogPage($cursor: String) {\n    products(first: 50, after: $cursor) {\n      pageInfo { hasNextPage endCursor }\n      nodes {\n        id\n        title\n        vendor\n        productType\n        status\n        tags\n        updatedAt\n        collections(first: 20) { nodes { id } }\n        variants(first: 100) {\n          pageInfo { hasNextPage endCursor }\n          nodes {\n            id\n            title\n            sku\n            barcode\n            price\n            compareAtPrice\n            inventoryQuantity\n            inventoryItem { unitCost { amount currencyCode } }\n          }\n        }\n      }\n    }\n  }\n": {return: AnchorCatalogPageQuery, variables: AnchorCatalogPageQueryVariables},
   "#graphql\n  query AnchorShopCurrency {\n    shop { currencyCode ianaTimezone }\n  }\n": {return: AnchorShopCurrencyQuery, variables: AnchorShopCurrencyQueryVariables},
   "#graphql\n  query AnchorPriceLists($cursor: String) {\n    priceLists(first: 50, after: $cursor) {\n      pageInfo { hasNextPage endCursor }\n      nodes {\n        id\n        name\n        currency\n        parent { adjustment { type value } }\n        catalog {\n          id\n          title\n          __typename\n          ... on MarketCatalog {\n            # One country this catalogue's market serves.\n            #\n            # Prices are asked for by country rather than by price list, so the market\n            # surface needs a country to ask about. Every country in a market sees the\n            # same price, so the first region answers for all of them.\n            markets(first: 1) {\n              nodes {\n                conditions {\n                  regionsCondition {\n                    regions(first: 1) {\n                      nodes { ... on MarketRegionCountry { code } }\n                    }\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n": {return: AnchorPriceListsQuery, variables: AnchorPriceListsQueryVariables},
   "#graphql\n  query AnchorPriceListPrices($id: ID!, $cursor: String) {\n    priceList(id: $id) {\n      id\n      prices(first: 250, after: $cursor) {\n        pageInfo { hasNextPage endCursor }\n        nodes {\n          originType\n          variant { id }\n          price { amount currencyCode }\n          compareAtPrice { amount currencyCode }\n        }\n      }\n    }\n  }\n": {return: AnchorPriceListPricesQuery, variables: AnchorPriceListPricesQueryVariables},
