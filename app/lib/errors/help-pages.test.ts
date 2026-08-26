@@ -7,12 +7,10 @@
  * no link, because it confirms nobody is looking after this.
  */
 
-import { existsSync } from "node:fs";
-import { join } from "node:path";
-
 import { describe, expect, it } from "vitest";
 
-import { helpUrlFor, HELP_BASE } from "./help-links";
+import { readHelpPage } from "../help/pages.server";
+import { helpUrlFor, HELP_BASE } from "./help-links.server";
 
 const CODES = [
   "UNAUTHENTICATED",
@@ -27,16 +25,28 @@ const CODES = [
   "UNKNOWN",
 ] as const;
 
-/** The repo path a published help URL corresponds to. */
-function sourceFor(url: string): string {
-  const path = url.slice(HELP_BASE.length);
-  return join(process.cwd(), "docs/help", `${path}.md`);
+/**
+ * The slug the route would receive for a published help URL.
+ *
+ * Asking the server what it would serve, rather than rebuilding the file path here. The
+ * two used to be able to disagree: the mapping could name a real file that the route
+ * refused anyway — a slug the path check rejects reads as a missing page to the merchant
+ * no matter how present the file is.
+ */
+function slugFor(url: string): string {
+  expect(url.startsWith(HELP_BASE), `${url} is not under ${HELP_BASE}`).toBe(true);
+  return url.slice(HELP_BASE.length).replace(/^\//, "");
 }
 
-describe("every error links to a page that exists", () => {
-  it.each(CODES)("%s", (code) => {
-    const file = sourceFor(helpUrlFor(code));
+describe("every error links to a page the app will serve", () => {
+  it.each(CODES)("%s", async (code) => {
+    const url = helpUrlFor(code);
+    const page = await readHelpPage(slugFor(url));
 
-    expect(existsSync(file), `${code} links to ${file}, which is not in the repo`).toBe(true);
+    expect(page, `${code} links to ${url}, which the help centre will not serve`).not.toBeNull();
+  });
+
+  it("sends an unrecognised code somewhere real too", async () => {
+    expect(await readHelpPage(slugFor(helpUrlFor("NOT_A_REAL_CODE")))).not.toBeNull();
   });
 });

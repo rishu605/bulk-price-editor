@@ -6,6 +6,9 @@
  * channel is then useless for the one that matters.
  */
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -24,6 +27,7 @@ const quiet: SignalWindow = {
   requests: 500,
   divergenceRate: 0,
   executionQueueDepth: 0,
+  unpriceableVariants: 0,
 };
 
 const ids = (window: Partial<SignalWindow>) =>
@@ -71,6 +75,7 @@ describe("what a missing signal means", () => {
         requests: 0,
         divergenceRate: null,
         executionQueueDepth: null,
+        unpriceableVariants: null,
       }),
     ).toEqual([]);
   });
@@ -116,6 +121,7 @@ describe("every alert is actionable", () => {
       requests: 100,
       divergenceRate: 0.5,
       executionQueueDepth: 5_000,
+      unpriceableVariants: 400,
     });
 
     expect(all.length).toBeGreaterThan(0);
@@ -133,4 +139,60 @@ describe("every alert is actionable", () => {
       expect(entry.because.length).toBeGreaterThan(20);
     }
   });
+});
+
+describe("every alert leads somewhere", () => {
+  /**
+   * The runbook link has to resolve, and nothing else checks that.
+   *
+   * An alert carries an anchor into `docs/runbooks.md`, and the two drift apart in the
+   * quietest possible way: somebody renames a heading, every test still passes, and the
+   * link only fails for the person following it at 3am — which is the one moment it exists
+   * for. Broken then is worse than absent, because absent at least sets expectations.
+   *
+   * Anchors are derived the way GitHub derives them: lowercase, punctuation dropped,
+   * spaces to hyphens.
+   */
+  const runbook = readFileSync(join(process.cwd(), "docs/runbooks.md"), "utf8");
+
+  const anchors = new Set(
+    [...runbook.matchAll(/^##\s+(.+)$/gm)].map(([, heading]) =>
+      heading
+        .trim()
+        .toLowerCase()
+        .replace(/[^\w\s-]/g, "")
+        .replace(/\s+/g, "-"),
+    ),
+  );
+
+  // Every condition at once, so a new alert is covered without anybody remembering to add
+  // it here.
+  const all = evaluate({
+    secondsSinceTick: 10_000,
+    webhookLagMs: 10 * 60_000,
+    errors: 100,
+    requests: 100,
+    divergenceRate: 0.5,
+    executionQueueDepth: 5_000,
+    unpriceableVariants: 400,
+  });
+
+  it("fires every condition, so this file cannot silently stop covering one", () => {
+    // If a condition is added and this number is not, the assertions below stop being
+    // exhaustive without failing — which is the same rot they exist to prevent.
+    expect(all.length).toBe(6);
+  });
+
+  for (const alert of all) {
+    it(`${alert.id} points at a runbook section that exists`, () => {
+      const [file, anchor] = alert.runbook.split("#");
+
+      expect(file).toBe("docs/runbooks.md");
+      expect(anchor, `${alert.id} has no anchor`).toBeTruthy();
+      expect(
+        anchors,
+        `${alert.id} points at "#${anchor}", which is not a heading in the runbook`,
+      ).toContain(anchor);
+    });
+  }
 });

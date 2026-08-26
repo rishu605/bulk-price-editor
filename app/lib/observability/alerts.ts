@@ -36,6 +36,16 @@ export interface SignalWindow {
   divergenceRate: number | null;
   /** Depth of the execution queue. */
   executionQueueDepth: number | null;
+  /**
+   * Live variants the nightly audit could not give a base surface row.
+   *
+   * Distinct from divergence, and the distinction is the whole reason it is here. Divergence
+   * is the mirror disagreeing with Shopify; this is the mirror disagreeing with *itself* —
+   * a variant present in `variant_index` with no `price_surface_entries` row, which cannot
+   * be baselined and therefore cannot be priced. Shopify is not involved and the divergence
+   * check cannot see it.
+   */
+  unpriceableVariants: number | null;
 }
 
 /** How long the scheduler may go quiet before it is presumed stopped. */
@@ -46,6 +56,16 @@ export const WEBHOOK_LAG_MS = 5 * 60_000;
 
 /** Errors as a fraction of requests. Above this is a spike, not background noise. */
 export const ERROR_RATE = 0.05;
+
+/**
+ * Variants the audit could not make priceable. The healthy value is zero.
+ *
+ * A count rather than a rate, because one broken import path on a large catalogue is a
+ * rounding error as a proportion and a catastrophe as a fact — every variant it touched is
+ * invisible to campaigns. The audit heals what it can from the index, so anything left is
+ * something it could not repair.
+ */
+export const UNPRICEABLE_VARIANTS = 0;
 
 /** Mirror divergence above this is systematic rather than incidental. */
 export const DIVERGENCE_RATE = 0.005;
@@ -128,6 +148,22 @@ export function evaluate(window: SignalWindow): AlertCondition[] {
         "Merchant campaigns are queued rather than running. Not urgent on its own, and the " +
         "thing to watch is whether the floor is rising over hours.",
       runbook: "docs/runbooks.md#alert-queue-depth-rising",
+    });
+  }
+
+  if (
+    window.unpriceableVariants !== null &&
+    window.unpriceableVariants > UNPRICEABLE_VARIANTS
+  ) {
+    firing.push({
+      id: "unpriceable-variants",
+      severity: "page",
+      title: "Variants exist that no campaign can price",
+      because:
+        "These are mirrored, counted and shown in the catalogue, and have no baseline — so " +
+        "a campaign silently skips them and the merchant is told nothing. It is how a whole " +
+        "catalogue was once importable and unpriceable at the same time.",
+      runbook: "docs/runbooks.md#alert-variants-that-cannot-be-priced",
     });
   }
 

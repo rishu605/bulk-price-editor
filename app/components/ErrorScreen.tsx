@@ -11,7 +11,7 @@
  * screen tells a merchant nothing and tells an attacker something.
  */
 
-import { helpLabelFor, helpUrlFor } from "../lib/errors/help-links";
+import { helpLabelFor, helpPathFor } from "../lib/errors/help-links";
 
 export interface ErrorScreenProps {
   errorId: string;
@@ -52,7 +52,7 @@ export function ErrorScreen({
               hitting this at 9pm before a sale wants the sentence that says what to do,
               one click from here — not a search box. */}
           <s-paragraph>
-            <s-link href={helpUrlFor(code)} target="_blank">
+            <s-link href={helpPathFor(code)} target="_blank">
               {helpLabelFor(code)}
             </s-link>
           </s-paragraph>

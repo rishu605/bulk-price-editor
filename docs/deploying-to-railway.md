@@ -68,7 +68,7 @@ not after.
 | `RESEND_API_KEY` | No notification emails are sent. |
 | `NOTIFICATION_FROM_EMAIL` | — required if `RESEND_API_KEY` is set |
 | `OPERATOR_ALERT_EMAIL` | Nobody is paged for a systematic failure. |
-| `HELP_BASE_URL` | Error messages link nowhere. |
+| `HELP_BASE_URL` | Help links point at this deploy's own `/help`. Set it only to move the docs onto hosting that survives an outage of this app — `failures/app-unavailable` is otherwise served by the app it describes. |
 | `SCHEDULER_TICK_MS` | Defaults to 30s. |
 | `RUN_STALE_AFTER_MS` | Defaults to 5min — how long before the reaper treats a silent run as abandoned and makes it resumable. Raise it only if a legitimate run can go that long without a heartbeat. |
 
