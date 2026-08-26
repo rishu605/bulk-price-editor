@@ -233,6 +233,16 @@ model Baseline {
   /// guardrails skip or error instead.
   cost          BigInt?
 
+  /// The wholesale ladder this variant had before any campaign touched it, as
+  /// `[{ minimumQuantity, amount }]` in integer minor units of `currency`.
+  ///
+  /// Only ever set on B2B surfaces, and null there means "no ladder", which is a real
+  /// state rather than missing data -- most wholesale variants have a single price.
+  /// It lives on the baseline rather than in its own table because revert recomputes
+  /// from the baseline, so a ladder that is not part of the baseline could only be
+  /// restored, and restoring is what this product deliberately does not do.
+  quantityBreaks Json?
+
   source     BaselineSource
   capturedAt DateTime       @default(now())
   capturedBy String?
