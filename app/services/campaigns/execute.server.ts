@@ -5,6 +5,10 @@
  * normalises both into the same per-row result shape, so the caller records
  * outcomes identically either way.
  *
+ * Both paths now verify the same way — by comparing the price Shopify reports against the
+ * price the campaign intended. They did not always: the bulk path checked only for
+ * `userError`s, which meant the largest campaigns got the weakest guarantee.
+ *
  * Without this, a 1,615-row campaign would preview as "bulk" and then execute
  * synchronously -- roughly one variant every two seconds against a standard shop's
  * rate limit, which is not merely slow but infeasible.
@@ -17,6 +21,7 @@ import {
   type StagedTarget,
 } from "../../lib/execution/bulk-executor";
 import { executeSync, type AdminClient, type ExecutedRow } from "../../lib/execution/sync-executor";
+import { readBackVerdict } from "../../lib/execution/read-back";
 import type { PlannedRow } from "../../lib/planning/types";
 import { selectWritePath } from "../../lib/planning/write-path";
 import { RateLimitBudget } from "../../lib/shopify/budget";
@@ -144,7 +149,22 @@ async function executeBulk(
     if (!outcome || !outcome.ok) {
       return { row, status: "failed", failureReason: outcome?.failureReason ?? "Unknown failure" };
     }
-    return { row, status: "verified" };
+
+    // The result file carries the price Shopify stored, and this used to throw it away —
+    // marking a row verified because no `userError` came back. That is a claim about the
+    // mutation, not about the storefront, and invariant I5 asks for the second one. The
+    // comparison is free: no extra request, the number is already in hand.
+    const verdict = readBackVerdict(row.intendedPrice, outcome.price);
+    if (!verdict.ok) {
+      return {
+        row,
+        status: "failed",
+        failureReason: verdict.reason,
+        observedPrice: verdict.observed,
+      };
+    }
+
+    return { row, status: "verified", observedPrice: verdict.observed };
   });
 
   const rows = [...executed, ...skipped];

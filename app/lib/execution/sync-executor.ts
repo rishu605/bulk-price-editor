@@ -18,7 +18,8 @@
  *   ledger exists to prevent.
  */
 
-import { formatMoney, money, type Money } from "../money/money";
+import { formatMoney, type Money } from "../money/money";
+import { readBackVerdict } from "./read-back";
 import type { PlannedRow } from "../planning/types";
 import { isThrottledError, RateLimitBudget, withRetry } from "../shopify/budget";
 import {
@@ -359,25 +360,16 @@ async function verifyRows(
 
   for (const entry of sample) {
     const node = byId.get(entry.row.ref.variantGid);
-    const intended = entry.row.intendedPrice;
-    if (!node?.price || !intended) {
-      entry.status = "failed";
-      entry.failureReason = "Verification read returned no price for this variant.";
-      continue;
-    }
+    // Shared with the bulk path, so the two cannot disagree about what "verified" means.
+    const verdict = readBackVerdict(entry.row.intendedPrice, node?.price);
 
-    const actual = money(
-      Math.round(Number(node.price) * 10 ** decimalsOf(intended)),
-      intended.currency,
-    );
-
-    if (actual.amount !== intended.amount) {
-      entry.status = "failed";
-      entry.failureReason =
-        `Read-back mismatch: expected ${formatMoney(intended)}, found ${node.price}.`;
-      entry.observedPrice = actual;
-    } else {
+    if (verdict.ok) {
       entry.status = "verified";
+      entry.observedPrice = verdict.observed;
+    } else {
+      entry.status = "failed";
+      entry.failureReason = verdict.reason;
+      entry.observedPrice = verdict.observed;
     }
   }
 }
@@ -391,13 +383,6 @@ export function indexFromField(field?: string[] | null): number | undefined {
   return undefined;
 }
 
-function decimalsOf(m: Money): number {
-  // Derived from the formatted representation so zero-decimal currencies (JPY) and
-  // three-decimal ones (KWD) both round-trip correctly.
-  const formatted = formatMoney(m);
-  const dot = formatted.indexOf(".");
-  return dot === -1 ? 0 : formatted.length - dot - 1;
-}
 
 /** Deterministic-with-injected-random sample, without mutating the input. */
 function pickSample<T>(items: T[], size: number, random: () => number): T[] {
