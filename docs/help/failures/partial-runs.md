@@ -1,5 +1,7 @@
 # Understanding a partial run
 
+![The "What is live, and why" page: 3,696 rows, a green banner reading "Every price we have written is still exactly what we wrote. 6 are away from their baseline, which is what a running campaign looks like.", and filters for title, surface, controlling campaign and what to show.](../images/what-is-live.png)
+
 A run is **partial** when some products were priced and some were not.
 
 This is a normal outcome, not a crash. Shopify rate-limits, a product gets deleted

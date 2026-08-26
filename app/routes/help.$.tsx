@@ -207,6 +207,17 @@ const STYLES = `
   border-radius: 3px;
 }
 .help pre { background: #f1f1f1; padding: 1rem; border-radius: 6px; overflow-x: auto; }
+/* Screenshots are captured at admin width and are far wider than this column. Scaling
+   them down keeps the page from scrolling sideways, which is the one thing a reader
+   should never have to do to finish a sentence. */
+.help img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 1.5rem 0;
+  border: 1px solid #e1e1e1;
+  border-radius: 6px;
+}
 .help pre code { background: none; padding: 0; }
 .help table { border-collapse: collapse; width: 100%; display: block; overflow-x: auto; }
 .help th, .help td {
@@ -227,6 +238,7 @@ const STYLES = `
   .help a { color: #6aa9ff; }
   .help code, .help pre { background: #2a2a2a; }
   .help th, .help td { border-color: #3a3a3a; }
+  .help img { border-color: #3a3a3a; }
   .help blockquote { border-left-color: #3a3a3a; color: #b5b5b5; }
   .help ol.hits p { color: #b5b5b5; }
   .help mark { background: #6b5510; color: #f5f5f5; }

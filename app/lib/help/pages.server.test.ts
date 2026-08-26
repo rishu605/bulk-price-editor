@@ -234,7 +234,27 @@ describe("pictures in a page point at the route that serves them", () => {
     expect(checked, "no page shows an image, so this proves nothing").toBeGreaterThan(0);
   });
 
-  it("gives every image alt text that says what it shows", async () => {
+  it("gives every image on every page alt text that says what it shows", async () => {
+    // A picture explaining a concept is useless to a screen reader if its alt text is
+    // "diagram" or "screenshot", and a screenshot with none at all is worse than absent.
+    let checked = 0;
+
+    for (const slug of allSlugs()) {
+      const html = (await readHelpPage(slug))!.html;
+
+      for (const match of html.matchAll(/<img[^>]*alt="([^"]*)"/g)) {
+        const alt = match[1]!;
+        expect(alt.length, `${slug} has an image with alt text of ${alt.length} characters`)
+          .toBeGreaterThan(40);
+        expect(["diagram", "screenshot", "image"]).not.toContain(alt.toLowerCase());
+        checked += 1;
+      }
+    }
+
+    expect(checked, "no page has an image, so this proves nothing").toBeGreaterThan(2);
+  });
+
+  it("gives the resolver diagram alt text that says what it shows", async () => {
     // A diagram explaining the one concept merchants misunderstand is useless to a
     // screen reader if its alt text is "diagram".
     const html = (await readHelpPage("concepts/resolver"))!.html;

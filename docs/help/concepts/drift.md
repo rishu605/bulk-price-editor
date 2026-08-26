@@ -1,5 +1,7 @@
 # What drift means
 
+![The drift page with nothing to review: a single line reading "No drift detected. Prices set by your campaigns are still in place.", beside a panel explaining what Adopt, Reassert and Ignore each do.](../images/drift-empty.png)
+
 **Drift** is when a price on your storefront is not what this app last wrote.
 
 It is not an error, and it is usually not a problem. It means somebody or something else
