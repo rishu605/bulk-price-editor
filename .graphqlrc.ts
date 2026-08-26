@@ -25,7 +25,16 @@ function getConfig() {
       default: shopifyApiProject({
         apiType: ApiType.Admin,
         apiVersion: API_VERSION_STRING,
-        documents: ["./app/**/*.{js,ts,jsx,tsx}", "./app/.server/**/*.{js,ts,jsx,tsx}"],
+        // `scripts/` is in here because those files send real mutations to a real store
+        // — seeding a perf catalogue, probing scopes, spot-checking reconciliation. A
+        // typo in one of them fails after the round trip, against somebody's data,
+        // rather than at build time. There is no reason the app's queries get checked
+        // against the pinned schema and the ones that write to production do not.
+        documents: [
+          "./app/**/*.{js,ts,jsx,tsx}",
+          "./app/.server/**/*.{js,ts,jsx,tsx}",
+          "./scripts/**/*.{js,ts}",
+        ],
         outputDir: "./app/types",
       }),
     },

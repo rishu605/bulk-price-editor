@@ -305,6 +305,55 @@ export type AnchorAuditVariantsQueryVariables = AdminTypes.Exact<{
 
 export type AnchorAuditVariantsQuery = { nodes: Array<AdminTypes.Maybe<Pick<AdminTypes.ProductVariant, 'id' | 'price' | 'compareAtPrice'>>> };
 
+export type SeedProductSetMutationVariables = AdminTypes.Exact<{
+  input: AdminTypes.ProductSetInput;
+}>;
+
+
+export type SeedProductSetMutation = { productSet?: AdminTypes.Maybe<{ product?: AdminTypes.Maybe<Pick<AdminTypes.Product, 'id'>>, userErrors: Array<Pick<AdminTypes.ProductSetUserError, 'field' | 'message'>> }> };
+
+export type SeedExistingQueryVariables = AdminTypes.Exact<{
+  cursor?: AdminTypes.InputMaybe<AdminTypes.Scalars['String']['input']>;
+}>;
+
+
+export type SeedExistingQuery = { products: { nodes: Array<Pick<AdminTypes.Product, 'handle'>>, pageInfo: Pick<AdminTypes.PageInfo, 'hasNextPage' | 'endCursor'> } };
+
+export type SeedCollectionByHandleQueryVariables = AdminTypes.Exact<{
+  handle: AdminTypes.Scalars['String']['input'];
+}>;
+
+
+export type SeedCollectionByHandleQuery = { collectionByHandle?: AdminTypes.Maybe<Pick<AdminTypes.Collection, 'id'>> };
+
+export type SeedCollectionCreateMutationVariables = AdminTypes.Exact<{
+  input: AdminTypes.CollectionInput;
+}>;
+
+
+export type SeedCollectionCreateMutation = { collectionCreate?: AdminTypes.Maybe<{ collection?: AdminTypes.Maybe<Pick<AdminTypes.Collection, 'id'>>, userErrors: Array<Pick<AdminTypes.UserError, 'field' | 'message'>> }> };
+
+export type SeedStagedUploadMutationVariables = AdminTypes.Exact<{ [key: string]: never; }>;
+
+
+export type SeedStagedUploadMutation = { stagedUploadsCreate?: AdminTypes.Maybe<{ stagedTargets?: AdminTypes.Maybe<Array<(
+      Pick<AdminTypes.StagedMediaUploadTarget, 'url'>
+      & { parameters: Array<Pick<AdminTypes.StagedUploadParameter, 'name' | 'value'>> }
+    )>>, userErrors: Array<Pick<AdminTypes.UserError, 'message'>> }> };
+
+export type SeedBulkRunMutationVariables = AdminTypes.Exact<{
+  mutation: AdminTypes.Scalars['String']['input'];
+  path: AdminTypes.Scalars['String']['input'];
+}>;
+
+
+export type SeedBulkRunMutation = { bulkOperationRunMutation?: AdminTypes.Maybe<{ bulkOperation?: AdminTypes.Maybe<Pick<AdminTypes.BulkOperation, 'id' | 'status'>>, userErrors: Array<Pick<AdminTypes.BulkMutationUserError, 'field' | 'message'>> }> };
+
+export type SeedBulkStatusQueryVariables = AdminTypes.Exact<{ [key: string]: never; }>;
+
+
+export type SeedBulkStatusQuery = { currentBulkOperation?: AdminTypes.Maybe<Pick<AdminTypes.BulkOperation, 'id' | 'status' | 'objectCount' | 'errorCode'>> };
+
 interface GeneratedQueryTypes {
   "#graphql\n  query AnchorCurrentBulkOperation {\n    currentBulkOperation(type: MUTATION) {\n      id status url partialDataUrl objectCount errorCode\n    }\n  }\n": {return: AnchorCurrentBulkOperationQuery, variables: AnchorCurrentBulkOperationQueryVariables},
   "#graphql\n  query AnchorPriceListDerivedPrices($priceListId: ID!, $query: String!, $first: Int!, $after: String) {\n    priceList(id: $priceListId) {\n      currency\n      prices(originType: RELATIVE, query: $query, first: $first, after: $after) {\n        nodes {\n          variant { id }\n          price { amount currencyCode }\n        }\n        pageInfo { hasNextPage endCursor }\n      }\n    }\n  }\n": {return: AnchorPriceListDerivedPricesQuery, variables: AnchorPriceListDerivedPricesQueryVariables},
@@ -319,6 +368,9 @@ interface GeneratedQueryTypes {
   "#graphql\n  query AnchorPriceLists($cursor: String) {\n    priceLists(first: 50, after: $cursor) {\n      pageInfo { hasNextPage endCursor }\n      nodes {\n        id\n        name\n        currency\n        parent { adjustment { type value } }\n        catalog { id title __typename }\n      }\n    }\n  }\n": {return: AnchorPriceListsQuery, variables: AnchorPriceListsQueryVariables},
   "#graphql\n  query AnchorPriceListPrices($id: ID!, $cursor: String) {\n    priceList(id: $id) {\n      id\n      prices(first: 250, after: $cursor) {\n        pageInfo { hasNextPage endCursor }\n        nodes {\n          originType\n          variant { id }\n          price { amount currencyCode }\n          compareAtPrice { amount currencyCode }\n        }\n      }\n    }\n  }\n": {return: AnchorPriceListPricesQuery, variables: AnchorPriceListPricesQueryVariables},
   "#graphql\n  query AnchorAuditVariants($ids: [ID!]!) {\n    nodes(ids: $ids) {\n      ... on ProductVariant { id price compareAtPrice }\n    }\n  }\n": {return: AnchorAuditVariantsQuery, variables: AnchorAuditVariantsQueryVariables},
+  "#graphql\n          query SeedExisting($cursor: String) {\n            products(first: 250, after: $cursor, query: \"handle:anchor-perf-*\") {\n              nodes { handle }\n              pageInfo { hasNextPage endCursor }\n            }\n          }\n        ": {return: SeedExistingQuery, variables: SeedExistingQueryVariables},
+  "#graphql\n        query SeedCollectionByHandle($handle: String!) {\n          collectionByHandle(handle: $handle) { id }\n        }\n      ": {return: SeedCollectionByHandleQuery, variables: SeedCollectionByHandleQueryVariables},
+  "#graphql\n        query SeedBulkStatus {\n          currentBulkOperation(type: MUTATION) { id status objectCount errorCode }\n        }\n      ": {return: SeedBulkStatusQuery, variables: SeedBulkStatusQueryVariables},
 }
 
 interface GeneratedMutationTypes {
@@ -345,6 +397,10 @@ interface GeneratedMutationTypes {
   "#graphql\n  mutation AnchorTagsRemove($id: ID!, $tags: [String!]!) {\n    tagsRemove(id: $id, tags: $tags) {\n      node { id }\n      userErrors { field message }\n    }\n  }\n": {return: AnchorTagsRemoveMutation, variables: AnchorTagsRemoveMutationVariables},
   "#graphql\n  mutation AnchorCatalogBulkQuery($query: String!) {\n    bulkOperationRunQuery(query: $query) {\n      bulkOperation { id status }\n      userErrors { field message }\n    }\n  }\n": {return: AnchorCatalogBulkQueryMutation, variables: AnchorCatalogBulkQueryMutationVariables},
   "#graphql\n  mutation AnchorFlowTriggerReceive($handle: String!, $payload: JSON!) {\n    flowTriggerReceive(handle: $handle, payload: $payload) {\n      userErrors { field message }\n    }\n  }\n": {return: AnchorFlowTriggerReceiveMutation, variables: AnchorFlowTriggerReceiveMutationVariables},
+  "#graphql\n  mutation SeedProductSet($input: ProductSetInput!) {\n    productSet(input: $input) {\n      product { id }\n      userErrors { field message }\n    }\n  }\n": {return: SeedProductSetMutation, variables: SeedProductSetMutationVariables},
+  "#graphql\n        mutation SeedCollectionCreate($input: CollectionInput!) {\n          collectionCreate(input: $input) {\n            collection { id }\n            userErrors { field message }\n          }\n        }\n      ": {return: SeedCollectionCreateMutation, variables: SeedCollectionCreateMutationVariables},
+  "#graphql\n      mutation SeedStagedUpload {\n        stagedUploadsCreate(input: [{\n          resource: BULK_MUTATION_VARIABLES,\n          filename: \"seed.jsonl\",\n          mimeType: \"text/jsonl\",\n          httpMethod: POST\n        }]) {\n          stagedTargets { url parameters { name value } }\n          userErrors { message }\n        }\n      }\n    ": {return: SeedStagedUploadMutation, variables: SeedStagedUploadMutationVariables},
+  "#graphql\n      mutation SeedBulkRun($mutation: String!, $path: String!) {\n        bulkOperationRunMutation(mutation: $mutation, stagedUploadPath: $path) {\n          bulkOperation { id status }\n          userErrors { field message }\n        }\n      }\n    ": {return: SeedBulkRunMutation, variables: SeedBulkRunMutationVariables},
 }
 declare module '@shopify/admin-api-client' {
   type InputMaybe<T> = AdminTypes.InputMaybe<T>;

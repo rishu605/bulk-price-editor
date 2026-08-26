@@ -64,6 +64,15 @@ install, so it is recorded here as a known price of P6.1 rather than discovered 
 for the revenue half of P6.2. Same reasoning: a known future cost, deliberately not paid
 early.
 
+**Two scopes the seeding script wants and will not get.** Setting stock on a seeded
+catalogue needs a location id, and both routes to one are closed: `locations` answers
+"Access denied", and a variant's `inventoryLevels` answers "Required access:
+`read_inventory`". Neither goes in the manifest — no *feature* reads a location or an
+inventory level, and the mirror gets `inventoryQuantity` from the product graph, which
+`read_products` already covers. `scripts/seed-store.ts` takes `--location` instead, pasted
+from admin by whoever runs it. A permission checkbox in front of every merchant is not a
+reasonable price for a developer tool being easier to run.
+
 **Still open: `write_markets` is over-broad.** Nothing in the app writes a market. The
 market surface works by creating and updating *price lists*, which `write_products`
 covers; the only markets access ever exercised is reading which markets exist. The install
