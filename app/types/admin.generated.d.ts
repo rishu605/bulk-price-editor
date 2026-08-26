@@ -147,6 +147,14 @@ export type AnchorShopCurrencyQueryVariables = AdminTypes.Exact<{ [key: string]:
 
 export type AnchorShopCurrencyQuery = { shop: Pick<AdminTypes.Shop, 'currencyCode' | 'ianaTimezone'> };
 
+export type AnchorFlowTriggerReceiveMutationVariables = AdminTypes.Exact<{
+  handle: AdminTypes.Scalars['String']['input'];
+  payload: AdminTypes.Scalars['JSON']['input'];
+}>;
+
+
+export type AnchorFlowTriggerReceiveMutation = { flowTriggerReceive?: AdminTypes.Maybe<{ userErrors: Array<Pick<AdminTypes.UserError, 'field' | 'message'>> }> };
+
 export type AnchorPriceListsQueryVariables = AdminTypes.Exact<{
   cursor?: AdminTypes.InputMaybe<AdminTypes.Scalars['String']['input']>;
 }>;
@@ -211,6 +219,7 @@ interface GeneratedMutationTypes {
   "#graphql\n  mutation AnchorTagsAdd($id: ID!, $tags: [String!]!) {\n    tagsAdd(id: $id, tags: $tags) {\n      node { id }\n      userErrors { field message }\n    }\n  }\n": {return: AnchorTagsAddMutation, variables: AnchorTagsAddMutationVariables},
   "#graphql\n  mutation AnchorTagsRemove($id: ID!, $tags: [String!]!) {\n    tagsRemove(id: $id, tags: $tags) {\n      node { id }\n      userErrors { field message }\n    }\n  }\n": {return: AnchorTagsRemoveMutation, variables: AnchorTagsRemoveMutationVariables},
   "#graphql\n  mutation AnchorCatalogBulkQuery($query: String!) {\n    bulkOperationRunQuery(query: $query) {\n      bulkOperation { id status }\n      userErrors { field message }\n    }\n  }\n": {return: AnchorCatalogBulkQueryMutation, variables: AnchorCatalogBulkQueryMutationVariables},
+  "#graphql\n  mutation AnchorFlowTriggerReceive($handle: String!, $payload: JSON!) {\n    flowTriggerReceive(handle: $handle, payload: $payload) {\n      userErrors { field message }\n    }\n  }\n": {return: AnchorFlowTriggerReceiveMutation, variables: AnchorFlowTriggerReceiveMutationVariables},
 }
 declare module '@shopify/admin-api-client' {
   type InputMaybe<T> = AdminTypes.InputMaybe<T>;
