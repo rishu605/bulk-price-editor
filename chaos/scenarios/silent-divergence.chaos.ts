@@ -10,9 +10,10 @@
  * to look. Invariant I5 exists for exactly this, and it only holds if verification
  * compares prices rather than checking for errors.
  *
- * Both write paths are covered. The bulk path is the one that used to check only for
- * `userError`s, which meant the largest campaigns — the ones nobody can eyeball — had the
- * weakest guarantee.
+ * Both base-surface write paths are covered here. The market path makes the same
+ * comparison and is covered by `market-executor.test.ts` instead — getting a market
+ * surface planned inside a chaos fixture needs setup this scenario does not otherwise
+ * need, and the unit test exercises the same refusal directly.
  */
 
 import { describe, expect, it } from "vitest";

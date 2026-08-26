@@ -39,8 +39,13 @@ function acceptingClient(seen: Array<Record<string, unknown>> = []): AdminClient
   return {
     async request<T>(_query: string, variables: Record<string, unknown>) {
       seen.push(variables);
-      const prices = ((variables.prices ?? []) as Array<{ variantId: string }>).map((p) => ({
+      // `PriceListPrice.price` is non-null in the schema: Shopify always echoes back
+      // what it stored. A stub that omitted it was easier to satisfy than the real API.
+      const prices = (
+        (variables.prices ?? []) as Array<{ variantId: string; price: { amount: string } }>
+      ).map((p) => ({
         variant: { id: p.variantId },
+        price: { amount: p.price.amount, currencyCode: "EUR" },
       }));
       return { data: { priceListFixedPricesAdd: { prices, userErrors: [] } } as T };
     },
@@ -114,7 +119,12 @@ describe("writeMarketPrices", () => {
         return {
           data: {
             priceListFixedPricesAdd: {
-              prices: [{ variant: { id: "gid://shopify/ProductVariant/1" } }],
+              prices: [
+                {
+                  variant: { id: "gid://shopify/ProductVariant/1" },
+                  price: { amount: "10.01", currencyCode: "EUR" },
+                },
+              ],
               userErrors: [],
             },
           } as T,
@@ -129,13 +139,47 @@ describe("writeMarketPrices", () => {
     expect(result.rows.find((r) => r.variantGid.endsWith("/2"))?.failureReason).toMatch(/did not confirm/i);
   });
 
+  it("refuses a row Shopify confirmed at a different price", async () => {
+    // The failure this exists to catch: a price list with a rounding rule accepts the
+    // write, stores something else, and returns no error at all. "It confirmed the
+    // variant" is a weaker claim than "it stored what we asked for", and a shopper pays
+    // the difference.
+    const rounding: AdminClient = {
+      async request<T>(_q: string, variables: Record<string, unknown>) {
+        const prices = (
+          (variables.prices ?? []) as Array<{ variantId: string; price: { amount: string } }>
+        ).map((p) => ({
+          variant: { id: p.variantId },
+          // Rounded down to a whole unit, exactly as a price list rule might.
+          price: { amount: `${Math.floor(Number(p.price.amount))}.00`, currencyCode: "EUR" },
+        }));
+        return { data: { priceListFixedPricesAdd: { prices, userErrors: [] } } as T };
+      },
+    };
+
+    const result = await writeMarketPrices(rounding, "gid://PriceList/1", "EUR", [row(1), row(2)]);
+
+    expect(result.clean).toBe(false);
+    expect(result.verified).toBe(0);
+    expect(result.failed).toBe(2);
+    expect(result.rows[0]?.failureReason).toMatch(/Read-back mismatch/);
+    // Both numbers, so support can act without opening the Shopify admin.
+    expect(result.rows[0]?.failureReason).toContain("10.01");
+    expect(result.rows[0]?.guidance).toMatch(/rounding or adjustment/i);
+  });
+
   it("maps a positional userError back to its own row", async () => {
     const rejecting: AdminClient = {
       async request<T>() {
         return {
           data: {
             priceListFixedPricesAdd: {
-              prices: [{ variant: { id: "gid://shopify/ProductVariant/1" } }],
+              prices: [
+                {
+                  variant: { id: "gid://shopify/ProductVariant/1" },
+                  price: { amount: "10.01", currencyCode: "EUR" },
+                },
+              ],
               userErrors: [{ field: ["prices", "1", "price"], message: "Price is invalid" }],
             },
           } as T,
@@ -154,8 +198,11 @@ describe("writeMarketPrices", () => {
     const flaky: AdminClient = {
       async request<T>(_q: string, variables: Record<string, unknown>) {
         if (++call === 2) throw new Error("fetch failed");
-        const prices = ((variables.prices ?? []) as Array<{ variantId: string }>).map((p) => ({
+        const prices = (
+          (variables.prices ?? []) as Array<{ variantId: string; price: { amount: string } }>
+        ).map((p) => ({
           variant: { id: p.variantId },
+          price: { amount: p.price.amount, currencyCode: "EUR" },
         }));
         return { data: { priceListFixedPricesAdd: { prices, userErrors: [] } } as T };
       },
