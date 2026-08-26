@@ -176,7 +176,7 @@ const STYLES = `
 .help input[type="search"], .help button {
   font: inherit;
   padding: 0.35rem 0.6rem;
-  border: 1px solid #c9c9c9;
+  border: 1px solid #8e8e8e;
   border-radius: 6px;
   background: transparent;
   color: inherit;
@@ -230,6 +230,6 @@ const STYLES = `
   .help blockquote { border-left-color: #3a3a3a; color: #b5b5b5; }
   .help ol.hits p { color: #b5b5b5; }
   .help mark { background: #6b5510; color: #f5f5f5; }
-  .help input[type="search"], .help button { border-color: #4a4a4a; }
+  .help input[type="search"], .help button { border-color: #707070; }
 }
 `;

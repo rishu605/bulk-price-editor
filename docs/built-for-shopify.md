@@ -31,13 +31,21 @@ scale the criteria care about.
 | No full-page reloads | `uses no native form outside the App Bridge-safe wrapper` | met |
 | Exemptions are genuine | `only excuses routes that genuinely render outside the admin` | met |
 | Every form field labelled (WCAG AA) | `labels every form field` | met |
-| Colour is never the only signal | — | gap |
-| Contrast ratios verified | — | gap |
+| Colour is never the only signal (WCAG 1.4.1) | `every tone is accompanied by words` | met, see note |
+| Contrast ratios verified (WCAG 1.4.3, 1.4.11) | `light palette meets AA` / `dark palette meets AA` | met |
 
-**The two design gaps are real and untested.** Both need a person looking at rendered
-pages: a static test can see that a `tone` is set, not that the information survives
-without it. They are the likeliest source of an audit finding, and they are cheap to fix
-once someone has actually looked.
+**Contrast is computed, not eyeballed.** Polaris renders most of this app and its contrast
+is Shopify's responsibility; the help centre ships its own stylesheet and is ours. Both its
+palettes are checked against the CSS as shipped rather than a list kept beside it. Doing
+this found two real failures: the search field's border was 1.66:1 in light and 1.96:1 in
+dark, against the 3:1 that WCAG 1.4.11 asks for on a control's boundary — visible to most
+people, invisible to some, and the sort of thing only ever found by computing it.
+
+**What the colour test can and cannot do.** It refuses a status tone with no content at
+all — a badge that is a coloured dot, a cell tinted by state with nothing in it. It cannot
+judge whether the words beside a colour actually explain it; that still wants a person.
+`neutral` is excluded deliberately: it means "this matters less", which is not information
+a reader loses without colour.
 
 ## Integration
 
