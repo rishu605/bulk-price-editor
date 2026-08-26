@@ -97,6 +97,7 @@ model Shop {
   priceListChanges PriceListChange[]
   topologyNotices  TopologyNotice[]
   feedback         Feedback[]
+  priceImports     PriceImport[]
   writeIntents     WriteIntent[]
   driftEvents      DriftEvent[]
   roundingProfiles RoundingProfileRecord[]
@@ -733,6 +734,53 @@ model Feedback {
   @@index([shopId, createdAt])
   @@index([status])
   @@map("feedback")
+}
+
+/// A file of exact prices, applied as a campaign rather than written directly.
+///
+/// Setting prices from a spreadsheet is something a rule cannot express: one answer per
+/// product. Writing them directly would break two rules at once -- the web process never
+/// writes prices, and nothing changes without a ledger row a revert can recompute from.
+/// So the import becomes a campaign whose rule says "look it up here", and preview,
+/// guardrails, rounding, markets and revert all work unchanged.
+model PriceImport {
+  id String @id @default(cuid())
+
+  shopId   String
+  name     String
+  currency String
+
+  rowsRead    Int @default(0)
+  rowsMatched Int @default(0)
+
+  createdBy String?
+  createdAt DateTime @default(now())
+
+  shop Shop               @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  rows PriceImportRow[]
+
+  @@index([shopId, createdAt])
+  @@map("price_imports")
+}
+
+/// One variant's price in an imported file.
+///
+/// Separate rows rather than JSON on the campaign: forty thousand prices in a JSON column
+/// would be a second copy of the file that can disagree with the first.
+model PriceImportRow {
+  id String @id @default(cuid())
+
+  importId   String
+  variantGid String
+
+  price     BigInt
+  compareAt BigInt?
+
+  priceImport PriceImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+
+  /// A file naming a variant twice is a question, not two instructions.
+  @@unique([importId, variantGid])
+  @@map("price_import_rows")
 }
 
 model RoundingProfileRecord {

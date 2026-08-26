@@ -48,6 +48,20 @@ export type AdjustmentRule =
    * Margin is a percentage of the *selling price*, the usual retail convention.
    */
   | { kind: "from-cost-margin"; marginPercent: number }
+  /**
+   * The price this variant was given in an imported file.
+   *
+   * A merchant setting prices from a spreadsheet is doing something a rule cannot
+   * express: forty thousand different answers, one per product. Rather than a side door
+   * that writes them directly, the import becomes a campaign whose rule says "look it
+   * up" — so it gets a preview, guardrails, rounding, blast-radius confirmation, per-
+   * market surfaces and a revert, exactly like every other campaign, and for free.
+   *
+   * The rule carries the import's id rather than the prices themselves. A rule row is
+   * stored as JSON on the campaign, and forty thousand prices in a JSON column would be
+   * a second copy of the file that can disagree with the first.
+   */
+  | { kind: "from-import"; importId: string }
   /** Percentage change from the baseline compare-at price. */
   | { kind: "percent-of-compare-at"; percent: number };
 
@@ -184,7 +198,14 @@ export type ResolutionReason =
   | "missing-cost"
   | "invalid-compare-at"
   | "invalid-margin"
-  | "non-positive-price";
+  | "non-positive-price"
+  /**
+   * A `from-import` campaign covers this variant but the file did not name it.
+   *
+   * Its own reason rather than folding into "missing-cost", because the fix is entirely
+   * different: add the row to the file, or narrow the campaign's scope to match it.
+   */
+  | "missing-import";
 
 export interface Resolution {
   /** The price to write. Absent when nothing should be written. */
@@ -207,4 +228,12 @@ export interface ResolveInput {
   storeGuardrails?: Guardrails;
   /** Segment ids this variant belongs to, for matching rule rows. */
   variantSegmentIds?: string[];
+  /**
+   * This variant's price in an imported file, keyed by import id.
+   *
+   * Passed in rather than looked up, because the resolver does no I/O — the same reason
+   * baselines are. A `from-import` rule with nothing here prices nothing, which is the
+   * correct outcome for a variant the file did not mention.
+   */
+  importedPrices?: Record<string, Money>;
 }

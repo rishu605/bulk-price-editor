@@ -60,6 +60,14 @@ export async function loadCandidates(
    * the campaign's scope must not be pulled into a run just because a caller named it.
    */
   onlyVariantGids?: string[],
+  /**
+   * Imports whose prices these candidates may need.
+   *
+   * Passed in rather than discovered, because only the caller knows which campaigns are
+   * in play — and loading every import a shop has ever done would be a table scan for
+   * the many campaigns that use none.
+   */
+  importIds: readonly string[] = [],
 ): Promise<PlanCandidate[]> {
   if (onlyVariantGids?.length === 0) return [];
 
@@ -73,6 +81,8 @@ export async function loadCandidates(
   if (variants.length === 0) return [];
 
   const gids = variants.map((v) => v.variantGid);
+
+  const imported = await importedPricesByVariant(importIds, gids);
 
   const [baselines, entries] = await Promise.all([
     prisma.baseline.findMany({
@@ -109,8 +119,54 @@ export async function loadCandidates(
       baseline: base,
       livePrice: asMoney(entry?.livePrice),
       liveCompareAt: asMoney(entry?.liveCompareAt),
+      ...(imported.size > 0
+        ? { importedPrices: pricesFor(imported, variant.variantGid, currency) }
+        : {}),
     });
   }
 
   return candidates;
+}
+
+
+/**
+ * Imported prices for these variants, from these imports.
+ *
+ * Keyed variant → import → price, because a variant can appear in more than one import
+ * and the rule names which one it means. Two campaigns from two files pricing the same
+ * product is exactly the overlap the resolver exists to settle, and it can only do that
+ * if both prices are available to it.
+ */
+async function importedPricesByVariant(
+  importIds: readonly string[],
+  variantGids: readonly string[],
+): Promise<Map<string, Map<string, bigint>>> {
+  if (importIds.length === 0 || variantGids.length === 0) return new Map();
+
+  const rows = await prisma.priceImportRow.findMany({
+    where: { importId: { in: [...importIds] }, variantGid: { in: [...variantGids] } },
+    select: { importId: true, variantGid: true, price: true },
+  });
+
+  const byVariant = new Map<string, Map<string, bigint>>();
+  for (const row of rows) {
+    const forVariant = byVariant.get(row.variantGid) ?? new Map<string, bigint>();
+    forVariant.set(row.importId, row.price);
+    byVariant.set(row.variantGid, forVariant);
+  }
+
+  return byVariant;
+}
+
+function pricesFor(
+  imported: Map<string, Map<string, bigint>>,
+  variantGid: string,
+  currency: string,
+): Record<string, Money> {
+  const forVariant = imported.get(variantGid);
+  if (!forVariant) return {};
+
+  return Object.fromEntries(
+    [...forVariant].map(([importId, price]) => [importId, money(Number(price), currency)]),
+  );
 }

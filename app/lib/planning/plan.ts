@@ -99,6 +99,7 @@ export function planRun(input: PlanInput): PlanOutcome {
       campaigns: applicable,
       storeGuardrails,
       variantSegmentIds: candidate.segmentIds,
+      importedPrices: candidate.importedPrices,
     });
 
     // A blocking policy stops the whole run. Returning partial rows here would let

@@ -105,10 +105,15 @@ export function resolve(input: ResolveInput): Resolution {
 
   let unrounded: Money;
   try {
-    unrounded = applyRule(rule, baseline);
+    unrounded = applyRule(rule, baseline, { importedPrices: input.importedPrices });
   } catch (error) {
     if (error instanceof RuleNotApplicableError) {
-      const reason = error.reason === "invalid-margin" ? "invalid-margin" : "missing-cost";
+      const reason =
+        error.reason === "invalid-margin"
+          ? "invalid-margin"
+          : error.reason === "missing-import"
+            ? "missing-import"
+            : "missing-cost";
       return winner.guardrailViolationPolicy === "block"
         ? blocked(winner, reason, rule)
         : skipped(winner, reason, rule);

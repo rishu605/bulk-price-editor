@@ -10,7 +10,7 @@ import { money, type Money } from "../../lib/money/money";
 import { planRun } from "../../lib/planning/plan";
 import { selectWritePath } from "../../lib/planning/write-path";
 import { loadCandidates, titleMapFor } from "./candidates.server";
-import { loadCampaignContext } from "./model.server";
+import { loadCampaignContext, importIdsOf} from "./model.server";
 import { guardrailsFor, readSettings } from "../settings.server";
 import { describeImpact, marginImpact } from "../../lib/pricing/margin";
 import { decideMarketPath, describePath, planMarket } from "./market-plan.server";
@@ -49,7 +49,7 @@ export async function previewCampaign(
 ): Promise<CampaignPreview> {
   const { campaign, resolvable, ast } = await loadCampaignContext(shopId, campaignId);
   const [candidates, storeGuardrails] = await Promise.all([
-    loadCandidates(shopId, ast),
+    loadCandidates(shopId, ast, undefined, importIdsOf(resolvable)),
     guardrailsFor(shopId),
   ]);
 
