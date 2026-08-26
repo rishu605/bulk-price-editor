@@ -22,9 +22,17 @@ import type { LoaderFunctionArgs } from "react-router";
 import { data, isRouteErrorResponse, useLoaderData, useRouteError } from "react-router";
 
 import { INDEX_SLUG, readHelpPage } from "../lib/help/pages.server";
+import { searchHelp, type HelpHit } from "../lib/help/search.server";
 
-export async function loader({ params }: LoaderFunctionArgs) {
+export async function loader({ params, request }: LoaderFunctionArgs) {
   const slug = params["*"] || INDEX_SLUG;
+
+  // Search is a GET with a query string rather than a route of its own, so a merchant can
+  // bookmark or share a result list, and so the back button behaves.
+  const query = new URL(request.url).searchParams.get("q")?.trim() ?? "";
+  if (query) {
+    return { query, hits: searchHelp(query), page: null, isIndex: false };
+  }
 
   const page = await readHelpPage(slug);
 
@@ -32,12 +40,12 @@ export async function loader({ params }: LoaderFunctionArgs) {
   // silently landing them somewhere else hides that a link in the product is wrong.
   if (!page) throw data({ slug }, { status: 404 });
 
-  return { page, isIndex: slug === INDEX_SLUG };
+  return { query, hits: null, page, isIndex: slug === INDEX_SLUG };
 }
 
 export function meta({ data: loaded }: { data?: Awaited<ReturnType<typeof loader>> }) {
   const SUFFIX = "Anchor help";
-  const title = loaded?.page.title ?? SUFFIX;
+  const title = loaded?.query ? `${loaded.query} — search` : (loaded?.page?.title ?? SUFFIX);
 
   // The index's own heading is already the suffix, and "Anchor help · Anchor help" in a
   // browser tab reads like a bug because it is one.
@@ -45,13 +53,55 @@ export function meta({ data: loaded }: { data?: Awaited<ReturnType<typeof loader
 }
 
 export default function HelpRoute() {
-  const { page, isIndex } = useLoaderData<typeof loader>();
+  const { page, isIndex, query, hits } = useLoaderData<typeof loader>();
+
+  if (hits) {
+    return (
+      <Shell showBack query={query}>
+        <h1>
+          {hits.length === 0 ? "Nothing matched" : `${hits.length} page${hits.length === 1 ? "" : "s"}`}
+          {" for "}
+          {/* Rendered as text, never as markup: this is the only thing on the page that
+              did not come from a file we wrote. */}
+          <em>{query}</em>
+        </h1>
+        {hits.length === 0 ? (
+          <p>
+            Try a single word — the pages are written in plain language, so the word you
+            would say out loud is usually the one that finds them.
+          </p>
+        ) : (
+          <ol className="hits">
+            {hits.map((hit) => (
+              <li key={hit.slug}>
+                <a href={`/help/${hit.slug}`}>{hit.title}</a>
+                <p>{highlight(hit)}</p>
+              </li>
+            ))}
+          </ol>
+        )}
+      </Shell>
+    );
+  }
 
   return (
-    <Shell showBack={!isIndex}>
+    <Shell showBack={!isIndex} query={query}>
       {/* The markdown is committed alongside this file — it is our prose, not input. */}
-      <article dangerouslySetInnerHTML={{ __html: page.html }} />
+      <article dangerouslySetInnerHTML={{ __html: page!.html }} />
     </Shell>
+  );
+}
+
+/** The matched term marked inside its snippet, split into nodes so React does the escaping. */
+function highlight(hit: HelpHit) {
+  if (!hit.match) return hit.snippet;
+
+  return (
+    <>
+      {hit.snippet.slice(0, hit.match.start)}
+      <mark>{hit.snippet.slice(hit.match.start, hit.match.end)}</mark>
+      {hit.snippet.slice(hit.match.end)}
+    </>
   );
 }
 
@@ -60,7 +110,7 @@ export function ErrorBoundary() {
   const missing = isRouteErrorResponse(error) && error.status === 404;
 
   return (
-    <Shell showBack>
+    <Shell showBack query="">
       <h1>{missing ? "No such help page" : "That page could not be loaded"}</h1>
       <p>
         {missing
@@ -71,15 +121,30 @@ export function ErrorBoundary() {
   );
 }
 
-function Shell({ children, showBack }: { children: React.ReactNode; showBack: boolean }) {
+function Shell({
+  children,
+  showBack,
+  query,
+}: {
+  children: React.ReactNode;
+  showBack: boolean;
+  query: string;
+}) {
   return (
     <main className="help">
       <style>{STYLES}</style>
-      {showBack ? (
-        <nav>
-          <a href="/help">← Help centre</a>
-        </nav>
-      ) : null}
+      <nav>
+        {showBack ? <a href="/help">← Help centre</a> : <span />}
+        {/* A plain GET form: it works before any JavaScript has loaded, which matters on
+            a page a merchant may reach while the rest of the app is misbehaving. */}
+        <form method="get" action="/help" role="search">
+          <label htmlFor="q" className="visually-hidden">
+            Search the help centre
+          </label>
+          <input id="q" type="search" name="q" defaultValue={query} placeholder="Search help" />
+          <button type="submit">Search</button>
+        </form>
+      </nav>
       {children}
     </main>
   );
@@ -98,7 +163,37 @@ const STYLES = `
   line-height: 1.65;
   color: #1a1a1a;
 }
-.help nav { margin-bottom: 2rem; font-size: 0.875rem; }
+.help nav {
+  margin-bottom: 2rem;
+  font-size: 0.875rem;
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.help nav form { display: flex; gap: 0.5rem; }
+.help input[type="search"], .help button {
+  font: inherit;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid #c9c9c9;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+}
+.help button { cursor: pointer; }
+.help mark { background: #ffe9a8; color: inherit; }
+.help ol.hits { list-style: none; padding: 0; }
+.help ol.hits li { margin: 0 0 1.5rem; }
+.help ol.hits p { margin: 0.25rem 0 0; color: #4a4a4a; }
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
 .help a { color: #005bd3; }
 .help h1 { font-size: 1.75rem; line-height: 1.3; margin: 0 0 1rem; }
 .help h2 { font-size: 1.25rem; margin: 2.5rem 0 0.75rem; }
@@ -133,5 +228,8 @@ const STYLES = `
   .help code, .help pre { background: #2a2a2a; }
   .help th, .help td { border-color: #3a3a3a; }
   .help blockquote { border-left-color: #3a3a3a; color: #b5b5b5; }
+  .help ol.hits p { color: #b5b5b5; }
+  .help mark { background: #6b5510; color: #f5f5f5; }
+  .help input[type="search"], .help button { border-color: #4a4a4a; }
 }
 `;
