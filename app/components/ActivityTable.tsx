@@ -1,3 +1,4 @@
+import { formatWhen } from "../lib/format/display";
 import type { ActivityEntry } from "../lib/reporting/activity-csv";
 import { describeActor } from "../lib/audit/actor";
 
@@ -40,16 +41,3 @@ export function ActivityTable({
   );
 }
 
-/**
- * The shop's own timezone, falling back to the raw timestamp.
- *
- * A bad zone string throws a RangeError out of `toLocaleString`, which would take the
- * whole page down over a display preference.
- */
-function formatWhen(iso: string, timeZone: string): string {
-  try {
-    return new Date(iso).toLocaleString("en-GB", { timeZone });
-  } catch {
-    return iso;
-  }
-}

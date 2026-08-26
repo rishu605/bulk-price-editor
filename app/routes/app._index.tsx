@@ -1,3 +1,4 @@
+import { formatDay, formatWhen } from "../lib/format/display";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -64,6 +65,7 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
   ]);
 
   return {
+    timeZone: shop.timezone,
     shopDomain: shop.domain,
     syncedAt: shop.initialSyncCompletedAt?.toISOString() ?? null,
     health: {
@@ -196,6 +198,7 @@ export default function Dashboard() {
     needsAttention,
     lastRun,
     recent,
+    timeZone,
   } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
   const busy = fetcher.state !== "idle";
@@ -389,7 +392,7 @@ export default function Dashboard() {
                 {lastRun.status.toLowerCase()}, {lastRun.verified} verified
                 {lastRun.failed > 0 ? `, ${lastRun.failed} failed` : ""}
                 {lastRun.finishedAt
-                  ? ` on ${new Date(lastRun.finishedAt).toLocaleString()}`
+                  ? ` on ${formatWhen(lastRun.finishedAt, timeZone)}`
                   : " (still running)"}
                 .
               </s-text>
@@ -415,7 +418,7 @@ export default function Dashboard() {
         <s-paragraph>{shopDomain}</s-paragraph>
         <s-paragraph>
           <s-text>
-            {syncedAt ? `Last synced ${new Date(syncedAt).toLocaleString()}` : "Not yet synced"}
+            {syncedAt ? `Last synced ${formatWhen(syncedAt, timeZone)}` : "Not yet synced"}
           </s-text>
         </s-paragraph>
       </s-section>
@@ -426,7 +429,7 @@ export default function Dashboard() {
             <s-paragraph key={entry.id}>
               <s-text>
                 {entry.action} · {entry.actor ?? "Scheduler"} ·{" "}
-                {new Date(entry.at).toLocaleString()}
+                {formatWhen(entry.at, timeZone)}
               </s-text>
             </s-paragraph>
           ))}
@@ -439,7 +442,7 @@ export default function Dashboard() {
           <s-paragraph>
             <s-text>
               {health.oldestCapturedAt
-                ? `Oldest captured ${new Date(health.oldestCapturedAt).toLocaleDateString()}`
+                ? `Oldest captured ${formatDay(health.oldestCapturedAt, timeZone)}`
                 : "None captured"}
             </s-text>
           </s-paragraph>

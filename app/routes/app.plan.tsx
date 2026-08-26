@@ -7,6 +7,7 @@
  * people keep paying resentfully and then leave a one-star review about it.
  */
 
+import { formatCount, formatDay } from "../lib/format/display";
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -40,6 +41,7 @@ export const loader = withGuard("/app/plan", async ({ request }: LoaderFunctionA
   });
 
   return {
+    timeZone: shop.timezone,
     current: billing.plan.id,
     exempt: billing.exempt,
     trialing: billing.trialing,
@@ -64,7 +66,7 @@ export const loader = withGuard("/app/plan", async ({ request }: LoaderFunctionA
 });
 
 export default function PlanPage() {
-  const { current, exempt, trialing, trialEndsAt, variants, plans, affected } =
+  const { current, exempt, trialing, trialEndsAt, variants, plans, affected, timeZone } =
     useLoaderData<typeof loader>();
 
   return (
@@ -81,7 +83,7 @@ export default function PlanPage() {
       {trialing && trialEndsAt ? (
         <s-banner tone="info">
           <s-paragraph>
-            Your trial runs until {new Date(trialEndsAt).toLocaleDateString()}.
+            Your trial runs until {formatDay(trialEndsAt, timeZone)}.
           </s-paragraph>
         </s-banner>
       ) : null}
@@ -89,7 +91,7 @@ export default function PlanPage() {
       <s-section heading="What you are on">
         <s-paragraph>
           <s-text>
-            {PLANS[current as keyof typeof PLANS].name} · {variants.toLocaleString()}{" "}
+            {PLANS[current as keyof typeof PLANS].name} · {formatCount(variants)}{" "}
             variants in your catalogue.
           </s-text>
         </s-paragraph>
@@ -124,7 +126,7 @@ export default function PlanPage() {
                 <s-table-cell>
                   {plan.variantLimit === null
                     ? "Unlimited"
-                    : plan.variantLimit.toLocaleString()}
+                    : formatCount(plan.variantLimit)}
                 </s-table-cell>
                 <s-table-cell>{plan.markets ? "Yes" : "—"}</s-table-cell>
                 <s-table-cell>{plan.b2b ? "Yes" : "—"}</s-table-cell>

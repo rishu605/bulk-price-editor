@@ -7,6 +7,7 @@
  * the other, and a partial run is exactly where they disagree.
  */
 
+import { formatCount } from "../lib/format/display";
 import type { CampaignResult } from "../services/campaigns/result.server";
 
 export function RunResultSection({ result }: { result: CampaignResult }) {
@@ -86,8 +87,8 @@ export function RunResultSection({ result }: { result: CampaignResult }) {
       {result.marginCoveredRows !== null ? (
         <s-paragraph>
           <s-text tone="caution">
-            The margin figures above cover the first {result.marginCoveredRows.toLocaleString()}{" "}
-            of {counts.total.toLocaleString()} rows. The counts cover all of them.
+            The margin figures above cover the first {formatCount(result.marginCoveredRows)}{" "}
+            of {formatCount(counts.total)} rows. The counts cover all of them.
           </s-text>
         </s-paragraph>
       ) : null}
@@ -102,7 +103,7 @@ export function RunResultSection({ result }: { result: CampaignResult }) {
 function Count({ label, value }: { label: string; value: number }) {
   return (
     <s-stack gap="none">
-      <s-text type="strong">{value.toLocaleString()}</s-text>
+      <s-text type="strong">{formatCount(value)}</s-text>
       <s-text tone="neutral">{label}</s-text>
     </s-stack>
   );

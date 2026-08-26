@@ -1,3 +1,4 @@
+import { formatCount } from "../format/display";
 /**
  * What each plan includes, and — more importantly — what it never gates.
  *
@@ -170,8 +171,8 @@ function gate(reason: GateReason, upgradeTo: PlanId | null, plan: Plan, variants
 
   const messages: Record<GateReason, string> = {
     "variant-limit":
-      `Your ${plan.name} plan manages up to ${plan.variantLimit?.toLocaleString()} variants ` +
-      `and this campaign covers ${variants?.toLocaleString()}.`,
+      `Your ${plan.name} plan manages up to ${plan.variantLimit == null ? plan.variantLimit : formatCount(plan.variantLimit)} variants ` +
+      `and this campaign covers ${variants == null ? variants : formatCount(variants)}.`,
     markets: `Pricing into markets is not part of ${plan.name}.`,
     b2b: `Pricing into wholesale catalogues is not part of ${plan.name}.`,
   };
