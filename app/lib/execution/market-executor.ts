@@ -396,3 +396,95 @@ export async function readDerivedPrices(
 
   return out;
 }
+
+/**
+ * What a shopper in a given country actually pays, as Shopify computes it.
+ *
+ * This is the market surface's source of truth, and it replaces reading a price list's
+ * own `prices` connection for the purpose. The schema calls it "the final price after all
+ * adjustments are applied" and that is precisely the question a baseline asks.
+ *
+ * **It is authoritative in a way arithmetic cannot be.** The obvious alternative is to take
+ * a converted price and apply the list's percentage — but on the dev store a DE market
+ * returns €15.73, which *is* the conversion times its list's -10%, while a JP market with
+ * an identically-configured list returns the unadjusted conversion. Computing the JP price
+ * ourselves would have produced ¥2,629 where Shopify says ¥2,921, and written a price 11%
+ * under the real one while believing we had read it from the source.
+ *
+ * It also carries the per-market compare-at, including hand-set overrides — a variant
+ * fixed at ¥1,200 on a JPY list comes back as ¥1,200 with its ¥1,800 strike-through — so
+ * one read answers for relative and fixed lists alike.
+ */
+export const CONTEXTUAL_PRICES = `#graphql
+  query AnchorContextualPrices($ids: [ID!]!, $context: ContextualPricingContext!) {
+    nodes(ids: $ids) {
+      ... on ProductVariant {
+        id
+        contextualPricing(context: $context) {
+          price { amount currencyCode }
+          compareAtPrice { amount currencyCode }
+        }
+      }
+    }
+  }
+`;
+
+export interface ContextualPrice {
+  amount: string;
+  currency: string;
+  compareAtAmount: string | null;
+}
+
+interface ContextualResponse {
+  nodes?: Array<{
+    id?: string;
+    contextualPricing?: {
+      price?: { amount?: string; currencyCode?: string } | null;
+      compareAtPrice?: { amount?: string } | null;
+    } | null;
+  } | null>;
+}
+
+/**
+ * How many variants go into one contextual-pricing request.
+ *
+ * Smaller than the id-based reads elsewhere because each node carries a nested pricing
+ * resolution, and Shopify's cost accounting charges for it. Fifty keeps a request well
+ * inside a standard shop's budget while still being one round trip per fifty variants
+ * rather than one per variant.
+ */
+export const MAX_VARIANTS_PER_CONTEXT_QUERY = 50;
+
+export async function readContextualPrices(
+  client: AdminClient,
+  variantGids: readonly string[],
+  country: string,
+): Promise<Map<string, ContextualPrice>> {
+  const out = new Map<string, ContextualPrice>();
+
+  for (let i = 0; i < variantGids.length; i += MAX_VARIANTS_PER_CONTEXT_QUERY) {
+    const ids = variantGids.slice(i, i + MAX_VARIANTS_PER_CONTEXT_QUERY);
+
+    const response = await withRetry(
+      () => client.request<ContextualResponse>(CONTEXTUAL_PRICES, { ids, context: { country } }),
+      isThrottledError,
+    );
+
+    for (const node of response.data?.nodes ?? []) {
+      const gid = node?.id;
+      const price = node?.contextualPricing?.price;
+      // A node with no contextual price is a variant this market does not price. Left out
+      // rather than defaulted, exactly as the derived read does: a campaign that invents a
+      // reference price then writes a real one on top of it is the failure to avoid.
+      if (!gid || !price?.amount || !price.currencyCode) continue;
+
+      out.set(gid, {
+        amount: price.amount,
+        currency: price.currencyCode,
+        compareAtAmount: node?.contextualPricing?.compareAtPrice?.amount ?? null,
+      });
+    }
+  }
+
+  return out;
+}

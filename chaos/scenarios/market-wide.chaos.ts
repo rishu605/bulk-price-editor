@@ -29,6 +29,7 @@ function addEuMarket(chaos: ChaosContext) {
     id: EU,
     name: "Europe",
     currency: "EUR",
+    country: "DE",
     adjustment: { type: "PERCENTAGE_DECREASE", value: 10 },
     catalog: { id: "gid://shopify/MarketCatalog/eu", title: "EU", __typename: "MarketCatalog" },
     prices: [],
@@ -177,6 +178,7 @@ describe("chaos: repricing a market with one mutation", () => {
           id: parity,
           name: "Wholesale",
           currency: "USD",
+          country: "US",
           adjustment: { type: "PERCENTAGE_DECREASE", value: 0 },
           catalog: {
             id: "gid://shopify/MarketCatalog/parity",
@@ -429,6 +431,7 @@ describe("chaos: repricing a market with one mutation", () => {
           id: parity,
           name: "Wholesale",
           currency: "USD",
+          country: "US",
           adjustment: { type: "PERCENTAGE_DECREASE", value: 0 },
           catalog: {
             id: "gid://shopify/MarketCatalog/parity",
@@ -508,6 +511,7 @@ describe("chaos: repricing a market with one mutation", () => {
           id: parity,
           name: "Wholesale",
           currency: "USD",
+          country: "US",
           adjustment: { type: "PERCENTAGE_DECREASE", value: 0 },
           catalog: {
             id: "gid://shopify/MarketCatalog/parity",

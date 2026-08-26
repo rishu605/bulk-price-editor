@@ -65,6 +65,7 @@ describe("chaos: writing campaign prices to markets", () => {
           id: "gid://shopify/PriceList/eu",
           name: "Europe",
           currency: "EUR",
+          country: "DE",
           adjustment: { type: "PERCENTAGE_DECREASE", value: 10 },
           catalog: { id: "gid://shopify/MarketCatalog/eu", title: "EU", __typename: "MarketCatalog" },
           prices: [],
@@ -73,6 +74,7 @@ describe("chaos: writing campaign prices to markets", () => {
           id: "gid://shopify/PriceList/jp",
           name: "Japan",
           currency: "JPY",
+          country: "JP",
           adjustment: { type: "PERCENTAGE_INCREASE", value: 20 },
           catalog: { id: "gid://shopify/MarketCatalog/jp", title: "JP", __typename: "MarketCatalog" },
           prices: [],
@@ -186,6 +188,7 @@ describe("chaos: writing campaign prices to markets", () => {
           id: "gid://shopify/PriceList/big",
           name: "Big market",
           currency: "EUR",
+          country: "DE",
           adjustment: { type: "PERCENTAGE_DECREASE", value: 5 },
           catalog: { id: "gid://shopify/MarketCatalog/big", title: "Big", __typename: "MarketCatalog" },
           prices: [],
@@ -250,6 +253,7 @@ describe("chaos: writing campaign prices to markets", () => {
           id: "gid://shopify/PriceList/jp",
           name: "Japan",
           currency: "JPY",
+          country: "JP",
           adjustment: { type: "PERCENTAGE_DECREASE", value: 10 },
           catalog: { id: "gid://shopify/MarketCatalog/jp", title: "JP", __typename: "MarketCatalog" },
           prices: [
@@ -307,7 +311,7 @@ describe("chaos: writing campaign prices to markets", () => {
     );
   });
 
-  it("refuses a market whose prices came back unconverted, and prices the rest", async () => {
+  it("refuses a market that answers in the wrong currency, and prices the rest", async () => {
     /**
      * The dev store returned an EUR list and a JPY list with byte-identical amounts — the
      * base price with the list's percentage applied and no currency conversion at all
@@ -328,20 +332,19 @@ describe("chaos: writing campaign prices to markets", () => {
       async (chaos) => {
         const { shopId, campaignId, variantGids } = chaos.fixture;
 
+        // This market answers in dollars when it should answer in euros. Injected rather
+        // than arranged, because a market that behaves correctly cannot demonstrate the
+        // refusal — and the refusal is the point.
         chaos.fake.rates.set("EUR", 1);
 
         chaos.fake.addPriceList({
           id: "gid://shopify/PriceList/eu",
           name: "Europe",
           currency: "EUR",
+          country: "DE",
+          answersInCurrency: "USD",
           adjustment: { type: "PERCENTAGE_DECREASE", value: 10 },
           catalog: { id: "gid://shopify/MarketCatalog/eu", title: "EU", __typename: "MarketCatalog" },
-          // What the real API does: a relative price comes back in the *shop's* currency,
-          // whatever the list's own currency is (#257). Opted into here because the fake
-          // still defaults to the list's currency everywhere else — the mistake this
-          // scenario guards against is precisely that the fake and the code agreed with
-          // each other and neither agreed with Shopify.
-          relativeCurrency: "USD",
           prices: [],
         });
 
@@ -420,6 +423,7 @@ describe("chaos: writing campaign prices to markets", () => {
           id: "gid://shopify/PriceList/eu",
           name: "Europe",
           currency: "EUR",
+          country: "DE",
           adjustment: { type: "PERCENTAGE_DECREASE", value: 10 },
           catalog: { id: "gid://shopify/MarketCatalog/eu", title: "EU", __typename: "MarketCatalog" },
           prices: [],

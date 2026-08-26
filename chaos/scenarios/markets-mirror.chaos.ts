@@ -35,6 +35,7 @@ describe("chaos: mirroring market and B2B price lists", () => {
           id: "gid://shopify/PriceList/relative",
           name: "Canada",
           currency: "CAD",
+          country: "CA",
           adjustment: { type: "PERCENTAGE_DECREASE", value: 5 },
           catalog: { id: "gid://shopify/MarketCatalog/1", title: "Canada", __typename: "MarketCatalog" },
           prices: variantGids.map((gid) => ({
@@ -51,6 +52,7 @@ describe("chaos: mirroring market and B2B price lists", () => {
           id: "gid://shopify/PriceList/fixed",
           name: "Wholesale",
           currency: "USD",
+          country: "US",
           adjustment: null,
           catalog: null,
           prices: [
@@ -125,6 +127,7 @@ describe("chaos: mirroring market and B2B price lists", () => {
           id: "gid://shopify/PriceList/doomed",
           name: "Temporary",
           currency: "USD",
+          country: "US",
           adjustment: null,
           catalog: null,
           prices: [
@@ -146,6 +149,7 @@ describe("chaos: mirroring market and B2B price lists", () => {
           id: "gid://shopify/PriceList/survivor",
           name: "Kept",
           currency: "USD",
+          country: "US",
           adjustment: { type: "PERCENTAGE_DECREASE", value: 10 },
           catalog: { id: "gid://shopify/MarketCatalog/2", title: "EU", __typename: "MarketCatalog" },
           prices: [],
@@ -197,6 +201,7 @@ describe("chaos: mirroring market and B2B price lists", () => {
           id: "gid://shopify/PriceList/jp",
           name: "Japan",
           currency: "JPY",
+          country: "JP",
           adjustment: { type: "PERCENTAGE_DECREASE", value: 10 },
           catalog: { id: "gid://shopify/MarketCatalog/jp", title: "Japan", __typename: "MarketCatalog" },
           prices: variantGids.map((gid) => ({

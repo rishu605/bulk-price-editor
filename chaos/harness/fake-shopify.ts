@@ -43,23 +43,22 @@ export interface FakePriceList {
   adjustment: { type: string; value: number } | null;
   catalog: { id: string; title: string; __typename: string } | null;
   /**
-   * The currency this list reports its `RELATIVE` prices in.
+   * The country this list's market serves, if it has one.
    *
-   * **The real API always answers in the shop's currency here**, whatever the list's own
-   * currency is — a JPY list at -10% returns `{"amount":"18.0","currencyCode":"USD"}` for
-   * a $20 variant, while a `FIXED` price on the same list returns
-   * `{"amount":"1200.0","currencyCode":"JPY"}`. Conversion happens later, at presentment.
-   *
-   * This fake still defaults to the list's own currency, which is wrong, and that is
-   * exactly why the mistake it models went unnoticed: the production code matched the
-   * fake and neither matched Shopify. Flipping the default is the remaining half of #257
-   * — it turns thirteen market scenarios red, because the app cannot currently price a
-   * relative list at all, and repairing them needs the baseline to come from
-   * `presentmentPrices` rather than from here.
-   *
-   * Until then a scenario can opt into the truth by setting this.
+   * `contextualPricing` is asked by country rather than by price list, so this is how a
+   * scenario says which market a shopper is in. Absent for a company-location catalogue,
+   * which is priced by company and has no country at all.
    */
-  relativeCurrency?: string;
+  country?: string;
+  /**
+   * Answer this market's contextual prices in a currency that is not the list's.
+   *
+   * Fault injection, not behaviour: a market should always answer in its own currency, and
+   * the campaign refuses it when that is not true. Provable only by making it untrue, and
+   * worth proving because a price in the wrong currency is the one kind of wrong price
+   * that looks like an ordinary number — €797.36 where ¥797.36 would be absurd on sight.
+   */
+  answersInCurrency?: string;
   /** Per-variant entries, as Shopify reports them -- fixed and derived alike. */
   prices: Array<{
     variantGid: string;
@@ -240,6 +239,15 @@ export class FakeShopify {
     if (query.includes("fixed: prices(originType: FIXED")) {
       return this.priceListParent(variables) as { data?: T; extensions?: { cost?: QueryCost } };
     }
+    // Matched on the operation name, not on a field name.
+    //
+    // The router works by substring, which is fine until a *comment* in another query
+    // mentions the field — the markets sync explains why it needs a country, and doing so
+    // sent the price-list query here and returned zero markets. An operation name cannot
+    // collide by accident that way.
+    if (query.includes("AnchorContextualPrices")) {
+      return this.contextualPrices(variables) as { data?: T; extensions?: { cost?: QueryCost } };
+    }
     if (query.includes("prices(originType: RELATIVE")) {
       return this.derivedPrices(variables) as { data?: T; extensions?: { cost?: QueryCost } };
     }
@@ -405,21 +413,60 @@ export class FakeShopify {
    * The order is Shopify's and it is not interchangeable. Adjusting before converting
    * gives a different number in every currency whose minor unit is not the shop's.
    */
+  /**
+   * A percentage applied to integer minor units.
+   *
+   * Basis points keep the multiplication integral so there is exactly one divide, and the
+   * one divide is the one being rounded. The obvious spelling — `minor * (1 + value/100)`
+   * and then a scale back through major units — turned 3517.5 into 3517.4999999999995 and
+   * made two of this fake's own price functions disagree by a minor unit, which surfaced
+   * as a chaos scenario reporting a verified row the store did not have. Rule 7 applies to
+   * the harness as much as to the product.
+   */
+  private adjustMinorUnits(minorUnits: number, adjustment: { type: string; value: number }): number {
+    const sign = adjustment.type === "PERCENTAGE_DECREASE" ? -1 : 1;
+    const bps = 10_000 + sign * adjustment.value * 100;
+    return Math.round((minorUnits * bps) / 10_000);
+  }
+
+  /**
+   * What `priceList.prices(originType: RELATIVE)` really answers: the base price with the
+   * list's adjustment applied, **in the shop's currency**, with no conversion at all.
+   */
+  relativePriceOf(variantGid: string, list: FakePriceList): string | undefined {
+    const variant = this.variants.get(variantGid);
+    if (!variant || variant.deleted || !list.adjustment) return undefined;
+
+    const base = parseMoney(variant.price, this.shopCurrency).amount;
+
+    return formatMoney(money(this.adjustMinorUnits(base, list.adjustment), this.shopCurrency));
+  }
+
   derivedPriceOf(variantGid: string, list: FakePriceList): string | undefined {
     const variant = this.variants.get(variantGid);
     if (!variant || variant.deleted || !list.adjustment) return undefined;
 
-    const rate = list.currency === this.shopCurrency ? 1 : (this.rates.get(list.currency) ?? 1);
-    const converted = parseMoney(variant.price, this.shopCurrency).amount * rate;
+    const inTarget = this.convertMinorUnits(
+      parseMoney(variant.price, this.shopCurrency).amount,
+      list.currency,
+    );
 
-    const sign = list.adjustment.type === "PERCENTAGE_DECREASE" ? -1 : 1;
-    const adjusted = converted * (1 + (sign * list.adjustment.value) / 100);
+    return formatMoney(money(this.adjustMinorUnits(inTarget, list.adjustment), list.currency));
+  }
 
-    // From the shop's minor units into the market's: $77.60 is 7760 cents, and at 148
-    // that is ¥11,485 — 11485 minor units, not 1,148,480.
-    const inTarget = (adjusted / minorUnitsPerMajor(this.shopCurrency)) * minorUnitsPerMajor(list.currency);
+  /**
+   * Shop minor units into a market's minor units, at that market's rate.
+   *
+   * The exponents differ as well as the rate: $77.60 is 7760 cents, and at 148 that is
+   * ¥11,485 — 11485 minor units, not 1,148,480. Converting through major units is the only
+   * way that arithmetic stays right, and it is why this is the one place a float is
+   * unavoidable — an exchange rate is not a rational number we get to choose.
+   */
+  private convertMinorUnits(shopMinorUnits: number, currency: string): number {
+    const rate = currency === this.shopCurrency ? 1 : (this.rates.get(currency) ?? 1);
+    const major = (shopMinorUnits / minorUnitsPerMajor(this.shopCurrency)) * rate;
 
-    return formatMoney(money(Math.round(inTarget), list.currency));
+    return Math.round(major * minorUnitsPerMajor(currency));
   }
 
   /** Mutations that moved a whole market at once. Scenarios count these. */
@@ -504,6 +551,70 @@ export class FakeShopify {
     };
   }
 
+  /**
+   * Serves `productVariant.contextualPricing(context: { country })`.
+   *
+   * What a shopper in that country pays, after everything: the base price converted at the
+   * market's rate, the list's percentage applied, and any price the merchant set by hand
+   * taking precedence over both — with its own compare-at, which is the per-market
+   * strike-through the product exists for.
+   *
+   * This is the market surface's source of truth, because it is the only question whose
+   * answer is a price rather than an ingredient. A price list's own connection gives
+   * relative prices in the shop's currency (#257), and converting one ourselves is how a
+   * JPY market ends up 146x out.
+   */
+  private contextualPrices(variables: Record<string, unknown>) {
+    const ids = (variables.ids as string[] | undefined) ?? [];
+    const country = String((variables.context as { country?: string } | undefined)?.country ?? "");
+    const list = this.priceLists.find((l) => l.country === country);
+
+    const nodes = ids.map((gid) => {
+      const variant = this.variants.get(gid);
+      if (!variant || variant.deleted) return null;
+
+      // No market for this country: the shopper pays the shop's own price.
+      if (!list) {
+        return {
+          id: gid,
+          contextualPricing: {
+            price: { amount: variant.price, currencyCode: this.shopCurrency },
+            compareAtPrice: variant.compareAtPrice
+              ? { amount: variant.compareAtPrice, currencyCode: this.shopCurrency }
+              : null,
+          },
+        };
+      }
+
+      // A hand-set price wins over the list's percentage, which is what "fixed" means.
+      const fixed = list.prices.find((p) => p.variantGid === gid && p.originType === "FIXED");
+      if (fixed) {
+        return {
+          id: gid,
+          contextualPricing: {
+            price: { amount: fixed.amount, currencyCode: list.currency },
+            compareAtPrice: fixed.compareAt
+              ? { amount: fixed.compareAt, currencyCode: list.currency }
+              : null,
+          },
+        };
+      }
+
+      const amount = this.derivedPriceOf(gid, list);
+      if (!amount) return null;
+
+      return {
+        id: gid,
+        contextualPricing: {
+          price: { amount, currencyCode: list.answersInCurrency ?? list.currency },
+          compareAtPrice: null,
+        },
+      };
+    });
+
+    return { data: { nodes }, extensions: this.cost(Math.max(1, ids.length)) };
+  }
+
   /** Serves `priceList.prices(originType: RELATIVE)`, filtered by variant id. */
   private derivedPrices(variables: Record<string, unknown>) {
     const list = this.priceLists.find((l) => l.id === String(variables.priceListId ?? ""));
@@ -524,11 +635,16 @@ export class FakeShopify {
         // is FIXED, so it is not in this connection at all.
         if (list.prices.some((p) => p.variantGid === gid && p.originType === "FIXED")) continue;
 
-        const amount = this.derivedPriceOf(gid, list);
+        // In the shop's currency, which is what the real API does: a JPY list at -10%
+        // answers `{"amount":"18.0","currencyCode":"USD"}` for a $20 variant, and the
+        // conversion into the market's currency happens later at presentment. This fake
+        // answered in the list's currency, so the production code and the fake agreed with
+        // each other and neither agreed with Shopify (#257).
+        const amount = this.relativePriceOf(gid, list);
         if (amount) {
           nodes.push({
             variant: { id: gid },
-            price: { amount, currencyCode: list.relativeCurrency ?? list.currency },
+            price: { amount, currencyCode: this.shopCurrency },
           });
         }
       }
@@ -640,7 +756,27 @@ export class FakeShopify {
             name: list.name,
             currency: list.currency,
             parent: list.adjustment ? { adjustment: list.adjustment } : null,
-            catalog: list.catalog,
+            // The catalogue carries its market's region, because that is where the market
+            // surface gets the country it asks `contextualPricing` about. A catalogue with
+            // no country is a company-location catalogue, which has no market and no
+            // region — and answering `markets: { nodes: [] }` for it is the truth, not an
+            // omission.
+            catalog: list.catalog
+              ? {
+                  ...list.catalog,
+                  markets: {
+                    nodes: list.country
+                      ? [
+                          {
+                            conditions: {
+                              regionsCondition: { regions: { nodes: [{ code: list.country }] } },
+                            },
+                          },
+                        ]
+                      : [],
+                  },
+                }
+              : null,
           })),
         },
       },

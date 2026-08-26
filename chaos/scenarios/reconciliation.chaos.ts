@@ -98,6 +98,7 @@ describe("chaos: the reconciliation view", () => {
           id: "gid://shopify/PriceList/eu",
           name: "Europe",
           currency: "EUR",
+          country: "DE",
           adjustment: null,
           catalog: { id: "gid://shopify/MarketCatalog/eu", title: "EU", __typename: "MarketCatalog" },
           prices: variantGids.map((gid) => ({
