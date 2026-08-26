@@ -22,6 +22,37 @@ export interface GraphQLRunner {
   ): Promise<{ json(): Promise<unknown> }>;
 }
 
+/**
+ * The rest of one product's variants.
+ *
+ * `variants(first: 100)` on the page query is not a limit anybody chose — it is the page
+ * size — but for a product with 2,048 variants it silently dropped 1,948 of them. The app
+ * would then manage a twentieth of that product and report a clean run over the part it
+ * could see, which is the failure mode this whole product exists to prevent.
+ *
+ * 250 is the largest page Shopify allows on this connection, so a 2,048-variant product
+ * costs eight follow-up requests and only products that need them pay anything.
+ */
+const PRODUCT_VARIANTS_PAGE = `#graphql
+  query AnchorProductVariantsPage($id: ID!, $cursor: String) {
+    product(id: $id) {
+      variants(first: 250, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          title
+          sku
+          barcode
+          price
+          compareAtPrice
+          inventoryQuantity
+          inventoryItem { unitCost { amount currencyCode } }
+        }
+      }
+    }
+  }
+`;
+
 const PRODUCTS_PAGE = `#graphql
   query AnchorCatalogPage($cursor: String) {
     products(first: 50, after: $cursor) {
@@ -36,6 +67,7 @@ const PRODUCTS_PAGE = `#graphql
         updatedAt
         collections(first: 20) { nodes { id } }
         variants(first: 100) {
+          pageInfo { hasNextPage endCursor }
           nodes {
             id
             title
@@ -61,7 +93,10 @@ interface ProductNode {
   tags?: string[] | null;
   updatedAt?: string | null;
   collections?: { nodes?: Array<{ id: string }> | null } | null;
-  variants?: { nodes?: VariantNode[] | null } | null;
+  variants?: {
+    pageInfo?: { hasNextPage?: boolean; endCursor?: string | null } | null;
+    nodes?: VariantNode[] | null;
+  } | null;
 }
 
 interface VariantNode {
@@ -127,7 +162,27 @@ export async function syncCatalog(
       result.products++;
       const collections = product.collections?.nodes?.map((c) => c.id) ?? [];
 
-      for (const variant of product.variants?.nodes ?? []) {
+      // Everything the page gave us, then everything it did not. A product with more
+      // variants than one page holds is rare and expensive to get wrong: those variants
+      // are not merely missing from a report, they are variants no campaign can price.
+      const variants = [...(product.variants?.nodes ?? [])];
+
+      if (product.variants?.pageInfo?.hasNextPage) {
+        try {
+          variants.push(
+            ...(await remainingVariants(client, product.id, product.variants.pageInfo.endCursor ?? null)),
+          );
+        } catch (error) {
+          // Recorded, never swallowed: a product left partly mirrored is a product whose
+          // campaigns will be partly applied, and the run has to be able to say so.
+          result.errors.push(
+            `${product.id}: could not read past the first page of variants — ` +
+              `${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+
+      for (const variant of variants) {
         try {
           await upsertVariant(shopId, product, variant, collections, shopCurrency);
           result.variants++;
@@ -148,6 +203,53 @@ export async function syncCatalog(
   }
 
   return result;
+}
+
+/**
+ * Pages through a product's variants until they are all read.
+ *
+ * Bounded at forty pages — 10,000 variants, well past Shopify's 2,048 ceiling — so a
+ * malformed cursor cannot spin a background worker forever. Hitting the bound is
+ * reported by the caller rather than passing silently, for the same reason everything
+ * else here is.
+ */
+async function remainingVariants(
+  client: GraphQLRunner,
+  productId: string,
+  after: string | null,
+): Promise<VariantNode[]> {
+  const found: VariantNode[] = [];
+  let cursor = after;
+
+  for (let page = 0; page < 40; page += 1) {
+    const response = await client.graphql(PRODUCT_VARIANTS_PAGE, {
+      variables: { id: productId, cursor },
+    });
+    const body = (await response.json()) as {
+      data?: {
+        product?: {
+          variants?: {
+            pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
+            nodes?: VariantNode[];
+          } | null;
+        } | null;
+      };
+      errors?: Array<{ message: string }>;
+    };
+
+    if (body.errors?.length) {
+      throw new Error(body.errors.map((error) => error.message).join("; "));
+    }
+
+    const connection = body.data?.product?.variants;
+    found.push(...(connection?.nodes ?? []));
+
+    if (!connection?.pageInfo?.hasNextPage) return found;
+    cursor = connection.pageInfo.endCursor ?? null;
+    if (!cursor) return found;
+  }
+
+  throw new Error("stopped after 40 pages of variants");
 }
 
 async function upsertVariant(

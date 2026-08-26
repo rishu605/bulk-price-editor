@@ -1,0 +1,17 @@
+{
+  "label": "e12",
+  "startedAt": "2026-08-26T22:15:05.467Z",
+  "elapsedSeconds": 42,
+  "memory": {
+    "peakRssMb": 94,
+    "samples": 20
+  },
+  "variantsAfter": 100184,
+  "productsAfter": 2001,
+  "variantsAdded": 100,
+  "maxVariantProduct": {
+    "handle": "gid://shopify/Product/9121334591642",
+    "variants": 100
+  },
+  "exitCode": 0
+}
