@@ -182,5 +182,24 @@ export async function auditMirror(
     logger.info("mirror audited", line);
   }
 
+  // Recorded as well as logged, so the rate is queryable rather than greppable. The
+  // runbook tells an operator to compare tonight's rate against last night's, and the
+  // alerting path reads the same row — a number that only exists in a log line cannot be
+  // alerted on and has usually rolled over by the time somebody looks.
+  await prisma.auditLogEntry.create({
+    data: {
+      shopId,
+      action: "mirror.audited",
+      entity: "mirror",
+      after: {
+        checked: verdict.checked,
+        diverged: verdict.diverged,
+        rate: verdict.rate,
+        healed: result.healed,
+        alert: verdict.alert,
+      } as never,
+    },
+  });
+
   return result;
 }
