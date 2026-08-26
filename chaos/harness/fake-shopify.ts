@@ -113,8 +113,14 @@ export class FakeShopify {
    *
    * Takes and returns the decimal string Shopify deals in, so a scenario can model
    * rounding to whole units without this file knowing about currency precision.
+   *
+   * `priceListGid` is null for the base surface, so a scenario can distort one surface
+   * and leave the other alone — a base write that fails aborts the run before it ever
+   * reaches the markets, which would make a market assertion vacuous.
    */
-  distortStoredPrice: ((requested: string, variantGid: string) => string) | null = null;
+  distortStoredPrice:
+    | ((requested: string, variantGid: string, priceListGid: string | null) => string)
+    | null = null;
 
   /**
    * Exchange rates from the shop currency, per market currency.
@@ -344,7 +350,7 @@ export class FakeShopify {
       if (typeof input.price === "string") {
         // What the shop ends up holding, which is not always what was asked for.
         const stored = this.distortStoredPrice
-          ? this.distortStoredPrice(input.price, id)
+          ? this.distortStoredPrice(input.price, id, null)
           : input.price;
         variant.price = stored;
         this.writeLog.push({ variantGid: id, price: stored, priceListGid: null });
@@ -715,13 +721,25 @@ export class FakeShopify {
       };
     }
 
-    const confirmed: Array<{ variant: { id: string } }> = [];
+    // Shopify echoes back what it stored, and `PriceListPrice.price` is non-null in the
+    // schema — so a fake that returned only the variant id was easier to satisfy than the
+    // real API, which is the wrong direction for a fake to be wrong in.
+    const confirmed: Array<{
+      variant: { id: string };
+      price: { amount: string; currencyCode: string };
+      compareAtPrice: { amount: string; currencyCode: string } | null;
+    }> = [];
 
     for (const price of prices) {
       const existing = list.prices.findIndex((entry) => entry.variantGid === price.variantId);
+      // What the list ends up holding, which a distorting shop may change.
+      const stored = this.distortStoredPrice
+        ? this.distortStoredPrice(price.price.amount, price.variantId, list.id)
+        : price.price.amount;
+
       const row = {
         variantGid: price.variantId,
-        amount: price.price.amount,
+        amount: stored,
         compareAt: price.compareAtPrice?.amount ?? null,
         originType: "FIXED" as const,
       };
@@ -731,10 +749,16 @@ export class FakeShopify {
 
       this.writeLog.push({
         variantGid: price.variantId,
-        price: price.price.amount,
+        price: stored,
         priceListGid: list.id,
       });
-      confirmed.push({ variant: { id: price.variantId } });
+      confirmed.push({
+        variant: { id: price.variantId },
+        price: { amount: stored, currencyCode: list.currency },
+        compareAtPrice: row.compareAt
+          ? { amount: row.compareAt, currencyCode: list.currency }
+          : null,
+      });
     }
 
     return {

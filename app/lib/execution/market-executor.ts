@@ -31,6 +31,7 @@
 import { formatMoney, type Money } from "../money/money";
 import { isThrottledError, withRetry } from "../shopify/budget";
 import { classifyFailure } from "./classify";
+import { readBackVerdict } from "./read-back";
 import type { AdminClient } from "./sync-executor";
 
 /** Shopify's cap. Not a tuning knob — the request is rejected above it. */
@@ -165,9 +166,14 @@ export async function writeMarketPrices(
         else errorsByIndex.set(at, text);
       }
 
-      const confirmed = new Set(
-        (payload?.prices ?? []).map((entry) => entry.variant?.id).filter(Boolean) as string[],
-      );
+      // Keep the amount, not just the id. Shopify echoes back what it stored, and
+      // "it mentioned this variant" is a weaker claim than "it stored the price we
+      // asked for" — a price list can reshape a number without raising a userError.
+      const confirmed = new Map<string, string | undefined>();
+      for (const entry of payload?.prices ?? []) {
+        const id = entry.variant?.id;
+        if (id) confirmed.set(id, entry.price?.amount);
+      }
 
       chunk.forEach((row, at) => {
         const reason = errorsByIndex.get(at) ?? chunkWide;
@@ -191,6 +197,22 @@ export async function writeMarketPrices(
               "Shopify accepted the request but did not confirm this variant's market price.",
             guidance:
               "The market price for this variant may not have been set. Resume the campaign to try it again.",
+          });
+          return;
+        }
+
+        // The same comparison the base surface makes, for the same reason: a market
+        // price that Shopify stored differently is a price a shopper pays and nobody
+        // approved. Markets are where that has actually bitten.
+        const verdict = readBackVerdict(row.price, confirmed.get(row.variantGid));
+        if (!verdict.ok) {
+          results.set(row.variantGid, {
+            variantGid: row.variantGid,
+            status: "failed",
+            failureReason: verdict.reason,
+            guidance:
+              "Shopify stored a different price for this market than the campaign asked " +
+              "for. Check the price list for rounding or adjustment rules, then resume.",
           });
           return;
         }
