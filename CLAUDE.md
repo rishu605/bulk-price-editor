@@ -52,5 +52,6 @@ npm run build
 
 ## State
 
-Pre-development: scaffold only. Phase P0 tasks are unstarted. `shopify.app.toml` has no
-`client_id` until someone runs `npm run config:link` against a Partner app.
+Two development stores, documented in [`docs/environments.md`](docs/environments.md):
+`boltify-apps.myshopify.com` for feature work and `anchor-perf.myshopify.com` at 102,132
+variants for scale. The app record is linked and `client_id` is in `shopify.app.toml`.
