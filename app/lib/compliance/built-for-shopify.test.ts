@@ -37,13 +37,23 @@ const components = sourceFiles("app/components", /\.tsx$/);
 /**
  * The embedded admin surface.
  *
- * `_index` is the app's public landing page — it renders outside Shopify's admin, where
- * App Bridge is not loaded and Polaris web components therefore do not exist. The design
- * criteria are about the embedded experience, so holding a plain login page to them would
- * be checking the wrong thing.
+ * Two routes are deliberately outside it, and both render where App Bridge is not loaded
+ * and Polaris web components therefore do not exist:
+ *
+ * - `_index`, the app's public landing page.
+ * - `help.$`, the help centre. A merchant reaches it from an error message, an email, or
+ *   a session that has already expired, so it must render without App Bridge — and its
+ *   search box must be a plain GET form for the same reason. Holding either page to
+ *   criteria about the embedded experience would be checking the wrong thing.
+ *
+ * The exclusion is by exact route rather than a pattern, so a new file cannot quietly opt
+ * itself out of the design criteria by living next door. The first test below makes the
+ * list earn itself.
  */
+const OUTSIDE_THE_ADMIN = ["routes/_index", "routes/help.$"];
+
 const ui = [
-  ...routes.filter((file) => !file.includes("routes/_index")),
+  ...routes.filter((file) => !OUTSIDE_THE_ADMIN.some((route) => file.includes(route))),
   ...components,
 ];
 
@@ -69,6 +79,22 @@ describe("performance — no storefront impact", () => {
 });
 
 describe("design — Polaris and App Bridge", () => {
+  it("only excuses routes that genuinely render outside the admin", () => {
+    // The exclusion list is the one way to escape every criterion below, so it has to
+    // earn itself. A route inside the embedded admin authenticates as an admin and mounts
+    // AppProvider; a route doing either of those has no business on this list.
+    for (const route of OUTSIDE_THE_ADMIN) {
+      const file = routes.find((candidate) => candidate.includes(route));
+      expect(file, `${route} is excluded but does not exist`).toBeDefined();
+
+      const source = readFileSync(file!, "utf8");
+      expect(source, `${route} is excluded but authenticates as embedded admin`).not.toMatch(
+        /authenticate\.admin/,
+      );
+      expect(source, `${route} is excluded but mounts AppProvider`).not.toMatch(/AppProvider/);
+    }
+  });
+
   it("uses no native form outside the App Bridge-safe wrapper", () => {
     // A native form does a full navigation that wipes App Bridge's host, id_token and
     // shop parameters. The server then sees no shop and the merchant gets a blank page —
