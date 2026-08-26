@@ -253,7 +253,7 @@ async function ingest(
  */
 async function writeBatch(shopId: string, currency: string, rows: CatalogRow[]): Promise<void> {
   await prisma.$transaction(
-    rows.map((row) =>
+    rows.flatMap((row) => [
       prisma.variantIndex.upsert({
         where: { shopId_variantGid: { shopId, variantGid: row.variantGid } },
         create: {
@@ -296,7 +296,52 @@ async function writeBatch(shopId: string, currency: string, rows: CatalogRow[]):
           syncedAt: new Date(),
         },
       }),
-    ),
+      // The base-surface row, in the same transaction as the index row.
+      //
+      // This was missing, and the consequence was that the bulk path could not produce a
+      // priceable variant. Baselines are captured from `price_surface_entries`, not from
+      // `variant_index` — so a variant imported here got mirrored, counted, and shown in
+      // the catalogue, and then had no baseline, and a variant with no baseline cannot be
+      // included in a campaign.
+      //
+      // The dashboard's remedy made it worse rather than better: "N variants have no
+      // baseline yet — re-sync to capture them" ran the bulk path again, which again wrote
+      // no surface row. The warning could not be cleared by the only action offered for
+      // clearing it.
+      //
+      // Small stores hid it. The paginated path writes both tables and runs whenever the
+      // bulk path errors or returns nothing, so the failure was invisible until a
+      // catalogue was big enough for the bulk path to succeed — which is to say, the app
+      // was broken specifically on the stores it exists for.
+      //
+      // Same transaction rather than a second pass, because the two tables disagreeing is
+      // the bug itself, and a second pass can fail on its own.
+      prisma.priceSurfaceEntry.upsert({
+        where: {
+          shopId_variantGid_surfaceKind_priceListGid: {
+            shopId,
+            variantGid: row.variantGid,
+            surfaceKind: "BASE",
+            priceListGid: "",
+          },
+        },
+        create: {
+          shopId,
+          variantGid: row.variantGid,
+          surfaceKind: "BASE",
+          priceListGid: "",
+          currency: row.price?.currency ?? currency,
+          livePrice: row.price ? BigInt(row.price.amount) : null,
+          liveCompareAt: row.compareAt ? BigInt(row.compareAt.amount) : null,
+        },
+        update: {
+          currency: row.price?.currency ?? currency,
+          livePrice: row.price ? BigInt(row.price.amount) : null,
+          liveCompareAt: row.compareAt ? BigInt(row.compareAt.amount) : null,
+          syncedAt: new Date(),
+        },
+      }),
+    ]),
   );
 }
 
