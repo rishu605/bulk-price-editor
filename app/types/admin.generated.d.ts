@@ -58,6 +58,17 @@ export type AnchorPriceListDerivedPricesQuery = { priceList?: AdminTypes.Maybe<(
     & { prices: { nodes: Array<{ variant: Pick<AdminTypes.ProductVariant, 'id'>, price: Pick<AdminTypes.MoneyV2, 'amount' | 'currencyCode'> }>, pageInfo: Pick<AdminTypes.PageInfo, 'hasNextPage' | 'endCursor'> } }
   )> };
 
+export type AnchorContextualPricesQueryVariables = AdminTypes.Exact<{
+  ids: Array<AdminTypes.Scalars['ID']['input']> | AdminTypes.Scalars['ID']['input'];
+  context: AdminTypes.ContextualPricingContext;
+}>;
+
+
+export type AnchorContextualPricesQuery = { nodes: Array<AdminTypes.Maybe<(
+    Pick<AdminTypes.ProductVariant, 'id'>
+    & { contextualPricing: { price: Pick<AdminTypes.MoneyV2, 'amount' | 'currencyCode'>, compareAtPrice?: AdminTypes.Maybe<Pick<AdminTypes.MoneyV2, 'amount' | 'currencyCode'>> } }
+  )>> };
+
 export type AnchorPriceListParentQueryVariables = AdminTypes.Exact<{
   id: AdminTypes.Scalars['ID']['input'];
 }>;
@@ -281,6 +292,7 @@ export type AnchorPriceListsQuery = { priceLists: { pageInfo: Pick<AdminTypes.Pa
       ) | (
         { __typename: 'MarketCatalog' }
         & Pick<AdminTypes.MarketCatalog, 'id' | 'title'>
+        & { markets: { nodes: Array<{ conditions?: AdminTypes.Maybe<{ regionsCondition?: AdminTypes.Maybe<{ regions: { nodes: Array<Pick<AdminTypes.MarketRegionCountry, 'code'>> } }> }> }> } }
       )> }
     )> } };
 
@@ -357,6 +369,7 @@ export type SeedBulkStatusQuery = { currentBulkOperation?: AdminTypes.Maybe<Pick
 interface GeneratedQueryTypes {
   "#graphql\n  query AnchorCurrentBulkOperation {\n    currentBulkOperation(type: MUTATION) {\n      id status url partialDataUrl objectCount errorCode\n    }\n  }\n": {return: AnchorCurrentBulkOperationQuery, variables: AnchorCurrentBulkOperationQueryVariables},
   "#graphql\n  query AnchorPriceListDerivedPrices($priceListId: ID!, $query: String!, $first: Int!, $after: String) {\n    priceList(id: $priceListId) {\n      currency\n      prices(originType: RELATIVE, query: $query, first: $first, after: $after) {\n        nodes {\n          variant { id }\n          price { amount currencyCode }\n        }\n        pageInfo { hasNextPage endCursor }\n      }\n    }\n  }\n": {return: AnchorPriceListDerivedPricesQuery, variables: AnchorPriceListDerivedPricesQueryVariables},
+  "#graphql\n  query AnchorContextualPrices($ids: [ID!]!, $context: ContextualPricingContext!) {\n    nodes(ids: $ids) {\n      ... on ProductVariant {\n        id\n        contextualPricing(context: $context) {\n          price { amount currencyCode }\n          compareAtPrice { amount currencyCode }\n        }\n      }\n    }\n  }\n": {return: AnchorContextualPricesQuery, variables: AnchorContextualPricesQueryVariables},
   "#graphql\n  query AnchorPriceListParent($id: ID!) {\n    priceList(id: $id) {\n      id\n      currency\n      parent {\n        adjustment { type value }\n        settings { compareAtMode }\n      }\n      fixed: prices(originType: FIXED, first: 1) {\n        nodes { variant { id } }\n      }\n    }\n  }\n": {return: AnchorPriceListParentQuery, variables: AnchorPriceListParentQueryVariables},
   "#graphql\n  query AnchorVariantPrices($ids: [ID!]!) {\n    nodes(ids: $ids) {\n      ... on ProductVariant { id price compareAtPrice }\n    }\n  }\n": {return: AnchorVariantPricesQuery, variables: AnchorVariantPricesQueryVariables},
   "#graphql\n      query AnchorProbeMarkets {\n        markets(first: 1) { nodes { id } }\n      }\n    ": {return: AnchorProbeMarketsQuery, variables: AnchorProbeMarketsQueryVariables},
@@ -365,7 +378,7 @@ interface GeneratedQueryTypes {
   "#graphql\n  query AnchorCurrentBulkQuery {\n    currentBulkOperation(type: QUERY) {\n      id status url partialDataUrl objectCount errorCode\n    }\n  }\n": {return: AnchorCurrentBulkQueryQuery, variables: AnchorCurrentBulkQueryQueryVariables},
   "#graphql\n  query AnchorCatalogPage($cursor: String) {\n    products(first: 50, after: $cursor) {\n      pageInfo { hasNextPage endCursor }\n      nodes {\n        id\n        title\n        vendor\n        productType\n        status\n        tags\n        updatedAt\n        collections(first: 20) { nodes { id } }\n        variants(first: 100) {\n          nodes {\n            id\n            title\n            sku\n            barcode\n            price\n            compareAtPrice\n            inventoryQuantity\n            inventoryItem { unitCost { amount currencyCode } }\n          }\n        }\n      }\n    }\n  }\n": {return: AnchorCatalogPageQuery, variables: AnchorCatalogPageQueryVariables},
   "#graphql\n  query AnchorShopCurrency {\n    shop { currencyCode ianaTimezone }\n  }\n": {return: AnchorShopCurrencyQuery, variables: AnchorShopCurrencyQueryVariables},
-  "#graphql\n  query AnchorPriceLists($cursor: String) {\n    priceLists(first: 50, after: $cursor) {\n      pageInfo { hasNextPage endCursor }\n      nodes {\n        id\n        name\n        currency\n        parent { adjustment { type value } }\n        catalog { id title __typename }\n      }\n    }\n  }\n": {return: AnchorPriceListsQuery, variables: AnchorPriceListsQueryVariables},
+  "#graphql\n  query AnchorPriceLists($cursor: String) {\n    priceLists(first: 50, after: $cursor) {\n      pageInfo { hasNextPage endCursor }\n      nodes {\n        id\n        name\n        currency\n        parent { adjustment { type value } }\n        catalog {\n          id\n          title\n          __typename\n          ... on MarketCatalog {\n            # One country this catalogue's market serves.\n            #\n            # Prices are asked for by country rather than by price list, so the market\n            # surface needs a country to ask about. Every country in a market sees the\n            # same price, so the first region answers for all of them.\n            markets(first: 1) {\n              nodes {\n                conditions {\n                  regionsCondition {\n                    regions(first: 1) {\n                      nodes { ... on MarketRegionCountry { code } }\n                    }\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n": {return: AnchorPriceListsQuery, variables: AnchorPriceListsQueryVariables},
   "#graphql\n  query AnchorPriceListPrices($id: ID!, $cursor: String) {\n    priceList(id: $id) {\n      id\n      prices(first: 250, after: $cursor) {\n        pageInfo { hasNextPage endCursor }\n        nodes {\n          originType\n          variant { id }\n          price { amount currencyCode }\n          compareAtPrice { amount currencyCode }\n        }\n      }\n    }\n  }\n": {return: AnchorPriceListPricesQuery, variables: AnchorPriceListPricesQueryVariables},
   "#graphql\n  query AnchorAuditVariants($ids: [ID!]!) {\n    nodes(ids: $ids) {\n      ... on ProductVariant { id price compareAtPrice }\n    }\n  }\n": {return: AnchorAuditVariantsQuery, variables: AnchorAuditVariantsQueryVariables},
   "#graphql\n          query SeedExisting($cursor: String) {\n            products(first: 250, after: $cursor, query: \"handle:anchor-perf-*\") {\n              nodes { handle }\n              pageInfo { hasNextPage endCursor }\n            }\n          }\n        ": {return: SeedExistingQuery, variables: SeedExistingQueryVariables},

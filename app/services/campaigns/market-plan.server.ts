@@ -8,7 +8,7 @@
  */
 
 import prisma from "../../db.server";
-import { readDerivedPrices } from "../../lib/execution/market-executor";
+import { readContextualPrices, readDerivedPrices } from "../../lib/execution/market-executor";
 import { unconvertedMessage } from "../../lib/markets/conversion-check";
 import {
   readParentState,
@@ -27,6 +27,14 @@ export interface MarketList {
   name: string;
   currency: string;
   adjustmentBps: number | null;
+  /**
+   * One country this list's market serves, or null when it has no market.
+   *
+   * `contextualPricing` is keyed by country rather than by price list, and every country
+   * in a market sees the same price, so any one region answers for all of them. Null for a
+   * B2B catalogue, which is priced by company location and read from the mirror instead.
+   */
+  contextCountry?: string | null;
 }
 
 export interface MarketPlan {
@@ -226,68 +234,78 @@ async function captureMarketBaselines(
 ): Promise<Map<string, Money>> {
   const found = new Map<string, Money>();
 
-  // Hand-set prices first, whether or not the list also carries a rule.
+  // Ask Shopify what a shopper in this market pays, and take that as the baseline.
   //
-  // This used to be an either/or on `adjustmentBps`, and a list can be both: Shopify lets
-  // a fixed price shadow the parent adjustment for one variant, which is how a merchant
-  // says "10% off Japan, except this one product at ¥1,200". Asking only for derived
-  // prices on such a list gets nothing back for the overridden variants — the query is
-  // `originType: RELATIVE` and their origin is FIXED — so the campaign concluded they were
-  // not priced on that market and left them alone. The merchant's "20% off in Japan" then
-  // skipped exactly the products they had cared enough about to price by hand.
-  const entries = await prisma.priceSurfaceEntry.findMany({
-    where: {
-      shopId,
-      priceListGid: list.priceListGid,
-      variantGid: { in: variantGids },
-      livePrice: { not: null },
-    },
-    select: { variantGid: true, livePrice: true, currency: true },
-  });
+  // One question, one answer, for every kind of list. `contextualPricing` is described in
+  // the schema as "the final price after all adjustments are applied", so it already
+  // accounts for the list's percentage *and* for any price a merchant set by hand — a
+  // variant fixed at ¥1,200 comes back as ¥1,200 with its ¥1,800 strike-through. That
+  // replaces reading the price list's own `prices` connection, which answered relative
+  // prices in the shop's currency and made a JPY baseline 146x too low (#257).
+  //
+  // Authoritative in a way arithmetic cannot be. The tempting alternative — convert, then
+  // apply the list's percentage — produces ¥2,629 for a market where Shopify says ¥2,921,
+  // and would write a price 11% under the real one while looking like it had been read
+  // from the source. Whatever Shopify says a shopper pays is what they pay.
+  if (list.contextCountry) {
+    const contextual = await readContextualPrices(client, variantGids, list.contextCountry);
 
-  for (const entry of entries) {
-    found.set(entry.variantGid, money(Number(entry.livePrice), entry.currency || list.currency));
-  }
+    for (const [variantGid, price] of contextual) {
+      // Still checked, because a price in the wrong currency is the one failure that looks
+      // like an ordinary number. Shopify should never answer a country's context in
+      // anything but that market's currency, and if it does we refuse rather than find out
+      // on a storefront.
+      if (price.currency !== list.currency) {
+        throw new UnconvertedMarketError(
+          list.priceListGid,
+          list.currency,
+          unconvertedMessage(list.name, list.currency, price.currency),
+        );
+      }
 
-  if (list.adjustmentBps !== null) {
-    // Everything the rule still governs.
+      found.set(variantGid, parseMoney(price.amount, list.currency));
+    }
+  } else {
+    // A list with no market behind it — a B2B catalogue, priced by company location rather
+    // than by country, so there is no country context to ask about.
     //
-    // Narrowing to the variants without an override saves round trips and nothing else:
-    // Shopify does not return a relative price for an overridden variant in the first
-    // place — its origin is FIXED — so asking for all of them would produce the same
-    // answers more slowly. Deliberately not relied on for correctness, because a filter
-    // that silently became the only thing preventing an override being overwritten would
-    // be a bad thing to depend on.
-    const remaining = variantGids.filter((gid) => !found.has(gid));
+    // Hand-set prices come from the mirror, and whatever the list's rule still governs
+    // comes from its own `prices` connection. That connection answers in the shop's
+    // currency (#257), which for a wholesale list *is* the list's currency — there is no
+    // conversion in play — so the currency check below passes and the number is right.
+    // The check stays anyway: the day a B2B catalogue is priced in another currency is
+    // the day this would otherwise be wrong by an exchange rate, silently.
+    const entries = await prisma.priceSurfaceEntry.findMany({
+      where: {
+        shopId,
+        priceListGid: list.priceListGid,
+        variantGid: { in: variantGids },
+        livePrice: { not: null },
+      },
+      select: { variantGid: true, livePrice: true, currency: true },
+    });
 
-    if (remaining.length > 0) {
-      const derived = await readDerivedPrices(client, list.priceListGid, remaining);
+    for (const entry of entries) {
+      found.set(entry.variantGid, money(Number(entry.livePrice), entry.currency || list.currency));
+    }
 
-      for (const [variantGid, derivedPrice] of derived) {
-        // Refuse a price Shopify did not state in this market's currency.
-        //
-        // `priceList.prices(originType: RELATIVE)` answers in the *shop's* currency with
-        // the list's adjustment applied — a JPY list at -10% returns
-        // `{"amount":"18.0","currencyCode":"USD"}` for a $20 variant, while a hand-set
-        // override on the same list returns `{"amount":"1200.0","currencyCode":"JPY"}`.
-        // Reading the amount and assuming the list's currency made that ¥18, against a
-        // real market price of ¥2,921. Wrong by the exchange rate, on the surface a
-        // merchant is least able to check, and the same failure P1.2 hit — because the
-        // fix then read the right field and ignored the currency beside it.
-        //
-        // Checked as a fact rather than inferred from the arithmetic. The heuristic this
-        // replaces compared the amount against the base price times the rule and happened
-        // to catch the same case; it was right by accident, and an accident is a poor
-        // thing to leave guarding a live storefront.
-        if (derivedPrice.currency !== list.currency) {
-          throw new UnconvertedMarketError(
-            list.priceListGid,
-            list.currency,
-            unconvertedMessage(list.name, list.currency, derivedPrice.currency),
-          );
+    if (list.adjustmentBps !== null) {
+      const remaining = variantGids.filter((gid) => !found.has(gid));
+
+      if (remaining.length > 0) {
+        const derived = await readDerivedPrices(client, list.priceListGid, remaining);
+
+        for (const [variantGid, price] of derived) {
+          if (price.currency !== list.currency) {
+            throw new UnconvertedMarketError(
+              list.priceListGid,
+              list.currency,
+              unconvertedMessage(list.name, list.currency, price.currency),
+            );
+          }
+
+          found.set(variantGid, parseMoney(price.amount, list.currency));
         }
-
-        found.set(variantGid, parseMoney(derivedPrice.amount, list.currency));
       }
     }
   }

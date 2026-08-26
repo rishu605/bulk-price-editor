@@ -109,6 +109,7 @@ describe("chaos: pricing into a B2B catalogue", () => {
           id: "gid://shopify/PriceList/eu",
           name: "Europe",
           currency: "EUR",
+          country: "DE",
           adjustment: { type: "PERCENTAGE_DECREASE", value: 10 },
           catalog: { id: "gid://shopify/MarketCatalog/eu", title: "EU", __typename: "MarketCatalog" },
           prices: [],

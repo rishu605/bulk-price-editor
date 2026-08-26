@@ -655,6 +655,14 @@ model PriceListRecord {
 
   /// Basis points, so the adjustment never touches a float. A 5% decrease is -500.
   /// Null means the list stores fixed per-variant prices instead.
+  /// One country this price list serves, for asking Shopify what a shopper there pays.
+  ///
+  /// `contextualPricing` is keyed by country, not by price list, and every country in a
+  /// market sees the same price — so any one of its regions answers for all of them. Null
+  /// for a list with no market behind it, such as a B2B catalogue, which is priced by
+  /// company location instead.
+  contextCountry String?
+
   adjustmentBps Int?
 
   syncedAt DateTime @default(now())

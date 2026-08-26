@@ -40,7 +40,29 @@ export const PRICE_LISTS_QUERY = `#graphql
         name
         currency
         parent { adjustment { type value } }
-        catalog { id title __typename }
+        catalog {
+          id
+          title
+          __typename
+          ... on MarketCatalog {
+            # One country this catalogue's market serves.
+            #
+            # Prices are asked for by country rather than by price list, so the market
+            # surface needs a country to ask about. Every country in a market sees the
+            # same price, so the first region answers for all of them.
+            markets(first: 1) {
+              nodes {
+                conditions {
+                  regionsCondition {
+                    regions(first: 1) {
+                      nodes { ... on MarketRegionCountry { code } }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     }
   }
@@ -68,7 +90,18 @@ interface PriceListNode {
   name: string;
   currency: string;
   parent?: { adjustment?: { type: string; value: number } | null } | null;
-  catalog?: { id: string; title: string; __typename?: string } | null;
+  catalog?: {
+    id: string;
+    title: string;
+    __typename?: string;
+    markets?: {
+      nodes?: Array<{
+        conditions?: {
+          regionsCondition?: { regions?: { nodes?: Array<{ code?: string }> } } | null;
+        } | null;
+      }>;
+    };
+  } | null;
 }
 
 /**
@@ -181,6 +214,7 @@ export async function syncMarkets(
         surfaceKind,
         catalogGid: list.catalog?.id ?? null,
         catalogTitle: list.catalog?.title ?? null,
+        contextCountry: contextCountryOf(list),
         adjustmentBps,
       },
       update: {
@@ -189,6 +223,7 @@ export async function syncMarkets(
         surfaceKind,
         catalogGid: list.catalog?.id ?? null,
         catalogTitle: list.catalog?.title ?? null,
+        contextCountry: contextCountryOf(list),
         adjustmentBps,
         syncedAt: new Date(),
       },
@@ -295,6 +330,23 @@ async function readPriceLists(client: AdminClient): Promise<PriceListNode[]> {
   }
 
   return lists;
+}
+
+/**
+ * One country this list's market serves, or null when it has no market.
+ *
+ * The market surface asks Shopify what a shopper pays via
+ * `productVariant.contextualPricing(context: { country })`, which is keyed by country
+ * rather than by price list. Every country in a market sees the same price, so the first
+ * region answers for all of them.
+ *
+ * Null for a B2B catalogue, which is priced by company location and has no region at all —
+ * and null is the right answer rather than a default, because a made-up country would ask
+ * Shopify about a market this list does not serve and get a confidently wrong price back.
+ */
+function contextCountryOf(list: PriceListNode): string | null {
+  const market = list.catalog?.markets?.nodes?.[0];
+  return market?.conditions?.regionsCondition?.regions?.nodes?.[0]?.code ?? null;
 }
 
 /**

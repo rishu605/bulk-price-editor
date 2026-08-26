@@ -95,6 +95,7 @@ describe("chaos: markets changing while campaigns run", () => {
           id: "gid://shopify/PriceList/jp",
           name: "Japan",
           currency: "JPY",
+          country: "JP",
           adjustment: { type: "PERCENTAGE_INCREASE", value: 20 },
           catalog: { id: "gid://shopify/MarketCatalog/jp", title: "JP", __typename: "MarketCatalog" },
           prices: [],
