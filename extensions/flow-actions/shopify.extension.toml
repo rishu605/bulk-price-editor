@@ -1,0 +1,23 @@
+# Flow actions.
+#
+# Each one does exactly what the equivalent button in the app does, including the plan
+# gate and the guardrails. An action that could start a campaign the interface would have
+# refused would be a way round every safety feature in the product, reachable by anybody
+# who can build a Flow.
+api_version = "2025-10"
+
+[[extensions]]
+type = "flow_action"
+name = "Start a price campaign"
+handle = "start-campaign"
+description = "Applies a campaign's prices, exactly as the Apply button does."
+runtime_url = "https://{{app_url}}/flow/actions/start-campaign"
+
+  [settings]
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "campaign_id"
+    name = "Campaign ID"
+    description = "Copy this from the campaign's page in the app."
+    required = true

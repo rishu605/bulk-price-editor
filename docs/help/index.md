@@ -18,6 +18,7 @@ first campaign.
 - [Scheduling a sale](./how-to/schedule-a-sale.md)
 - [Running a sale across several markets](./how-to/multi-market-sale.md)
 - [Importing your own prices](./how-to/import-baselines.md)
+- [Wiring pricing into Shopify Flow](./how-to/shopify-flow.md)
 
 ## When something goes wrong
 
