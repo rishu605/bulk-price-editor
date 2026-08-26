@@ -56,7 +56,13 @@ export const PRICE_LIST_QUANTITY_BREAKS = `#graphql
 
 export interface QuantityRow {
   variantGid: string;
-  /** Ascending by quantity, already guardrail-checked by `resolveBreaks`. */
+  /**
+   * Ascending by quantity, already guardrail-checked by `resolveBreaks`.
+   *
+   * Empty means "this variant should have no ladder" — which is what recomputing without
+   * a campaign yields for a variant that never had one. It is a real instruction rather
+   * than a no-op, because the campaign's ladder is there and has to be taken away.
+   */
   breaks: Array<{ minimumQuantity: number; price: Money }>;
 }
 
@@ -162,6 +168,13 @@ export async function writeQuantityBreaks(
       );
 
       for (const row of chunk) {
+        // A row that clears a ladder adds nothing, so the mutation has no variant to name
+        // for it. Confirmation cannot speak to it either way; the read-back can, and does.
+        if (row.breaks.length === 0) {
+          results.set(row.variantGid, { variantGid: row.variantGid, status: "verified" });
+          continue;
+        }
+
         if (!confirmed.has(row.variantGid)) {
           results.set(row.variantGid, {
             variantGid: row.variantGid,
@@ -262,6 +275,21 @@ async function verifyLadders(
     if (!current || current.status !== "verified") continue;
 
     const actual = seen.get(row.variantGid);
+
+    // Clearing a ladder succeeds by the ladder being gone. `readLadders` omits a variant
+    // with no rungs, so absence is exactly the outcome asked for.
+    if (row.breaks.length === 0) {
+      if (actual && actual.length > 0) {
+        results.set(row.variantGid, {
+          variantGid: row.variantGid,
+          status: "failed",
+          failureReason: `Read-back mismatch: asked for no quantity breaks, the price list still holds ${actual.length}.`,
+          guidance: "The old ladder is still live for this product. Resume the revert to clear it.",
+        });
+      }
+      continue;
+    }
+
     if (!actual) {
       results.set(row.variantGid, {
         variantGid: row.variantGid,
