@@ -17,7 +17,7 @@
 import { ApiVersion } from "@shopify/shopify-app-react-router/server";
 
 /** The pinned version. Changing it means regenerating types and re-reading the diff. */
-export const API_VERSION = ApiVersion.October25;
+export const API_VERSION = ApiVersion.July26;
 
 /** The same value as a plain string, for URL construction and codegen config. */
 export const API_VERSION_STRING: string = API_VERSION;

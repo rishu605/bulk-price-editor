@@ -119,14 +119,19 @@ describe("per-market compare-at, as a schema fact", () => {
   /**
    * The wedge, asserted against the generated schema rather than against a belief.
    *
-   * `priceListFixedPricesByProductUpdate` is the obvious mutation for per-market pricing
-   * and its input has no compare-at field at all — which is almost certainly why the
-   * ecosystem believes Shopify cannot do per-market strike-throughs. The variant-level
-   * mutation has one. That asymmetry is the product's differentiator, and it is exactly
-   * the kind of thing that changes silently in a later API version.
+   * **It closed in 2026-07.** `priceListFixedPricesByProductUpdate` used to have no
+   * compare-at field at all, while the variant-level mutation had one. That asymmetry is
+   * almost certainly why the ecosystem believed Shopify could not do per-market
+   * strike-throughs, and it was the product's differentiator. `PriceListProductPriceInput`
+   * now carries `compareAtPrice`, so the moat is a head start rather than a wall.
    *
-   * If Shopify adds compare-at to the product-level input, this test fails and we find
-   * out by a red build rather than by a competitor shipping it.
+   * This test was written to fail on exactly this change, and it did — on the API version
+   * bump, rather than when a competitor shipped it. Now inverted: it asserts the field is
+   * present, so the *next* silent move here is caught too.
+   *
+   * Nothing in the engine changes. The app writes per-variant because a campaign resolves
+   * per variant, and a product-level mutation cannot express two variants of one product
+   * at different prices. What changed is the commercial claim, not the code.
    */
   const schema = fs.readFileSync(
     path.join(process.cwd(), "app/types/admin.types.d.ts"),
@@ -139,12 +144,25 @@ describe("per-market compare-at, as a schema fact", () => {
     return body![1];
   };
 
-  it("the product-level input still has no compare-at", () => {
-    expect(inputFields("PriceListProductPriceInput")).not.toMatch(/compareAtPrice/);
+  it("the product-level input gained compare-at in 2026-07", () => {
+    // Was `.not.toMatch` until the version bump. Kept as an assertion rather than
+    // deleted: the field appearing and disappearing again is exactly as significant as
+    // it appearing was, and a deleted test notices neither.
+    expect(inputFields("PriceListProductPriceInput")).toMatch(/compareAtPrice/);
   });
 
   it("the variant-level input still has one", () => {
     expect(inputFields("PriceListPriceInput")).toMatch(/compareAtPrice/);
+  });
+
+  it("still cannot express two variants of one product at different prices", () => {
+    // The reason the engine writes per-variant is unchanged by the above: the
+    // product-level input takes one price for the whole product, and a campaign that
+    // resolves per variant cannot be expressed through it.
+    const fields = inputFields("PriceListProductPriceInput");
+
+    expect(fields).toMatch(/productId/);
+    expect(fields).not.toMatch(/variantId/);
   });
 });
 

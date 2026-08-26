@@ -143,15 +143,18 @@ async function ensureCollections(client: AdminClient): Promise<Map<string, strin
         userErrors?: Array<{ message?: string }>;
       };
     }>(
+      // 2026-07 renamed the argument and its input type: `input: CollectionInput`
+      // became `collection: CollectionCreateInput`. Caught by codegen against the new
+      // schema, which is the entire reason the scripts are in its document set.
       `#graphql
-        mutation SeedCollectionCreate($input: CollectionInput!) {
-          collectionCreate(input: $input) {
+        mutation SeedCollectionCreate($collection: CollectionCreateInput!) {
+          collectionCreate(collection: $collection) {
             collection { id }
             userErrors { field message }
           }
         }
       `,
-      { input: { handle, title: handle.replace(/-/g, " ") } },
+      { collection: { handle, title: handle.replace(/-/g, " ") } },
     );
 
     const error = created.data?.collectionCreate?.userErrors?.[0]?.message;
