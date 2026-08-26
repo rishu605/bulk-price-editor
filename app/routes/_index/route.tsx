@@ -27,10 +27,20 @@ export default function App() {
         </p>
         {showForm && (
           <Form className={styles.form} method="post" action="/auth/login">
-            <label className={styles.label}>
+            <label className={styles.label} htmlFor="shop">
               <span>Shop domain</span>
-              <input className={styles.input} type="text" name="shop" />
-              <span>e.g: my-shop-domain.myshopify.com</span>
+              {/* Explicitly associated rather than relying on the wrapping label alone:
+                  some screen readers announce a wrapped input without its hint, and this
+                  page is the first thing a merchant installing the app ever sees. */}
+              <input
+                id="shop"
+                className={styles.input}
+                type="text"
+                name="shop"
+                autoComplete="off"
+                aria-describedby="shop-hint"
+              />
+              <span id="shop-hint">e.g: my-shop-domain.myshopify.com</span>
             </label>
             <button className={styles.button} type="submit">
               Log in
