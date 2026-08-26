@@ -12,6 +12,7 @@
 
 import Redis from "ioredis";
 
+import { initSentry } from "../app/lib/observability/sentry.server";
 import { tick } from "../app/services/scheduler.server";
 import { reportDepths, runtimeFor } from "../app/worker/queue-runtime.server";
 import { handleJob } from "../app/worker/handlers.server";
@@ -31,6 +32,8 @@ for (const key of ["DATABASE_URL"]) {
     process.exit(1);
   }
 }
+
+initSentry({ process: "worker" });
 
 const redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
   maxRetriesPerRequest: 3,
