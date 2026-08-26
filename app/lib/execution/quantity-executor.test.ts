@@ -243,6 +243,71 @@ describe("accepted is not the same as stored", () => {
   });
 });
 
+describe("clearing a ladder", () => {
+  /** A price list that acknowledges the delete and then keeps the ladder anyway. */
+  function ignoresDeletes() {
+    return {
+      async request<T>(query: string) {
+        if (query.includes("quantityPricingByVariantUpdate")) {
+          return {
+            data: {
+              quantityPricingByVariantUpdate: { productVariants: [], userErrors: [] },
+            } as T,
+          };
+        }
+        return {
+          data: {
+            priceList: {
+              prices: {
+                nodes: [
+                  {
+                    variant: { id: row(1).variantGid },
+                    quantityPriceBreaks: {
+                      nodes: [{ minimumQuantity: 12, price: { amount: "36.00" } }],
+                    },
+                  },
+                ],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          } as T,
+        };
+      },
+    };
+  }
+
+  const clearing: QuantityRow = { variantGid: row(1).variantGid, breaks: [] };
+
+  it("succeeds by the ladder being gone", async () => {
+    const result = await writeQuantityBreaks(honestClient(), "gid://PriceList/1", [clearing]);
+
+    expect(result.clean).toBe(true);
+    expect(result.verified).toBe(1);
+  });
+
+  it("is not called done just because the mutation returned no errors", async () => {
+    // A clearing row adds nothing, so the mutation names no variant for it. Confirmation
+    // cannot speak to it either way — only the read-back can, and it has to.
+    const result = await writeQuantityBreaks(ignoresDeletes(), "gid://PriceList/1", [clearing]);
+
+    expect(result.clean).toBe(false);
+    expect(result.rows[0]!.failureReason).toMatch(/asked for no quantity breaks.*still holds 1/);
+    expect(result.rows[0]!.guidance).toMatch(/still live/);
+  });
+
+  it("asks Shopify to delete the variant's breaks", async () => {
+    const client = honestClient();
+    await writeQuantityBreaks(client, "gid://PriceList/1", [clearing]);
+
+    const input = client.sent[0]!.input as {
+      quantityPriceBreaksToDeleteByVariantId: string[];
+      quantityPriceBreaksToAdd: unknown[];
+    };
+    expect(input.quantityPriceBreaksToDeleteByVariantId).toEqual([clearing.variantGid]);
+    expect(input.quantityPriceBreaksToAdd).toEqual([]);
+  });
+});
+
 describe("reading the ladders a catalogue already holds", () => {
   /**
    * The same read serves two purposes: checking what a run just wrote, and capturing what

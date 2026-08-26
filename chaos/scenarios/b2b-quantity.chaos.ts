@@ -172,4 +172,151 @@ describe("chaos: wholesale quantity breaks", () => {
       },
     );
   });
+
+  it("puts back the ladder the catalogue had, and clears one it never had", async () => {
+    await withChaos(
+      "b2b-quantity-revert",
+      { catalog: { products: 2, variantsPerProduct: 1 }, percent: -20 },
+      async (chaos) => {
+        const { shopId, variantGids } = chaos.fixture;
+        const { applyQuantityBreaks, revertQuantityBreaks } = await import(
+          "../../app/services/campaigns/b2b-surfaces.server"
+        );
+
+        chaos.fake.addPriceList({
+          id: LIST.priceListGid,
+          name: LIST.name,
+          currency: LIST.currency,
+          adjustment: null,
+          catalog: {
+            id: "gid://shopify/CompanyLocationCatalog/1",
+            title: "Wholesale",
+            __typename: "CompanyLocationCatalog",
+          },
+          prices: [],
+        });
+
+        // One variant already has the merchant's own ladder; the other has none. Revert
+        // has to reach both end states, and they are different end states.
+        const [withLadder, withoutLadder] = variantGids;
+        chaos.fake.ladders.set(`${LIST.priceListGid}|${withLadder}`, [
+          { minimumQuantity: 1, amount: "50.00" },
+          { minimumQuantity: 24, amount: "45.00" },
+        ]);
+
+        await chaos.apply();
+        const runId = await chaos.latestRunId("APPLY");
+        const client = chaosAdminClient(chaos.server.endpoint());
+
+        // Capture baselines the way a real run does, so the ladder above becomes the
+        // baseline rather than something this test asserts into place.
+        await prisma.baseline.createMany({
+          data: [
+            {
+              shopId,
+              variantGid: withLadder!,
+              surfaceKind: "MARKET" as const,
+              priceListGid: LIST.priceListGid,
+              currency: LIST.currency,
+              basePrice: 5000n,
+              quantityBreaks: [
+                { minimumQuantity: 1, amount: 5000 },
+                { minimumQuantity: 24, amount: 4500 },
+              ],
+              source: "AUTO_ENROLL" as const,
+            },
+            {
+              shopId,
+              variantGid: withoutLadder!,
+              surfaceKind: "MARKET" as const,
+              priceListGid: LIST.priceListGid,
+              currency: LIST.currency,
+              basePrice: 4000n,
+              source: "AUTO_ENROLL" as const,
+            },
+          ],
+          skipDuplicates: true,
+        });
+
+        const applied = await applyQuantityBreaks(
+          shopId,
+          runId,
+          LIST,
+          catalogue(variantGids),
+          TIERS,
+          { minMarginPercent: 20, missingCost: "refuse" },
+          client,
+        );
+        expect(applied!.clean).toBe(true);
+
+        await chaos.revert();
+        const revertRunId = await chaos.latestRunId("REVERT");
+
+        const outcome = await revertQuantityBreaks(shopId, revertRunId, LIST, variantGids, client);
+
+        expect(outcome!.clean).toBe(true);
+        expect(outcome!.messages.join(" ")).toMatch(/had no quantity breaks before/);
+
+        // Recomputed, not restored — but for this variant the two agree, which is the
+        // point: the baseline is the anchor and the anchor is the merchant's own ladder.
+        expect(chaos.fake.ladders.get(`${LIST.priceListGid}|${withLadder}`)).toEqual([
+          { minimumQuantity: 1, amount: "50.00" },
+          { minimumQuantity: 24, amount: "45.00" },
+        ]);
+
+        // And the one that never had a ladder ends with none, rather than keeping the
+        // campaign's — which would leave a buyer quoted a sale price forever.
+        expect(chaos.fake.ladders.get(`${LIST.priceListGid}|${withoutLadder}`) ?? []).toEqual([]);
+      },
+    );
+  });
+
+  it("leaves alone a ladder this campaign never wrote", async () => {
+    // A wholesale catalogue may carry ladders somebody set by hand. Reverting a campaign
+    // takes away the campaign's, and taking away a ladder the merchant set themselves
+    // would be this app deleting a price it never owned.
+    await withChaos(
+      "b2b-quantity-not-ours",
+      { catalog: { products: 2, variantsPerProduct: 1 }, percent: -20 },
+      async (chaos) => {
+        const { shopId, variantGids } = chaos.fixture;
+        const { revertQuantityBreaks } = await import(
+          "../../app/services/campaigns/b2b-surfaces.server"
+        );
+
+        chaos.fake.addPriceList({
+          id: LIST.priceListGid,
+          name: LIST.name,
+          currency: LIST.currency,
+          adjustment: null,
+          catalog: {
+            id: "gid://shopify/CompanyLocationCatalog/1",
+            title: "Wholesale",
+            __typename: "CompanyLocationCatalog",
+          },
+          prices: [],
+        });
+
+        const handSet = [{ minimumQuantity: 6, amount: "38.00" }];
+        chaos.fake.ladders.set(`${LIST.priceListGid}|${variantGids[0]}`, handSet);
+
+        await chaos.apply();
+        await chaos.revert();
+        const revertRunId = await chaos.latestRunId("REVERT");
+
+        // No ledger row says this campaign gave that variant a ladder, so there is
+        // nothing of ours to take back.
+        const outcome = await revertQuantityBreaks(
+          shopId,
+          revertRunId,
+          LIST,
+          variantGids,
+          chaosAdminClient(chaos.server.endpoint()),
+        );
+
+        expect(outcome).toBeNull();
+        expect(chaos.fake.ladders.get(`${LIST.priceListGid}|${variantGids[0]}`)).toEqual(handSet);
+      },
+    );
+  });
 });
