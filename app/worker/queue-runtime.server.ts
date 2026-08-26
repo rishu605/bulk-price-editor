@@ -21,6 +21,7 @@ import { Queue, Worker, type Job } from "bullmq";
 
 import { logger } from "../lib/logging/logger";
 import { metric } from "../lib/telemetry/metrics";
+import { span } from "../lib/observability/otel.server";
 import {
   jobOptionsFor,
   QUEUE_NAMES,
@@ -47,7 +48,7 @@ export type Handler = (name: QueueName, ref: JobRef) => Promise<void>;
 export function inlineRuntime(handler: Handler): QueueRuntime {
   return {
     async enqueue(name, ref) {
-      await handler(name, ref);
+      await traced(name, ref, () => handler(name, ref));
     },
     async depths() {
       return Object.fromEntries(QUEUE_NAMES.map((name) => [name, 0])) as Record<
@@ -82,7 +83,7 @@ export function redisRuntime(handler: Handler, options: RedisRuntimeOptions): Qu
       const worker = new Worker(
         name,
         async (job: Job<JobRef>) => {
-          await handler(name, job.data);
+          await traced(name, job.data, () => handler(name, job.data));
         },
         { connection, concurrency: policy.concurrency },
       );
@@ -170,4 +171,29 @@ export async function reportDepths(runtime: QueueRuntime): Promise<void> {
   for (const [queue, depth] of Object.entries(depths)) {
     metric("queue.depth", depth, { queue });
   }
+}
+
+
+/**
+ * One span per job, whichever runtime ran it.
+ *
+ * Attributes are the queue and the ids, never the payload — a job carries ids by design
+ * and a span that re-expanded them would put back exactly what the job class avoids.
+ *
+ * Wrapped around both runtimes rather than only the Redis one, so a trace from a
+ * deployment running inline looks the same as one from a deployment with a queue. A
+ * degraded mode that is invisible in tracing is a degraded mode nobody notices.
+ */
+async function traced(name: QueueName, ref: JobRef, work: () => Promise<void>): Promise<void> {
+  await span(
+    `job ${name}`,
+    {
+      "queue.name": name,
+      "shop.id": ref.shopId,
+      ...(ref.campaignId ? { "campaign.id": ref.campaignId } : {}),
+      ...(ref.runId ? { "run.id": ref.runId } : {}),
+      ...(ref.revert === undefined ? {} : { "job.revert": ref.revert }),
+    },
+    work,
+  );
 }

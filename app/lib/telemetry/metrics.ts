@@ -17,6 +17,7 @@
  */
 
 import { logger } from "../logging/logger";
+import { record as recordOtel } from "../observability/otel.server";
 
 /** The SLO panels. Stubbed where the feature does not exist yet, named so they can be. */
 export type Metric =
@@ -58,7 +59,11 @@ export interface MetricLabels {
  */
 export function metric(name: Metric, value: number, labels: MetricLabels = {}): void {
   try {
+    // The log line stays, and is not a placeholder for the exporter. It is the sink that
+    // keeps working when the collector is down, which is exactly when somebody is trying
+    // to work out what happened.
     logger.info("metric", { metric: name, value, ...labels });
+    recordOtel(name, value, labels);
   } catch {
     // Deliberately silent. There is nothing useful to do when the thing that reports
     // problems is the problem, and recursing into the logger to say so is worse.

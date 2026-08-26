@@ -10,6 +10,7 @@
 import type { QueryCost } from "../lib/shopify/budget";
 import type { AdminClient } from "../lib/execution/sync-executor";
 import { API_VERSION_STRING } from "../lib/shopify/api-version";
+import { span } from "../lib/observability/otel.server";
 import { decryptToken, isEncrypted } from "../lib/crypto/secrets";
 import { logger } from "../lib/logging/logger";
 
@@ -23,21 +24,50 @@ export interface ShopifyAdminContext {
 export function toAdminClient(admin: ShopifyAdminContext): AdminClient {
   return {
     async request<T>(query: string, variables: Record<string, unknown>) {
-      const response = await admin.graphql(query, { variables });
-      const body = (await response.json()) as {
-        data?: T;
-        extensions?: { cost?: QueryCost };
-        errors?: unknown;
-      };
+      // One span per Admin API call, carrying the cost points and what was left in the
+      // bucket afterwards. That pair is what turns "the run was slow" into "the run was
+      // slow because this shop's budget was exhausted", which is the difference between
+      // a graph and a diagnosis.
+      //
+      // The operation name, never the query body — a mutation's variables carry prices.
+      return span("shopify.graphql", { "graphql.operation": operationName(query) }, async (active) => {
+        const response = await admin.graphql(query, { variables });
+        const body = (await response.json()) as {
+          data?: T;
+          extensions?: { cost?: QueryCost };
+          errors?: unknown;
+        };
 
-      // Top-level GraphQL errors are transport-level failures, distinct from the
-      // per-row `userErrors` the executors map back to individual variants.
-      const message = formatGraphQLErrors(body.errors);
-      if (message) throw new Error(message);
+        const cost = body.extensions?.cost;
+        if (active && cost) {
+          active.setAttribute("shopify.cost.requested", cost.requestedQueryCost ?? 0);
+          active.setAttribute("shopify.cost.actual", cost.actualQueryCost ?? 0);
+          active.setAttribute(
+            "shopify.throttle.available",
+            cost.throttleStatus?.currentlyAvailable ?? -1,
+          );
+        }
 
-      return { data: body.data, extensions: body.extensions };
+        // Top-level GraphQL errors are transport-level failures, distinct from the
+        // per-row `userErrors` the executors map back to individual variants.
+        const message = formatGraphQLErrors(body.errors);
+        if (message) throw new Error(message);
+
+        return { data: body.data, extensions: body.extensions };
+      });
     },
   };
+}
+
+/**
+ * The operation name from a GraphQL document.
+ *
+ * Never the document itself and never the variables: a price mutation's variables are
+ * exactly the thing that must not be exported, and a query body as a span attribute is
+ * both enormous and unhelpful.
+ */
+export function operationName(query: string): string {
+  return /\b(?:query|mutation)\s+(\w+)/.exec(query)?.[1] ?? "anonymous";
 }
 
 
