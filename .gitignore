@@ -36,3 +36,4 @@ chaos/artefacts/
 # `npm run graphql-codegen`; the operation types beside it are committed because they
 # are what typechecking reads.
 app/types/admin-*.schema.json
+perf-baseline-*.json
