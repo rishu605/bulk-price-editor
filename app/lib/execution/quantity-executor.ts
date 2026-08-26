@@ -198,42 +198,62 @@ export async function writeQuantityBreaks(
  * than "it is wrong" and should not be reported as the latter. It is recorded on the row
  * so a run is not silently less verified than it looks.
  */
+/**
+ * The ladders a price list currently holds, for the variants asked about.
+ *
+ * Used twice, for opposite reasons: to verify what a run just wrote, and to capture what
+ * a catalogue had *before* a campaign touched it. Same read, because a ladder observed
+ * after the write and a ladder observed before it are the same kind of fact.
+ */
+export async function readLadders(
+  client: AdminClient,
+  priceListGid: string,
+  variantGids: readonly string[],
+): Promise<Map<string, Array<{ minimumQuantity: number; amount: string }>>> {
+  const wanted = new Set(variantGids);
+  const found = new Map<string, Array<{ minimumQuantity: number; amount: string }>>();
+
+  let after: string | null = null;
+  for (let page = 0; page < 50; page += 1) {
+    const response: { data?: BreaksResponse } = await withRetry(
+      () => client.request<BreaksResponse>(PRICE_LIST_QUANTITY_BREAKS, { priceListId: priceListGid, after }),
+      isThrottledError,
+    );
+
+    const prices = response.data?.priceList?.prices;
+    for (const node of prices?.nodes ?? []) {
+      const id = node?.variant?.id;
+      if (!id || !wanted.has(id)) continue;
+
+      const rungs = (node.quantityPriceBreaks?.nodes ?? [])
+        .filter(Boolean)
+        .map((tier) => ({ minimumQuantity: tier!.minimumQuantity, amount: tier!.price.amount }))
+        .sort((a, b) => a.minimumQuantity - b.minimumQuantity);
+
+      // An empty ladder is left out rather than recorded as an empty one: "no breaks" is
+      // the absence of a row here, and the baseline column says the same with null.
+      if (rungs.length > 0) found.set(id, rungs);
+    }
+
+    if (!prices?.pageInfo?.hasNextPage) break;
+    after = prices.pageInfo.endCursor ?? null;
+  }
+
+  return found;
+}
+
 async function verifyLadders(
   client: AdminClient,
   priceListGid: string,
   rows: readonly QuantityRow[],
   results: Map<string, QuantityRowResult>,
 ): Promise<void> {
-  const expected = new Map(rows.map((row) => [row.variantGid, row]));
-  const seen = new Map<string, Array<{ minimumQuantity: number; amount: string }>>();
-
-  let after: string | null = null;
+  let seen: Map<string, Array<{ minimumQuantity: number; amount: string }>>;
   try {
-    for (let page = 0; page < 50; page += 1) {
-      const response: { data?: BreaksResponse } = await withRetry(
-        () => client.request<BreaksResponse>(PRICE_LIST_QUANTITY_BREAKS, { priceListId: priceListGid, after }),
-        isThrottledError,
-      );
-
-      const prices = response.data?.priceList?.prices;
-      for (const node of prices?.nodes ?? []) {
-        const id = node?.variant?.id;
-        if (!id || !expected.has(id)) continue;
-
-        seen.set(
-          id,
-          (node.quantityPriceBreaks?.nodes ?? [])
-            .filter(Boolean)
-            .map((tier) => ({ minimumQuantity: tier!.minimumQuantity, amount: tier!.price.amount }))
-            .sort((a, b) => a.minimumQuantity - b.minimumQuantity),
-        );
-      }
-
-      if (!prices?.pageInfo?.hasNextPage) break;
-      after = prices.pageInfo.endCursor ?? null;
-    }
+    seen = await readLadders(client, priceListGid, rows.map((row) => row.variantGid));
   } catch {
-    // See the note above: unreadable is not the same as wrong.
+    // Unreadable is not the same as wrong: the mutation is atomic and did report success,
+    // so downgrading these rows would send a merchant hunting a problem that may not exist.
     return;
   }
 

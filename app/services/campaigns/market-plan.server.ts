@@ -7,9 +7,13 @@
  * about a different campaign from the one that happens.
  */
 
+import { Prisma } from "@prisma/client";
+
 import prisma from "../../db.server";
 import { readContextualPrices, readDerivedPrices } from "../../lib/execution/market-executor";
 import { unconvertedMessage } from "../../lib/markets/conversion-check";
+import { readLadders } from "../../lib/execution/quantity-executor";
+import { parseLadder, serialiseLadder, type LadderRung } from "../../lib/pricing/ladder-baseline";
 import {
   readParentState,
   type MarketWritePath,
@@ -219,6 +223,42 @@ export async function marketBaselines(
  * derive it. Either way this runs once per variant per market, before the campaign has
  * changed anything — which is the only moment the untouched price is observable.
  */
+/**
+ * The ladders a catalogue holds right now, as baseline rungs.
+ *
+ * A failed read yields no ladders rather than throwing. The price baseline is the thing
+ * this function exists to record, and losing it because a secondary read timed out would
+ * leave the campaign unable to price the market at all — a much larger failure than a
+ * ladder that has to be captured on the next run.
+ */
+async function captureLadders(
+  client: AdminClient,
+  list: MarketList,
+  variantGids: readonly string[],
+): Promise<Map<string, LadderRung[]>> {
+  if (variantGids.length === 0) return new Map();
+
+  try {
+    const raw = await readLadders(client, list.priceListGid, variantGids);
+    const ladders = new Map<string, LadderRung[]>();
+
+    for (const [variantGid, rungs] of raw) {
+      const parsed = parseLadder(
+        rungs.map((rung) => ({
+          minimumQuantity: rung.minimumQuantity,
+          amount: parseMoney(rung.amount, list.currency).amount,
+        })),
+        list.currency,
+      );
+      if (parsed) ladders.set(variantGid, parsed);
+    }
+
+    return ladders;
+  } catch {
+    return new Map();
+  }
+}
+
 export class UnconvertedMarketError extends Error {
   constructor(readonly priceListGid: string, readonly currency: string, message: string) {
     super(message);
@@ -310,6 +350,17 @@ async function captureMarketBaselines(
     }
   }
 
+  // A wholesale catalogue's variants may also have a quantity ladder, and that ladder is
+  // as much a part of "what this was before the campaign" as the price is. Captured here
+  // because this is the same moment — before anything has been written — and reverting a
+  // tiered campaign recomputes from it rather than restoring it.
+  //
+  // Only for a list with no country context, which is what makes it a B2B catalogue: a
+  // market price list has no concept of ordering twelve.
+  const ladders = list.contextCountry
+    ? new Map<string, LadderRung[]>()
+    : await captureLadders(client, list, [...found.keys()]);
+
   if (found.size > 0) {
     await prisma.baseline.createMany({
       data: [...found].map(([variantGid, price]) => ({
@@ -319,6 +370,12 @@ async function captureMarketBaselines(
         priceListGid: list.priceListGid,
         currency: price.currency,
         basePrice: BigInt(price.amount),
+        // Null for the great majority: most wholesale variants have a single price, and
+        // null says "no ladder" rather than "we did not look".
+        // Cast at the boundary: Prisma's JSON input type is structurally strict and the
+        // shape is already validated by `serialiseLadder`, which is the check that matters.
+        quantityBreaks: (serialiseLadder(ladders.get(variantGid) ?? []) ??
+          undefined) as Prisma.InputJsonValue | undefined,
         source: "AUTO_ENROLL" as const,
       })),
       skipDuplicates: true,
