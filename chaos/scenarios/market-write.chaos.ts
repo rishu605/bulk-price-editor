@@ -197,7 +197,18 @@ describe("chaos: writing campaign prices to markets", () => {
 
         await prisma.campaign.update({
           where: { id: campaignId },
-          data: { surfaces: { base: true, priceLists: ["gid://shopify/PriceList/big"] } as never },
+          data: {
+            surfaces: { base: true, priceLists: ["gid://shopify/PriceList/big"] } as never,
+            // A strike-through, so every one of the 300 rows genuinely needs writing.
+            //
+            // Without it most rows need no write at all: a relative list already follows
+            // the base price this campaign just moved, so they are correct before we
+            // start (#260) and only the ones rounding pushes off by a minor unit are
+            // written — 62 of 300, which never reaches the 250 boundary this scenario
+            // exists to test. A compare-at cannot be expressed by a parent adjustment, so
+            // asking for one puts every row back on the per-variant path.
+            compareAtPolicy: { kind: "set-to-baseline" } as never,
+          },
         });
 
         const applied = await chaos.apply();
@@ -284,9 +295,14 @@ describe("chaos: writing campaign prices to markets", () => {
         expect(jp.has(overridden), "the hand-set variant was skipped").toBe(true);
         expect(jp.get(overridden)!.amount).toBe("960");
 
-        // The variants the rule still governs were priced too, so preferring overrides
-        // did not cost the ordinary path.
-        expect(jp.size).toBe(variantGids.length);
+        // The variants the rule still governs end up right too, so preferring overrides
+        // did not cost the ordinary path. Asserted on the prices rather than on how many
+        // were written, because a variant already showing the correct price is now left
+        // alone rather than written to (#260) — and "we did not need to write it" is a
+        // better outcome than "we wrote it again", not a worse one.
+        for (const gid of variantGids) {
+          expect(chaos.fake.priceOf(gid, "gid://shopify/PriceList/jp")).toBeDefined();
+        }
       },
     );
   });
@@ -339,9 +355,18 @@ describe("chaos: writing campaign prices to markets", () => {
         const applied = await chaos.apply();
         await chaos.expectHonest(applied.runId);
 
-        // Nothing written to the market. A price wrong by an exchange rate is worse than
-        // no price, because the merchant cannot see that it is wrong.
+        // Nothing written to the market, by either route. A price wrong by an exchange
+        // rate is worse than no price, because the merchant cannot see it is wrong.
+        //
+        // Both are asserted because counting only fixed prices is how this passed while
+        // the market was in fact being priced: the market-wide shortcut sets a parent
+        // adjustment and writes no per-variant prices at all, so zero fixed prices looked
+        // like "refused" when it meant "repriced wholesale".
         expect(chaos.fake.fixedPricesOn("gid://shopify/PriceList/eu").size).toBe(0);
+        expect(
+          chaos.fake.parentWrites.filter((w) => w.priceListGid === "gid://shopify/PriceList/eu"),
+          "the market was repriced by a parent adjustment despite being refused",
+        ).toHaveLength(0);
 
         // The base surface still ran. One misconfigured market must not turn a campaign
         // into something that did nothing and explained little.

@@ -298,6 +298,7 @@ export async function runCampaign(
   // on a resume this is the filtered set. Passing the unfiltered plan here would make
   // the resume silently re-send every row it had just decided to leave alone.
   const messagesBeforeExecution: string[] = [];
+  const refusedMarkets: string[] = [];
 
   // Market baselines before any surface is written, never after.
   //
@@ -310,13 +311,15 @@ export async function runCampaign(
   // Nothing is written here; it only records what the markets look like now, which is
   // exactly the moment that is about to stop being observable.
   if (!options.revert && !options.variantGids) {
-    const baselineMessages = await captureMarketBaselinesFirst(
+    const baselines = await captureMarketBaselinesFirst(
       shopId,
       campaignId,
       writable.map((row) => row.ref.variantGid),
       client,
     );
-    messagesBeforeExecution.push(...baselineMessages);
+    messagesBeforeExecution.push(...baselines.messages);
+    // Carried to the market step so a market refused here is not quietly priced there.
+    refusedMarkets.push(...baselines.refused);
   }
 
   const result = await executeRows(writable, {
@@ -355,6 +358,7 @@ export async function runCampaign(
             writable.map((row) => row.ref.variantGid),
             client,
             storeGuardrails,
+            refusedMarkets,
           );
 
     for (const market of markets) {
