@@ -11,7 +11,7 @@ handle = "end-campaign"
 type = "flow_action"
 uid = "2f1ca836-d0ff-d660-ed32-554a5196ff87fdd8fe9a"
 description = "Reverts a campaign's prices. Recomputes each price without it rather than restoring old values."
-runtime_url = "https://increasingly-functioning-funk-firm.trycloudflare.com/flow/actions/end-campaign"
+runtime_url = "https://bulk-price-editor-production-eb91.up.railway.app/flow/actions/end-campaign"
 
 [settings]
 

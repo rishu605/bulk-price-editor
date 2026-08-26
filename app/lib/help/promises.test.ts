@@ -8,15 +8,13 @@
  * search, find nothing, and conclude the app is broken — which is a support ticket and a
  * one-star review, not a missing feature.
  *
- * The notice used to be tied to the extension manifests existing. That was a proxy for
- * "a merchant can use this", and once the manifests were written it became visibly too
- * loose: an extension in the repo is not an extension in a merchant's Flow. The real gate
- * is a release, which a test cannot see.
+ * Flow is released as of app version `bulk-price-editor-8`, so the page describes
+ * something a merchant can actually set up and the "not available yet" notice is gone.
  *
- * So the rule is weaker and honest: while the page says it is unavailable, it must also
- * say what is missing, and it must not describe the integration in the present tense.
- * Removing the notice is a deliberate act somebody performs when Flow actually works,
- * and the manifests' existence no longer forces it.
+ * What remains worth asserting is the pair that made the notice necessary in the first
+ * place: the page describes triggers and actions, and the extensions that declare them to
+ * Shopify exist. Delete the extensions and the page becomes a promise again — which is
+ * the state this test was written to catch.
  */
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -41,31 +39,20 @@ function manifests(): string[] {
 describe("Shopify Flow", () => {
   const doc = readFileSync(join(ROOT, "docs/help/how-to/shopify-flow.md"), "utf8");
   const index = readFileSync(join(ROOT, "docs/help/index.md"), "utf8");
-  it("says plainly that it is not available", () => {
-    // Until somebody removes this deliberately, the page must not read as instructions.
-    expect(doc).toContain(NOTICE);
+  it("has an extension for everything the page describes", () => {
+    // Six: three triggers and three actions. Fewer means the page promises something
+    // Shopify was never told about, which is how it read before the release.
+    expect(manifests().length, "the Flow extension manifests are gone").toBe(6);
   });
 
-  it("names what is actually missing, not just that something is", () => {
-    // "Not available yet" with no reason invites a merchant to go looking for a setting.
-    expect(doc).toMatch(/has not been released|not been released/);
+  it("no longer warns that it is unavailable, because it is not", () => {
+    expect(doc).not.toContain(NOTICE);
   });
 
-  it("has the extensions that a release would publish", () => {
-    // The half that *is* done. If these disappear, the page is describing nothing at all.
-    expect(manifests().length, "the Flow extension manifests are gone").toBeGreaterThan(0);
-  });
-
-  it("does not describe it in the present tense while it is unavailable", () => {
-    // "Anchor adds three triggers" reads as a statement of fact about today.
-    expect(doc).not.toMatch(/^Anchor adds /m);
-  });
-
-  it("warns on the index too, where merchants choose what to read", () => {
+  it("does not warn on the index either", () => {
     const line = index.split("\n").find((row) => row.includes("shopify-flow.md")) ?? "";
 
-    expect(line, "the index links to Flow with no hint that it is unavailable").toMatch(
-      /not available yet/i,
-    );
+    expect(line).not.toMatch(/not available/i);
   });
+
 });
