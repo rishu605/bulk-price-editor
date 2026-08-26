@@ -249,13 +249,28 @@ export function optionsFor(index: number, total: number): Array<{ optionName: st
 
   const colour = COLOURS[index % COLOURS.length];
   const size = SIZES[Math.floor(index / COLOURS.length) % SIZES.length];
-  // A third axis once colour × size runs out, which is what it takes to reach 2,048.
+
+  // The axis count comes from `total`, not from `index`. It used to come from the index —
+  // an "Edition" value appeared only once colour × size ran out at variant 48 — which
+  // meant the product declared three options while its first 48 variants supplied two
+  // values. Shopify requires exactly one value per option and rejected every row.
+  //
+  // Because `productSet` runs inside a bulk operation, all Shopify reported was
+  // `COMPLETED — 1 objects`. Every product over 48 variants failed in total silence, which
+  // is every product in a catalogue seeded at the default fifty.
+  if (total <= COLOURS.length * SIZES.length) {
+    return [
+      { optionName: "Colour", name: colour },
+      { optionName: "Size", name: size },
+    ];
+  }
+
   const edition = Math.floor(index / (COLOURS.length * SIZES.length));
 
   return [
     { optionName: "Colour", name: colour },
     { optionName: "Size", name: size },
-    ...(edition > 0 ? [{ optionName: "Edition", name: `E${edition}` }] : []),
+    { optionName: "Edition", name: `E${edition}` },
   ];
 }
 

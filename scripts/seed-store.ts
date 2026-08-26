@@ -312,11 +312,19 @@ async function poll(client: AdminClient): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 5_000));
 
     const status = await client.request<{
-      currentBulkOperation?: { status: string; objectCount?: string; errorCode?: string | null };
+      currentBulkOperation?: {
+        status: string;
+        objectCount?: string;
+        errorCode?: string | null;
+        url?: string | null;
+        partialDataUrl?: string | null;
+      };
     }>(
       `#graphql
         query SeedBulkStatus {
-          currentBulkOperation(type: MUTATION) { id status objectCount errorCode }
+          currentBulkOperation(type: MUTATION) {
+            id status objectCount errorCode url partialDataUrl
+          }
         }
       `,
       {},
@@ -331,11 +339,68 @@ async function poll(client: AdminClient): Promise<void> {
       console.log(
         `\n  finished: ${operation.status}${operation.errorCode ? ` (${operation.errorCode})` : ""}`,
       );
+      await reportRowErrors(operation.url ?? operation.partialDataUrl ?? null);
       return;
     }
   }
 
   console.log("\n  still running — check the Dev Dashboard");
+}
+
+/**
+ * Reads what the bulk mutation actually did, rather than trusting that it finished.
+ *
+ * `COMPLETED` means Shopify ran every line, not that any of them worked. Each line's
+ * `userErrors` are in the result file and nowhere else — so a seed where every single
+ * product was rejected printed `COMPLETED — 1 objects` and exited zero. It did exactly
+ * that for the 2,048-variant product, and the failure was only visible by fetching this
+ * file by hand afterwards.
+ *
+ * That is the same mistake the app itself is built not to make: a run is clean only when
+ * its rows have been read back. A seeding script gets no exemption — it is the thing
+ * every perf number is measured against.
+ */
+async function reportRowErrors(url: string | null): Promise<void> {
+  if (!url) {
+    console.log("  no result file — cannot confirm any row succeeded");
+    return;
+  }
+
+  const body = await (await fetch(url)).text();
+  const lines = body.split("\n").filter(Boolean);
+
+  let created = 0;
+  const messages = new Map<string, number>();
+
+  for (const line of lines) {
+    const parsed = JSON.parse(line) as {
+      data?: { productSet?: { product?: { id?: string } | null; userErrors?: Array<{ message?: string }> } };
+    };
+    const payload = parsed.data?.productSet;
+
+    if (payload?.product?.id) created++;
+
+    // Counted by message rather than listed. One malformed input produces one error per
+    // variant, so a single bad product yields two thousand identical lines — printing
+    // them all buries the one line that says what to fix.
+    for (const error of payload?.userErrors ?? []) {
+      const message = error.message ?? "unknown";
+      messages.set(message, (messages.get(message) ?? 0) + 1);
+    }
+  }
+
+  console.log(`  created ${created}/${lines.length}`);
+
+  if (messages.size === 0) return;
+
+  console.log("  errors:");
+  for (const [message, count] of [...messages.entries()].sort((a, b) => b[1] - a[1])) {
+    console.log(`    ${count}× ${message}`);
+  }
+
+  // Non-zero exit, because a seed that created nothing must not look like a success to
+  // whatever ran it.
+  if (created === 0) process.exitCode = 1;
 }
 
 async function seedMarkets(): Promise<void> {
