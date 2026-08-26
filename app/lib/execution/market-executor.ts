@@ -321,7 +321,10 @@ interface DerivedPricesResponse {
   priceList?: {
     currency?: string;
     prices?: {
-      nodes?: Array<{ variant?: { id?: string }; price?: { amount?: string } }>;
+      nodes?: Array<{
+        variant?: { id?: string };
+        price?: { amount?: string; currencyCode?: string };
+      }>;
       pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
     };
   } | null;
@@ -336,12 +339,31 @@ interface DerivedPricesResponse {
  */
 export const MAX_VARIANTS_PER_PRICE_QUERY = 50;
 
+/** A price exactly as Shopify stated it, including the currency it is denominated in. */
+export interface DerivedPrice {
+  amount: string;
+  /**
+   * The currency Shopify put on the number — **not** the price list's currency.
+   *
+   * These differ, and the difference is the whole reason this field is carried. A
+   * `RELATIVE` price comes back in the *shop's* currency with the list's adjustment
+   * applied; a `FIXED` price on the same list comes back in the list's own currency. A
+   * JPY list at -10% answers `{"amount":"18.0","currencyCode":"USD"}` for a $20 variant,
+   * while its hand-set override answers `{"amount":"1200.0","currencyCode":"JPY"}`.
+   *
+   * Reading the amount and assuming the list's currency turned $18.00 into ¥18, against a
+   * real market price of ¥2,921 — wrong by the exchange rate, on the surface a merchant
+   * is least able to check.
+   */
+  currency: string;
+}
+
 export async function readDerivedPrices(
   client: AdminClient,
   priceListGid: string,
   variantGids: readonly string[],
-): Promise<Map<string, string>> {
-  const out = new Map<string, string>();
+): Promise<Map<string, DerivedPrice>> {
+  const out = new Map<string, DerivedPrice>();
 
   for (let i = 0; i < variantGids.length; i += MAX_VARIANTS_PER_PRICE_QUERY) {
     const batch = variantGids.slice(i, i + MAX_VARIANTS_PER_PRICE_QUERY);
@@ -361,7 +383,11 @@ export async function readDerivedPrices(
       for (const node of prices?.nodes ?? []) {
         const gid = node.variant?.id;
         const amount = node.price?.amount;
-        if (gid && amount) out.set(gid, amount);
+        const currency = node.price?.currencyCode;
+        // A price with no stated currency is a price we cannot place. Dropping it sends
+        // the row down the ordinary path rather than guessing which currency it is in,
+        // and guessing is the entire bug this field exists to prevent.
+        if (gid && amount && currency) out.set(gid, { amount, currency });
       }
 
       after = prices?.pageInfo?.hasNextPage ? (prices.pageInfo.endCursor ?? null) : null;

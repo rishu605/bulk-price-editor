@@ -9,7 +9,7 @@
 
 import prisma from "../../db.server";
 import { readDerivedPrices } from "../../lib/execution/market-executor";
-import { looksUnconverted, unconvertedMessage } from "../../lib/markets/conversion-check";
+import { unconvertedMessage } from "../../lib/markets/conversion-check";
 import {
   readParentState,
   type MarketWritePath,
@@ -263,49 +263,31 @@ async function captureMarketBaselines(
     if (remaining.length > 0) {
       const derived = await readDerivedPrices(client, list.priceListGid, remaining);
 
-      // What the base surface holds for these variants, so an unconverted answer can be
-      // recognised as one. Read once for the batch rather than per row.
-      const base = new Map(
-        (
-          await prisma.variantIndex.findMany({
-            where: { shopId, variantGid: { in: [...derived.keys()] } },
-            select: { variantGid: true, price: true, currency: true },
-          })
-        ).map((row) => [row.variantGid, row]),
-      );
-
-      for (const [variantGid, amount] of derived) {
-        // Refuse a price Shopify never converted, before parsing it.
+      for (const [variantGid, derivedPrice] of derived) {
+        // Refuse a price Shopify did not state in this market's currency.
         //
-        // A relative list is meant to answer with the base price converted into the
-        // market's currency and then adjusted. When it answers with the base price merely
-        // adjusted, the number is wrong by an exchange rate — and in a two-decimal
-        // currency it is wrong while looking entirely ordinary. €797.36 would sail
-        // through every check below it and land on a live storefront.
+        // `priceList.prices(originType: RELATIVE)` answers in the *shop's* currency with
+        // the list's adjustment applied — a JPY list at -10% returns
+        // `{"amount":"18.0","currencyCode":"USD"}` for a $20 variant, while a hand-set
+        // override on the same list returns `{"amount":"1200.0","currencyCode":"JPY"}`.
+        // Reading the amount and assuming the list's currency made that ¥18, against a
+        // real market price of ¥2,921. Wrong by the exchange rate, on the surface a
+        // merchant is least able to check, and the same failure P1.2 hit — because the
+        // fix then read the right field and ignored the currency beside it.
         //
-        // Checked here rather than after `parseMoney` because parsing is where the yen
-        // case dies, and it dies complaining about decimal places — which sends a
-        // merchant to look at their prices when the problem is their market. Cause still
-        // open in #257; refusing is right regardless of what it turns out to be.
-        const row = base.get(variantGid);
-        if (
-          row?.price != null &&
-          looksUnconverted({
-            listCurrency: list.currency,
-            shopCurrency: row.currency ?? list.currency,
-            baseMinorUnits: Number(row.price),
-            adjustmentBps: list.adjustmentBps,
-            derivedAmount: amount,
-          })
-        ) {
+        // Checked as a fact rather than inferred from the arithmetic. The heuristic this
+        // replaces compared the amount against the base price times the rule and happened
+        // to catch the same case; it was right by accident, and an accident is a poor
+        // thing to leave guarding a live storefront.
+        if (derivedPrice.currency !== list.currency) {
           throw new UnconvertedMarketError(
             list.priceListGid,
             list.currency,
-            unconvertedMessage(list.name, list.currency),
+            unconvertedMessage(list.name, list.currency, derivedPrice.currency),
           );
         }
 
-        found.set(variantGid, parseMoney(amount, list.currency));
+        found.set(variantGid, parseMoney(derivedPrice.amount, list.currency));
       }
     }
   }

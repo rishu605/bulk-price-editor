@@ -42,6 +42,24 @@ export interface FakePriceList {
   /** Percentage adjustment, or null when the list stores fixed per-variant prices. */
   adjustment: { type: string; value: number } | null;
   catalog: { id: string; title: string; __typename: string } | null;
+  /**
+   * The currency this list reports its `RELATIVE` prices in.
+   *
+   * **The real API always answers in the shop's currency here**, whatever the list's own
+   * currency is — a JPY list at -10% returns `{"amount":"18.0","currencyCode":"USD"}` for
+   * a $20 variant, while a `FIXED` price on the same list returns
+   * `{"amount":"1200.0","currencyCode":"JPY"}`. Conversion happens later, at presentment.
+   *
+   * This fake still defaults to the list's own currency, which is wrong, and that is
+   * exactly why the mistake it models went unnoticed: the production code matched the
+   * fake and neither matched Shopify. Flipping the default is the remaining half of #257
+   * — it turns thirteen market scenarios red, because the app cannot currently price a
+   * relative list at all, and repairing them needs the baseline to come from
+   * `presentmentPrices` rather than from here.
+   *
+   * Until then a scenario can opt into the truth by setting this.
+   */
+  relativeCurrency?: string;
   /** Per-variant entries, as Shopify reports them -- fixed and derived alike. */
   prices: Array<{
     variantGid: string;
@@ -508,7 +526,10 @@ export class FakeShopify {
 
         const amount = this.derivedPriceOf(gid, list);
         if (amount) {
-          nodes.push({ variant: { id: gid }, price: { amount, currencyCode: list.currency } });
+          nodes.push({
+            variant: { id: gid },
+            price: { amount, currencyCode: list.relativeCurrency ?? list.currency },
+          });
         }
       }
     }

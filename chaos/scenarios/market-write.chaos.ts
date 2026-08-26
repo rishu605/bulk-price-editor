@@ -328,10 +328,6 @@ describe("chaos: writing campaign prices to markets", () => {
       async (chaos) => {
         const { shopId, campaignId, variantGids } = chaos.fixture;
 
-        // A rate of exactly 1 is what "unconverted" means: the base price with the
-        // list's percentage applied and nothing else. Set rather than deleted, because
-        // deleting only falls back to 1 if nothing else supplies a rate, and saying it
-        // outright is both clearer and immune to the fixture changing its mind.
         chaos.fake.rates.set("EUR", 1);
 
         chaos.fake.addPriceList({
@@ -340,6 +336,12 @@ describe("chaos: writing campaign prices to markets", () => {
           currency: "EUR",
           adjustment: { type: "PERCENTAGE_DECREASE", value: 10 },
           catalog: { id: "gid://shopify/MarketCatalog/eu", title: "EU", __typename: "MarketCatalog" },
+          // What the real API does: a relative price comes back in the *shop's* currency,
+          // whatever the list's own currency is (#257). Opted into here because the fake
+          // still defaults to the list's currency everywhere else — the mistake this
+          // scenario guards against is precisely that the fake and the code agreed with
+          // each other and neither agreed with Shopify.
+          relativeCurrency: "USD",
           prices: [],
         });
 
@@ -380,7 +382,11 @@ describe("chaos: writing campaign prices to markets", () => {
         // reports rather than silently pricing three of four surfaces.
         const said = applied.messages.join(" ");
         expect(said).toContain("Europe");
-        expect(said).toMatch(/not been converted/);
+        expect(said).toMatch(/not in EUR/);
+        // Names the currency Shopify actually answered in, because "wrong currency" and
+        // "wrong by an exchange rate" are the same sentence to a merchant only once you
+        // say which currency arrived.
+        expect(said).toMatch(/answered in USD/);
         expect(said).toMatch(/Settings → Markets/);
       },
     );

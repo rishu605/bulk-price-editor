@@ -131,8 +131,16 @@ export async function applyMarketWide(
     const intended = row.intendedPrice;
     if (!intended) continue;
 
+    // Verified only against a price Shopify stated in this market's currency. A
+    // `RELATIVE` price arrives in the *shop's* currency (#257), and a read-back that
+    // compared it as though it were the market's would mark a row verified against a
+    // number denominated in something else entirely.
     const live = derived.get(row.ref.variantGid);
-    if (live !== undefined && parseMoney(live, list.currency).amount === intended.amount) {
+    if (
+      live !== undefined &&
+      live.currency === list.currency &&
+      parseMoney(live.amount, live.currency).amount === intended.amount
+    ) {
       verified.push(row.ref.variantGid);
     } else {
       drifted.push({ variantGid: row.ref.variantGid, price: intended, compareAt: null });

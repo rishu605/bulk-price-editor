@@ -74,10 +74,15 @@ export function looksUnconverted(check: ConversionCheck): boolean {
  * the cause, because we do not know it yet, and a confident wrong diagnosis wastes more
  * of somebody's afternoon than an honest description does.
  */
-export function unconvertedMessage(marketName: string, listCurrency: string): string {
+export function unconvertedMessage(
+  marketName: string,
+  listCurrency: string,
+  statedCurrency?: string,
+): string {
+  const inWhat = statedCurrency ? ` — it answered in ${statedCurrency}` : "";
   return (
-    `${marketName} returned prices that have not been converted into ${listCurrency}, ` +
-    `so they are wrong by an exchange rate and this campaign will not price that market. ` +
+    `${marketName} returned prices that are not in ${listCurrency}${inWhat}, so they are ` +
+    `wrong by an exchange rate and this campaign will not price that market. ` +
     `Check the market's currency settings in Shopify under Settings → Markets → ` +
     `${marketName}, then run this again. Every other surface has been priced.`
   );
