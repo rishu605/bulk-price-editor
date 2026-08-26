@@ -75,7 +75,7 @@ describe("chaos: downgrading while a campaign is live", () => {
       "downgrade-markets-revert",
       { catalog: { products: 5, variantsPerProduct: 1 }, percent: -30 },
       async (chaos) => {
-        const { shopId, campaignId, variantGids } = chaos.fixture;
+        const { shopId, campaignId } = chaos.fixture;
 
         chaos.fake.addPriceList({
           id: "gid://shopify/PriceList/eu",
@@ -98,9 +98,22 @@ describe("chaos: downgrading while a campaign is live", () => {
 
         const applied = await chaos.apply();
         await chaos.expectHonest(applied.runId);
-        expect(chaos.fake.fixedPricesOn("gid://shopify/PriceList/eu").size).toBe(
-          variantGids.length,
-        );
+
+        // Priced by whichever path the planner chose, not by the one this test expected.
+        //
+        // It used to assert five fixed prices, which quietly encoded a bug: the campaign
+        // covers every product on the market at one percentage, so it is exactly the case
+        // the market-wide path exists for, and the only reason five fixed prices appeared
+        // is that eligibility was failing to recognise it. Pinning the count here made the
+        // broken behaviour a requirement.
+        //
+        // What this scenario is actually about is the downgrade, so it asks the
+        // path-agnostic question: is the market carrying our prices now, and is it clean
+        // afterwards.
+        const priced =
+          chaos.fake.fixedPricesOn("gid://shopify/PriceList/eu").size > 0 ||
+          chaos.fake.parentWrites.some((w) => w.priceListGid === "gid://shopify/PriceList/eu");
+        expect(priced, "the campaign did not reach the market at all").toBe(true);
 
         // Down to a plan with no markets at all. The market prices we wrote are still
         // ours to undo — refusing here would strand a whole market on sale prices, which
@@ -111,6 +124,13 @@ describe("chaos: downgrading while a campaign is live", () => {
         await chaos.expectHonest(reverted.runId);
 
         expect(chaos.fake.fixedPricesOn("gid://shopify/PriceList/eu").size).toBe(0);
+
+        // And the list is back on the merchant's own percentage, not left on the
+        // campaign's. A revert that cleared the fixed prices but left a -37% parent
+        // adjustment behind would pass the line above and strand the whole market —
+        // which is the exact failure this scenario was written to catch.
+        const list = chaos.fake.priceLists.find((l) => l.id === "gid://shopify/PriceList/eu");
+        expect(list?.adjustment).toEqual({ type: "PERCENTAGE_DECREASE", value: 10 });
       },
     );
   });
