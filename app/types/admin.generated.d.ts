@@ -90,6 +90,25 @@ export type AnchorPriceListUpdateMutation = { priceListUpdate?: AdminTypes.Maybe
       & { parent?: AdminTypes.Maybe<{ adjustment: Pick<AdminTypes.PriceListAdjustment, 'type' | 'value'> }> }
     )>, userErrors: Array<Pick<AdminTypes.PriceListUserError, 'field' | 'message' | 'code'>> }> };
 
+export type AnchorQuantityPricingUpdateMutationVariables = AdminTypes.Exact<{
+  priceListId: AdminTypes.Scalars['ID']['input'];
+  input: AdminTypes.QuantityPricingByVariantUpdateInput;
+}>;
+
+
+export type AnchorQuantityPricingUpdateMutation = { quantityPricingByVariantUpdate?: AdminTypes.Maybe<{ productVariants?: AdminTypes.Maybe<Array<Pick<AdminTypes.ProductVariant, 'id'>>>, userErrors: Array<Pick<AdminTypes.QuantityPricingByVariantUserError, 'field' | 'message' | 'code'>> }> };
+
+export type AnchorPriceListQuantityBreaksQueryVariables = AdminTypes.Exact<{
+  priceListId: AdminTypes.Scalars['ID']['input'];
+  after?: AdminTypes.InputMaybe<AdminTypes.Scalars['String']['input']>;
+}>;
+
+
+export type AnchorPriceListQuantityBreaksQuery = { priceList?: AdminTypes.Maybe<{ prices: { nodes: Array<{ variant: Pick<AdminTypes.ProductVariant, 'id'>, quantityPriceBreaks: { nodes: Array<(
+            Pick<AdminTypes.QuantityPriceBreak, 'minimumQuantity'>
+            & { price: Pick<AdminTypes.MoneyV2, 'amount' | 'currencyCode'> }
+          )> } }>, pageInfo: Pick<AdminTypes.PageInfo, 'hasNextPage' | 'endCursor'> } }> };
+
 export type AnchorProductVariantsBulkUpdateMutationVariables = AdminTypes.Exact<{
   productId: AdminTypes.Scalars['ID']['input'];
   variants: Array<AdminTypes.ProductVariantsBulkInput> | AdminTypes.ProductVariantsBulkInput;
@@ -371,6 +390,7 @@ interface GeneratedQueryTypes {
   "#graphql\n  query AnchorPriceListDerivedPrices($priceListId: ID!, $query: String!, $first: Int!, $after: String) {\n    priceList(id: $priceListId) {\n      currency\n      prices(originType: RELATIVE, query: $query, first: $first, after: $after) {\n        nodes {\n          variant { id }\n          price { amount currencyCode }\n        }\n        pageInfo { hasNextPage endCursor }\n      }\n    }\n  }\n": {return: AnchorPriceListDerivedPricesQuery, variables: AnchorPriceListDerivedPricesQueryVariables},
   "#graphql\n  query AnchorContextualPrices($ids: [ID!]!, $context: ContextualPricingContext!) {\n    nodes(ids: $ids) {\n      ... on ProductVariant {\n        id\n        contextualPricing(context: $context) {\n          price { amount currencyCode }\n          compareAtPrice { amount currencyCode }\n        }\n      }\n    }\n  }\n": {return: AnchorContextualPricesQuery, variables: AnchorContextualPricesQueryVariables},
   "#graphql\n  query AnchorPriceListParent($id: ID!) {\n    priceList(id: $id) {\n      id\n      currency\n      parent {\n        adjustment { type value }\n        settings { compareAtMode }\n      }\n      fixed: prices(originType: FIXED, first: 1) {\n        nodes { variant { id } }\n      }\n    }\n  }\n": {return: AnchorPriceListParentQuery, variables: AnchorPriceListParentQueryVariables},
+  "#graphql\n  query AnchorPriceListQuantityBreaks($priceListId: ID!, $after: String) {\n    priceList(id: $priceListId) {\n      prices(first: 100, after: $after) {\n        nodes {\n          variant { id }\n          quantityPriceBreaks(first: 20) {\n            nodes { minimumQuantity price { amount currencyCode } }\n          }\n        }\n        pageInfo { hasNextPage endCursor }\n      }\n    }\n  }\n": {return: AnchorPriceListQuantityBreaksQuery, variables: AnchorPriceListQuantityBreaksQueryVariables},
   "#graphql\n  query AnchorVariantPrices($ids: [ID!]!) {\n    nodes(ids: $ids) {\n      ... on ProductVariant { id price compareAtPrice }\n    }\n  }\n": {return: AnchorVariantPricesQuery, variables: AnchorVariantPricesQueryVariables},
   "#graphql\n      query AnchorProbeMarkets {\n        markets(first: 1) { nodes { id } }\n      }\n    ": {return: AnchorProbeMarketsQuery, variables: AnchorProbeMarketsQueryVariables},
   "#graphql\n      query AnchorProbeCompanies {\n        companies(first: 1) { nodes { id } }\n      }\n    ": {return: AnchorProbeCompaniesQuery, variables: AnchorProbeCompaniesQueryVariables},
@@ -392,6 +412,7 @@ interface GeneratedMutationTypes {
   "#graphql\n  mutation AnchorPriceListFixedPricesAdd($priceListId: ID!, $prices: [PriceListPriceInput!]!) {\n    priceListFixedPricesAdd(priceListId: $priceListId, prices: $prices) {\n      prices { variant { id } price { amount currencyCode } compareAtPrice { amount currencyCode } }\n      userErrors { field message code }\n    }\n  }\n": {return: AnchorPriceListFixedPricesAddMutation, variables: AnchorPriceListFixedPricesAddMutationVariables},
   "#graphql\n  mutation AnchorPriceListFixedPricesDelete($priceListId: ID!, $variantIds: [ID!]!) {\n    priceListFixedPricesDelete(priceListId: $priceListId, variantIds: $variantIds) {\n      deletedFixedPriceVariantIds\n      userErrors { field message code }\n    }\n  }\n": {return: AnchorPriceListFixedPricesDeleteMutation, variables: AnchorPriceListFixedPricesDeleteMutationVariables},
   "#graphql\n  mutation AnchorPriceListUpdate($id: ID!, $input: PriceListUpdateInput!) {\n    priceListUpdate(id: $id, input: $input) {\n      priceList {\n        id\n        parent { adjustment { type value } }\n      }\n      userErrors { field message code }\n    }\n  }\n": {return: AnchorPriceListUpdateMutation, variables: AnchorPriceListUpdateMutationVariables},
+  "#graphql\n  mutation AnchorQuantityPricingUpdate($priceListId: ID!, $input: QuantityPricingByVariantUpdateInput!) {\n    quantityPricingByVariantUpdate(priceListId: $priceListId, input: $input) {\n      productVariants { id }\n      userErrors { field message code }\n    }\n  }\n": {return: AnchorQuantityPricingUpdateMutation, variables: AnchorQuantityPricingUpdateMutationVariables},
   "#graphql\n  mutation AnchorProductVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {\n    productVariantsBulkUpdate(productId: $productId, variants: $variants) {\n      productVariants { id price compareAtPrice }\n      userErrors { field message code }\n    }\n  }\n": {return: AnchorProductVariantsBulkUpdateMutation, variables: AnchorProductVariantsBulkUpdateMutationVariables},
   "#graphql\n      mutation AnchorProbeVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {\n        productVariantsBulkUpdate(productId: $productId, variants: $variants) {\n          userErrors { field message }\n        }\n      }\n    ": {return: AnchorProbeVariantsBulkUpdateMutation, variables: AnchorProbeVariantsBulkUpdateMutationVariables},
   "#graphql\n      mutation AnchorProbeBulkQuery($query: String!) {\n        bulkOperationRunQuery(query: $query) {\n          userErrors { field message }\n        }\n      }\n    ": {return: AnchorProbeBulkQueryMutation, variables: AnchorProbeBulkQueryMutationVariables},
