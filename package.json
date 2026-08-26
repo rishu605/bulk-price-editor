@@ -24,7 +24,8 @@
     "feedback": "tsx scripts/feedback-review.ts",
     "alerts": "tsx scripts/test-alert-routing.ts",
     "seed:store": "tsx scripts/seed-store.ts",
-    "test:chaos": "vitest run --config vitest.chaos.config.ts"
+    "test:chaos": "vitest run --config vitest.chaos.config.ts",
+    "scope:probe": "tsx scripts/scope-probe.ts"
   },
   "type": "module",
   "engines": {

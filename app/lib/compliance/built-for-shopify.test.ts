@@ -178,13 +178,19 @@ describe("integration — API, auth and webhooks", () => {
 
   it("keeps requested scopes to the ones the app demonstrably uses", () => {
     // Every extra scope is a reason a merchant declines the install, and a question at
-    // review. These three were each established empirically in P0.2.
+    // review. Both were established empirically by `npm run scope:probe` — all thirteen
+    // mutations in RFC §6 pass under `write_products` alone, and markets needs its own.
+    //
+    // `read_markets` was dropped: Shopify implies it from `write_markets` and had already
+    // collapsed the pair in its record of what the shop granted, so declaring it was a
+    // checkbox that bought nothing. See D4 in docs/decisions.md, which also records the
+    // one narrowing still open — nothing in the app writes a market.
     const toml = readFileSync(join(ROOT, "shopify.app.toml"), "utf8");
     const match = /scopes\s*=\s*"([^"]*)"/.exec(toml);
 
     expect(match).not.toBeNull();
     const scopes = (match?.[1] ?? "").split(",").map((scope) => scope.trim()).filter(Boolean);
 
-    expect(scopes.sort()).toEqual(["read_markets", "write_markets", "write_products"]);
+    expect(scopes.sort()).toEqual(["write_markets", "write_products"]);
   });
 });
