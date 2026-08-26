@@ -112,3 +112,26 @@ describe("nothing formats against the ambient environment", () => {
     }
   });
 });
+
+describe("counts a merchant reads are grouped, wherever they appear", () => {
+  /**
+   * The inconsistency this pins: the plan page rendered "3,670" while the dashboard and
+   * reconciliation rendered "3670" for the same catalogue. Below a thousand nobody
+   * notices; on a 120,000-variant store the two pages disagree about the same number and
+   * one of them looks broken.
+   */
+  const merchantFacing = [
+    "app/components/CountsRow.tsx",
+    "app/routes/app._index.tsx",
+    "app/routes/app.reconciliation.tsx",
+    "app/routes/app.activity.tsx",
+    "app/routes/app.plan.tsx",
+    "app/components/RunResultSection.tsx",
+  ];
+
+  it.each(merchantFacing)("%s formats its counts", (file) => {
+    const source = readFileSync(join(process.cwd(), file), "utf8");
+
+    expect(source, `${file} shows counts without grouping them`).toContain("formatCount");
+  });
+});

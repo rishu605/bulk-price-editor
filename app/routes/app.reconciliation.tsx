@@ -1,3 +1,4 @@
+import { formatCount } from "../lib/format/display";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -82,7 +83,7 @@ export default function Reconciliation() {
         <s-paragraph>
           <s-text>
             Every price on every surface, next to the baseline it was computed from and
-            the campaign that put it there. {total} rows.
+            the campaign that put it there. {formatCount(total)} rows.
           </s-text>
         </s-paragraph>
 
