@@ -38,6 +38,14 @@ export interface StoreSettings {
    * any one sale. Campaigns inherit it and may override it.
    */
   rounding: StoredRoundingPolicy;
+  /**
+   * Campaigns changing more than this many variants need a second person's approval.
+   *
+   * Null, and off by default. Most stores are one person, and making them approve their
+   * own work is a ritual that teaches people to click through warnings — which is worse
+   * than no rule, because the same reflex is what makes real warnings ineffective.
+   */
+  approvalThreshold: number | null;
 }
 
 export const DEFAULT_SETTINGS: StoreSettings = {
@@ -52,6 +60,7 @@ export const DEFAULT_SETTINGS: StoreSettings = {
   // No rounding until a merchant asks for it. A store that has never opened the
   // setting should get exactly the prices the campaign calculated.
   rounding: { default: "none", byCurrency: {} },
+  approvalThreshold: null,
 };
 
 /** Reads settings, filling anything absent or malformed with a default. */
@@ -77,6 +86,7 @@ export function parseSettings(raw: unknown): StoreSettings {
         : "clamp",
     missingCostPolicy: value.missingCostPolicy === "error" ? "error" : "skip",
     rounding: parseRoundingPolicy(value.rounding),
+    approvalThreshold: finiteOrNull(value.approvalThreshold, 1, Number.MAX_SAFE_INTEGER),
   };
 }
 
