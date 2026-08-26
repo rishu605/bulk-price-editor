@@ -34,6 +34,14 @@ export interface PlanCandidate {
   liveCompareAt?: Money;
   /** Segments this variant belongs to, for matching campaign rule rows. */
   segmentIds?: string[];
+  /**
+   * This variant's price in each import that names it, keyed by import id.
+   *
+   * Loaded by the caller, because the planner and resolver do no I/O — the same reason
+   * baselines and live prices are passed in. A `from-import` rule with nothing here
+   * prices nothing, which is correct for a variant the file did not mention.
+   */
+  importedPrices?: Record<string, Money>;
 }
 
 export type PlannedRowStatus = "pending" | "skipped" | "clamped";

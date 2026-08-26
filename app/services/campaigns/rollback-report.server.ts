@@ -23,7 +23,7 @@ import { format } from "../../lib/money/format";
 import { money } from "../../lib/money/money";
 import { planRun } from "../../lib/planning/plan";
 import { loadCandidates, titleMapFor } from "./candidates.server";
-import { loadCampaignContext } from "./model.server";
+import { loadCampaignContext, importIdsOf} from "./model.server";
 import { guardrailsFor } from "../settings.server";
 import {
   classifyRollbackRow,
@@ -47,7 +47,7 @@ export async function rollbackReport(
   const { campaign, resolvable, ast } = await loadCampaignContext(shopId, campaignId);
 
   const [candidates, storeGuardrails, applied] = await Promise.all([
-    loadCandidates(shopId, ast),
+    loadCandidates(shopId, ast, undefined, importIdsOf(resolvable)),
     guardrailsFor(shopId),
     appliedValues(campaignId),
   ]);

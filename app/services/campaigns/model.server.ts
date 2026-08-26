@@ -187,3 +187,23 @@ export async function loadCampaignContext(shopId: string, campaignId: string) {
     ast: await scopeOf(shopId, campaign),
   };
 }
+
+
+/**
+ * Import ids any of these campaigns price from.
+ *
+ * Collected from the rules rather than stored separately, so a campaign whose rule
+ * changes cannot end up loading prices for an import it no longer uses — or, worse,
+ * failing to load the one it now does.
+ */
+export function importIdsOf(campaigns: readonly ResolvableCampaign[]): string[] {
+  const ids = new Set<string>();
+
+  for (const campaign of campaigns) {
+    for (const row of campaign.ruleRows) {
+      if (row.rule.kind === "from-import") ids.add(row.rule.importId);
+    }
+  }
+
+  return [...ids];
+}

@@ -16,7 +16,7 @@ import type { PlannedRow } from "../../lib/planning/types";
 import { planRun } from "../../lib/planning/plan";
 import { recordWriteIntents } from "../drift.server";
 import { loadCandidates, productMapFor } from "./candidates.server";
-import { isPractice, loadCampaignContext, scopeOf } from "./model.server";
+import { isPractice, loadCampaignContext, scopeOf, importIdsOf} from "./model.server";
 import { astToWhere } from "../segments.server";
 import { AppError } from "../../lib/errors/app-error";
 import { guardrailsFor } from "../settings.server";
@@ -152,7 +152,7 @@ export async function runCampaign(
   const { campaign: campaignRecord, resolvable, ast } = await loadCampaignContext(shopId, campaignId);
   const campaignName = campaignRecord.name;
   const [candidates, storeGuardrails] = await Promise.all([
-    loadCandidates(shopId, ast, options.variantGids),
+    loadCandidates(shopId, ast, options.variantGids, importIdsOf(resolvable)),
     guardrailsFor(shopId),
   ]);
 
@@ -433,9 +433,47 @@ export async function runCampaign(
               ".",
           ]
         : []),
+      // Rows the plan decided not to write, grouped by why. Previously only *resume*
+      // skips were reported, so a campaign that skipped four hundred products for a
+      // nameable reason — no cost, below a floor, not in the imported file — handed the
+      // merchant a smaller number than they expected and no explanation for it. The
+      // count was in the database; it was just never said out loud.
+      ...describeSkips(outcome.rows),
       ...messages.slice(0, 5),
     ],
   };
+}
+
+/** Why the plan left rows alone, in the merchant's terms. */
+const SKIP_REASONS: Record<string, string> = {
+  "missing-cost": "have no cost recorded, and a cost-based guardrail applies",
+  "missing-import": "were not in the imported file",
+  "below-floor": "would have priced below a guardrail floor",
+  "invalid-margin": "have a margin target that cannot be satisfied",
+  "invalid-compare-at": "would have had a compare-at price below their price",
+  "non-positive-price": "would have priced at or below zero",
+};
+
+function describeSkips(rows: readonly PlannedRow[]): string[] {
+  const byReason = new Map<string, number>();
+
+  for (const row of rows) {
+    if (row.status !== "skipped") continue;
+    const reason = row.reason ?? "unknown";
+    byReason.set(reason, (byReason.get(reason) ?? 0) + 1);
+  }
+
+  // Largest group first: a merchant reading one line wants the one that explains most of
+  // the difference between what they expected and what happened.
+  return [...byReason]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([reason, count]) => {
+      const what = SKIP_REASONS[reason];
+      return what
+        ? `${count} ${count === 1 ? "product was" : "products were"} skipped: they ${what}.`
+        : `${count} ${count === 1 ? "product was" : "products were"} skipped (${reason}).`;
+    });
 }
 
 /**

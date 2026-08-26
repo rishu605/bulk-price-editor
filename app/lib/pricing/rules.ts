@@ -14,9 +14,19 @@ import {
 } from "../money/money";
 import type { AdjustmentRule, Baseline, RuleRow } from "./types";
 
+/** Per-variant inputs a rule may need that the baseline does not carry. */
+export interface RuleContext {
+  importedPrices?: Record<string, Money>;
+}
+
 export class RuleNotApplicableError extends Error {
   constructor(
-    readonly reason: "missing-cost" | "missing-compare-at" | "invalid-margin",
+    readonly reason:
+      | "missing-cost"
+      | "missing-compare-at"
+      | "invalid-margin"
+      /** The imported file did not name this variant. */
+      | "missing-import",
     message: string,
   ) {
     super(message);
@@ -54,7 +64,12 @@ export function selectRule(
  * on a variant with no cost must never silently treat cost as zero — that would
  * price the item at nothing and report success.
  */
-export function applyRule(rule: AdjustmentRule, baseline: Baseline): Money {
+export function applyRule(
+  rule: AdjustmentRule,
+  baseline: Baseline,
+  /** Per-variant inputs a rule may need that the baseline does not carry. */
+  context: RuleContext = {},
+): Money {
   switch (rule.kind) {
     case "percent-change":
       return applyPercentChange(baseline.price, rule.percent);
@@ -64,6 +79,14 @@ export function applyRule(rule: AdjustmentRule, baseline: Baseline): Money {
 
     case "set-exact":
       return rule.amount;
+
+    case "from-import": {
+      const price = context.importedPrices?.[rule.importId];
+      // A variant the file did not mention. Not an error and not zero: this campaign
+      // simply does not price it, and reporting that is what the skipped count is for.
+      if (!price) throw new RuleNotApplicableError("missing-import", rule.kind);
+      return price;
+    }
 
     case "from-cost-multiplier": {
       const cost = requireCost(baseline, "from-cost-multiplier");
