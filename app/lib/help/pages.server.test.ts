@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import {
   escapesRoot,
   INDEX_SLUG,
+  readHelpImage,
   readHelpPage,
   resolveHelpFile,
   rewriteHelpHref,
@@ -162,5 +163,84 @@ describe("links inside a page lead somewhere", () => {
     expect(rewriteHelpHref("./revert.md#partial", "concepts/baselines")).toBe(
       "/help/concepts/revert#partial",
     );
+  });
+});
+
+/**
+ * Images are served from the same directory by the same rules.
+ *
+ * This route hands raw bytes to an unauthenticated caller from a path they supplied,
+ * which is the shape of request that turns a help centre into a file server.
+ */
+describe("serving an image belonging to a page", () => {
+  it("serves one that exists, with the right type", async () => {
+    const image = await readHelpImage("images/resolver.svg");
+
+    expect(image).not.toBeNull();
+    expect(image!.contentType).toBe("image/svg+xml");
+    expect(image!.body.length).toBeGreaterThan(100);
+  });
+
+  it.each([
+    "images/../../package.json",
+    "../../package.json",
+    "../../../etc/passwd",
+    "images/..%2f..%2fpackage.json",
+    // The ones that matter: a traversal wearing an extension we do serve, so the type
+    // allowlist waves them through and something else has to stop them.
+    "../../app/root.png",
+    "images/../../../etc/hosts.png",
+    "images/../../app/db.server.svg",
+  ])("refuses %j", async (path) => {
+    expect(await readHelpImage(path)).toBeNull();
+  });
+
+  it("refuses a type we do not publish, whatever the file is", async () => {
+    // The allowlist is on the extension, so a markdown page cannot be served as bytes
+    // and an executable cannot be served at all.
+    expect(await readHelpImage("concepts/resolver.md")).toBeNull();
+    expect(await readHelpImage("images/resolver.exe")).toBeNull();
+    expect(await readHelpImage("images/resolver")).toBeNull();
+  });
+
+  it("refuses an image that is not there", async () => {
+    expect(await readHelpImage("images/not-a-picture.png")).toBeNull();
+  });
+});
+
+describe("pictures in a page point at the route that serves them", () => {
+  it("rewrites a relative image path to an absolute one", () => {
+    expect(rewriteHelpHref("../images/resolver.svg", "concepts/resolver")).toBe(
+      "/help/images/resolver.svg",
+    );
+    // Unlike a page, an asset keeps its extension — that is how its type is decided.
+    expect(rewriteHelpHref("./diagram.png", "how-to/first-campaign")).toBe(
+      "/help/how-to/diagram.png",
+    );
+  });
+
+  it("every image a page renders is one the help centre will serve", async () => {
+    let checked = 0;
+
+    for (const slug of allSlugs()) {
+      const html = (await readHelpPage(slug))!.html;
+
+      for (const match of html.matchAll(/<img[^>]+src="\/help\/([^"]+)"/g)) {
+        expect(await readHelpImage(match[1]), `${slug} shows ${match[1]}`).not.toBeNull();
+        checked += 1;
+      }
+    }
+
+    expect(checked, "no page shows an image, so this proves nothing").toBeGreaterThan(0);
+  });
+
+  it("gives every image alt text that says what it shows", async () => {
+    // A diagram explaining the one concept merchants misunderstand is useless to a
+    // screen reader if its alt text is "diagram".
+    const html = (await readHelpPage("concepts/resolver"))!.html;
+    const alt = /<img[^>]*alt="([^"]*)"/.exec(html)?.[1] ?? "";
+
+    expect(alt.length).toBeGreaterThan(40);
+    expect(alt.toLowerCase()).not.toBe("diagram");
   });
 });
