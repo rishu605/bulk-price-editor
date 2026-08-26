@@ -40,7 +40,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   const segmentId = String(
-    (payload as { properties?: Record<string, unknown> }).properties?.segment_id ?? "",
+    (payload as { properties?: Record<string, unknown> }).properties?.["segment id"] ?? "",
   );
 
   // The confirmation phrase is generated from the plan and handed straight back. That
