@@ -6,6 +6,9 @@
  * so the fallback has to actually run the work rather than drop it.
  */
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { inlineRuntime, runtimeFor } from "./queue-runtime.server";
@@ -77,5 +80,31 @@ describe("picking a runtime", () => {
     await runtime.enqueue("sync", { shopId: "s1" });
 
     expect(seen).toEqual(["sync"]);
+  });
+});
+
+describe("both ends of a job's life are traced", () => {
+  /**
+   * `span()` is a no-op when OTel is off, which it is in tests, so there is nothing to
+   * observe at runtime — the check is over the source, the way `built-for-shopify`
+   * checks that every webhook route authenticates.
+   *
+   * Execution has been spanned since it was written. Enqueue was only counted, so a
+   * trace showed a job appearing from nowhere and taking however long it took, with no
+   * record of when it was asked for. The interesting number in a backlog is the gap
+   * between the two, and a counter cannot express a gap.
+   */
+  const source = readFileSync(join(process.cwd(), "app/worker/queue-runtime.server.ts"), "utf8");
+
+  it("spans the enqueue as well as the run", () => {
+    expect(source, "the enqueue is not spanned").toMatch(/span\(\s*`enqueue \$\{name\}`/);
+    expect(source, "the run is not spanned").toMatch(/span\(\s*`job \$\{name\}`/);
+  });
+
+  it("gives both spans the same attributes, so a trace lines them up", () => {
+    for (const attribute of ['"queue.name"', '"shop.id"', '"campaign.id"', '"run.id"']) {
+      const uses = source.split(attribute).length - 1;
+      expect(uses, `${attribute} appears on only one of the two spans`).toBeGreaterThanOrEqual(2);
+    }
   });
 });
