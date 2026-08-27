@@ -188,7 +188,11 @@ export default function Settings() {
               details="Share of the selling price. 25 means a price of at least cost ÷ 0.75. Leave blank for none."
             />
 
-            <s-number-field
+            {/* A money field, not a number field. This is a price, and the two differ
+                in how they handle the decimal separator a merchant's locale uses and
+                how many places the currency actually has — a generic number input is
+                where a ¥1,000 floor becomes ¥1,000.00 and then something else. */}
+            <s-money-field
               name="minPrice"
               label={`Minimum price (${currency})`}
               value={settings.minPrice?.toString() ?? ""}

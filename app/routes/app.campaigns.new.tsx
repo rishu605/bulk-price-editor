@@ -26,6 +26,7 @@ import { segmentToAst } from "../services/segments.server";
 import { astFrom, compareAtFrom, readerFor, ruleFrom } from "../lib/campaigns/draft-form";
 import { PageShell } from "../components/PageShell";
 import { DraftPreview } from "../components/DraftPreview";
+import { RuleValueField } from "../components/RuleValueField";
 import type { DraftPreview as Preview } from "../services/campaigns/draft-preview.server";
 
 export const loader = withGuard("/app/campaigns/new", async ({ request }: LoaderFunctionArgs) => {
@@ -378,20 +379,7 @@ export default function NewCampaign() {
           <s-stack gap="base">
             <s-text-field name="name" label="Campaign name" value="Sale" required />
 
-            <s-select name="ruleKind" label="Adjustment">
-              <s-option value="percent-change" defaultSelected>
-                Percent change from baseline
-              </s-option>
-              <s-option value="fixed-change">Fixed change from baseline</s-option>
-              <s-option value="set-exact">Set an exact price</s-option>
-            </s-select>
-
-            <s-number-field
-              name="ruleValue"
-              label="Value"
-              value="-20"
-              details="Negative discounts. -20 means 20% off the baseline."
-            />
+            <RuleValueField currency={currencies[0] ?? "USD"} />
 
             <s-select name="compareAt" label="Compare-at price">
               <s-option value="set-to-baseline" defaultSelected>
