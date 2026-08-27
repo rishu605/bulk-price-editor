@@ -46,31 +46,58 @@ export function VariantSearch({
 }) {
   return (
     <FilterForm fields={fields}>
-      <s-stack
-        direction={direction}
-        gap={direction === "inline" ? SPACE.item : SPACE.section}
-        alignItems={direction === "inline" ? "end" : undefined}
-      >
-        <s-search-field
-          name="q"
-          label={label}
-          labelAccessibilityVisibility={direction === "inline" ? "exclusive" : undefined}
-          placeholder={placeholder}
-          value={query}
-        />
-        {children}
-        {direction === "inline" ? (
+      {direction === "inline" ? (
+        <s-stack direction="inline" gap={SPACE.item} alignItems="end">
+          <s-search-field
+            name="q"
+            label={label}
+            labelAccessibilityVisibility="exclusive"
+            placeholder={placeholder}
+            value={query}
+          />
+          {children}
           <s-button type="submit">Search</s-button>
-        ) : (
-          // A block stack stretches its children, so the submit button was rendering the
-          // full width of the card -- a Search button the size of the table it filters.
-          // The row wrapper gives it back its own width without narrowing the fields
-          // above it, which is what `alignItems` on the outer stack would have done.
-          <s-stack direction="inline">
+        </s-stack>
+      ) : (
+        // A grid, not a vertical stack.
+        //
+        // Stacked, every control took the full width of the card: a "Surface" select
+        // holding the word "Every" rendered twelve hundred pixels wide. That is the
+        // single most unstyled-looking thing in the app, and it is not a width problem
+        // — the page is exactly as wide as it should be. It is a control that does not
+        // know how much room it needs.
+        //
+        // The earlier comment here warned that three selects inline "wrap into
+        // something unreadable". True of `s-stack direction="inline"`, which wraps
+        // wherever it runs out; a grid places them in named columns and re-flows to one
+        // column below 700px instead.
+        //
+        // `1fr 1fr 1fr`, never `repeat(3, 1fr)`: Polaris splits a responsive value on
+        // the comma to separate the two branches, so a comma inside a value makes the
+        // whole thing unparseable and it silently falls back to `none`.
+        <s-stack gap={SPACE.section}>
+          <s-grid
+            gap={SPACE.section}
+            gridTemplateColumns="@container (inline-size <= 700px) 1fr, 1fr 1fr 1fr"
+          >
+            <s-grid-item gridColumn="span 2">
+              <s-search-field
+                name="q"
+                label={label}
+                placeholder={placeholder}
+                value={query}
+              />
+            </s-grid-item>
+            {children}
+          </s-grid>
+
+          {/* Its own row, so the button keeps its natural width. A block stack stretches
+              its children, which is how this rendered as a full-width submit bar. */}
+          <s-stack direction="inline" gap={SPACE.item}>
             <s-button type="submit">Search</s-button>
           </s-stack>
-        )}
-      </s-stack>
+        </s-stack>
+      )}
     </FilterForm>
   );
 }

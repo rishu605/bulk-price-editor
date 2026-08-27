@@ -101,12 +101,16 @@ export default function Baselines() {
               ))}
             </s-select>
 
-            <s-checkbox
+            {/* Its own full row. A checkbox is a tick and a sentence, not a field, so
+                a column sized for a select leaves it stranded in white space. */}
+            <s-grid-item gridColumn="span 3">
+              <s-checkbox
               name="diverged"
               value="1"
               label="Only variants whose live price differs from their baseline"
               checked={filters.divergedOnly || undefined}
             />
+            </s-grid-item>
 
         </VariantSearch>
 
