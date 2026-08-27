@@ -1,12 +1,13 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useSearchParams } from "react-router";
+import { useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { ensureShop } from "../services/shop.server";
 import { formatMoney, money } from "../lib/money/money";
-import { FilterForm } from "../components/FilterForm";
+import { VariantSearch } from "../components/prices/VariantSearch";
+import { Pagination } from "../components/prices/Pagination";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
@@ -88,33 +89,10 @@ export const loader = withGuard("/app/prices", async ({ request }: LoaderFunctio
 
 export default function Catalog() {
   const { rows, total, page, query, pageSize } = useLoaderData<typeof loader>();
-  const [, setSearchParams] = useSearchParams();
-
-  const lastPage = Math.max(1, Math.ceil(total / pageSize));
-  const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
-  const to = Math.min(total, page * pageSize);
-
-  const goTo = (next: number) =>
-    setSearchParams((params) => {
-      params.set("page", String(next));
-      return params;
-    });
-
   return (
     <PageShell heading="Catalogue">
       <s-section>
-        <FilterForm fields={["q"]}>
-          <s-stack direction="inline" gap="base">
-            <s-text-field
-              name="q"
-              label="Search"
-              labelAccessibilityVisibility="exclusive"
-              placeholder="Search by title or SKU"
-              value={query}
-            />
-            <s-button type="submit">Search</s-button>
-          </s-stack>
-        </FilterForm>
+        <VariantSearch fields={["q"]} query={query} />
 
         {total === 0 ? (
           <s-paragraph>
@@ -124,12 +102,6 @@ export default function Catalog() {
           </s-paragraph>
         ) : (
           <>
-            <s-paragraph>
-              <s-text>
-                Showing {from}–{to} of {total} variants
-              </s-text>
-            </s-paragraph>
-
             <s-table>
               <s-table-header-row>
                 <s-table-header>Variant</s-table-header>
@@ -163,19 +135,7 @@ export default function Catalog() {
               </s-table-body>
             </s-table>
 
-            {lastPage > 1 ? (
-              <s-stack direction="inline" gap="base">
-                <s-button disabled={page <= 1} onClick={() => goTo(page - 1)}>
-                  Previous
-                </s-button>
-                <s-text>
-                  Page {page} of {lastPage}
-                </s-text>
-                <s-button disabled={page >= lastPage} onClick={() => goTo(page + 1)}>
-                  Next
-                </s-button>
-              </s-stack>
-            ) : null}
+            <Pagination page={page} total={total} pageSize={pageSize} />
           </>
         )}
       </s-section>
