@@ -31,6 +31,7 @@ import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { reportError } from "../services/error-report.server";
 import { PageShell } from "../components/PageShell";
+import { CsvDropZone } from "../components/imports/CsvDropZone";
 
 export const loader = withGuard("/app/imports/costs", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -133,6 +134,8 @@ export default function ImportCosts() {
               rows and duplicating the field would let them drift apart. */}
           <input type="hidden" name="intent" ref={intent} value="dry-run" readOnly />
           <s-stack gap="base">
+            <CsvDropZone target="csv" />
+
             <s-text-area
               name="csv"
               label="Rows"

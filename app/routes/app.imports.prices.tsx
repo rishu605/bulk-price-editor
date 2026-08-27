@@ -27,6 +27,7 @@ import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import prisma from "../db.server";
 import { PageShell } from "../components/PageShell";
+import { CsvDropZone } from "../components/imports/CsvDropZone";
 
 export const loader = withGuard("/app/imports/prices", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -136,6 +137,8 @@ export default function ImportPrices() {
           <input type="hidden" name="intent" ref={intent} value="dry-run" readOnly />
           <s-stack gap="base">
             <s-text-field name="name" label="Call this" value="Imported prices" />
+            <CsvDropZone target="csv" />
+
             <s-text-area
               name="csv"
               label="Rows"
