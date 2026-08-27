@@ -74,27 +74,26 @@ function Step({ step, isNext }: { step: OnboardingStep; isNext: boolean }) {
             {step.done ? "Done" : isNext ? "Next" : "Later"}
           </s-badge>
           <s-text type="strong">{step.title}</s-text>
+          {/* Progressive disclosure, not a link away. The reasoning belongs next to the
+              step it explains — sending a merchant to a docs page to find out why they
+              are being asked to sync is how they end up not syncing.
+
+              These render on their own lines, because `s-clickable` and `s-link` are
+              block-level and an inline stack does not change that. It is not pretty and
+              it is what works: replacing them with `s-button-group` laid the row out
+              correctly and rendered no buttons at all, so the first screen after install
+              offered no way to sync. A checklist that looks slightly loose beats one
+              whose actions are missing.
+
+              Before the action, deliberately. The row wraps on a narrow column, and when
+              the toggle was last it wrapped onto its own line and read as belonging to
+              the step below it. The action wrapping is harmless; an explanation attached
+              to the wrong step is not. */}
+          <s-clickable onClick={() => setWhy((open) => !open)}>
+            <s-text color="subdued">{why ? "Hide why" : "Why?"}</s-text>
+          </s-clickable>
+          {step.href && step.cta ? <s-link href={step.href}>{step.cta}</s-link> : null}
         </s-stack>
-
-        {/* A button group, because `s-clickable` and `s-link` are block-level: inside an
-            inline stack each still took its own line, so a step rendered as three
-            stacked rows — badge and title, then "Why?", then the action.
-            `s-button-group` is the component for a row of actions and lays them out as
-            one, which also keeps the toggle unambiguously inside its own step.
-
-            The toggle is progressive disclosure rather than a link away: the reasoning
-            belongs beside the step it explains, and sending a merchant to a docs page to
-            learn why they are being asked to sync is how they end up not syncing. */}
-        <s-button-group>
-          <s-button variant="tertiary" onClick={() => setWhy((open) => !open)}>
-            {why ? "Hide why" : "Why?"}
-          </s-button>
-          {step.href && step.cta ? (
-            <s-button variant="tertiary" href={step.href}>
-              {step.cta}
-            </s-button>
-          ) : null}
-        </s-button-group>
 
         {why ? (
           <s-paragraph>
