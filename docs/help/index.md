@@ -29,4 +29,6 @@ first campaign.
 - [This store is no longer connected](./failures/store-disconnected.md)
 - [Your session expired](./failures/session-expired.md)
 - [The app is not responding](./failures/app-unavailable.md)
+- [A form will not save](./failures/form-validation.md)
+- [A campaign or record has gone](./failures/missing-record.md)
 - [Something went wrong](./failures/unexpected.md)
