@@ -20,6 +20,20 @@ RUN npm ci --omit=dev && npm cache clean --force
 
 COPY . .
 
+# Generate the Prisma client into the image, not at boot.
+#
+# `npm run docker-start` runs `prisma generate && prisma migrate deploy` before starting,
+# so the web service produced its own client on every boot and the image never needed one.
+# The worker starts with `tsx scripts/worker.ts` and runs neither — so it imported
+# `db.server.ts`, found no generated client, and crashed on every deploy with
+# "@prisma/client did not initialize yet". Build succeeded, deploy succeeded, process died.
+#
+# Generating here is also the right split on its own terms. `generate` produces code and
+# belongs to the build; `migrate` changes a database and belongs to exactly one service at
+# deploy time. Bundling them into one `setup` script is what tied a build step to the web
+# service's start command.
+RUN npx prisma generate
+
 RUN npm run build
 
 # The default is the web service. The worker overrides it with `npm run worker`.
