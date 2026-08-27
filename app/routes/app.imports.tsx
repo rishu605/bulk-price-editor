@@ -1,6 +1,6 @@
 import { Outlet } from "react-router";
 
-import { SectionNav } from "../components/SectionNav";
+import { SectionTabs } from "../components/SectionTabs";
 
 /**
  * The imports section: one verb that used to have three destinations.
@@ -13,7 +13,7 @@ import { SectionNav } from "../components/SectionNav";
 export default function ImportsSection() {
   return (
     <>
-      <SectionNav
+      <SectionTabs
         tabs={[
           { href: "/app/imports/prices", label: "Prices" },
           { href: "/app/imports/baselines", label: "Baselines" },

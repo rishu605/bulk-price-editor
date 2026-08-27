@@ -3,7 +3,7 @@ import { Outlet, useLoaderData } from "react-router";
 
 import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
-import { PricesTabs } from "../components/prices/PricesTabs";
+import { SectionTabs } from "../components/SectionTabs";
 import prisma from "../db.server";
 
 /**
@@ -38,7 +38,7 @@ export default function PricesSection() {
 
   return (
     <>
-      <PricesTabs
+      <SectionTabs
         tabs={[
           { href: "/app/prices", label: "Variants" },
           { href: "/app/prices/baselines", label: "Baselines" },

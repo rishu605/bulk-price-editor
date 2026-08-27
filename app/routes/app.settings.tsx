@@ -1,6 +1,6 @@
 import { Outlet } from "react-router";
 
-import { SectionNav } from "../components/SectionNav";
+import { SectionTabs } from "../components/SectionTabs";
 
 /**
  * The settings section: the things a merchant opens once, or when something is wrong.
@@ -12,9 +12,9 @@ import { SectionNav } from "../components/SectionNav";
 export default function SettingsSection() {
   return (
     <>
-      <SectionNav
+      <SectionTabs
         tabs={[
-          { href: "/app/settings", label: "Guardrails & rounding" },
+          { href: "/app/settings", label: "Guardrails, rounding & alerts" },
           { href: "/app/settings/segments", label: "Segments" },
           { href: "/app/settings/plan", label: "Plan" },
           { href: "/app/settings/feedback", label: "Feedback" },
