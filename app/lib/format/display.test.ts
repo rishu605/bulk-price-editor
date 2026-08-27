@@ -16,7 +16,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { formatCount, formatDay, formatWhen } from "./display";
+import { formatAgo, formatCount, formatDay, formatWhen } from "./display";
 
 describe("counts group the same way everywhere", () => {
   it("groups in thousands, whatever the machine's locale is", () => {
@@ -133,5 +133,47 @@ describe("counts a merchant reads are grouped, wherever they appear", () => {
     const source = readFileSync(join(process.cwd(), file), "utf8");
 
     expect(source, `${file} shows counts without grouping them`).toContain("formatCount");
+  });
+});
+
+describe("how long ago", () => {
+  const now = "2026-08-27T15:00:00.000Z";
+  const ago = (value: string) => formatAgo(value, now, "Europe/London");
+
+  it("says just now rather than 0 minutes", () => {
+    expect(ago("2026-08-27T14:59:40.000Z")).toBe("just now");
+  });
+
+  it("counts minutes, and does not say 1 minutes", () => {
+    expect(ago("2026-08-27T14:59:00.000Z")).toBe("1 minute ago");
+    expect(ago("2026-08-27T14:43:00.000Z")).toBe("17 minutes ago");
+  });
+
+  it("counts hours and days", () => {
+    expect(ago("2026-08-27T13:00:00.000Z")).toBe("2 hours ago");
+    expect(ago("2026-08-25T15:00:00.000Z")).toBe("2 days ago");
+  });
+
+  it("falls back to a date once relative stops helping", () => {
+    // "47 days ago" is a subtraction the reader has to undo to place it against
+    // anything else they know.
+    expect(ago("2026-06-02T09:00:00.000Z")).toBe("02/06/2026");
+  });
+
+  it("handles a timestamp in the future, which a scheduled run is", () => {
+    expect(ago("2026-08-27T18:00:00.000Z")).toBe("in 3 hours");
+  });
+
+  it("takes its clock from the caller, so the server and the browser agree", () => {
+    // The whole point of passing `now` in: two renders of the same page must produce
+    // the same string, not two readings of two different clocks.
+    const earlier = formatAgo("2026-08-27T14:00:00.000Z", "2026-08-27T15:00:00.000Z", "UTC");
+    const later = formatAgo("2026-08-27T14:00:00.000Z", "2026-08-27T16:00:00.000Z", "UTC");
+    expect(earlier).toBe("1 hour ago");
+    expect(later).toBe("2 hours ago");
+  });
+
+  it("returns the raw value rather than throwing on an unparseable date", () => {
+    expect(formatAgo("not a date", now, "UTC")).toBe("not a date");
   });
 });

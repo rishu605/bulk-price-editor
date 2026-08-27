@@ -77,6 +77,39 @@ describe("a shop part-way through", () => {
     // the new normal, permanently — so a finished step must not invite a repeat.
     expect(html).not.toContain("Sync catalogue");
   });
+
+  it("offers no explanation on a completed step either", () => {
+    // The one row with nothing to do had a lone "Why?" hanging off its right edge,
+    // offering to explain work the merchant had already finished.
+    const step = html.slice(
+      html.indexOf("Capture your baselines"),
+      html.indexOf("Try one in practice mode"),
+    );
+    expect(step).not.toContain("Why?");
+  });
+});
+
+describe("how a step is drawn", () => {
+  const html = render(fresh);
+
+  it("is a row, not a card", () => {
+    // Each step used to be a bordered box holding a stack, which rendered the title, the
+    // toggle and the action on three separate lines — nine lines and three borders for
+    // three short sentences. The cells of a grid are what put them on one line.
+    expect(html).toContain("<s-grid");
+    expect(html).not.toContain("borderWidth");
+  });
+
+  it("draws the status as a glyph rather than a badge on every row", () => {
+    // Three badges to say what three glyphs say, and the two loudest words on the card
+    // were "Done" and "Later".
+    expect(html).not.toContain("Later");
+    expect(html).toContain("<s-icon");
+  });
+
+  it("still marks exactly one step as the one to do next", () => {
+    expect(html.match(/Next/g)).toHaveLength(1);
+  });
 });
 
 describe("a shop that has finished", () => {
