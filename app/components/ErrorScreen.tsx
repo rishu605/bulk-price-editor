@@ -11,6 +11,7 @@
  * screen tells a merchant nothing and tells an attacker something.
  */
 
+import { ActionRow } from "./ActionRow";
 import { helpLabelFor, helpPathFor } from "../lib/errors/help-links";
 
 export interface ErrorScreenProps {
@@ -50,19 +51,18 @@ export function ErrorScreen({
 
           {/* Every merchant-visible error links to the page that explains it. Somebody
               hitting this at 9pm before a sale wants the sentence that says what to do,
-              one click from here — not a search box. */}
-          <s-paragraph>
-            <s-link href={helpPathFor(code)} target="_blank">
-              {helpLabelFor(code)}
-            </s-link>
-          </s-paragraph>
-
-          <s-stack direction="inline" gap="base">
+              one click from here — not a search box. It sits in the row with the other
+              two actions rather than a paragraph above them, because it is one of the
+              three things they might do next. */}
+          <ActionRow>
             <s-button href={retryHref ?? "."} variant="primary">
               Try again
             </s-button>
             <s-button href="/app">Back to dashboard</s-button>
-          </s-stack>
+            <s-button variant="tertiary" href={helpPathFor(code)} target="_blank">
+              {helpLabelFor(code)}
+            </s-button>
+          </ActionRow>
 
           <s-divider />
 

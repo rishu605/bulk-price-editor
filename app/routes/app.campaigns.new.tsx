@@ -15,6 +15,7 @@ import {
   readRoundingPolicy,
   ROUNDING_LABELS,
 } from "../lib/money/rounding-policy";
+import { ActionRow } from "../components/ActionRow";
 import { FilterForm } from "../components/FilterForm";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
@@ -486,7 +487,9 @@ export default function NewCampaign() {
                       already running keeps running, and reverts always work whatever
                       plan you are on.
                     </s-paragraph>
-                    <s-link href="/app/settings/plan">See the plans</s-link>
+                    <ActionRow>
+                      <s-button href="/app/settings/plan">See the plans</s-button>
+                    </ActionRow>
                   </s-banner>
                 ) : null}
 

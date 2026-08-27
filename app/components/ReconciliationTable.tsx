@@ -37,9 +37,13 @@ export function ReconciliationTable({ rows }: { rows: ReconciliationRow[] }) {
         {rows.map((row) => (
           <s-table-row key={`${row.variantGid}-${row.priceListGid}`}>
             <s-table-cell>
-              <s-link href={row.adminUrl} target="_blank">
+              {/* A whole column of blue is what makes a table read as link soup — and
+                  this table is the one a merchant scans when prices disagree, so its
+                  names should read as names. The icon carries "this opens the Shopify
+                  admin", which the colour never did. */}
+              <s-button variant="tertiary" icon="external" href={row.adminUrl} target="_blank">
                 {row.title}
-              </s-link>
+              </s-button>
             </s-table-cell>
             <s-table-cell>{row.surface}</s-table-cell>
             <s-table-cell>{row.live ?? "—"}</s-table-cell>

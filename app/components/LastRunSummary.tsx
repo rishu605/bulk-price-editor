@@ -61,7 +61,9 @@ export function LastRunSummary({
           </s-text>
         </s-stack>
 
-        <s-link href={`/app/campaigns/${run.campaignId}`}>View campaign</s-link>
+        <s-button variant="tertiary" href={`/app/campaigns/${run.campaignId}`}>
+          View campaign
+        </s-button>
       </s-grid>
     </s-box>
   );
