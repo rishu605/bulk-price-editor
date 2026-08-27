@@ -43,6 +43,48 @@ function environmentKeys(): Set<string> {
   return keys;
 }
 
+describe("the worker's Railway config", () => {
+  /**
+   * Railway applies a repo's config file to every service built from it, and
+   * `railway.json` carries `healthcheckPath: "/healthz"`. The worker serves no HTTP, so
+   * it inherited a healthcheck it could never answer — build succeeded, deploy succeeded,
+   * then `Network > Healthcheck` failed after the timeout and the deployment was marked
+   * FAILED. The worker had never once run.
+   *
+   * Nothing in that error names the healthcheck as the wrong setting for this service
+   * rather than a broken app, which is why it is worth a test rather than a paragraph.
+   */
+  const web = JSON.parse(readFileSync(join(ROOT, "railway.json"), "utf8"));
+  const worker = JSON.parse(readFileSync(join(ROOT, "railway.worker.json"), "utf8"));
+
+  it("gives the web service a healthcheck", () => {
+    expect(web.deploy?.healthcheckPath, "the web service must be health-checked").toBe(
+      "/healthz",
+    );
+  });
+
+  it("gives the worker none, because it serves no HTTP", () => {
+    expect(
+      worker.deploy?.healthcheckPath,
+      "a healthcheck on the worker can never pass, so every deploy fails",
+    ).toBeUndefined();
+  });
+
+  it("starts the worker as a worker", () => {
+    expect(worker.deploy?.startCommand).toBe("npm run worker");
+  });
+
+  it("builds both from the same Dockerfile", () => {
+    // The pair that must never disagree about a price is exactly this pair: the worker
+    // writes what the web process previewed.
+    expect(worker.build).toEqual(web.build);
+  });
+
+  it("restarts the worker on failure, like the web service", () => {
+    expect(worker.deploy?.restartPolicyType).toBe(web.deploy?.restartPolicyType);
+  });
+});
+
 describe("the webhooks the manifest subscribes to", () => {
   /**
    * A declared topic with no route, or a route no topic reaches.
