@@ -1,5 +1,7 @@
 import { Link } from "react-router";
 
+import { SPACE } from "../lib/ui/spacing";
+
 import type { CalendarDay } from "../lib/scheduling/calendar";
 import { CAMPAIGN_TONE, toneFor } from "./tone";
 
@@ -21,14 +23,19 @@ export function CalendarGrid({ days, today }: { days: CalendarDay[]; today: stri
   }
 
   return (
-    <s-stack gap="small">
+    <s-stack gap={SPACE.item}>
       {/* Which column is which day. Without it the grid is seven anonymous boxes and a
           merchant has to count from the first date to work out whether a sale lands on
           a weekend — which is usually the thing they came to check. */}
-      <s-grid gridTemplateColumns="repeat(7, 1fr)" gap="small-200">
+      {/* `repeat(7, 1fr)` is safe here because this is not a responsive value. Polaris
+          only splits on the comma when the value begins `@container`, so the ban on
+          commas applies there and not to a plain template. */}
+      <s-grid gridTemplateColumns="repeat(7, 1fr)" gap={SPACE.item}>
         {WEEKDAYS.map((weekday) => (
-          <s-box key={weekday} padding="small-200">
-            <s-text color="subdued">{weekday}</s-text>
+          <s-box key={weekday} paddingInline={SPACE.tight}>
+            <s-text color="subdued" type="strong">
+              {weekday}
+            </s-text>
           </s-box>
         ))}
       </s-grid>
@@ -37,14 +44,28 @@ export function CalendarGrid({ days, today }: { days: CalendarDay[]; today: stri
           columns line up under their weekday. Stacked boxes sized themselves to their
           contents, which put a busy Tuesday under Wednesday's heading. */}
       {chunk(days, 7).map((week) => (
-        <s-grid key={week[0].date} gridTemplateColumns="repeat(7, 1fr)" gap="small-200">
+        <s-grid key={week[0].date} gridTemplateColumns="repeat(7, 1fr)" gap={SPACE.item}>
           {week.map((day) => (
-            <s-box key={day.date} padding="small-200" borderWidth="base" borderRadius="base">
-              <s-stack gap="small-500">
+            <s-box
+              key={day.date}
+              padding={SPACE.tight}
+              borderWidth="base"
+              borderRadius="base"
+              // Today gets a filled cell, and days outside the month being viewed are
+              // dimmed. A merchant opens a calendar to place a sale relative to now, so
+              // "which square is today" has to be answerable without reading -- it used
+              // to be a "· today" suffix in the same weight as every other date.
+              background={day.date === today ? "subdued" : undefined}
+              // px, not rem: Polaris sizes accept `${number}px`, a percentage or `0`.
+              minBlockSize="64px"
+            >
+              <s-stack gap={SPACE.tight}>
                 <Link to={`/app/campaigns/new?startAt=${day.date}`}>
-                  <s-text tone={day.date === today ? "info" : day.inFocus ? "auto" : "neutral"}>
+                  <s-text
+                    type={day.date === today ? "strong" : "generic"}
+                    color={day.inFocus ? "base" : "subdued"}
+                  >
                     {dayNumber(day.date)}
-                    {day.date === today ? " · today" : ""}
                   </s-text>
                 </Link>
 
