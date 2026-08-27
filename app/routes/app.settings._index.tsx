@@ -15,6 +15,7 @@ import {
   readRoundingPolicy,
   ROUNDING_LABELS,
 } from "../lib/money/rounding-policy";
+import { PageShell } from "../components/PageShell";
 
 export const loader = withGuard("/app/settings", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -132,7 +133,7 @@ export default function Settings() {
   const costCoverage = variants === 0 ? 0 : Math.round((withCost / variants) * 100);
 
   return (
-    <s-page heading="Settings">
+    <PageShell heading="Settings">
       {fetcher.data ? (
         <s-banner tone="success">
           <s-paragraph>{fetcher.data.message}</s-paragraph>
@@ -381,7 +382,7 @@ export default function Settings() {
           </s-text>
         </s-paragraph>
       </s-section>
-    </s-page>
+    </PageShell>
   );
 }
 

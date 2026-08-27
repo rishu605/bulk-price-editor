@@ -29,6 +29,7 @@ import { baselinesCsv } from "../lib/reporting/baselines-csv";
 import { downloadCsv } from "../lib/reporting/csv";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
+import { PageShell } from "../components/PageShell";
 
 const FILTER_FIELDS = ["q", "vendor", "source", "diverged", "variant"] as const;
 
@@ -74,7 +75,7 @@ export default function Baselines() {
     });
 
   return (
-    <s-page heading="Baselines">
+    <PageShell heading="Baselines">
       <s-section>
         <FilterForm fields={FILTER_FIELDS}>
           <s-stack gap="base">
@@ -204,7 +205,7 @@ export default function Baselines() {
           </s-text>
         </s-paragraph>
       </s-section>
-    </s-page>
+    </PageShell>
   );
 }
 

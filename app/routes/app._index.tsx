@@ -16,6 +16,7 @@ import { OnboardingCard } from "../components/OnboardingCard";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { onboarding } from "../lib/onboarding/steps";
 import { withGuard } from "../lib/errors/guard.server";
+import { PageShell } from "../components/PageShell";
 
 export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -215,7 +216,7 @@ export default function Dashboard() {
   const neverSynced = syncedAt === null;
 
   return (
-    <s-page heading="Anchor">
+    <PageShell heading="Anchor">
       {result ? (
         <s-banner tone={result.ok ? "success" : "critical"}>
           <s-paragraph>{result.message}</s-paragraph>
@@ -467,7 +468,7 @@ export default function Dashboard() {
           <s-link href="/app/imports/recapture">Recapture baselines…</s-link>
         </s-section>
       ) : null}
-    </s-page>
+    </PageShell>
   );
 }
 

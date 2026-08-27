@@ -9,6 +9,7 @@ import { formatMoney, money } from "../lib/money/money";
 import { FilterForm } from "../components/FilterForm";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
+import { PageShell } from "../components/PageShell";
 
 const PAGE_SIZE = 50;
 
@@ -100,7 +101,7 @@ export default function Catalog() {
     });
 
   return (
-    <s-page heading="Catalogue">
+    <PageShell heading="Catalogue">
       <s-section>
         <FilterForm fields={["q"]}>
           <s-stack direction="inline" gap="base">
@@ -195,7 +196,7 @@ export default function Catalog() {
           </s-text>
         </s-paragraph>
       </s-section>
-    </s-page>
+    </PageShell>
   );
 }
 

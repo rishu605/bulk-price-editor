@@ -24,6 +24,7 @@ import { facets } from "../services/segments.server";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { reportError } from "../services/error-report.server";
+import { PageShell } from "../components/PageShell";
 
 export const loader = withGuard("/app/settings/segments", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -152,7 +153,7 @@ export default function Segments() {
   const busy = fetcher.state !== "idle";
 
   return (
-    <s-page heading="Segments">
+    <PageShell heading="Segments">
       {result ? (
         <s-banner tone={result.ok ? "success" : "critical"}>
           <s-paragraph>{result.message}</s-paragraph>
@@ -319,7 +320,7 @@ export default function Segments() {
           </s-text>
         </s-paragraph>
       </s-section>
-    </s-page>
+    </PageShell>
   );
 }
 

@@ -26,6 +26,7 @@ import { actorFor } from "../lib/audit/actor";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import prisma from "../db.server";
+import { PageShell } from "../components/PageShell";
 
 export const loader = withGuard("/app/imports/prices", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -107,7 +108,7 @@ export default function ImportPrices() {
     : [];
 
   return (
-    <s-page heading="Import prices">
+    <PageShell heading="Import prices">
       {fetcher.data ? (
         <s-banner tone={fetcher.data.ok ? "success" : "critical"}>
           <s-paragraph>{fetcher.data.message}</s-paragraph>
@@ -175,7 +176,7 @@ export default function ImportPrices() {
           </s-unordered-list>
         </s-section>
       ) : null}
-    </s-page>
+    </PageShell>
   );
 }
 

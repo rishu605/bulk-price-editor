@@ -28,6 +28,7 @@ import { facets, type FilterAst } from "../services/segments.server";
 import { actorFor } from "../lib/audit/actor";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
+import { PageShell } from "../components/PageShell";
 
 export const loader = withGuard("/app/prices/costs", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -112,7 +113,7 @@ export default function Costs() {
   const coverage = variants === 0 ? 0 : Math.round((withCost / variants) * 100);
 
   return (
-    <s-page heading="Costs">
+    <PageShell heading="Costs">
       {violationCount > 0 ? (
         <s-banner tone="critical">
           <s-heading>A cost change has put live prices below your floor</s-heading>
@@ -222,7 +223,7 @@ export default function Costs() {
           </s-unordered-list>
         ) : null}
       </s-section>
-    </s-page>
+    </PageShell>
   );
 }
 

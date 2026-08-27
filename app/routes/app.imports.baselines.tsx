@@ -26,6 +26,7 @@ import { actorFor } from "../lib/audit/actor";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { reportError } from "../services/error-report.server";
+import { PageShell } from "../components/PageShell";
 
 export const loader = withGuard("/app/imports/baselines", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -85,7 +86,7 @@ export default function ImportBaselines() {
   };
 
   return (
-    <s-page heading="Import baselines">
+    <PageShell heading="Import baselines">
       {data ? (
         <s-banner tone={data.ok ? "success" : "critical"}>
           <s-paragraph>{data.message}</s-paragraph>
@@ -164,7 +165,7 @@ export default function ImportBaselines() {
           </s-text>
         </s-paragraph>
       </s-section>
-    </s-page>
+    </PageShell>
   );
 }
 

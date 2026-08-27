@@ -30,6 +30,7 @@ import { linesOf } from "../lib/reporting/lines";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { reportError } from "../services/error-report.server";
+import { PageShell } from "../components/PageShell";
 
 export const loader = withGuard("/app/imports/costs", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -101,7 +102,7 @@ export default function ImportCosts() {
     : [];
 
   return (
-    <s-page heading="Import costs">
+    <PageShell heading="Import costs">
       {data ? (
         <s-banner tone={data.ok ? "success" : "critical"}>
           <s-paragraph>{data.message}</s-paragraph>
@@ -193,7 +194,7 @@ export default function ImportCosts() {
           ) : null}
         </s-section>
       ) : null}
-    </s-page>
+    </PageShell>
   );
 }
 
