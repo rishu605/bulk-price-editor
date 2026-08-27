@@ -40,7 +40,8 @@ const lastSent = new Map<string, number>();
 export async function gather(now: Date = new Date()): Promise<SignalWindow> {
   const since = new Date(now.getTime() - WINDOW_MINUTES * 60_000);
 
-  const [sinceTick, errors, webhooks, lastAudit] = await Promise.all([
+  const [sinceTick, errors, webhooks, delivered, lastAudit, errorsByShop, deliveriesByShop] =
+    await Promise.all([
     // The scheduler's own heartbeat, not a campaign run's.
     //
     // This used to read the newest `campaign_runs.heartbeatAt`, which is stamped by runs
@@ -50,15 +51,39 @@ export async function gather(now: Date = new Date()): Promise<SignalWindow> {
     // stamping looked alive, which is the one case the alert exists for.
     secondsSinceBeat(now),
     prisma.errorEvent.count({ where: { createdAt: { gte: since } } }),
+    // Sampled, and only ever used for the worst lag. The cap is why the count below is a
+    // separate query rather than this array's length.
     prisma.webhookEvent.findMany({
       where: { receivedAt: { gte: since }, processedAt: { not: null } },
       select: { receivedAt: true, processedAt: true },
       take: 500,
     }),
+    // The real denominator.
+    //
+    // This used to be `webhooks.length`, which is capped at 500 — while `errors` above is
+    // an uncapped count. Past five hundred deliveries in a window the denominator stops
+    // growing and the numerator does not, so the error rate climbs with traffic and the
+    // alert fires because the platform is *busy*. A rate whose two halves are measured
+    // differently is not a rate.
+    prisma.webhookEvent.count({
+      where: { receivedAt: { gte: since }, processedAt: { not: null } },
+    }),
     prisma.auditLogEntry.findFirst({
       where: { action: "mirror.audited" },
       orderBy: { createdAt: "desc" },
       select: { after: true },
+    }),
+    // Counted rather than listed. The global pair above samples 500 deliveries because it
+    // only needs the worst lag; a rate needs the whole denominator or it is not a rate.
+    prisma.errorEvent.groupBy({
+      by: ["shopId"],
+      where: { createdAt: { gte: since }, shopId: { not: null } },
+      _count: { _all: true },
+    }),
+    prisma.webhookEvent.groupBy({
+      by: ["shopId"],
+      where: { receivedAt: { gte: since }, processedAt: { not: null }, shopId: { not: null } },
+      _count: { _all: true },
     }),
   ]);
 
@@ -69,6 +94,10 @@ export async function gather(now: Date = new Date()): Promise<SignalWindow> {
         ),
       )
     : null;
+
+  const deliveries = new Map(
+    deliveriesByShop.map((group) => [group.shopId!, group._count._all] as const),
+  );
 
   const audit = (lastAudit?.after ?? null) as
     | { rate?: number; unpriceable?: number }
@@ -83,13 +112,21 @@ export async function gather(now: Date = new Date()): Promise<SignalWindow> {
     // Webhook deliveries stand in for request volume: it is the traffic that arrives
     // whether or not a merchant has the app open, so it does not fall to zero overnight
     // and turn every error into a spike.
-    requests: webhooks.length,
+    requests: delivered,
     divergenceRate: typeof audit?.rate === "number" ? audit.rate : null,
     // Null until an audit has run, for the same reason as the tick: "we have not looked"
     // and "we looked and found none" are different statements, and only one of them is
     // worth staying asleep over.
     unpriceableVariants: typeof audit?.unpriceable === "number" ? audit.unpriceable : null,
     executionQueueDepth: null,
+    // Only shops that produced errors can be spiking, so the error groups drive the list
+    // and the delivery counts supply each denominator. A shop with deliveries and no
+    // errors is healthy and does not need a row.
+    shopRates: errorsByShop.map((group) => ({
+      shopId: group.shopId!,
+      errors: group._count._all,
+      requests: deliveries.get(group.shopId!) ?? 0,
+    })),
   };
 }
 
