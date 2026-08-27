@@ -15,7 +15,36 @@ FAILED. Nothing about that error names the healthcheck as the *wrong setting for
 service* rather than a broken app, which is what makes it worth writing down.
 
 So the worker points at `railway.worker.json`, which is the same build with no healthcheck
-and the worker's start command. Building
+and the worker's start command.
+
+### These config files have an expiry date
+
+Railway has deprecated Config as Code. Two dates, and only one of them is far away:
+
+| | |
+|---|---|
+| **2026-08-28** | services that have never used Config as Code can no longer opt in |
+| **2026-12-01** | existing `railway.json` / `railway.worker.json` files stop being read — hard cutoff |
+
+Both services opted in before the first date, so they are grandfathered and nothing is
+broken today. The replacement is Infrastructure as Code — a `.railway/railway.ts` applied
+through the CLI with `railway config plan` / `railway config apply`, and a
+`railway config migrate` that generates it from these files. It is explicitly beta, and
+its own docs say the generated formatting may still change, so there is no hurry to adopt
+it for a deployment that works.
+
+**The trap is the first date, not the second.** If the worker service is ever deleted and
+recreated — which is exactly what somebody would do to fix a broken deploy — the new
+service cannot opt into Config as Code, `railway.worker.json` will not be read, and it
+inherits the healthcheck problem with no file-based way out.
+
+So set the same two values in the worker's **dashboard** settings as well: start command
+`npm run worker`, healthcheck path empty. Config as Code overrides dashboard values while
+it is read, so this changes nothing today — and on 2026-12-01, when the files stop being
+read, the dashboard values are already correct and the cutoff passes as a no-op rather
+than as an outage.
+
+Building
 twice would let them drift, and the pair that must never disagree about a price is exactly
 this pair: the worker writes what the web process previewed.
 
