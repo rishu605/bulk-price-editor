@@ -1,0 +1,65 @@
+/**
+ * List and calendar are one route, and the parameter that says which.
+ *
+ * The two were separate nav items showing the same objects, so a merchant asking "what
+ * is running next week?" had to already know a calendar existed.
+ *
+ * The trap in merging them: the calendar already used `?view=` for week-or-month. One
+ * parameter cannot mean both, so the calendar's own toggle moved to `?period=`. A stale
+ * `?view=week` would otherwise read as "not calendar" and silently show the list.
+ */
+
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+import { describe, expect, it } from "vitest";
+
+const route = readFileSync(
+  join(process.cwd(), "app", "routes", "app.campaigns._index.tsx"),
+  "utf8",
+);
+const calendar = readFileSync(
+  join(process.cwd(), "app", "components", "campaign", "CampaignCalendar.tsx"),
+  "utf8",
+);
+const stub = readFileSync(
+  join(process.cwd(), "app", "routes", "app.campaigns.calendar.tsx"),
+  "utf8",
+);
+
+describe("one parameter, one meaning", () => {
+  it("uses view for list-or-calendar", () => {
+    expect(route).toContain('params.get("view") === "calendar"');
+  });
+
+  it("uses period for week-or-month", () => {
+    expect(route).toContain('params.get("period") === "week"');
+  });
+
+  it("no longer reads view as a calendar period anywhere", () => {
+    for (const [name, source] of [["route", route], ["calendar", calendar]] as const) {
+      expect(
+        source.includes('view === "week"'),
+        `${name} still treats view as a period, which now means something else`,
+      ).toBe(false);
+    }
+  });
+
+  it("carries a stale ?view=week across the redirect as ?period=week", () => {
+    // The one link shape that would otherwise break: a bookmark of a specific week.
+    expect(stub).toContain('to.set("period", period)');
+  });
+});
+
+describe("both views read the same filters", () => {
+  it("loads the list even when the calendar is showing", () => {
+    // Switching views must not throw away the search or filter a merchant just set.
+    const loaderBody = route.slice(route.indexOf("const list = await listCampaigns"));
+    expect(loaderBody).toContain("listCampaigns(shop.id, filters)");
+    expect(
+      route.indexOf("const list = await listCampaigns") <
+        route.indexOf('if (view === "list")'),
+      "the list must load before the early return, or the calendar loses the filters",
+    ).toBe(true);
+  });
+});

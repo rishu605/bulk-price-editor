@@ -78,10 +78,13 @@ describe("nothing inside the app links through a redirect", () => {
           continue;
         }
         if (!/\.(ts|tsx)$/.test(entry.name)) continue;
-        // The map itself and the stubs that read it are the one place old URLs belong.
+        // The map itself, and the stubs that read it, are the one place old URLs
+        // belong. Keyed on referencing LEGACY_ROUTES at all rather than on a particular
+        // call shape: the first version matched `redirect(LEGACY_ROUTES` literally and
+        // missed a stub that built its destination with a template literal.
         const source = readFileSync(path, "utf8");
         if (path.includes("legacy-routes")) continue;
-        if (source.includes("redirect(LEGACY_ROUTES")) continue;
+        if (source.includes("LEGACY_ROUTES")) continue;
 
         for (const match of source.matchAll(/["'`](\/app\/[a-z0-9/$._-]*)["'`?#]/gi)) {
           found.push({ file: path, url: match[1] });
