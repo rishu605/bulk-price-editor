@@ -83,7 +83,7 @@ export function CampaignPreviewTab({ preview, approval, fetcher, busy }: Campaig
             <s-paragraph>
               {/* Said plainly, because overstating causality in a pricing tool is how
                   merchants make expensive decisions on bad inference. */}
-              <s-text tone="neutral">
+              <s-text color="subdued">
                 This is arithmetic on your prices and costs. It does not predict what you
                 will sell.
               </s-text>

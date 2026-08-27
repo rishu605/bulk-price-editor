@@ -19,7 +19,7 @@ export function DraftPreview({ preview }: { preview: Preview | null }) {
   if (!preview) {
     return (
       <s-paragraph>
-        <s-text tone="neutral">Set a rule to see what it would do.</s-text>
+        <s-text color="subdued">Set a rule to see what it would do.</s-text>
       </s-paragraph>
     );
   }
@@ -39,7 +39,7 @@ export function DraftPreview({ preview }: { preview: Preview | null }) {
   if (preview.matched === 0) {
     return (
       <s-paragraph>
-        <s-text tone="neutral">Nothing matches this scope yet.</s-text>
+        <s-text color="subdued">Nothing matches this scope yet.</s-text>
       </s-paragraph>
     );
   }
@@ -57,7 +57,7 @@ export function DraftPreview({ preview }: { preview: Preview | null }) {
           needs the other 20 explained here rather than after the run. */}
       {preview.alreadyCorrect > 0 ? (
         <s-paragraph>
-          <s-text tone="neutral">
+          <s-text color="subdued">
             {formatCount(preview.alreadyCorrect)} already at this price.
           </s-text>
         </s-paragraph>
@@ -97,7 +97,7 @@ export function DraftPreview({ preview }: { preview: Preview | null }) {
                   {row.skippedReason ? (
                     <s-text tone="caution">{row.skippedReason}</s-text>
                   ) : row.unchanged ? (
-                    <s-text tone="neutral">no change</s-text>
+                    <s-text color="subdued">no change</s-text>
                   ) : (
                     <s-text>
                       {row.after ?? "—"}
@@ -113,7 +113,7 @@ export function DraftPreview({ preview }: { preview: Preview | null }) {
 
       {preview.changing + preview.alreadyCorrect + preview.skipped > preview.rows.length ? (
         <s-paragraph>
-          <s-text tone="neutral">
+          <s-text color="subdued">
             Showing the first {formatCount(preview.rows.length)}. Every row is priced the
             same way.
           </s-text>

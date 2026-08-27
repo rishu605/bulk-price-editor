@@ -121,7 +121,7 @@ export function CampaignListView({
               {list.page > 1 ? (
                 <s-link href={linkTo({ page: String(list.page - 1) })}>Previous</s-link>
               ) : null}
-              <s-text tone="neutral">
+              <s-text color="subdued">
                 Page {list.page} of {list.pages} · {list.total} campaigns
               </s-text>
               {list.page < list.pages ? (

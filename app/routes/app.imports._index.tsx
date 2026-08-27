@@ -80,7 +80,7 @@ export default function Imports() {
                 {imports.map((row) => (
                   <s-table-row key={row.id}>
                     <s-table-cell>
-                      {row.name} <s-text tone="neutral">({row.currency})</s-text>
+                      {row.name} <s-text color="subdued">({row.currency})</s-text>
                     </s-table-cell>
                     <s-table-cell>{row.createdAt}</s-table-cell>
                     <s-table-cell>{formatCount(row.rowsRead)}</s-table-cell>
@@ -101,7 +101,7 @@ export default function Imports() {
               </s-table-body>
             </s-table>
             <s-paragraph>
-              <s-text tone="neutral">Times are your store&rsquo;s, in {timeZone}.</s-text>
+              <s-text color="subdued">Times are your store&rsquo;s, in {timeZone}.</s-text>
             </s-paragraph>
           </>
         )}

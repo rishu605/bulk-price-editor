@@ -347,7 +347,7 @@ export default function CampaignDetail() {
           <s-badge tone={lifecycle.tone === "critical" ? "critical" : lifecycle.tone === "warning" ? "warning" : "info"}>
             {lifecycle.label}
           </s-badge>
-          {scheduleText ? <s-text tone="neutral">{scheduleText}</s-text> : null}
+          {scheduleText ? <s-text color="subdued">{scheduleText}</s-text> : null}
         </s-stack>
         <CampaignActions {...detail} />
       </s-section>
