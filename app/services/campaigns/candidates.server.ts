@@ -30,6 +30,35 @@ export async function productMapFor(
   return new Map(rows.map((row) => [row.variantGid, row.productGid]));
 }
 
+/**
+ * Variant gid -> what a merchant needs to recognise the row: its title and its picture.
+ *
+ * A price table is a wall of near-identical strings — "Alpine Boots 1020 · Black / L /
+ * E0" differs from its neighbour by two characters. The thumbnail is how someone
+ * notices that a rule caught something it should not have, which is the whole reason a
+ * preview exists.
+ */
+export async function variantDisplayFor(
+  shopId: string,
+  variantGids: string[],
+): Promise<Map<string, { title: string; imageUrl: string | null }>> {
+  if (variantGids.length === 0) return new Map();
+
+  const rows = await inChunks(variantGids, (batch) =>
+    prisma.variantIndex.findMany({
+      where: { shopId, variantGid: { in: batch } },
+      select: { variantGid: true, title: true, imageUrl: true },
+    }),
+  );
+
+  return new Map(
+    rows.map((row) => [
+      row.variantGid,
+      { title: row.title ?? row.variantGid, imageUrl: row.imageUrl },
+    ]),
+  );
+}
+
 /** Variant gid -> display title, for previews and ledgers. */
 export async function titleMapFor(
   shopId: string,

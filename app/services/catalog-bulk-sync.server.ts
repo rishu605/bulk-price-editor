@@ -273,6 +273,7 @@ async function writeBatch(shopId: string, currency: string, rows: CatalogRow[]):
           productType: row.productType,
           tags: row.tags,
           collections: row.collections,
+          imageUrl: row.imageUrl,
           remoteUpdatedAt: row.remoteUpdatedAt,
         },
         update: {
@@ -290,6 +291,7 @@ async function writeBatch(shopId: string, currency: string, rows: CatalogRow[]):
           productType: row.productType,
           tags: row.tags,
           collections: row.collections,
+          imageUrl: row.imageUrl,
           remoteUpdatedAt: row.remoteUpdatedAt,
           // A variant reappearing after deletion clears its tombstone.
           deletedAt: null,

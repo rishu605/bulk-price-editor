@@ -131,6 +131,12 @@ model VariantIndex {
   barcode String?
   title   String?
 
+  /// The variant's own image, or its product's when the variant has none.
+  ///
+  /// Nullable and expected to be null: a product without a photo is normal, not an
+  /// error, and every variant predating this column has none until the next sync.
+  imageUrl String?
+
   /// Base-surface values in minor units, alongside the shop's primary currency.
   price     BigInt?
   compareAt BigInt?

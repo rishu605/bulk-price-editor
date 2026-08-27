@@ -21,7 +21,7 @@
 import { format } from "../../lib/money/format";
 import type { Money } from "../../lib/money/money";
 import { planRun } from "../../lib/planning/plan";
-import { loadCandidates, titleMapFor } from "./candidates.server";
+import { loadCandidates, variantDisplayFor } from "./candidates.server";
 import { importIdsOf, toResolvable } from "./model.server";
 import { guardrailsFor, readSettings } from "../settings.server";
 import { skipReasonForRow } from "../../lib/planning/reasons";
@@ -48,6 +48,8 @@ export interface DraftCampaign {
 export interface DraftPreviewRow {
   variantGid: string;
   title: string;
+  /** Null is ordinary — a product without a photo is normal, not a failure. */
+  imageUrl: string | null;
   before: string | null;
   after: string | null;
   beforeCompareAt: string | null;
@@ -171,7 +173,7 @@ export async function previewDraft(
   const skipped = ours.filter((row) => row.status === "skipped");
 
   const shown = [...changing, ...alreadyCorrect, ...skipped].slice(0, limit);
-  const titles = await titleMapFor(shopId, shown.map((row) => row.ref.variantGid));
+  const display = await variantDisplayFor(shopId, shown.map((row) => row.ref.variantGid));
 
   const fmt = (value?: Money | null) => (value ? format(value) : null);
 
@@ -184,7 +186,8 @@ export async function previewDraft(
     blocked: null,
     rows: shown.map((row) => ({
       variantGid: row.ref.variantGid,
-      title: titles.get(row.ref.variantGid) ?? row.ref.variantGid,
+      title: display.get(row.ref.variantGid)?.title ?? row.ref.variantGid,
+      imageUrl: display.get(row.ref.variantGid)?.imageUrl ?? null,
       before: fmt(row.beforePrice),
       after: fmt(row.intendedPrice),
       beforeCompareAt: fmt(row.beforeCompareAt),
