@@ -109,7 +109,26 @@ export function redisRuntime(handler: Handler, options: RedisRuntimeOptions): Qu
       const queue = queues.get(name);
       if (!queue) throw new Error(`No such queue: ${name}`);
 
-      await queue.add(name, ref, jobOptionsFor(QUEUE_POLICIES[name]));
+      // Spanned, not only counted. The execution side has had a span since it was
+      // written, so a trace showed a job appearing from nowhere and taking however long
+      // it took — with no record of when it was asked for. The interesting number in a
+      // backlog is the gap between those two, and a counter cannot express a gap.
+      //
+      // Same attributes as the execution span so the two line up in a trace view.
+      await span(
+        `enqueue ${name}`,
+        {
+          "queue.name": name,
+          "shop.id": ref.shopId,
+          ...(ref.campaignId ? { "campaign.id": ref.campaignId } : {}),
+          ...(ref.runId ? { "run.id": ref.runId } : {}),
+          ...(ref.revert === undefined ? {} : { "job.revert": ref.revert }),
+        },
+        async () => {
+          await queue.add(name, ref, jobOptionsFor(QUEUE_POLICIES[name]));
+        },
+      );
+
       metric("queue.enqueued", 1, { queue: name });
     },
 
