@@ -40,18 +40,30 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   const segmentId = String(
-    (payload as { properties?: Record<string, unknown> }).properties?.["segment id"] ?? "",
+    (payload as { properties?: Record<string, unknown> }).properties?.["segment-id"] ?? "",
   );
+
+  // `segment-id` is required in the manifest, so an empty one means the request did not
+  // carry what we asked for — a renamed field key, a hand-built call. Falling through
+  // would hand `undefined` to recapture, which means *every* baseline in the shop rather
+  // than one segment. The widest possible write is the worst available default, so this
+  // refuses instead of guessing.
+  if (!segmentId) {
+    logger.warn("Flow asked to capture baselines without a segment; refused", {
+      shopId: shop.id,
+    });
+    return new Response(null, { status: 200 });
+  }
 
   // The confirmation phrase is generated from the plan and handed straight back. That
   // reads like defeating the check and is not: the check exists to make a *person* stop
   // and read the warning, and the warning it produces is about live campaigns — which is
   // the condition already refused above. What remains is the scope, which the automation
   // named deliberately.
-  const plan = await planRecapture(shop.id, { segmentId: segmentId || undefined });
+  const plan = await planRecapture(shop.id, { segmentId });
 
   const result = await recapture(shop.id, {
-    segmentId: segmentId || undefined,
+    segmentId,
     confirmation: plan.confirmationPhrase ?? undefined,
     actor: "shopify-flow",
   });
