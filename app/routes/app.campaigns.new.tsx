@@ -1,13 +1,12 @@
+import { useCallback, useEffect, useRef } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { Form, redirect, useLoaderData } from "react-router";
+import { Form, redirect, useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
-import { facets, previewMatches, type FilterAst } from "../services/segments.server";
+import { facets, previewMatches } from "../services/segments.server";
 import { createCampaign } from "../services/campaigns/index.server";
-import type { AdjustmentRule, CompareAtPolicy } from "../lib/pricing/types";
-import { money } from "../lib/money/money";
 import { joinDateAndTime, localInputToUtc, type Schedule } from "../lib/scheduling/window";
 import { presetStartFor } from "../lib/scheduling/calendar";
 import { describeAdjustment } from "../lib/markets/describe";
@@ -24,7 +23,10 @@ import { billingFrom } from "../services/billing.server";
 import { canUseSurface } from "../lib/billing/plans";
 import prisma from "../db.server";
 import { segmentToAst } from "../services/segments.server";
+import { astFrom, compareAtFrom, readerFor, ruleFrom } from "../lib/campaigns/draft-form";
 import { PageShell } from "../components/PageShell";
+import { DraftPreview } from "../components/DraftPreview";
+import type { DraftPreview as Preview } from "../services/campaigns/draft-preview.server";
 
 export const loader = withGuard("/app/campaigns/new", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -51,7 +53,7 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
         filterAst: segment.filterAst,
         frozenVariantGids: segment.frozenVariantGids,
       })
-    : astFromParams(url.searchParams);
+    : astFrom(readerFor(url.searchParams));
 
   const [available, preview, segments, priceLists, settings, currency, shopRecord] =
     await Promise.all([
@@ -140,16 +142,6 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
 export const SCOPE_FIELDS = ["collection", "tag", "vendor", "title", "segment"] as const;
 
 /** Builds an AST from the simple scope form: all provided conditions ANDed. */
-function astFromParams(params: URLSearchParams): FilterAst {
-  // `segment` rides in the same form but is a reference, not a condition -- the
-  // loader resolves it into a whole AST rather than adding a clause to one.
-  const conditions = SCOPE_FIELDS.filter((field) => field !== "segment")
-    .map((field) => [field, params.get(field)] as const)
-    .filter(([, value]) => value && value.trim().length > 0)
-    .map(([field, value]) => ({ field, value: value!.trim() }));
-
-  return conditions.length > 0 ? { groups: [{ conditions }] } : { groups: [] };
-}
 
 export const action = withGuard("/app/campaigns/new", async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -162,26 +154,13 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
     if (typeof value === "string" && value.trim()) params.set(field, value.trim());
   }
 
-  const kind = String(form.get("ruleKind") ?? "percent-change");
-  const amount = Number(form.get("ruleValue") ?? 0);
-  const currency = String(form.get("currency") ?? "USD");
-
-  let rule: AdjustmentRule;
-  if (kind === "fixed-change") {
-    rule = { kind: "fixed-change", amount: money(Math.round(amount * 100), currency) };
-  } else if (kind === "set-exact") {
-    rule = { kind: "set-exact", amount: money(Math.round(amount * 100), currency) };
-  } else {
-    rule = { kind: "percent-change", percent: amount };
-  }
-
-  const compareAt = String(form.get("compareAt") ?? "leave");
-  const compareAtPolicy: CompareAtPolicy =
-    compareAt === "set-to-baseline"
-      ? { kind: "set-to-baseline" }
-      : compareAt === "clear"
-        ? { kind: "clear" }
-        : { kind: "leave" };
+  // The shop's own currency, not a form field. The form never had one, so this used to
+  // fall back to "USD" on every store -- and the conversion to minor units used a
+  // literal 100, so a JPY amount came out a hundred times too large as well (#343).
+  const read = readerFor(form);
+  const currency = await shopCurrency(shop.id);
+  const rule = ruleFrom(read, currency);
+  const compareAtPolicy = compareAtFrom(read);
 
   const startLocal = joinDateAndTime(
     String(form.get("startDate") ?? ""),
@@ -218,7 +197,7 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
 
   const campaign = await createCampaign(shop.id, {
     name: String(form.get("name") ?? "Untitled campaign").trim() || "Untitled campaign",
-    ast: astFromParams(params),
+    ast: astFrom(readerFor(params)),
     ...(segmentId ? { segmentId } : {}),
     ...(practice ? { practice: true } : {}),
     rule,
@@ -256,6 +235,29 @@ export default function NewCampaign() {
     gates,
     planName,
   } = useLoaderData<typeof loader>();
+
+  // The live price preview. Debounced, because it plans the whole scope on every call
+  // and a merchant typing "-20" would otherwise ask three times on the way there.
+  const previewFetcher = useFetcher<Preview>();
+  const formRef = useRef<HTMLFormElement>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const requestPreview = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      const form = formRef.current;
+      if (!form) return;
+      previewFetcher.submit(new FormData(form), {
+        method: "post",
+        action: "/app/preview-draft",
+      });
+    }, 400);
+  }, [previewFetcher]);
+
+  // Clear the pending call on unmount, so navigating away mid-type does not fire a
+  // request against a page that is gone.
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+
 
   return (
     <PageShell heading={practice ? "Practice campaign" : guided ? "Your first campaign" : "New campaign"}>
@@ -363,7 +365,7 @@ export default function NewCampaign() {
       </s-section>
 
       <s-section heading="2 · Rule">
-        <Form method="post">
+        <Form method="post" ref={formRef} onChange={requestPreview}>
           {/* The scope form and the create form are separate elements, so the chosen
               segment has to travel with the submission that actually creates. */}
           <input type="hidden" name="segment" value={selected.segment} />
@@ -416,6 +418,14 @@ export default function NewCampaign() {
                 differently.
               </s-text>
             </s-paragraph>
+
+            {/* What this rule does to prices, from the same resolver the run uses --
+                not an estimate of it. Sits with the rule rather than at the bottom of
+                the page, because it exists to answer "did I mean -20% or x0.20?" while
+                the merchant is still deciding. */}
+            <s-divider />
+            <s-heading>What this would do</s-heading>
+            <DraftPreview preview={previewFetcher.data ?? null} />
 
             <s-number-field
               name="priority"
