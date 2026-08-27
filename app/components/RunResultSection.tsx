@@ -94,7 +94,7 @@ export function RunResultSection({ result }: { result: CampaignResult }) {
       ) : null}
 
       <s-paragraph>
-        <s-text tone="neutral">{result.unavailable}</s-text>
+        <s-text color="subdued">{result.unavailable}</s-text>
       </s-paragraph>
     </s-section>
   );
@@ -104,7 +104,7 @@ function Count({ label, value }: { label: string; value: number }) {
   return (
     <s-stack gap="none">
       <s-text type="strong">{formatCount(value)}</s-text>
-      <s-text tone="neutral">{label}</s-text>
+      <s-text color="subdued">{label}</s-text>
     </s-stack>
   );
 }

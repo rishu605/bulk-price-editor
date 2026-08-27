@@ -28,7 +28,7 @@ export function CalendarGrid({ days, today }: { days: CalendarDay[]; today: stri
       <s-grid gridTemplateColumns="repeat(7, 1fr)" gap="small-200">
         {WEEKDAYS.map((weekday) => (
           <s-box key={weekday} padding="small-200">
-            <s-text tone="neutral">{weekday}</s-text>
+            <s-text color="subdued">{weekday}</s-text>
           </s-box>
         ))}
       </s-grid>

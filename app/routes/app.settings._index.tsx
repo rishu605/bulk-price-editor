@@ -144,7 +144,7 @@ export default function Settings() {
           and splitting them across pages is what made the nav sixteen items long. */}
       <s-section>
         <s-stack direction="inline" gap="base">
-          <s-text tone="neutral">Jump to</s-text>
+          <s-text color="subdued">Jump to</s-text>
           <s-link href="#guardrails">Guardrails</s-link>
           <s-link href="#rounding">Rounding</s-link>
           <s-link href="#notifications">Alerts</s-link>
