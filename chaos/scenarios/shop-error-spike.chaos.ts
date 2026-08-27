@@ -75,6 +75,7 @@ describe("chaos: one shop failing inside a healthy platform", () => {
         // reason that has nothing to do with the code.
         await prisma.errorEvent.deleteMany({ where: { errorId: { startsWith: "ANC-SPIKE-" } } });
         await prisma.webhookEvent.deleteMany({ where: { webhookId: { startsWith: "spike-" } } });
+        await prisma.shop.deleteMany({ where: { domain: { startsWith: "busy-" } } });
         const shop = await prisma.shop.findUniqueOrThrow({
           where: { id: chaos.fixture.shopId },
           select: { id: true, domain: true },
@@ -126,6 +127,12 @@ describe("chaos: one shop failing inside a healthy platform", () => {
 
         await prisma.errorEvent.deleteMany({ where: { errorId: { startsWith: "ANC-SPIKE-" } } });
         await prisma.webhookEvent.deleteMany({ where: { webhookId: { startsWith: "spike-" } } });
+        // Including the shop itself. Leaving it behind put sixteen `busy-…` rows in the
+        // database over an afternoon, and a `shop` table full of fixtures makes a real
+        // question — "which stores are installed?" — harder to answer than it should be.
+        // Earlier runs are cleaned too, so a database that already collected some
+        // recovers on the next run rather than needing somebody to notice.
+        await prisma.shop.deleteMany({ where: { domain: { startsWith: "busy-" } } });
       },
     );
   });
