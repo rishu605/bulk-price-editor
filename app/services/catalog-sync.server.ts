@@ -331,19 +331,32 @@ function mapStatus(status?: string | null): "ACTIVE" | "ARCHIVED" | "DRAFT" {
 
 const SHOP_CURRENCY = `#graphql
   query AnchorShopCurrency {
-    shop { currencyCode ianaTimezone }
+    shop {
+      currencyCode
+      ianaTimezone
+      plan { partnerDevelopment }
+    }
   }
 `;
 
 export async function fetchShopBasics(
   client: GraphQLRunner,
-): Promise<{ currency: string; timezone: string }> {
+): Promise<{ currency: string; timezone: string; developerStore: boolean }> {
   const response = await client.graphql(SHOP_CURRENCY);
   const body = (await response.json()) as {
-    data?: { shop?: { currencyCode?: string; ianaTimezone?: string } };
+    data?: {
+      shop?: {
+        currencyCode?: string;
+        ianaTimezone?: string;
+        plan?: { partnerDevelopment?: boolean } | null;
+      };
+    };
   };
   return {
     currency: body.data?.shop?.currencyCode ?? "USD",
     timezone: body.data?.shop?.ianaTimezone ?? "UTC",
+    // Defaults to false, so a query that fails or a field Shopify stops returning leaves
+    // the shop on its real plan rather than silently handing out the top tier.
+    developerStore: body.data?.shop?.plan?.partnerDevelopment === true,
   };
 }

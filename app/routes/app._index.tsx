@@ -131,7 +131,15 @@ export const action = withGuard("/app", async ({ request }: ActionFunctionArgs) 
     const basics = await fetchShopBasics(admin);
     await prisma.shop.update({
       where: { id: shop.id },
-      data: { timezone: basics.timezone },
+      data: {
+        timezone: basics.timezone,
+        // Recorded at sync, because it is the answer to "which plan applies" and the
+        // exemption for it was unreachable until now: `billingFrom` grants a development
+        // store the top tier, and nothing ever set the flag, so every dev store fell to
+        // Free and its 500-variant cap. Shopify's own reviewers evaluate on development
+        // stores, so the first campaign they tried would have been refused.
+        developerStore: basics.developerStore,
+      },
     });
 
     // Bulk first. One operation and a streamed result beats ten thousand paginated
