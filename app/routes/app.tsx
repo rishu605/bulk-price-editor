@@ -24,22 +24,11 @@ export default function App() {
     <AppProvider embedded apiKey={apiKey}>
       <RouteProgress />
       <s-app-nav>
-        <s-link href="/app">Dashboard</s-link>
+        <s-link href="/app">Home</s-link>
         <s-link href="/app/campaigns">Campaigns</s-link>
-        <s-link href="/app/calendar">Calendar</s-link>
-        <s-link href="/app/segments">Segments</s-link>
-        <s-link href="/app/catalog">Catalogue</s-link>
-        <s-link href="/app/baselines">Baselines</s-link>
-        <s-link href="/app/prices/import">Import prices</s-link>
-        <s-link href="/app/baselines/import">Import baselines</s-link>
-        <s-link href="/app/costs">Costs</s-link>
-        <s-link href="/app/reconciliation">What is live</s-link>
-        <s-link href="/app/drift">Drift</s-link>
-        <s-link href="/app/activity">Activity</s-link>
-        <s-link href="/app/feedback">Feedback</s-link>
-        <s-link href="/app/plan">Plan</s-link>
+        <s-link href="/app/prices">Prices</s-link>
+        <s-link href="/app/imports">Imports</s-link>
         <s-link href="/app/settings">Settings</s-link>
-        <s-link href="/app/debug">Diagnostics</s-link>
         {/* Absolute and a new tab: this renders in an iframe on admin.shopify.com,
             where a relative href would resolve against Shopify rather than us. */}
         <s-link href={helpBase} target="_blank">Help</s-link>

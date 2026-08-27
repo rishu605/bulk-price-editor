@@ -481,7 +481,7 @@ export default function NewCampaign() {
                       already running keeps running, and reverts always work whatever
                       plan you are on.
                     </s-paragraph>
-                    <s-link href="/app/plan">See the plans</s-link>
+                    <s-link href="/app/settings/plan">See the plans</s-link>
                   </s-banner>
                 ) : null}
 

@@ -19,7 +19,7 @@ import { FeedbackForm } from "../components/FeedbackForm";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 
-export const loader = withGuard("/app/feedback", async ({ request }: LoaderFunctionArgs) => {
+export const loader = withGuard("/app/settings/feedback", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
 
@@ -38,7 +38,7 @@ export const loader = withGuard("/app/feedback", async ({ request }: LoaderFunct
   };
 });
 
-export const action = withGuard("/app/feedback", async ({ request }: ActionFunctionArgs) => {
+export const action = withGuard("/app/settings/feedback", async ({ request }: ActionFunctionArgs) => {
   const { session, sessionToken } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
   const form = await request.formData();
@@ -61,7 +61,7 @@ export default function FeedbackPage() {
 
   return (
     <s-page heading="Feedback">
-      <FeedbackForm route="/app/feedback" />
+      <FeedbackForm route="/app/settings/feedback" />
 
       {sent.length > 0 ? (
         <s-section heading="What you have sent">

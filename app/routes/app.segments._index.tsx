@@ -4,7 +4,7 @@ import { authenticate } from "../shopify.server";
 import { LEGACY_ROUTES } from "../lib/routing/legacy-routes";
 
 /**
- * `/app/prices/import` moved to `/app/imports/prices`.
+ * `/app/segments` moved to `/app/settings/segments`.
  *
  * Kept because this URL is linked from operator alerts, runbooks and whatever a
  * merchant bookmarked. See `app/lib/routing/legacy-routes.ts`.
@@ -16,5 +16,5 @@ import { LEGACY_ROUTES } from "../lib/routing/legacy-routes";
  */
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
-  return redirect(LEGACY_ROUTES["/app/prices/import"]);
+  return redirect(LEGACY_ROUTES["/app/segments"]);
 };
