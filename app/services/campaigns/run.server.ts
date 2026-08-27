@@ -24,6 +24,7 @@ import type { RunOutcome } from "./types";
 import { inChunksCounting } from "../../lib/db/chunk";
 import { releaseClaim, transitionCampaign } from "./lifecycle.server";
 import type { CampaignState } from "../../lib/lifecycle/transitions";
+import { SKIP_REASON_GROUP } from "../../lib/planning/reasons";
 import { planResume, type LedgerState } from "../../lib/execution/resume";
 import { applyCampaignTags, removeCampaignTags } from "./tags.server";
 import {
@@ -560,15 +561,13 @@ async function executeCampaignRun(
   };
 }
 
-/** Why the plan left rows alone, in the merchant's terms. */
-const SKIP_REASONS: Record<string, string> = {
-  "missing-cost": "have no cost recorded, and a cost-based guardrail applies",
-  "missing-import": "were not in the imported file",
-  "below-floor": "would have priced below a guardrail floor",
-  "invalid-margin": "have a margin target that cannot be satisfied",
-  "invalid-compare-at": "would have had a compare-at price below their price",
-  "non-positive-price": "would have priced at or below zero",
-};
+/**
+ * Why the plan left rows alone, in the merchant's terms.
+ *
+ * Shared with the editor's preview, which phrases the same reasons one row at a time.
+ * Two copies would drift the moment a reason was added to the resolver.
+ */
+const SKIP_REASONS: Record<string, string> = SKIP_REASON_GROUP;
 
 function describeSkips(rows: readonly PlannedRow[]): string[] {
   const byReason = new Map<string, number>();
