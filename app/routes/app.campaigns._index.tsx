@@ -7,6 +7,8 @@ import { ensureShop } from "../services/shop.server";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
+import { TabBar } from "../components/TabBar";
+import { SPACE } from "../lib/ui/spacing";
 import { CampaignCalendar } from "../components/campaign/CampaignCalendar";
 import { CampaignListView } from "../components/campaign/CampaignListView";
 import { filtersFrom, listCampaigns } from "../services/campaigns/list.server";
@@ -101,21 +103,29 @@ export default function Campaigns() {
         </s-banner>
       ) : null}
 
+      {/* The action and the view choice are two different kinds of thing, and the row
+          that mixed them read as neither. Creating a campaign is the page's primary
+          action; list-versus-calendar is navigation, and now looks like the section
+          tabs and the campaign tabs because it is the same control. */}
       <s-section>
-        <s-stack direction="inline" gap="base">
-          <s-link href="/app/campaigns/new">
-            <s-button variant="primary">Create campaign</s-button>
-          </s-link>
-          <s-link href={linkTo({ view: "list" })}>
-            {view === "list" ? <s-text type="strong">List</s-text> : <s-text>List</s-text>}
-          </s-link>
-          <s-link href={linkTo({ view: "calendar" })}>
-            {view === "calendar" ? (
-              <s-text type="strong">Calendar</s-text>
-            ) : (
-              <s-text>Calendar</s-text>
-            )}
-          </s-link>
+        <s-stack direction="block" gap={SPACE.section}>
+          <s-stack direction="inline" gap="base" alignItems="center">
+            <s-link href="/app/campaigns/new">
+              <s-button variant="primary">Create campaign</s-button>
+            </s-link>
+          </s-stack>
+
+          <TabBar
+            label="Campaign views"
+            tabs={[
+              { label: "List", href: linkTo({ view: "list" }), current: view === "list" },
+              {
+                label: "Calendar",
+                href: linkTo({ view: "calendar" }),
+                current: view === "calendar",
+              },
+            ]}
+          />
         </s-stack>
       </s-section>
 
