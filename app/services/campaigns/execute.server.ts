@@ -25,6 +25,7 @@ import { readBackVerdict } from "../../lib/execution/read-back";
 import type { PlannedRow } from "../../lib/planning/types";
 import { selectWritePath } from "../../lib/planning/write-path";
 import { RateLimitBudget } from "../../lib/shopify/budget";
+import { metric } from "../../lib/telemetry/metrics";
 
 export interface ExecuteOutcome {
   rows: ExecutedRow[];
@@ -37,6 +38,15 @@ export interface ExecuteOutcome {
 
 export interface ExecuteContext {
   client: AdminClient;
+  /**
+   * Whose rate-limit budget this run is spending.
+   *
+   * Carried only so `budget.saturation` can be reported per shop, which is the only way
+   * the number means anything: saturation is a property of one merchant's bucket, and an
+   * average across shops would hide the one that is exhausted behind the ones that are
+   * idle. RFC §11 lists it as an SLO panel for that reason.
+   */
+  shopId: string;
   productOf: (variantGid: string) => string;
   verifySampleRate?: number;
   /** Overrides the automatic choice. Only used by tests and diagnostics. */
@@ -73,13 +83,28 @@ export async function executeRows(
   const path = context.forcePath ?? decision.path;
 
   if (path === "sync") {
+    const budget = new RateLimitBudget();
     const result = await executeSync(rows, {
       client: context.client,
-      budget: new RateLimitBudget(),
+      budget,
       productOf: context.productOf,
       verifySampleRate: context.verifySampleRate ?? 1,
       onProgress: context.onProgress,
     });
+
+    // Reported after the run rather than during it: the interesting number is how much
+    // of the merchant's bucket this campaign left behind, and sampling mid-run would
+    // mostly record the sleep the budget manager had just finished taking.
+    //
+    // Only the sync path. The bulk path spends no rate-limit budget at all, so reporting
+    // a saturation for it would draw a flat line that means "we did not look" while
+    // reading as "nothing was used".
+    const usable = budget.usableMaximum();
+    if (usable > 0) {
+      const saturation = Math.min(1, Math.max(0, 1 - budget.available() / usable));
+      metric("budget.saturation", saturation, { shop: context.shopId });
+    }
+
     return { ...result, path: "sync" };
   }
 

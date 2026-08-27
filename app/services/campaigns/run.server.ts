@@ -332,6 +332,7 @@ export async function runCampaign(
 
   const result = await executeRows(writable, {
     client,
+    shopId,
     productOf: (gid) => products.get(gid) ?? gid,
     verifySampleRate: options.verifySampleRate ?? 1,
     forcePath: options.forcePath,
