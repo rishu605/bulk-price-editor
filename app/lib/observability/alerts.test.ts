@@ -155,14 +155,21 @@ describe("every alert leads somewhere", () => {
    */
   const runbook = readFileSync(join(process.cwd(), "docs/runbooks.md"), "utf8");
 
+  const anchorOf = (heading: string) =>
+    heading
+      .trim()
+      .toLowerCase()
+      .replace(/[^\w\s-]/g, "")
+      .replace(/\s+/g, "-");
+
   const anchors = new Set(
-    [...runbook.matchAll(/^##\s+(.+)$/gm)].map(([, heading]) =>
-      heading
-        .trim()
-        .toLowerCase()
-        .replace(/[^\w\s-]/g, "")
-        .replace(/\s+/g, "-"),
-    ),
+    [...runbook.matchAll(/^##\s+(.+)$/gm)].map(([, heading]) => anchorOf(heading)),
+  );
+
+  // Only the `## Alert:` pages. The runbook also carries `## Watch:` sections and
+  // procedures like stuck-run recovery, and no alert should be pointing at those.
+  const alertSections = new Set(
+    [...runbook.matchAll(/^##\s+(Alert:.+)$/gm)].map(([, heading]) => anchorOf(heading)),
   );
 
   // Every condition at once, so a new alert is covered without anybody remembering to add
@@ -195,4 +202,30 @@ describe("every alert leads somewhere", () => {
       ).toContain(anchor);
     });
   }
+
+  /**
+   * One page per alert, and no page without an alert.
+   *
+   * "The anchor resolves" is too weak, and the gap is not hypothetical: `webhook-lag`
+   * pointed at the mirror-divergence runbook and `error-spike` at stuck-run recovery.
+   * Both anchors existed, so every assertion above passed — and the operator woken at 3am
+   * by an error spike read a page about a different incident. Worse than a broken link,
+   * which at least announces itself.
+   *
+   * The runbook also carried an `## Alert:` page for budget saturation, which `NOT_ALERTS`
+   * records as deliberately *not* an alert: a documented promise of a page that never
+   * comes.
+   *
+   * A bijection catches all three, and nothing weaker catches any of them.
+   */
+  it("gives every alert its own page, and every page an alert", () => {
+    const claimed = all.map((alert) => alert.runbook.split("#")[1]);
+
+    expect(
+      new Set(claimed).size,
+      "two alerts share one runbook page, so one of them describes the wrong incident",
+    ).toBe(claimed.length);
+
+    expect(new Set(claimed)).toEqual(alertSections);
+  });
 });

@@ -105,7 +105,7 @@ export function evaluate(window: SignalWindow): AlertCondition[] {
       because:
         "The catalogue mirror is stale, and a campaign planned against a stale mirror prices " +
         "the wrong products.",
-      runbook: "docs/runbooks.md#alert-mirror-divergence-above-05",
+      runbook: "docs/runbooks.md#alert-webhooks-more-than-five-minutes-behind",
     });
   }
 
@@ -132,7 +132,7 @@ export function evaluate(window: SignalWindow): AlertCondition[] {
       because:
         "More than one request in twenty is failing. Whatever it is, it is affecting " +
         "merchants right now rather than one unlucky one.",
-      runbook: "docs/runbooks.md#stuck-run-recovery",
+      runbook: "docs/runbooks.md#alert-errors-spiking",
     });
   }
 
