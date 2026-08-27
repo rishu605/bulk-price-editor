@@ -858,7 +858,37 @@ async function recordResults(
  */
 async function refreshMirror(shopId: string, rows: ExecutedRows): Promise<void> {
   for (const executed of rows) {
-    if (executed.status === "failed" || !executed.row.intendedPrice) continue;
+    if (!executed.row.intendedPrice) continue;
+
+    // A failed row leaves the mirror saying "unknown", not saying the old price.
+    //
+    // Read-back failed, so we genuinely do not know what is live: the write may have
+    // landed and been misreported, or not landed at all. Skipping the update left the
+    // mirror asserting the *pre-run* price, which is a definite claim and a wrong one —
+    // and the planner believes it. `isNoop` then compares a revert's target against that
+    // stale value, finds them equal, drops the row, and the revert writes nothing while
+    // reporting clean. A storefront stays on sale and the campaign says it is over.
+    //
+    // Null is the honest answer and the one the planner handles correctly: `isNoop`
+    // never treats an absent live price as already-correct, so the row is written. Drift
+    // detection already reads null as "we have not looked" and stays quiet, and the
+    // nightly audit heals it from Shopify.
+    if (executed.status === "failed") {
+      await prisma.priceSurfaceEntry.updateMany({
+        where: {
+          shopId,
+          variantGid: executed.row.ref.variantGid,
+          surfaceKind: "BASE",
+          priceListGid: "",
+        },
+        data: { livePrice: null, liveCompareAt: null, syncedAt: new Date() },
+      });
+      await prisma.variantIndex.updateMany({
+        where: { shopId, variantGid: executed.row.ref.variantGid },
+        data: { price: null, compareAt: null, syncedAt: new Date() },
+      });
+      continue;
+    }
 
     await prisma.priceSurfaceEntry.updateMany({
       where: {
