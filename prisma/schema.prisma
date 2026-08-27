@@ -167,6 +167,10 @@ model VariantIndex {
   @@index([shopId, price])
   @@index([shopId, status])
   @@index([shopId, deletedAt])
+  /// GIN, for the `has` lookups campaigns scope by. Declared with an explicit type
+  /// because a btree on an array column cannot serve containment.
+  @@index([tags], type: Gin)
+  @@index([collections], type: Gin)
   @@map("variant_index")
 }
 
