@@ -1,5 +1,7 @@
 import { Children, cloneElement, isValidElement, type ReactNode } from "react";
 
+import { SPACE } from "../lib/ui/spacing";
+
 /**
  * Every page in the app, at the full width of the screen.
  *
@@ -23,6 +25,20 @@ import { Children, cloneElement, isValidElement, type ReactNode } from "react";
  * The column collapses under 900px so the aside falls below the content rather than
  * being squeezed into something unreadable. It is a container query, not a media
  * query: the app renders in an admin iframe whose width is not the window's.
+ *
+ * ## The page rhythm lives here
+ *
+ * Both branches wrap their content in a stack at `SPACE.page`, and that is the only
+ * place in the app the distance between top-level sections is decided. Two reasons it
+ * is not left to the routes:
+ *
+ * - The two branches used to disagree. A page with an aside got `gap="base"` between its
+ *   sections; a page without one fell through to whatever `s-page` does with loose
+ *   children. Same app, two rhythms, decided by whether the page happened to have a
+ *   sidebar — which is exactly the kind of accident that reads as "unstyled".
+ * - Page rhythm has to be the largest gap on the screen to do its job. If a route can set
+ *   it, some route eventually sets it smaller than the gaps inside its own sections, and
+ *   the page stops having visible structure at all.
  */
 export function PageShell({
   heading,
@@ -41,7 +57,7 @@ export function PageShell({
   if (aside.length === 0) {
     return (
       <s-page heading={heading} inlineSize="large">
-        {main}
+        <s-stack gap={SPACE.page}>{main}</s-stack>
       </s-page>
     );
   }
@@ -49,16 +65,24 @@ export function PageShell({
   return (
     <s-page heading={heading} inlineSize="large">
       <s-grid
-        gap="base"
+        gap={SPACE.page}
+        // The column gap is the page rhythm too, not a smaller one. Two columns set
+        // closer together than the sections stacked within them read as one column of
+        // torn paper, because the strongest gap on the screen would then be running the
+        // wrong way.
+        //
         // One comma only. Polaris splits a responsive value on the comma to separate
         // "when the query matches" from "otherwise", so a `minmax(0, 1fr)` in here
         // takes its own comma as that separator and the whole value stops parsing --
         // which silently falls back to `none` and stacks the aside underneath, looking
         // exactly like a layout choice rather than a broken string.
         gridTemplateColumns="@container (inline-size <= 900px) 1fr, 1fr 22rem"
+        // Without this the aside column stretches to the height of the main content, so
+        // a one-line sidebar next to a long table becomes a very tall empty card.
+        alignItems="start"
       >
-        <s-stack gap="base">{main}</s-stack>
-        <s-stack gap="base">
+        <s-stack gap={SPACE.page}>{main}</s-stack>
+        <s-stack gap={SPACE.page}>
           {aside.map((child) =>
             // The slot is meaningless now that these are ordinary grid children, and
             // leaving it on would have them looking for a slot no ancestor provides.
