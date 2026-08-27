@@ -16,6 +16,7 @@
  */
 
 import prisma from "../app/db.server";
+import { chooseShop, shopArg } from "../app/lib/seed/target-shop";
 import { reconcile } from "../app/services/reconciliation.server";
 
 const PAGE_SIZE = 50;
@@ -39,7 +40,16 @@ async function time(label: string, fn: () => Promise<unknown>): Promise<void> {
 }
 
 async function main() {
-  const shop = await prisma.shop.findFirstOrThrow();
+  // Name the store or be told which exist. These scripts write real prices to a real
+  // storefront, so guessing is the one behaviour not on offer — the same rule the seeder
+  // and the perf scripts already follow.
+  const installed = await prisma.shop.findMany({
+    where: { uninstalledAt: null },
+    select: { domain: true },
+  });
+  const shop = await prisma.shop.findUniqueOrThrow({
+    where: { domain: chooseShop(installed, shopArg(process.argv.slice(2))).domain },
+  });
   const total = await prisma.variantIndex.count({ where: { shopId: shop.id, deletedAt: null } });
   const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
