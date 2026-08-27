@@ -55,9 +55,22 @@ export function PageShell({
   const main = all.filter((child) => !isAside(child));
 
   if (aside.length === 0) {
+    // Children go straight into `s-page`, with no wrapper of any kind.
+    //
+    // This looks inconsistent with the two-column branch below, which wraps its columns
+    // in stacks, and it is deliberate. Wrapping here — in an `s-stack`, and then in a
+    // single-column `s-grid` — rendered the page *blank* in the admin: the heading
+    // appeared and every section vanished, with no error and nothing in the console.
+    // Both were caught by opening the page; neither was caught by a test, because the
+    // markup serialises fine and Polaris' layout only runs in the browser.
+    //
+    // So `s-page` owns the spacing between its own direct sections, and the page rhythm
+    // in `spacing.ts` applies to content this component nests deliberately. Do not
+    // "tidy" this into matching the branch below without loading a page that has no
+    // aside — `/app/prices/live` is one — and looking at it.
     return (
       <s-page heading={heading} inlineSize="large">
-        <s-stack gap={SPACE.page}>{main}</s-stack>
+        {main}
       </s-page>
     );
   }
