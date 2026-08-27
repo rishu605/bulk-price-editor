@@ -50,9 +50,24 @@ export interface TriggerPayload {
    */
   "campaign id": string;
   "campaign name": string;
-  "products affected"?: number;
-  "products reverted"?: number;
-  "products drifted"?: number;
+  /**
+   * Counts are strings, and that is not a style choice.
+   *
+   * Every field in the trigger manifests is `single_line_text_field`, because Flow's
+   * trigger schema has no integer type — `number_integer` is rejected outright. Sending
+   * a number against a text field makes Shopify refuse the whole trigger:
+   *
+   *   Type error for field 'products reverted': 18 is not a String.
+   *
+   * `fireTrigger` swallows that by design — a campaign must not fail because an
+   * automation could not be told about it — so all three triggers silently never fired
+   * and every workflow downstream of them was dead. Nothing in the repo could see it:
+   * the mismatch is between a TOML file and a TypeScript type, and only Shopify
+   * validates the pair.
+   */
+  "products affected"?: string;
+  "products reverted"?: string;
+  "products drifted"?: string;
   outcome?: "clean" | "partial" | "failed";
 }
 
