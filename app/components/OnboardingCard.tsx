@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import type { OnboardingState, OnboardingStep } from "../lib/onboarding/steps";
-import { HAIRLINE, PAD, SPACE } from "../lib/ui/spacing";
+import { SPACE } from "../lib/ui/spacing";
 
 /**
  * The checklist, until the first campaign has run cleanly.
@@ -22,12 +22,19 @@ import { HAIRLINE, PAD, SPACE } from "../lib/ui/spacing";
  * The state comes from what the shop has actually done, never from "steps dismissed", so
  * there is nothing here to dismiss: the card retires itself when the work is real.
  *
- * Three rhythms, nested, and they are what make it scan as a checklist rather than a
- * paragraph with badges in it: section rhythm between the progress line and the list,
- * item rhythm between the steps, item rhythm again inside a step. The steps are bounded
- * boxes for the same reason the stat tiles are — a checklist whose items have no edges
- * is just four lines of text, and the merchant has to count the badges to work out where
- * one step stops.
+ * ## Why the steps are rows and not boxes
+ *
+ * Each step used to be a bordered box holding a stack, and the result was three tall
+ * cards inside a card, each with a title on one line, a lone "Why?" on the next and its
+ * action on a third — because `s-clickable` and `s-link` are block-level and an inline
+ * stack does not change that. Nine lines and three borders to carry three short
+ * sentences, with the right two-thirds of every box empty.
+ *
+ * A grid changes that, where a stack could not: block-level children placed in separate
+ * *cells* sit side by side, because it is the cell that decides where they go. So a step
+ * is one row — status, title, action — and the steps are separated by hairlines rather
+ * than each being drawn as its own card. Same information, a third of the height, and
+ * the eye can run down the status column to see where it is up to.
  */
 export function OnboardingCard({ state }: { state: OnboardingState }) {
   if (state.complete) return null;
@@ -48,8 +55,14 @@ export function OnboardingCard({ state }: { state: OnboardingState }) {
         </s-stack>
 
         <s-stack gap={SPACE.item}>
-          {state.steps.map((step) => (
-            <Step key={step.id} step={step} isNext={step.id === state.next?.id} />
+          {state.steps.map((step, index) => (
+            <s-stack key={step.id} gap={SPACE.item}>
+              {/* A rule between steps rather than a border around each. The separator is
+                  the same information as the box — where one step stops — at a fraction
+                  of the ink, and it does not nest a card inside a card. */}
+              {index > 0 ? <s-divider /> : null}
+              <Step step={step} isNext={step.id === state.next?.id} />
+            </s-stack>
           ))}
         </s-stack>
       </s-stack>
@@ -57,50 +70,80 @@ export function OnboardingCard({ state }: { state: OnboardingState }) {
   );
 }
 
+/**
+ * The status glyph.
+ *
+ * A checked circle, an open one and a dashed one: the standard vocabulary for done, now
+ * and not yet, which means the column reads as a progress track without anybody having
+ * to label it. The badge that used to say "Done" / "Next" / "Later" on every row is gone
+ * with it — three badges to say what three glyphs say, and the two loudest words on the
+ * card were "Done" and "Later".
+ *
+ * "Next" survives as a badge on exactly one row, because that one is not a status the
+ * eye should merely be able to find. It is the instruction.
+ */
+function StatusIcon({ done, isNext }: { done: boolean; isNext: boolean }) {
+  if (done) return <s-icon type="check-circle-filled" tone="success" />;
+  if (isNext) return <s-icon type="circle" />;
+  return <s-icon type="circle-dashed" color="subdued" />;
+}
+
 function Step({ step, isNext }: { step: OnboardingStep; isNext: boolean }) {
   const [why, setWhy] = useState(false);
 
   return (
-    <s-box
-      padding={PAD.card}
-      borderWidth={HAIRLINE.borderWidth}
-      borderStyle={HAIRLINE.borderStyle}
-      borderColor={HAIRLINE.borderColor}
-      borderRadius="base"
-    >
-      <s-stack gap={SPACE.item}>
+    <s-stack gap={SPACE.tight}>
+      <s-grid
+        // Three columns, collapsing to two. `auto 1fr auto` keeps the status glyph and
+        // the action tight to their content and gives the title everything left over,
+        // which is what stops the row from breaking into three.
+        //
+        // One comma only. Polaris splits a responsive value on the comma to separate
+        // "when the query matches" from "otherwise", so a second one anywhere in the
+        // value stops the whole thing parsing and it falls back to `none`.
+        gridTemplateColumns="@container (inline-size <= 500px) auto 1fr, auto 1fr auto"
+        gap={SPACE.item}
+        alignItems="center"
+      >
+        <StatusIcon done={step.done} isNext={isNext} />
+
         <s-stack direction="inline" gap={SPACE.item} alignItems="center">
-          <s-badge tone={step.done ? "success" : isNext ? "info" : "neutral"}>
-            {step.done ? "Done" : isNext ? "Next" : "Later"}
-          </s-badge>
-          <s-text type="strong">{step.title}</s-text>
-          {/* Progressive disclosure, not a link away. The reasoning belongs next to the
-              step it explains — sending a merchant to a docs page to find out why they
-              are being asked to sync is how they end up not syncing.
-
-              These render on their own lines, because `s-clickable` and `s-link` are
-              block-level and an inline stack does not change that. It is not pretty and
-              it is what works: replacing them with `s-button-group` laid the row out
-              correctly and rendered no buttons at all, so the first screen after install
-              offered no way to sync. A checklist that looks slightly loose beats one
-              whose actions are missing.
-
-              Before the action, deliberately. The row wraps on a narrow column, and when
-              the toggle was last it wrapped onto its own line and read as belonging to
-              the step below it. The action wrapping is harmless; an explanation attached
-              to the wrong step is not. */}
-          <s-clickable onClick={() => setWhy((open) => !open)}>
-            <s-text color="subdued">{why ? "Hide why" : "Why?"}</s-text>
-          </s-clickable>
-          {step.href && step.cta ? <s-link href={step.href}>{step.cta}</s-link> : null}
+          {/* Subdued once done. A finished step should still be findable — it is the
+              evidence the checklist is being honest — without competing with the step
+              the merchant is actually being asked to do. */}
+          <s-text type={step.done ? undefined : "strong"} color={step.done ? "subdued" : undefined}>
+            {step.title}
+          </s-text>
+          {isNext ? <s-badge tone="info">Next</s-badge> : null}
         </s-stack>
 
-        {why ? (
-          <s-paragraph>
-            <s-text color="subdued">{step.detail}</s-text>
-          </s-paragraph>
-        ) : null}
-      </s-stack>
-    </s-box>
+        {/* Both actions in one cell, as their own grid: two block-level elements in a
+            single cell would stack, and this is the pair that used to. Why before the
+            action, deliberately — when the row wraps it is the action that should fall
+            to the next line, not the explanation, which would then read as belonging to
+            the step below it. */}
+        <s-grid gridTemplateColumns="auto auto" gap={SPACE.item} alignItems="center">
+          {/* Not on a finished step. The reasoning for work already done is the one
+              thing on this card nobody needs, and on a completed row — which has no
+              action beside it — it was also the only thing left hanging off the right
+              edge, so the column of actions read as ragged. */}
+          {step.done ? null : (
+            <s-clickable onClick={() => setWhy((open) => !open)}>
+              <s-text color="subdued">{why ? "Hide why" : "Why?"}</s-text>
+            </s-clickable>
+          )}
+          {step.href && step.cta ? <s-link href={step.href}>{step.cta}</s-link> : null}
+        </s-grid>
+      </s-grid>
+
+      {/* Progressive disclosure, not a link away. The reasoning belongs next to the step
+          it explains — sending a merchant to a docs page to find out why they are being
+          asked to sync is how they end up not syncing. */}
+      {why ? (
+        <s-paragraph>
+          <s-text color="subdued">{step.detail}</s-text>
+        </s-paragraph>
+      ) : null}
+    </s-stack>
   );
 }

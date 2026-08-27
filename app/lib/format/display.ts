@@ -56,3 +56,50 @@ export function formatDay(value: Date | string, timeZone: string): string {
     return String(value);
   }
 }
+
+/**
+ * How long ago something happened, in words.
+ *
+ * ## Why a `now` is passed in rather than read
+ *
+ * Calling `Date.now()` inside this function would compute the string twice — once on the
+ * server rendering the HTML, once in the browser hydrating it — at two different
+ * instants. Most of the time that agrees; around a boundary it does not, and React
+ * patches over a difference it should never have been shown. Taking `now` from the
+ * loader makes both renders read the same clock, which also gives the phrase an honest
+ * meaning: *as of when this page was loaded*.
+ *
+ * ## Why relative at all
+ *
+ * A dashboard's activity list is five timestamps stacked vertically, and rendered
+ * absolutely they are five nearly identical strings — "27/08/2026, 12:40:38" five times.
+ * The reader has to diff them character by character to learn the only thing they wanted
+ * to know, which is whether this happened recently. Relative time answers that in a
+ * glance and stops the column being noise.
+ *
+ * Anything older than a week falls back to a date, because "47 days ago" is a subtraction
+ * the reader now has to undo to place it against anything else they know.
+ */
+export function formatAgo(value: Date | string, now: Date | string, timeZone: string): string {
+  const then = new Date(value).getTime();
+  const at = new Date(now).getTime();
+  if (Number.isNaN(then) || Number.isNaN(at)) return String(value);
+
+  const seconds = Math.round((at - then) / 1000);
+  const future = seconds < 0;
+  const size = Math.abs(seconds);
+
+  // Cast rather than pluralised by hand at four call sites: the unit is singular when
+  // the count is one, and "1 minutes ago" is the kind of detail that makes a UI look
+  // unattended.
+  const phrase = (count: number, unit: string) =>
+    `${count} ${unit}${count === 1 ? "" : "s"}`;
+
+  const relative = (body: string) => (future ? `in ${body}` : `${body} ago`);
+
+  if (size < 45) return future ? "in a moment" : "just now";
+  if (size < 3600) return relative(phrase(Math.round(size / 60), "minute"));
+  if (size < 86_400) return relative(phrase(Math.round(size / 3600), "hour"));
+  if (size < 604_800) return relative(phrase(Math.round(size / 86_400), "day"));
+  return formatDay(value, timeZone);
+}
