@@ -1,4 +1,5 @@
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { useRef } from "react";
 import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
@@ -16,6 +17,7 @@ import {
   ROUNDING_LABELS,
 } from "../lib/money/rounding-policy";
 import { PageShell } from "../components/PageShell";
+import { SettingsSaveBar } from "../components/SettingsSaveBar";
 
 export const loader = withGuard("/app/settings", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -61,30 +63,13 @@ export const action = withGuard("/app/settings", async ({ request }: ActionFunct
   const actor = actorFor(sessionToken, session.shop);
   const form = await request.formData();
 
-  if (String(form.get("intent")) === "notifications") {
-    await writePreferences(shop.id, {
-      email: String(form.get("email") ?? ""),
-      onCompletion: form.get("onCompletion") === "on",
-      onPartialOrFailure: form.get("onPartialOrFailure") === "on",
-      onDrift: form.get("onDrift") === "on",
-      onRevert: form.get("onRevert") === "on",
-      weeklyDigest: form.get("weeklyDigest") === "on",
-    });
-    return { ok: true, message: "Notification preferences saved." };
-  }
-
-  if (String(form.get("intent")) === "rounding") {
-    const existing = await readSettings(shop.id);
-
-    await writeSettings(
-      shop.id,
-      { ...existing, rounding: readRoundingPolicy(form.entries()) },
-      actor,
-    );
-
-    return { ok: true, message: "Rounding saved. New campaigns start with these." };
-  }
-
+  // One form, one save. It used to be three forms with three intents, each doing
+  // `{ ...existing, its own fields }` so the other two survived. That worked and it is
+  // also how a bug once switched notification preferences off while saving a guardrail:
+  // every write had to remember what it was not touching.
+  //
+  // With one form every field is present on every save, so nothing depends on being
+  // remembered. `{ ...existing }` stays only for fields no control on this page owns.
   const existing = await readSettings(shop.id);
 
   const saved = await writeSettings(
@@ -97,11 +82,21 @@ export const action = withGuard("/app/settings", async ({ request }: ActionFunct
       minPrice: emptyToNull(form.get("minPrice")),
       violationPolicy: asPolicy(form.get("violationPolicy")),
       missingCostPolicy: form.get("missingCostPolicy") === "error" ? "error" : "skip",
+      rounding: readRoundingPolicy(form.entries()),
     },
     actor,
   );
 
-  return { ok: true, message: "Guardrails saved. They apply to every campaign.", saved };
+  await writePreferences(shop.id, {
+    email: String(form.get("email") ?? ""),
+    onCompletion: form.get("onCompletion") === "on",
+    onPartialOrFailure: form.get("onPartialOrFailure") === "on",
+    onDrift: form.get("onDrift") === "on",
+    onRevert: form.get("onRevert") === "on",
+    weeklyDigest: form.get("weeklyDigest") === "on",
+  });
+
+  return { ok: true, message: "Settings saved.", saved };
 });
 
 function emptyToNull(value: FormDataEntryValue | null): number | null {
@@ -128,6 +123,7 @@ export default function Settings() {
     mailConfigured,
   } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
+  const formRef = useRef<HTMLFormElement>(null);
   const busy = fetcher.state !== "idle";
 
   const costCoverage = variants === 0 ? 0 : Math.round((withCost / variants) * 100);
@@ -140,6 +136,7 @@ export default function Settings() {
         </s-banner>
       ) : null}
 
+      <fetcher.Form method="post" ref={formRef}>
       {/* Three long sections in one page, so a merchant who came here to change one
           number does not scroll past the other two hunting for it. In-page anchors
           rather than more routes: these settings are read together — a rounding rule
@@ -173,7 +170,6 @@ export default function Settings() {
           </s-banner>
         ) : null}
 
-        <fetcher.Form method="post">
           <s-stack gap="base">
             <s-checkbox
               name="neverBelowCost"
@@ -222,12 +218,7 @@ export default function Settings() {
                 Fail the campaign
               </s-option>
             </s-select>
-
-            <s-button type="submit" variant="primary" loading={busy || undefined}>
-              Save guardrails
-            </s-button>
           </s-stack>
-        </fetcher.Form>
       </s-section>
 
       <s-section id="rounding" heading="Rounding">
@@ -237,9 +228,6 @@ export default function Settings() {
             once here; each campaign can override it.
           </s-text>
         </s-paragraph>
-
-        <fetcher.Form method="post">
-          <input type="hidden" name="intent" value="rounding" />
 
           <s-stack gap="base">
             <s-select name="rounding.default" label="Everywhere, unless overridden">
@@ -295,12 +283,7 @@ export default function Settings() {
                 })}
               </>
             ) : null}
-
-            <s-button type="submit" variant="primary" loading={busy || undefined}>
-              Save rounding
-            </s-button>
           </s-stack>
-        </fetcher.Form>
       </s-section>
 
       <s-section id="notifications" heading="Notifications">
@@ -320,8 +303,6 @@ export default function Settings() {
           </s-banner>
         ) : null}
 
-        <fetcher.Form method="post">
-          <input type="hidden" name="intent" value="notifications" />
           <s-stack gap="base">
             <s-text-field
               name="email"
@@ -359,12 +340,7 @@ export default function Settings() {
               label="Weekly summary"
               checked={notifications.weeklyDigest || undefined}
             />
-
-            <s-button type="submit" variant="primary" loading={busy || undefined}>
-              Save notification preferences
-            </s-button>
           </s-stack>
-        </fetcher.Form>
 
         <s-paragraph>
           <s-text>
@@ -374,6 +350,10 @@ export default function Settings() {
           </s-text>
         </s-paragraph>
       </s-section>
+
+      </fetcher.Form>
+
+      <SettingsSaveBar form={formRef} saving={busy} />
 
       <s-section slot="aside" heading="Why floors are checked last">
         <s-paragraph>
