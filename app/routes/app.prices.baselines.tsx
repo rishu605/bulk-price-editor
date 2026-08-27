@@ -24,7 +24,8 @@ import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
 import { baselineHistory, browseBaselines } from "../services/baseline-browser.server";
 import { BaselineTable } from "../components/BaselineTable";
-import { FilterForm } from "../components/FilterForm";
+import { VariantSearch } from "../components/prices/VariantSearch";
+import { Pagination } from "../components/prices/Pagination";
 import { baselinesCsv } from "../lib/reporting/baselines-csv";
 import { downloadCsv } from "../lib/reporting/csv";
 import { RouteBoundary } from "../components/RouteBoundary";
@@ -61,12 +62,6 @@ export default function Baselines() {
     useLoaderData<typeof loader>();
   const [, setSearchParams] = useSearchParams();
 
-  const lastPage = Math.max(1, Math.ceil(total / 25));
-  const goTo = (next: number) =>
-    setSearchParams((params) => {
-      params.set("page", String(next));
-      return params;
-    });
 
   const show = (gid: string) =>
     setSearchParams((params) => {
@@ -77,9 +72,12 @@ export default function Baselines() {
   return (
     <PageShell heading="Baselines">
       <s-section>
-        <FilterForm fields={FILTER_FIELDS}>
-          <s-stack gap="base">
-            <s-text-field name="q" label="Title, SKU or variant ID" value={filters.q ?? ""} />
+        <VariantSearch
+          fields={FILTER_FIELDS}
+          query={filters.q ?? ""}
+          label="Title, SKU or variant ID"
+          direction="block"
+        >
 
             <s-select name="vendor" label="Vendor">
               <s-option value="" defaultSelected={!filters.vendor}>
@@ -110,9 +108,7 @@ export default function Baselines() {
               checked={filters.divergedOnly || undefined}
             />
 
-            <s-button type="submit">Filter</s-button>
-          </s-stack>
-        </FilterForm>
+        </VariantSearch>
 
         {rows.length === 0 ? (
           <s-paragraph>
@@ -123,7 +119,7 @@ export default function Baselines() {
           <>
             <s-paragraph>
               <s-text>
-                {total} variants · showing {rows.length}
+                {total} variants
               </s-text>
             </s-paragraph>
 
@@ -140,19 +136,7 @@ export default function Baselines() {
 
             <BaselineTable rows={rows} onShowHistory={show} />
 
-            {lastPage > 1 ? (
-              <s-stack direction="inline" gap="base">
-                <s-button disabled={page <= 1} onClick={() => goTo(page - 1)}>
-                  Previous
-                </s-button>
-                <s-text>
-                  Page {page} of {lastPage}
-                </s-text>
-                <s-button disabled={page >= lastPage} onClick={() => goTo(page + 1)}>
-                  Next
-                </s-button>
-              </s-stack>
-            ) : null}
+            <Pagination page={page} total={total} pageSize={25} noun="baselines" />
           </>
         )}
       </s-section>

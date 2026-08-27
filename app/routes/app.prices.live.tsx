@@ -11,7 +11,7 @@ import { toAdminClient } from "../services/admin-client.server";
 import { reconciliationCsv } from "../lib/reporting/reconciliation-csv";
 import { downloadCsv } from "../lib/reporting/csv";
 import { ReconciliationTable } from "../components/ReconciliationTable";
-import { FilterForm } from "../components/FilterForm";
+import { VariantSearch } from "../components/prices/VariantSearch";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
@@ -106,9 +106,12 @@ export default function Reconciliation() {
           </s-banner>
         )}
 
-        <FilterForm fields={RECONCILE_FIELDS}>
-          <s-stack gap="base">
-            <s-text-field name="q" label="Title, SKU or variant ID" value={selected.q} />
+        <VariantSearch
+          fields={RECONCILE_FIELDS}
+          query={selected.q}
+          label="Title, SKU or variant ID"
+          direction="block"
+        >
 
             <s-select name="surface" label="Surface">
               <s-option value="any" defaultSelected={selected.surface === "any"}>
@@ -156,9 +159,7 @@ export default function Reconciliation() {
               </s-option>
             </s-select>
 
-            <s-button type="submit">Filter</s-button>
-          </s-stack>
-        </FilterForm>
+        </VariantSearch>
       </s-section>
 
       <s-section heading="Check against Shopify right now">
