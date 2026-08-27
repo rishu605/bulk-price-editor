@@ -38,7 +38,7 @@ type Client = NonNullable<Awaited<ReturnType<typeof adminClientForShop>>>;
 
 async function livePrice(client: Client, variantGid: string): Promise<string> {
   const result = await client.request<{ productVariant: { price: string } }>(
-    `query Price($id: ID!) { productVariant(id: $id) { price } }`,
+    `query ResolutionPrice($id: ID!) { productVariant(id: $id) { price } }`,
     { id: variantGid },
   );
   return result.data?.productVariant?.price ?? "";
@@ -48,7 +48,7 @@ async function createProbe(client: Client, price: string) {
   const result = await client.request<{
     productSet: { product: { id: string; variants: { nodes: Array<{ id: string }> } } };
   }>(
-    `mutation Create($input: ProductSetInput!) {
+    `mutation ResolutionCreate($input: ProductSetInput!) {
        productSet(synchronous: true, input: $input) {
          product { id variants(first: 1) { nodes { id } } }
          userErrors { message }
@@ -151,7 +151,7 @@ async function main() {
     await prisma.campaign.delete({ where: { id } }).catch(() => {});
   }
   await client.request(
-    `mutation Delete($input: ProductDeleteInput!) { productDelete(input: $input) { deletedProductId } }`,
+    `mutation ResolutionDelete($input: ProductDeleteInput!) { productDelete(input: $input) { deletedProductId } }`,
     { input: { id: probe.productGid } },
   );
   console.log("\ncleaned up");
