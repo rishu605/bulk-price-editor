@@ -52,13 +52,18 @@ function Step({ step, isNext }: { step: OnboardingStep; isNext: boolean }) {
           {step.done ? "Done" : isNext ? "Next" : "Later"}
         </s-badge>
         <s-text type="strong">{step.title}</s-text>
-        {step.href && step.cta ? <s-link href={step.href}>{step.cta}</s-link> : null}
         {/* Progressive disclosure, not a link away. The reasoning belongs next to the
             step it explains — sending a merchant to a docs page to find out why they
-            are being asked to sync is how they end up not syncing. */}
+            are being asked to sync is how they end up not syncing.
+            
+            Before the action, deliberately. The row wraps on a narrow column, and when
+            the toggle was last it wrapped onto its own line and read as belonging to
+            the step below it. The action wrapping is harmless; an explanation attached
+            to the wrong step is not. */}
         <s-clickable onClick={() => setWhy((open) => !open)}>
           <s-text tone="neutral">{why ? "Hide why" : "Why?"}</s-text>
         </s-clickable>
+        {step.href && step.cta ? <s-link href={step.href}>{step.cta}</s-link> : null}
       </s-stack>
 
       {why ? (
