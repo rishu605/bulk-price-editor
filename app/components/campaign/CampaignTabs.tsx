@@ -1,4 +1,6 @@
-import { Link, useSearchParams } from "react-router";
+import { useSearchParams } from "react-router";
+
+import { TabBar } from "../TabBar";
 
 export interface CampaignTab {
   id: string;
@@ -21,30 +23,34 @@ export interface CampaignTab {
  *
  * The state lives in `?tab=`, so an alert or an email can link at the tab that explains
  * the thing it is about, and a merchant reloading the page stays where they were.
+ *
+ * The bar is `TabBar`, the same one the section nav and the campaigns index use. This
+ * was a bold word beside a blue link until then -- which reads as a sentence containing
+ * a link, not as a choice between five views of a campaign.
  */
 export function CampaignTabs({ tabs, current }: { tabs: CampaignTab[]; current: string }) {
   const [params] = useSearchParams();
 
   return (
-    <s-stack direction="inline" gap="base">
-      {tabs
+    <TabBar
+      label="Campaign"
+      // These swap a panel on the same route. Jumping to the top of the page on every
+      // switch would throw away where the merchant was reading.
+      preventScrollReset
+      tabs={tabs
         .filter((tab) => tab.available)
         .map((tab) => {
           const next = new URLSearchParams(params);
           next.set("tab", tab.id);
-          const label = tab.badge ? `${tab.label} (${tab.badge})` : tab.label;
 
-          return tab.id === current ? (
-            <s-text key={tab.id} type="strong">
-              {label}
-            </s-text>
-          ) : (
-            <Link key={tab.id} to={`?${next}`} preventScrollReset>
-              {label}
-            </Link>
-          );
+          return {
+            label: tab.label,
+            badge: tab.badge,
+            current: tab.id === current,
+            href: `?${next}`,
+          };
         })}
-    </s-stack>
+    />
   );
 }
 

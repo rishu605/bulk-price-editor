@@ -19,6 +19,10 @@ const tabs = readFileSync(
   join(process.cwd(), "app", "components", "SectionTabs.tsx"),
   "utf8",
 );
+// The bar itself is shared with the campaign page and the campaigns index. What stays
+// in SectionTabs is only what is specific to sections: the query string, and what
+// "current" means when the tabs are separate routes.
+const bar = readFileSync(join(process.cwd(), "app", "components", "TabBar.tsx"), "utf8");
 const layout = readFileSync(
   join(process.cwd(), "app", "routes", "app.prices.tsx"),
   "utf8",
@@ -58,7 +62,7 @@ describe("drift is countable without being opened", () => {
   });
 
   it("shows nothing at zero, since an empty count is noise", () => {
-    expect(tabs).toContain("tab.badge ? `${tab.label} (${tab.badge})` : tab.label");
+    expect(bar).toContain("tab.badge ? `${tab.label} (${tab.badge})` : tab.label");
   });
 });
 
@@ -67,20 +71,20 @@ describe("the tab bar's semantics", () => {
     // Polaris has no tabs element and `accessibilityRole` offers no `tablist`, so this
     // is the correct role that is actually available — and it is the right one anyway:
     // these move between URLs, where ARIA tabs are for switching panels within a page.
-    expect(tabs).toContain('accessibilityRole="navigation"');
-    expect(tabs).toContain("accessibilityLabel=");
+    expect(bar).toContain('accessibilityRole="navigation"');
+    expect(bar).toContain("accessibilityLabel=");
   });
 
   it("tells a screen reader which tab is current, not only the eye", () => {
     // The filled pill says it to everyone who can see it and nothing to anyone who
     // cannot.
-    expect(tabs).toContain('accessibilityVisibility="exclusive"');
-    expect(tabs).toMatch(/current section/i);
+    expect(bar).toContain('accessibilityVisibility="exclusive"');
+    expect(bar).toMatch(/\(current\)/i);
   });
 
   it("does not link the tab you are already on", () => {
     // A link to the page you are on is a control that does nothing.
-    const currentBranch = tabs.slice(tabs.indexOf("current ?"), tabs.indexOf(") : ("));
+    const currentBranch = bar.slice(bar.indexOf("tab.current ?"), bar.indexOf(") : ("));
     expect(currentBranch).not.toContain("<Link");
   });
 });
