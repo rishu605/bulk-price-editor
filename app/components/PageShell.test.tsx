@@ -78,8 +78,14 @@ describe("pages without an aside", () => {
     </PageShell>,
   );
 
-  it("do not pay for a two-column grid", () => {
+  it("put their sections straight into the page, with no wrapper", () => {
+    // Not a style preference. Wrapping them — in an `s-stack`, and then in a
+    // single-column `s-grid` — rendered the page blank in the admin: heading present,
+    // every section gone, no error. Both were found by opening the page, so this
+    // assertion is the only thing standing between the next tidy-up and a blank page.
     expect(html).not.toContain("<s-grid");
+    expect(html).not.toContain("<s-stack");
+    expect(html).toContain("just rows");
   });
 
   it("still render their content", () => {
