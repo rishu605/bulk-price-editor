@@ -7,6 +7,7 @@
  */
 
 import prisma from "../../db.server";
+import { inChunks } from "../../lib/db/chunk";
 import { money, type Money } from "../../lib/money/money";
 import type { Baseline } from "../../lib/pricing/types";
 import type { PlanCandidate } from "../../lib/planning/types";
@@ -19,10 +20,12 @@ export async function productMapFor(
 ): Promise<Map<string, string>> {
   if (variantGids.length === 0) return new Map();
 
-  const rows = await prisma.variantIndex.findMany({
-    where: { shopId, variantGid: { in: variantGids } },
-    select: { variantGid: true, productGid: true },
-  });
+  const rows = await inChunks(variantGids, (batch) =>
+    prisma.variantIndex.findMany({
+      where: { shopId, variantGid: { in: batch } },
+      select: { variantGid: true, productGid: true },
+    }),
+  );
 
   return new Map(rows.map((row) => [row.variantGid, row.productGid]));
 }
@@ -34,10 +37,12 @@ export async function titleMapFor(
 ): Promise<Map<string, string>> {
   if (variantGids.length === 0) return new Map();
 
-  const rows = await prisma.variantIndex.findMany({
-    where: { shopId, variantGid: { in: variantGids } },
-    select: { variantGid: true, title: true },
-  });
+  const rows = await inChunks(variantGids, (batch) =>
+    prisma.variantIndex.findMany({
+      where: { shopId, variantGid: { in: batch } },
+      select: { variantGid: true, title: true },
+    }),
+  );
 
   return new Map(rows.map((row) => [row.variantGid, row.title ?? row.variantGid]));
 }
@@ -71,13 +76,18 @@ export async function loadCandidates(
 ): Promise<PlanCandidate[]> {
   if (onlyVariantGids?.length === 0) return [];
 
-  const variants = await prisma.variantIndex.findMany({
-    where: {
-      ...astToWhere(shopId, ast),
-      ...(onlyVariantGids ? { variantGid: { in: onlyVariantGids } } : {}),
-    },
-    select: { variantGid: true, currency: true, cost: true },
-  });
+  const scope = astToWhere(shopId, ast);
+  const variants = onlyVariantGids
+    ? await inChunks(onlyVariantGids, (batch) =>
+        prisma.variantIndex.findMany({
+          where: { ...scope, variantGid: { in: batch } },
+          select: { variantGid: true, currency: true, cost: true },
+        }),
+      )
+    : await prisma.variantIndex.findMany({
+        where: scope,
+        select: { variantGid: true, currency: true, cost: true },
+      });
   if (variants.length === 0) return [];
 
   const gids = variants.map((v) => v.variantGid);
@@ -85,12 +95,16 @@ export async function loadCandidates(
   const imported = await importedPricesByVariant(importIds, gids);
 
   const [baselines, entries] = await Promise.all([
-    prisma.baseline.findMany({
-      where: { shopId, supersededAt: null, surfaceKind: "BASE", variantGid: { in: gids } },
-    }),
-    prisma.priceSurfaceEntry.findMany({
-      where: { shopId, surfaceKind: "BASE", variantGid: { in: gids } },
-    }),
+    inChunks(gids, (batch) =>
+      prisma.baseline.findMany({
+        where: { shopId, supersededAt: null, surfaceKind: "BASE", variantGid: { in: batch } },
+      }),
+    ),
+    inChunks(gids, (batch) =>
+      prisma.priceSurfaceEntry.findMany({
+        where: { shopId, surfaceKind: "BASE", variantGid: { in: batch } },
+      }),
+    ),
   ]);
 
   const baselineBy = new Map(baselines.map((b) => [b.variantGid, b]));
@@ -143,10 +157,12 @@ async function importedPricesByVariant(
 ): Promise<Map<string, Map<string, bigint>>> {
   if (importIds.length === 0 || variantGids.length === 0) return new Map();
 
-  const rows = await prisma.priceImportRow.findMany({
-    where: { importId: { in: [...importIds] }, variantGid: { in: [...variantGids] } },
-    select: { importId: true, variantGid: true, price: true },
-  });
+  const rows = await inChunks([...variantGids], (batch) =>
+    prisma.priceImportRow.findMany({
+      where: { importId: { in: [...importIds] }, variantGid: { in: batch } },
+      select: { importId: true, variantGid: true, price: true },
+    }),
+  );
 
   const byVariant = new Map<string, Map<string, bigint>>();
   for (const row of rows) {

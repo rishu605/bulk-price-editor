@@ -21,6 +21,7 @@ import { astToWhere } from "../segments.server";
 import { AppError } from "../../lib/errors/app-error";
 import { guardrailsFor } from "../settings.server";
 import type { RunOutcome } from "./types";
+import { inChunksCounting } from "../../lib/db/chunk";
 import { transitionCampaign } from "./lifecycle.server";
 import { planResume, type LedgerState } from "../../lib/execution/resume";
 import { applyCampaignTags, removeCampaignTags } from "./tags.server";
@@ -799,14 +800,16 @@ async function recordResults(
 
   const now = new Date();
   for (const [status, gids] of byStatus) {
-    await prisma.variantChange.updateMany({
-      where: { runId, shopId, variantGid: { in: gids } },
-      data: {
-        status,
-        appliedAt: status === "FAILED" ? null : now,
-        verifiedAt: status === "VERIFIED" ? now : null,
-      },
-    });
+    await inChunksCounting(gids, (batch) =>
+      prisma.variantChange.updateMany({
+        where: { runId, shopId, variantGid: { in: batch } },
+        data: {
+          status,
+          appliedAt: status === "FAILED" ? null : now,
+          verifiedAt: status === "VERIFIED" ? now : null,
+        },
+      }),
+    );
   }
 
   // Failure reasons differ per row, so those are written individually -- but only
