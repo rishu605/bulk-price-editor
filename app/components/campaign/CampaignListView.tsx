@@ -1,3 +1,4 @@
+import { ActionRow } from "../ActionRow";
 import { FilterForm } from "../FilterForm";
 import type { listCampaigns, CampaignFilters } from "../../services/campaigns/list.server";
 
@@ -56,9 +57,13 @@ export function CampaignListView({
               {chip.label}
             </s-badge>
           ) : (
-            <s-link key={chip.value || "all"} href={linkTo({ status: chip.value })}>
+            <s-button
+              key={chip.value || "all"}
+              variant="tertiary"
+              href={linkTo({ status: chip.value })}
+            >
               {chip.label}
-            </s-link>
+            </s-button>
           ),
         )}
       </s-stack>
@@ -109,7 +114,9 @@ export function CampaignListView({
                       : "—"}
                   </s-table-cell>
                   <s-table-cell>
-                    <s-link href={`/app/campaigns/${campaign.id}`}>Open</s-link>
+                    <s-button variant="tertiary" href={`/app/campaigns/${campaign.id}`}>
+                      Open
+                    </s-button>
                   </s-table-cell>
                 </s-table-row>
               ))}
@@ -117,17 +124,23 @@ export function CampaignListView({
           </s-table>
 
           {list.pages > 1 ? (
-            <s-stack direction="inline" gap="base">
+            <ActionRow>
               {list.page > 1 ? (
-                <s-link href={linkTo({ page: String(list.page - 1) })}>Previous</s-link>
+                <s-button icon="chevron-left" href={linkTo({ page: String(list.page - 1) })}>
+                  Previous
+                </s-button>
               ) : null}
-              <s-text color="subdued">
+              {/* Tabular figures: the page number changes in place, and proportional
+                  digits make the sentence around it jump every time it does. */}
+              <s-text color="subdued" fontVariantNumeric="tabular-nums">
                 Page {list.page} of {list.pages} · {list.total} campaigns
               </s-text>
               {list.page < list.pages ? (
-                <s-link href={linkTo({ page: String(list.page + 1) })}>Next</s-link>
+                <s-button icon="chevron-right" href={linkTo({ page: String(list.page + 1) })}>
+                  Next
+                </s-button>
               ) : null}
-            </s-stack>
+            </ActionRow>
           ) : null}
         </>
       )}

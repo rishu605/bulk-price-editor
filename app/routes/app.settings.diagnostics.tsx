@@ -149,7 +149,12 @@ export default function Debug() {
               {recent.map((row) => (
                 <s-table-row key={row.errorId}>
                   <s-table-cell>
-                    <s-link href={`/app/settings/diagnostics?id=${row.errorId}`}>{row.errorId}</s-link>
+                    <s-button
+                      variant="tertiary"
+                      href={`/app/settings/diagnostics?id=${row.errorId}`}
+                    >
+                      {row.errorId}
+                    </s-button>
                   </s-table-cell>
                   <s-table-cell>
                     <s-badge tone={row.retryable ? "warning" : "critical"}>

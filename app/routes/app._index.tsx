@@ -13,6 +13,7 @@ import { syncMarkets } from "../services/markets-sync.server";
 import { syncCatalogViaBulk } from "../services/catalog-bulk-sync.server";
 import { toAdminClient } from "../services/admin-client.server";
 import { OnboardingCard } from "../components/OnboardingCard";
+import { ActionRow } from "../components/ActionRow";
 import { ActivityFeed } from "../components/ActivityFeed";
 import { CountsRow } from "../components/CountsRow";
 import { LastRunSummary } from "../components/LastRunSummary";
@@ -251,7 +252,9 @@ export default function Dashboard() {
             way. Every row that did not complete has a reason recorded, and resuming retries only
             those.
           </s-paragraph>
-          <s-link href="/app/campaigns">Review campaigns</s-link>
+          <ActionRow>
+            <s-button href="/app/campaigns">Review campaigns</s-button>
+          </ActionRow>
         </s-banner>
       ) : null}
 
@@ -315,7 +318,9 @@ export default function Dashboard() {
             else while a campaign was running. Those edits were deliberate, so nothing has been
             overwritten — each is waiting on your decision.
           </s-paragraph>
-          <s-link href="/app/prices/drift">Open the drift queue</s-link>
+          <ActionRow>
+            <s-button href="/app/prices/drift">Open the drift queue</s-button>
+          </ActionRow>
         </s-banner>
       ) : null}
 
@@ -379,15 +384,11 @@ export default function Dashboard() {
             </s-paragraph>
           )}
 
-          {/* A grid rather than an inline stack, for the same reason as everywhere else
-              on this page: `s-link` is block-level, so a stack gives three links three
-              lines. The trailing `1fr` is what keeps them tight to the left instead of
-              spread across the card. */}
-          <s-grid gridTemplateColumns="auto auto auto 1fr" gap={SPACE.section} alignItems="center">
-            <s-link href="/app/campaigns">Campaigns</s-link>
-            <s-link href="/app/prices/drift">Drift queue</s-link>
-            <s-link href="/app/activity">Activity log</s-link>
-          </s-grid>
+          <ActionRow>
+            <s-button href="/app/campaigns">Campaigns</s-button>
+            <s-button href="/app/prices/drift">Drift queue</s-button>
+            <s-button href="/app/activity">Activity log</s-button>
+          </ActionRow>
         </s-section>
       )}
 
@@ -416,15 +417,17 @@ export default function Dashboard() {
             </s-paragraph>
           ) : null}
 
-          <s-grid gridTemplateColumns="auto auto 1fr" gap={SPACE.section} alignItems="center">
+          <ActionRow>
             <fetcher.Form method="post">
               <input type="hidden" name="intent" value="sync" />
               <s-button type="submit" loading={busy || undefined}>
                 Re-sync catalogue
               </s-button>
             </fetcher.Form>
-            <s-link href="/app/prices">Browse variants and baselines</s-link>
-          </s-grid>
+            <s-button variant="tertiary" href="/app/prices">
+              Browse variants and baselines
+            </s-button>
+          </ActionRow>
         </s-section>
       ) : null}
 
@@ -477,9 +480,15 @@ export default function Dashboard() {
               </s-text>
             </s-paragraph>
 
-            {/* A link, not a button. One click from the dashboard was not enough ceremony
-                for the most destructive operation in the app. */}
-            <s-link href="/app/imports/recapture">Recapture baselines…</s-link>
+            {/* Tertiary, and the only action on this page deliberately kept quiet. One
+                click from the dashboard was not enough ceremony for the most destructive
+                operation in the app, and a bordered button beside a warning would read
+                as the thing to do next. */}
+            <ActionRow>
+              <s-button variant="tertiary" href="/app/imports/recapture">
+                Recapture baselines…
+              </s-button>
+            </ActionRow>
           </s-stack>
         </s-section>
       ) : null}
@@ -488,7 +497,11 @@ export default function Dashboard() {
         <s-section slot="aside" heading="Recent activity">
           <s-stack gap={SPACE.section}>
             <ActivityFeed entries={recent} now={now} timeZone={timeZone} />
-            <s-link href="/app/activity">See everything</s-link>
+            <ActionRow>
+              <s-button variant="tertiary" icon="arrow-right" href="/app/activity">
+                See everything
+              </s-button>
+            </ActionRow>
           </s-stack>
         </s-section>
       ) : null}

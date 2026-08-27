@@ -128,11 +128,19 @@ function Step({ step, isNext }: { step: OnboardingStep; isNext: boolean }) {
               action beside it — it was also the only thing left hanging off the right
               edge, so the column of actions read as ragged. */}
           {step.done ? null : (
-            <s-clickable onClick={() => setWhy((open) => !open)}>
-              <s-text color="subdued">{why ? "Hide why" : "Why?"}</s-text>
-            </s-clickable>
+            <s-button variant="tertiary" onClick={() => setWhy((open) => !open)}>
+              {why ? "Hide why" : "Why?"}
+            </s-button>
           )}
-          {step.href && step.cta ? <s-link href={step.href}>{step.cta}</s-link> : null}
+          {/* Black on the step being asked for, bordered on the ones after it. A
+              checklist whose every row shouts equally is a checklist that has not said
+              what to do next — which is the only thing it is for. See `ActionRow` for
+              the vocabulary. */}
+          {step.href && step.cta ? (
+            <s-button href={step.href} variant={isNext ? "primary" : "secondary"}>
+              {step.cta}
+            </s-button>
+          ) : null}
         </s-grid>
       </s-grid>
 

@@ -26,6 +26,7 @@ import { money } from "../lib/money/money";
 import { format } from "../lib/money/format";
 import { facets, type FilterAst } from "../services/segments.server";
 import { actorFor } from "../lib/audit/actor";
+import { ActionRow } from "../components/ActionRow";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
@@ -147,9 +148,9 @@ export default function Costs() {
             price below cost&rdquo; is doing less than it looks.
           </s-text>
         </s-paragraph>
-        <s-paragraph>
-          <s-link href="/app/imports/costs">Import costs from a spreadsheet</s-link>
-        </s-paragraph>
+        <ActionRow>
+          <s-button href="/app/imports/costs">Import costs from a spreadsheet</s-button>
+        </ActionRow>
       </s-section>
 
       <s-section heading="Change costs in bulk">

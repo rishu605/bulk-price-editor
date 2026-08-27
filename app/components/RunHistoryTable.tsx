@@ -40,7 +40,9 @@ export function RunHistoryTable({ runs, selectedRunId, timeZone }: Props) {
               {run.id === selectedRunId ? (
                 <s-text>Showing</s-text>
               ) : (
-                <s-link href={`?run=${run.id}`}>View ledger</s-link>
+                <s-button variant="tertiary" href={`?run=${run.id}`}>
+                  View ledger
+                </s-button>
               )}
             </s-table-cell>
           </s-table-row>

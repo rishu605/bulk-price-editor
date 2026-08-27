@@ -46,9 +46,17 @@ export function BaselineTable({
                 <s-button variant="tertiary" onClick={() => onShowHistory(row.variantGid)}>
                   History
                 </s-button>
-                <s-link href={row.adminUrl} target="_blank">
+                {/* The same treatment as History beside it, which it was not: one cell
+                    held a tertiary button and a blue link doing the same kind of job.
+                    The icon is what says this one leaves the app. */}
+                <s-button
+                  variant="tertiary"
+                  icon="external"
+                  href={row.adminUrl}
+                  target="_blank"
+                >
                   Shopify
-                </s-link>
+                </s-button>
               </s-stack>
             </s-table-cell>
           </s-table-row>

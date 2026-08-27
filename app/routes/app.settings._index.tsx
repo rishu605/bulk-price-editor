@@ -9,6 +9,7 @@ import { ensureShop } from "../services/shop.server";
 import { readSettings, shopCurrency, writeSettings } from "../services/settings.server";
 import { readPreferences, writePreferences } from "../services/notifications.server";
 import { actorFor } from "../lib/audit/actor";
+import { ActionRow } from "../components/ActionRow";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import {
@@ -144,12 +145,12 @@ export default function Settings() {
           that pushes a price under a floor is a conversation between two of them —
           and splitting them across pages is what made the nav sixteen items long. */}
       <s-section>
-        <s-stack direction="inline" gap="base">
+        <ActionRow>
           <s-text color="subdued">Jump to</s-text>
-          <s-link href="#guardrails">Guardrails</s-link>
-          <s-link href="#rounding">Rounding</s-link>
-          <s-link href="#notifications">Alerts</s-link>
-        </s-stack>
+          <s-button variant="tertiary" href="#guardrails">Guardrails</s-button>
+          <s-button variant="tertiary" href="#rounding">Rounding</s-button>
+          <s-button variant="tertiary" href="#notifications">Alerts</s-button>
+        </ActionRow>
       </s-section>
 
       <s-section id="guardrails" heading="Guardrails">

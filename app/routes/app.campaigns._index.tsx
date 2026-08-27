@@ -4,6 +4,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
+import { ActionRow } from "../components/ActionRow";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
@@ -97,9 +98,13 @@ export default function Campaigns() {
           <s-paragraph>
             {list.attentionCount === 1
               ? "One campaign needs a decision."
-              : `${list.attentionCount} campaigns need a decision.`}{" "}
-            <s-link href={linkTo({ status: "attention", view: "list" })}>Show them</s-link>
+              : `${list.attentionCount} campaigns need a decision.`}
           </s-paragraph>
+          {/* Out of the sentence and onto its own line. A banner's whole job is to be
+              acted on, and its action was three words of blue inside a paragraph. */}
+          <ActionRow>
+            <s-button href={linkTo({ status: "attention", view: "list" })}>Show them</s-button>
+          </ActionRow>
         </s-banner>
       ) : null}
 
@@ -109,11 +114,14 @@ export default function Campaigns() {
           tabs and the campaign tabs because it is the same control. */}
       <s-section>
         <s-stack direction="block" gap={SPACE.section}>
-          <s-stack direction="inline" gap="base" alignItems="center">
-            <s-link href="/app/campaigns/new">
-              <s-button variant="primary">Create campaign</s-button>
-            </s-link>
-          </s-stack>
+          {/* `s-button` takes an href, so this is one anchor styled as a button rather
+              than a button nested inside a link — which is what it was, and which no
+              browser is obliged to make sense of. */}
+          <ActionRow>
+            <s-button variant="primary" href="/app/campaigns/new">
+              Create campaign
+            </s-button>
+          </ActionRow>
 
           <TabBar
             label="Campaign views"

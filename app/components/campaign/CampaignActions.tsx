@@ -25,9 +25,13 @@ export function CampaignActions({ rollback, practice, lifecycle, fetcher, busy, 
         <s-stack gap="base">
           <fetcher.Form method="post">
             <input type="hidden" name="intent" value="apply" />
+            {/* Black only while it can actually be pressed. A partial run shows Resume
+                as well, and this card was rendering two black buttons at once — one of
+                them disabled, which is the loudest possible way to offer something that
+                cannot be done. The primary follows what the lifecycle says is next. */}
             <s-button
               type="submit"
-              variant="primary"
+              variant={canApply ? "primary" : "secondary"}
               loading={busy || undefined}
               disabled={!canApply}
             >
