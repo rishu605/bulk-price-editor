@@ -178,6 +178,27 @@ describe("the Railway runbook", () => {
     expect(scripts.worker).not.toContain("migrate");
   });
 
+  it("generates the Prisma client in the image, not at boot", () => {
+    // The worker starts with `tsx scripts/worker.ts` and runs neither `generate` nor
+    // `migrate`. With the client generated only by the web service's start command, the
+    // worker imported `db.server.ts`, found nothing, and crashed on every deploy with
+    // "@prisma/client did not initialize yet" — after a successful build and deploy.
+    //
+    // `generate` produces code and belongs to the build. `migrate` changes a database and
+    // belongs to one service at deploy time. The test below still holds the second rule.
+    const dockerfile = readFileSync(join(ROOT, "Dockerfile"), "utf8");
+
+    expect(
+      dockerfile,
+      "nothing generates the Prisma client at build time, so the worker starts without one",
+    ).toMatch(/RUN\s+npx\s+prisma\s+generate/);
+
+    // Before the build, since the build may import generated types.
+    const generateAt = dockerfile.search(/RUN\s+npx\s+prisma\s+generate/);
+    const buildAt = dockerfile.search(/RUN\s+npm\s+run\s+build/);
+    expect(generateAt, "generate must come before the build").toBeLessThan(buildAt);
+  });
+
   it("ships the worker's runtime dependencies in the production image", () => {
     // The worker starts through `tsx`. As a dev dependency it would build cleanly under
     // `npm ci --omit=dev` and then fail to start — in the deployed environment, which is
