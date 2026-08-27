@@ -40,8 +40,13 @@ export const LEGACY_ROUTES: Readonly<Record<string, string>> = {
   "/app/feedback": "/app/settings/feedback",
   "/app/debug": "/app/settings/diagnostics",
 
-  // Campaigns — the calendar shows the same objects as the list.
-  "/app/calendar": "/app/campaigns/calendar",
+  // Campaigns — the calendar is a view of the list, not a page of its own.
+  //
+  // P7.1 pointed this at `/app/campaigns/calendar`, which P7.5 then turned into a
+  // redirect itself. Two hops for one old link, and `legacy-routes.test.ts` fails on
+  // exactly that, so both now land on the merged view directly.
+  "/app/calendar": "/app/campaigns?view=calendar",
+  "/app/campaigns/calendar": "/app/campaigns?view=calendar",
 };
 
 /**
@@ -56,6 +61,8 @@ export const LEGACY_ROUTES: Readonly<Record<string, string>> = {
  * is checking.
  */
 export function routeFilesFor(url: string): [string, string] {
-  const dotted = url.replace(/^\//, "").split("/").join(".");
+  // A destination may carry a query string -- `/app/campaigns?view=calendar` is served
+  // by the campaigns index, not by a route named after its parameters.
+  const dotted = url.split("?")[0].replace(/^\//, "").split("/").join(".");
   return [`${dotted}.tsx`, `${dotted}._index.tsx`];
 }
