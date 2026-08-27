@@ -112,13 +112,36 @@ export async function checkForDrift(
 
   if (await isOurEcho(shopId, variantGid, incomingPrice, incomingCompareAt)) return false;
 
-  // Only meaningful while a campaign controls this variant.
-  const activeCampaign = await prisma.campaign.findFirst({
-    where: { shopId, status: "ACTIVE" },
-    orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
-    select: { id: true, name: true },
+  // The campaign that controls *this variant*, which is the one that last priced it and
+  // is still running.
+  //
+  // This used to take any ACTIVE campaign on the shop, highest priority first, with no
+  // reference to the variant at all — while the doc above claimed the opposite. So a
+  // merchant editing one product by hand stopped whichever unrelated campaign happened to
+  // be running, and the drift event named a variant that campaign had never priced. On a
+  // store running several campaigns at once, which is what this product is for, the
+  // highest-priority one absorbed every hand edit in the catalogue.
+  //
+  // The ledger answers it exactly: a VERIFIED base-surface row is us having written this
+  // variant, and its run carries the campaign. Newest first, because a variant repriced by
+  // a later campaign is controlled by that one.
+  const controlling = await prisma.variantChange.findFirst({
+    where: {
+      shopId,
+      variantGid,
+      surfaceKind: "BASE",
+      status: "VERIFIED",
+      run: { campaign: { status: "ACTIVE" } },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { run: { select: { campaignId: true, campaign: { select: { name: true } } } } },
   });
-  if (!activeCampaign) return false;
+  if (!controlling) return false;
+
+  const activeCampaign = {
+    id: controlling.run.campaignId,
+    name: controlling.run.campaign.name,
+  };
 
   // Collapse repeats: one open event per variant, updated rather than duplicated.
   const existing = await prisma.driftEvent.findFirst({
