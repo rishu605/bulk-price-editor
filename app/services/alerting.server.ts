@@ -7,14 +7,20 @@
  *
  * Runs from the scheduler tick, which is slightly circular: the tick is what reports that
  * the tick is alive. That is fine for every condition except a stopped scheduler, and that
- * one is deliberately detected by *absence* — the tick writes a heartbeat and an external
- * check reads it, so a worker that has died cannot suppress its own alert by not running
+ * one is detected by *absence* — the tick stamps `scheduler_heartbeat` and whoever reads
+ * that row decides, so a worker that has died cannot suppress its own alert by not running
  * the code that would send it.
+ *
+ * That last part was a description rather than a fact until the heartbeat existed. The
+ * window read the newest campaign-run heartbeat instead, which is produced by runs rather
+ * than by the tick — so the alert fired on any shop quiet for three minutes and stayed
+ * silent when the scheduler died mid-run.
  */
 
 import prisma from "../db.server";
 import { logger } from "../lib/logging/logger";
 import { evaluate, type AlertCondition, type SignalWindow } from "../lib/observability/alerts";
+import { secondsSinceBeat } from "./scheduler-heartbeat.server";
 
 /** How far back a window looks. Long enough to be meaningful, short enough to be current. */
 const WINDOW_MINUTES = 15;
@@ -34,12 +40,15 @@ const lastSent = new Map<string, number>();
 export async function gather(now: Date = new Date()): Promise<SignalWindow> {
   const since = new Date(now.getTime() - WINDOW_MINUTES * 60_000);
 
-  const [lastRun, errors, webhooks, lastAudit] = await Promise.all([
-    prisma.campaignRun.findFirst({
-      where: { heartbeatAt: { not: null } },
-      orderBy: { heartbeatAt: "desc" },
-      select: { heartbeatAt: true },
-    }),
+  const [sinceTick, errors, webhooks, lastAudit] = await Promise.all([
+    // The scheduler's own heartbeat, not a campaign run's.
+    //
+    // This used to read the newest `campaign_runs.heartbeatAt`, which is stamped by runs
+    // while they execute — so it was wrong in both directions. On an idle shop, which is
+    // the normal state, the newest one is hours old and "the scheduler has stopped" paged
+    // for a scheduler that was fine. And a scheduler that died while a long run was still
+    // stamping looked alive, which is the one case the alert exists for.
+    secondsSinceBeat(now),
     prisma.errorEvent.count({ where: { createdAt: { gte: since } } }),
     prisma.webhookEvent.findMany({
       where: { receivedAt: { gte: since }, processedAt: { not: null } },
@@ -66,11 +75,9 @@ export async function gather(now: Date = new Date()): Promise<SignalWindow> {
     | null;
 
   return {
-    // Null when nothing has ever run, which is a new install rather than a dead
-    // scheduler. Alerting there would page somebody on every fresh deployment.
-    secondsSinceTick: lastRun?.heartbeatAt
-      ? Math.round((now.getTime() - lastRun.heartbeatAt.getTime()) / 1000)
-      : null,
+    // Null until the scheduler has beaten once, which is a new install rather than a
+    // dead scheduler. Alerting there would page somebody on every fresh deployment.
+    secondsSinceTick: sinceTick,
     webhookLagMs: lagMs,
     errors,
     // Webhook deliveries stand in for request volume: it is the traffic that arrives

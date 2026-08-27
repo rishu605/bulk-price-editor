@@ -103,17 +103,29 @@ minimum are both there because the noisy versions of this alert were tried first
 
 ## Alert: scheduler tick stopped
 
-**Metric:** `scheduler.tick` absent for more than three intervals
+**Metric:** `scheduler_heartbeat.beatAt` older than three tick intervals.
 
 **What it means.** No worker is holding the leader lock and ticking. Scheduled campaigns
 are not starting and, more importantly, **scheduled reverts are not running** — every
 minute of this is a minute a sale runs past its end.
 
+**This is the only alert that catches a dead worker.** Every other condition in the window
+is computed from work the worker produces — webhook lag from processed deliveries, the
+error rate from a denominator of those same deliveries — so a process that stops outright
+empties all of them and they go *quiet* rather than fire. If this one is wrong, a dead
+worker is silent everywhere.
+
+It reads a row the tick stamps for no other purpose. It used to read the newest
+`campaign_runs.heartbeatAt`, which runs stamp while they execute — so it paged on any shop
+idle for three minutes and stayed silent when the scheduler died mid-run. If you are
+looking at an old incident, that is why.
+
 **Diagnose.**
 
-1. Is the worker process alive? A crash loop shows as repeated startup lines with no ticks between.
-2. Is Redis reachable? The leader lock lives there. Without it no worker will consider itself leader, and the process stays up while doing nothing — which is why this alert exists rather than a process-liveness one.
-3. `SELECT id, status, "startedAt", "heartbeatAt" FROM campaign_runs WHERE status NOT IN ('COMPLETED','FAILED','PARTIAL');` — runs stuck in EXECUTING with an old heartbeat confirm the worker died mid-run.
+1. `SELECT "beatAt", instance, now() - "beatAt" AS quiet FROM scheduler_heartbeat;` — one row. How long it has been quiet, and which process stamped it last.
+2. Is the worker process alive? A crash loop shows as repeated startup lines with no ticks between.
+3. Is Redis reachable? The leader lock lives there. Without it no worker will consider itself leader, and the process stays up while doing nothing — which is why this alert exists rather than a process-liveness one.
+4. `SELECT id, status, "startedAt", "heartbeatAt" FROM campaign_runs WHERE status NOT IN ('COMPLETED','FAILED','PARTIAL');` — runs stuck in EXECUTING with an old heartbeat confirm the worker died mid-run.
 
 **Remediate.** Restart the worker. The reaper reclaims stale runs on the next tick and
 marks them PARTIAL, which is resumable and visible to the merchant. Nothing needs manual

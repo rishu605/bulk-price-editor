@@ -355,12 +355,12 @@ model Campaign {
   roundingProfile RoundingProfileRecord? @relation(fields: [roundingProfileId], references: [id])
   runs            CampaignRun[]
   driftEvents     DriftEvent[]
+  approvals       Approval[]
 
   @@index([shopId, status])
   @@index([shopId, startAt])
   @@index([shopId, endAt])
   @@map("campaigns")
-  approvals Approval[]
 }
 
 enum RunKind {
@@ -419,12 +419,12 @@ model CampaignRun {
   /// dead run hanging for just as long.
   heartbeatAt DateTime?
 
-  shop     Shop                  @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  campaign Campaign              @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  changes    VariantChange[]
-  tagChanges TagChange[]
+  shop             Shop                  @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  campaign         Campaign              @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  changes          VariantChange[]
+  tagChanges       TagChange[]
   priceListChanges PriceListChange[]
-  bulkOps    BulkOperationRecord[]
+  bulkOps          BulkOperationRecord[]
 
   @@unique([campaignId, occurrenceKey, kind])
   @@index([shopId, status])
@@ -536,8 +536,8 @@ model TagChange {
   verifiedAt DateTime?
   createdAt  DateTime  @default(now())
 
-  shop     Shop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  run      CampaignRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  shop Shop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  run  CampaignRun @relation(fields: [runId], references: [id], onDelete: Cascade)
 
   /// One row per product per run: a resumed run must update its row rather than
   /// claim ownership of the same tags twice.
@@ -564,7 +564,7 @@ model PriceListChange {
   /// The merchant's percentage before this campaign, in basis points. Null means the
   /// list had no parent adjustment at all, which reverts differently from 0%: one
   /// removes the adjustment, the other pins it at zero.
-  priorAdjustmentBps Int?
+  priorAdjustmentBps   Int?
   /// What the campaign set it to: the campaign's percentage composed with the prior one.
   appliedAdjustmentBps Int
 
@@ -785,7 +785,7 @@ model PriceImport {
   createdBy String?
   createdAt DateTime @default(now())
 
-  shop Shop               @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  shop Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
   rows PriceImportRow[]
 
   @@index([shopId, createdAt])
@@ -965,11 +965,11 @@ model ErrorEvent {
   /// The short id shown on the error screen, e.g. ANC-K3M2-P7QR.
   errorId String @unique
 
-  shopId String?
-  code   String
+  shopId      String?
+  code        String
   /// The technical message. Never shown to a merchant.
-  message String
-  stack   String?
+  message     String
+  stack       String?
   /// What the merchant was shown, so support can see both halves of the story.
   userMessage String
 
@@ -1007,4 +1007,30 @@ model AuditLogEntry {
   @@index([shopId, createdAt])
   @@index([shopId, action])
   @@map("audit_log")
+}
+
+/// The scheduler's own liveness, which nothing else in the system can stand in for.
+///
+/// The alerting window used to read the newest `campaign_runs.heartbeatAt` and call it
+/// "seconds since tick". Those are stamped by campaign runs while they execute, so the
+/// signal was wrong in both directions: on an idle shop — the normal state — the newest
+/// one is hours old and the scheduler was reported stopped when it was fine, and a
+/// scheduler that died while a long run was still stamping looked alive.
+///
+/// A dead process cannot report its own death, so this is detected by absence: the tick
+/// stamps this row, and anything reading it decides. One row, in the database rather than
+/// in memory, so a restarted process does not reset the picture and the same question can
+/// be asked by hand during an incident.
+model SchedulerHeartbeat {
+  /// Always `singleton`. A primary key with one legal value keeps this to one row
+  /// without a partial unique index over a table that has no other key.
+  id String @id @default("singleton")
+
+  beatAt DateTime @default(now()) @updatedAt
+
+  /// Which process stamped it last. Only meaningful once more than one worker runs, and
+  /// then it is the first thing an operator wants to know.
+  instance String?
+
+  @@map("scheduler_heartbeat")
 }
