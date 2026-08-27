@@ -27,6 +27,7 @@ import { astFrom, compareAtFrom, readerFor, ruleFrom } from "../lib/campaigns/dr
 import { PageShell } from "../components/PageShell";
 import { DraftPreview } from "../components/DraftPreview";
 import { RuleValueField } from "../components/RuleValueField";
+import { FieldGrid, FullRow } from "../components/FieldGrid";
 import type { DraftPreview as Preview } from "../services/campaigns/draft-preview.server";
 
 export const loader = withGuard("/app/campaigns/new", async ({ request }: LoaderFunctionArgs) => {
@@ -288,7 +289,8 @@ export default function NewCampaign() {
           with AND.
         </s-paragraph>
         <FilterForm fields={SCOPE_FIELDS}>
-          <s-stack gap="base">
+          <FieldGrid>
+            <FullRow>
             <s-select name="segment" label="Saved segment">
               <s-option value="" defaultSelected={!selected.segment}>
                 Build a filter below instead
@@ -303,6 +305,7 @@ export default function NewCampaign() {
                 </s-option>
               ))}
             </s-select>
+            </FullRow>
 
             {usingSegment ? (
               <s-banner tone="info">
@@ -347,6 +350,9 @@ export default function NewCampaign() {
               ))}
             </s-select>
             <s-text-field name="title" label="Title contains" value={selected.title} />
+          </FieldGrid>
+
+          <s-stack direction="inline" gap="base">
             <s-button type="submit">Update match count</s-button>
           </s-stack>
         </FilterForm>

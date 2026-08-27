@@ -18,6 +18,7 @@ import {
 } from "../lib/money/rounding-policy";
 import { PageShell } from "../components/PageShell";
 import { SettingsSaveBar } from "../components/SettingsSaveBar";
+import { FieldGrid, FullRow } from "../components/FieldGrid";
 
 export const loader = withGuard("/app/settings", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -170,12 +171,14 @@ export default function Settings() {
           </s-banner>
         ) : null}
 
-          <s-stack gap="base">
+          <FieldGrid>
+            <FullRow>
             <s-checkbox
               name="neverBelowCost"
               label="Never price at or below cost"
               checked={settings.neverBelowCost || undefined}
             />
+            </FullRow>
 
             <s-number-field
               name="minMarginPercent"
@@ -218,7 +221,7 @@ export default function Settings() {
                 Fail the campaign
               </s-option>
             </s-select>
-          </s-stack>
+          </FieldGrid>
       </s-section>
 
       <s-section id="rounding" heading="Rounding">
