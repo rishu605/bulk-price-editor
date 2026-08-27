@@ -118,14 +118,32 @@ describe("asides that a page renders conditionally", () => {
 });
 
 describe("the column collapses before it gets unreadable", () => {
-  it("uses a container query, because the admin iframe is not the window", () => {
-    const html = render(
-      <PageShell heading="X">
-        <s-section>main</s-section>
-        <s-section slot="aside">side</s-section>
-      </PageShell>,
-    );
+  const html = render(
+    <PageShell heading="X">
+      <s-section>main</s-section>
+      <s-section slot="aside">side</s-section>
+    </PageShell>,
+  );
 
-    expect(html).toMatch(/@container[^"]*inline-size/);
+  const columns = /gridTemplateColumns="([^"]+)"/i.exec(html)?.[1] ?? "";
+
+  it("uses a container query, because the admin iframe is not the window", () => {
+    expect(columns).toMatch(/^@container[^)]*inline-size/);
+  });
+
+  it("carries exactly one comma, which is the separator and not part of a value", () => {
+    // This is the assertion that was missing, and its absence let a broken value
+    // through: `minmax(0, 1fr)` reads its own comma as the branch separator, so the
+    // value stops parsing and Polaris falls back to `none` -- one column, aside
+    // stacked underneath, indistinguishable from a deliberate layout.
+    expect(
+      columns.split(",").length - 1,
+      `"${columns}" has a comma inside a value, so Polaris cannot parse it`,
+    ).toBe(1);
+  });
+
+  it("asks for two columns when there is room", () => {
+    const [, wide] = columns.split(",");
+    expect(wide.trim().split(/\s+/), "wide viewports get content plus an aside").toHaveLength(2);
   });
 });

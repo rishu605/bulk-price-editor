@@ -50,7 +50,12 @@ export function PageShell({
     <s-page heading={heading} inlineSize="large">
       <s-grid
         gap="base"
-        gridTemplateColumns="@container (inline-size <= 900px) minmax(0, 1fr), minmax(0, 1fr) minmax(0, 22rem)"
+        // One comma only. Polaris splits a responsive value on the comma to separate
+        // "when the query matches" from "otherwise", so a `minmax(0, 1fr)` in here
+        // takes its own comma as that separator and the whole value stops parsing --
+        // which silently falls back to `none` and stacks the aside underneath, looking
+        // exactly like a layout choice rather than a broken string.
+        gridTemplateColumns="@container (inline-size <= 900px) 1fr, 1fr 22rem"
       >
         <s-stack gap="base">{main}</s-stack>
         <s-stack gap="base">
