@@ -4,7 +4,18 @@ Two services from one repository, per [D5](decisions.md). The worker is the only
 that writes prices, so it restarts and scales on its own — a slow campaign must never tie
 up a request thread, and a web deploy must never interrupt a run mid-write.
 
-Both services build the **same image**. They differ only in their start command. Building
+Both services build the **same image**. They differ in their start command and in which
+config file they read — and the second one is not optional.
+
+`railway.json` carries `healthcheckPath: "/healthz"`, and Railway applies a repo's config
+file to *every* service built from it. The worker serves no HTTP, so it inherited a
+healthcheck it can never answer: build succeeded, deploy succeeded, then
+`Network > Healthcheck` failed after the 120-second timeout and the deployment was marked
+FAILED. Nothing about that error names the healthcheck as the *wrong setting for this
+service* rather than a broken app, which is what makes it worth writing down.
+
+So the worker points at `railway.worker.json`, which is the same build with no healthcheck
+and the worker's start command. Building
 twice would let them drift, and the pair that must never disagree about a price is exactly
 this pair: the worker writes what the web process previewed.
 
@@ -17,6 +28,7 @@ this pair: the worker writes what the web process previewed.
 | Start command | `npm run docker-start` (the image default) | `npm run worker` |
 | Public domain | yes | **no** |
 | Healthcheck | `/healthz` | none — it serves no HTTP |
+| Config-as-code | `railway.json` (the default) | **`railway.worker.json`** — set it under Settings → Config-as-code |
 | Runs migrations | **yes** | no |
 | Replicas | scale freely | **exactly one** |
 
