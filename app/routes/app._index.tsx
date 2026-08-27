@@ -13,6 +13,7 @@ import { syncMarkets } from "../services/markets-sync.server";
 import { syncCatalogViaBulk } from "../services/catalog-bulk-sync.server";
 import { toAdminClient } from "../services/admin-client.server";
 import { OnboardingCard } from "../components/OnboardingCard";
+import { CountsRow } from "../components/CountsRow";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { onboarding } from "../lib/onboarding/steps";
 import { withGuard } from "../lib/errors/guard.server";
@@ -249,24 +250,18 @@ export default function Dashboard() {
         </s-section>
       ) : (
         <s-section heading="Catalogue">
-          <s-stack direction="inline" gap="large">
-            <s-box>
-              <s-text>Variants</s-text>
-              <s-heading>{formatCount(health.variants)}</s-heading>
-            </s-box>
-            <s-box>
-              <s-text>With baseline</s-text>
-              <s-heading>{formatCount(health.withBaseline)}</s-heading>
-            </s-box>
-            <s-box>
-              <s-text>Not at baseline</s-text>
-              <s-heading>{formatCount(health.drifted)}</s-heading>
-            </s-box>
-            <s-box>
-              <s-text>Campaigns</s-text>
-              <s-heading>{formatCount(campaigns)}</s-heading>
-            </s-box>
-          </s-stack>
+          {/* The shared component, not a second copy of its markup. This page had
+              hand-rolled the same four tiles, so it kept the old flat look after the
+              real one gained borders and equal columns -- and it is the first screen
+              after installing, which is the worst place to be a version behind. */}
+          <CountsRow
+            items={[
+              { label: "Variants", value: health.variants },
+              { label: "With baseline", value: health.withBaseline },
+              { label: "Not at baseline", value: health.drifted },
+              { label: "Campaigns", value: campaigns },
+            ]}
+          />
 
           {health.withBaseline > health.variants ? (
             <s-paragraph>
@@ -323,7 +318,7 @@ export default function Dashboard() {
           {health.missing > 0 ? (
             <s-banner tone="warning">
               <s-paragraph>
-                {health.missing} variants have no baseline yet and cannot be included
+                {formatCount(health.missing)} variants have no baseline yet and cannot be included
                 in a campaign. Re-sync to capture them.
               </s-paragraph>
             </s-banner>
@@ -343,24 +338,14 @@ export default function Dashboard() {
 
       {!neverSynced ? (
         <s-section heading="What is live right now">
-          <s-stack direction="inline" gap="large">
-            <s-box>
-              <s-text>Campaigns running</s-text>
-              <s-heading>{formatCount(live)}</s-heading>
-            </s-box>
-            <s-box>
-              <s-text>Scheduled</s-text>
-              <s-heading>{formatCount(upcoming)}</s-heading>
-            </s-box>
-            <s-box>
-              <s-text>Need attention</s-text>
-              <s-heading>{formatCount(needsAttention)}</s-heading>
-            </s-box>
-            <s-box>
-              <s-text>Prices changed outside the app</s-text>
-              <s-heading>{formatCount(driftOpen)}</s-heading>
-            </s-box>
-          </s-stack>
+          <CountsRow
+            items={[
+              { label: "Campaigns running", value: live },
+              { label: "Scheduled", value: upcoming },
+              { label: "Need attention", value: needsAttention },
+              { label: "Prices changed outside the app", value: driftOpen },
+            ]}
+          />
 
           {live === 0 && upcoming === 0 && campaigns === 0 ? (
             <s-paragraph>
@@ -376,7 +361,7 @@ export default function Dashboard() {
           {needsAttention > 0 ? (
             <s-banner tone="warning">
               <s-paragraph>
-                {needsAttention} campaign{needsAttention === 1 ? "" : "s"} did not finish
+                {formatCount(needsAttention)} campaign{needsAttention === 1 ? "" : "s"} did not finish
                 cleanly. Every row that did not complete has a reason recorded, and
                 resuming retries only those.
               </s-paragraph>
@@ -386,7 +371,7 @@ export default function Dashboard() {
           {driftOpen > 0 ? (
             <s-banner tone="info">
               <s-paragraph>
-                {driftOpen} price{driftOpen === 1 ? " was" : "s were"} changed somewhere
+                {formatCount(driftOpen)} price{driftOpen === 1 ? " was" : "s were"} changed somewhere
                 other than Anchor while a campaign was running. Those edits were
                 deliberate, so nothing has been overwritten — each is waiting on your
                 decision.
