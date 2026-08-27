@@ -14,6 +14,7 @@ import { ReconciliationTable } from "../components/ReconciliationTable";
 import { FilterForm } from "../components/FilterForm";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
+import { PageShell } from "../components/PageShell";
 
 /** Filters that ride in the query string, so a merchant can bookmark a view. */
 export const RECONCILE_FIELDS = ["q", "surface", "campaign", "state"] as const;
@@ -78,7 +79,7 @@ export default function Reconciliation() {
   const busy = fetcher.state !== "idle";
 
   return (
-    <s-page heading="What is live, and why">
+    <PageShell heading="What is live, and why">
       <s-section>
         <s-paragraph>
           <s-text>
@@ -197,7 +198,7 @@ export default function Reconciliation() {
           Export this page (CSV)
         </s-button>
       </s-section>
-    </s-page>
+    </PageShell>
   );
 }
 

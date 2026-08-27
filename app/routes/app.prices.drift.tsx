@@ -7,6 +7,7 @@ import { ensureShop } from "../services/shop.server";
 import { pendingDrift, resolveDrift, type DriftResolution } from "../services/drift.server";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
+import { PageShell } from "../components/PageShell";
 
 export const loader = withGuard("/app/prices/drift", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -41,7 +42,7 @@ export default function DriftQueue() {
   const busy = fetcher.state !== "idle";
 
   return (
-    <s-page heading="Price drift">
+    <PageShell heading="Price drift">
       {fetcher.data ? (
         <s-banner tone="success">
           <s-paragraph>{fetcher.data.message}</s-paragraph>
@@ -118,7 +119,7 @@ export default function DriftQueue() {
           </s-text>
         </s-paragraph>
       </s-section>
-    </s-page>
+    </PageShell>
   );
 }
 

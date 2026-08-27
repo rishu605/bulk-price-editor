@@ -21,6 +21,7 @@ import { RouteBoundary } from "../components/RouteBoundary";
 import { downloadCsv } from "../lib/reporting/csv";
 import { describeActor } from "../lib/audit/actor";
 import { withGuard } from "../lib/errors/guard.server";
+import { PageShell } from "../components/PageShell";
 
 const FILTER_FIELDS = ["actor", "action", "from", "to"] as const;
 
@@ -66,7 +67,7 @@ export default function Activity() {
     });
 
   return (
-    <s-page heading="Activity">
+    <PageShell heading="Activity">
       <s-section>
         <FilterForm fields={FILTER_FIELDS}>
           <s-stack gap="base">
@@ -156,7 +157,7 @@ export default function Activity() {
           </s-text>
         </s-paragraph>
       </s-section>
-    </s-page>
+    </PageShell>
   );
 }
 

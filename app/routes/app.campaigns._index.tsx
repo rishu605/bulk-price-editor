@@ -12,6 +12,7 @@ import {
   needsAttention,
   type CampaignState,
 } from "../lib/lifecycle/transitions";
+import { PageShell } from "../components/PageShell";
 
 export const loader = withGuard("/app/campaigns", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -61,7 +62,7 @@ export default function CampaignList() {
   const { campaigns, attentionCount } = useLoaderData<typeof loader>();
 
   return (
-    <s-page heading="Campaigns">
+    <PageShell heading="Campaigns">
       {attentionCount > 0 ? (
         <s-banner tone="warning">
           <s-paragraph>
@@ -134,7 +135,7 @@ export default function CampaignList() {
           campaign still covers a variant, that campaign&rsquo;s price stays in place.
         </s-paragraph>
       </s-section>
-    </s-page>
+    </PageShell>
   );
 }
 

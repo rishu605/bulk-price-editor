@@ -18,6 +18,7 @@ import { isErrorId } from "../lib/errors/error-id";
 import { EmptyState } from "../components/AsyncState";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
+import { PageShell } from "../components/PageShell";
 
 export const loader = withGuard("/app/settings/diagnostics", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -59,7 +60,7 @@ export default function Debug() {
   const { query, invalidQuery, match, recent, byCode } = useLoaderData<typeof loader>();
 
   return (
-    <s-page heading="Diagnostics">
+    <PageShell heading="Diagnostics">
       <s-section heading="Look up an error">
         <s-paragraph>
           <s-text>
@@ -180,7 +181,7 @@ export default function Debug() {
           ))}
         </s-section>
       ) : null}
-    </s-page>
+    </PageShell>
   );
 }
 

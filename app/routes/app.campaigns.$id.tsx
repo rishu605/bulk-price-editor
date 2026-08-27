@@ -40,6 +40,7 @@ import {
 } from "../lib/lifecycle/transitions";
 import { transitionHistory } from "../services/campaigns/lifecycle.server";
 import { approvalFor, decideApproval, requestApproval, SelfApprovalError } from "../services/approvals.server";
+import { PageShell } from "../components/PageShell";
 
 export const loader = withGuard("/app/campaigns/$id", async ({ request, params }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
@@ -279,7 +280,7 @@ export default function CampaignDetail() {
   const canApply = !practice && !preview.blocked && canTransition(state, "APPLYING");
 
   return (
-    <s-page heading={preview.name}>
+    <PageShell heading={preview.name}>
       {result ? (
         <s-banner tone={result.ok ? "success" : "critical"}>
           <s-paragraph>{result.message}</s-paragraph>
@@ -676,7 +677,7 @@ export default function CampaignDetail() {
           </>
         ) : null}
       </s-section>
-    </s-page>
+    </PageShell>
   );
 }
 

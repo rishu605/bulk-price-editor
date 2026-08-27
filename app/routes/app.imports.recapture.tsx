@@ -23,6 +23,7 @@ import { actorFor } from "../lib/audit/actor";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { reportError } from "../services/error-report.server";
+import { PageShell } from "../components/PageShell";
 
 export const loader = withGuard("/app/imports/recapture", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -89,7 +90,7 @@ export default function Recapture() {
   const data = fetcher.data;
 
   return (
-    <s-page heading="Recapture baselines">
+    <PageShell heading="Recapture baselines">
       {data ? (
         <s-banner tone={data.ok ? "success" : "critical"}>
           <s-paragraph>{data.message}</s-paragraph>
@@ -201,7 +202,7 @@ export default function Recapture() {
           <s-text>The Baselines page shows every version of every variant.</s-text>
         </s-paragraph>
       </s-section>
-    </s-page>
+    </PageShell>
   );
 }
 

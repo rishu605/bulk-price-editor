@@ -18,6 +18,7 @@ import { actorFor } from "../lib/audit/actor";
 import { FeedbackForm } from "../components/FeedbackForm";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
+import { PageShell } from "../components/PageShell";
 
 export const loader = withGuard("/app/settings/feedback", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -60,7 +61,7 @@ export default function FeedbackPage() {
   const { sent, timeZone } = useLoaderData<typeof loader>();
 
   return (
-    <s-page heading="Feedback">
+    <PageShell heading="Feedback">
       <FeedbackForm route="/app/settings/feedback" />
 
       {sent.length > 0 ? (
@@ -93,7 +94,7 @@ export default function FeedbackPage() {
           </s-table>
         </s-section>
       ) : null}
-    </s-page>
+    </PageShell>
   );
 }
 

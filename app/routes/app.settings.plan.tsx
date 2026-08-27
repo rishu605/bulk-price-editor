@@ -20,6 +20,7 @@ import { PLAN_ORDER, PLANS } from "../lib/billing/plans";
 import { formatMinorUnits } from "../lib/money/format";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
+import { PageShell } from "../components/PageShell";
 
 export const loader = withGuard("/app/settings/plan", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -70,7 +71,7 @@ export default function PlanPage() {
     useLoaderData<typeof loader>();
 
   return (
-    <s-page heading="Plan">
+    <PageShell heading="Plan">
       {exempt ? (
         <s-banner tone="info">
           <s-paragraph>
@@ -179,7 +180,7 @@ export default function PlanPage() {
           </>
         ) : null}
       </s-section>
-    </s-page>
+    </PageShell>
   );
 }
 

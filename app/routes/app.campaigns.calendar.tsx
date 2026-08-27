@@ -9,6 +9,7 @@ import { addDays } from "../lib/scheduling/calendar";
 import { CalendarGrid } from "../components/CalendarGrid";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
+import { PageShell } from "../components/PageShell";
 
 export const loader = withGuard("/app/campaigns/calendar", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -50,7 +51,7 @@ export default function Calendar() {
   const heading = view === "week" ? `Week of ${on}` : monthName(on);
 
   return (
-    <s-page heading="Calendar">
+    <PageShell heading="Calendar">
       <s-section heading={heading}>
         <s-paragraph>
           <s-text>
@@ -114,7 +115,7 @@ export default function Calendar() {
           ))}
         </s-section>
       ) : null}
-    </s-page>
+    </PageShell>
   );
 }
 

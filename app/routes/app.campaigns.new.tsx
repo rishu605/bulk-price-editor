@@ -24,6 +24,7 @@ import { billingFrom } from "../services/billing.server";
 import { canUseSurface } from "../lib/billing/plans";
 import prisma from "../db.server";
 import { segmentToAst } from "../services/segments.server";
+import { PageShell } from "../components/PageShell";
 
 export const loader = withGuard("/app/campaigns/new", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -257,7 +258,7 @@ export default function NewCampaign() {
   } = useLoaderData<typeof loader>();
 
   return (
-    <s-page heading={practice ? "Practice campaign" : guided ? "Your first campaign" : "New campaign"}>
+    <PageShell heading={practice ? "Practice campaign" : guided ? "Your first campaign" : "New campaign"}>
       {practice ? (
         <s-banner tone="info">
           <s-paragraph>
@@ -579,7 +580,7 @@ export default function NewCampaign() {
           discounting the discount.
         </s-paragraph>
       </s-section>
-    </s-page>
+    </PageShell>
   );
 }
 
