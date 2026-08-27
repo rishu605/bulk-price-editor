@@ -36,6 +36,7 @@ export interface GraphQLRunner {
 const PRODUCT_VARIANTS_PAGE = `#graphql
   query AnchorProductVariantsPage($id: ID!, $cursor: String) {
     product(id: $id) {
+      featuredImage { url }
       variants(first: 250, after: $cursor) {
         pageInfo { hasNextPage endCursor }
         nodes {
@@ -65,6 +66,7 @@ const PRODUCTS_PAGE = `#graphql
         status
         tags
         updatedAt
+        featuredImage { url }
         collections(first: 20) { nodes { id } }
         variants(first: 100) {
           pageInfo { hasNextPage endCursor }
@@ -76,6 +78,7 @@ const PRODUCTS_PAGE = `#graphql
             price
             compareAtPrice
             inventoryQuantity
+            image { url }
             inventoryItem { unitCost { amount currencyCode } }
           }
         }
@@ -92,6 +95,7 @@ interface ProductNode {
   status?: string | null;
   tags?: string[] | null;
   updatedAt?: string | null;
+  featuredImage?: { url?: string | null } | null;
   collections?: { nodes?: Array<{ id: string }> | null } | null;
   variants?: {
     pageInfo?: { hasNextPage?: boolean; endCursor?: string | null } | null;
@@ -107,6 +111,7 @@ interface VariantNode {
   price?: string | null;
   compareAtPrice?: string | null;
   inventoryQuantity?: number | null;
+  image?: { url?: string | null } | null;
   inventoryItem?: { unitCost?: { amount?: string | null; currencyCode?: string | null } | null } | null;
 }
 
@@ -274,6 +279,10 @@ async function upsertVariant(
     sku: variant.sku ?? null,
     barcode: variant.barcode ?? null,
     title: [product.title, variant.title].filter(Boolean).join(" · "),
+    // The variant's own image, falling back to the product's. A size that shares the
+    // product photo is the common case, and showing nothing for it would make the
+    // difference between "no photo" and "same photo as its siblings" invisible.
+    imageUrl: variant.image?.url ?? product.featuredImage?.url ?? null,
     price: price === null ? null : BigInt(price),
     compareAt: compareAt === null ? null : BigInt(compareAt),
     cost: cost === null ? null : BigInt(cost),

@@ -1,4 +1,5 @@
 import { formatCount } from "../lib/format/display";
+import { SPACE } from "../lib/ui/spacing";
 import type { DraftPreview as Preview } from "../services/campaigns/draft-preview.server";
 
 /**
@@ -88,7 +89,18 @@ export function DraftPreview({ preview }: { preview: Preview | null }) {
           <s-table-body>
             {preview.rows.map((row) => (
               <s-table-row key={row.variantGid}>
-                <s-table-cell>{row.title}</s-table-cell>
+                <s-table-cell>
+                  {/* The picture and the name are one thing, so they sit on one line at
+                      tight rhythm. A variant with no image still gets a row -- a product
+                      without a photo is ordinary, and a broken frame would read as an
+                      error the merchant needs to fix. */}
+                  <s-stack direction="inline" gap={SPACE.tight} alignItems="center">
+                    {row.imageUrl ? (
+                      <s-thumbnail src={row.imageUrl} alt="" size="small" />
+                    ) : null}
+                    <s-text>{row.title}</s-text>
+                  </s-stack>
+                </s-table-cell>
                 <s-table-cell>
                   {row.before ?? "—"}
                   {row.beforeCompareAt ? ` (was ${row.beforeCompareAt})` : ""}

@@ -22,6 +22,7 @@ import { parseMoney, type Money } from "../money/money";
 
 /** A product line from the bulk query. */
 export interface ProductLine {
+  featuredImage?: { url?: string | null } | null;
   id: string;
   title?: string | null;
   vendor?: string | null;
@@ -34,6 +35,7 @@ export interface ProductLine {
 
 /** A variant line, or a collection line, identified by its parent. */
 export interface ChildLine {
+  image?: { url?: string | null } | null;
   id: string;
   __parentId: string;
   title?: string | null;
@@ -63,6 +65,7 @@ export interface CatalogRow {
   tags: string[];
   collections: string[];
   remoteUpdatedAt: Date | null;
+  imageUrl: string | null;
 }
 
 export interface ParseStats {
@@ -76,6 +79,7 @@ export interface ParseStats {
 interface ProductState {
   gid: string;
   title: string | null;
+  imageUrl: string | null;
   vendor: string | null;
   productType: string | null;
   status: "ACTIVE" | "ARCHIVED" | "DRAFT";
@@ -134,6 +138,7 @@ export async function* parseCatalogJsonl(
       products.set(product.id, {
         gid: product.id,
         title: product.title ?? null,
+        imageUrl: product.featuredImage?.url ?? null,
         vendor: product.vendor ?? null,
         productType: product.productType ?? null,
         status: toStatus(product.status),
@@ -199,6 +204,11 @@ function toRow(child: ChildLine, product: ProductState, currency: string): Catal
   return {
     variantGid: child.id,
     productGid: product.gid,
+    // The variant's own image, falling back to its product's — the same rule the
+    // paginated path uses. The two writing different values for the same variant,
+    // depending only on catalogue size, is the shape of the bug that made bulk-imported
+    // variants unpriceable (#252).
+    imageUrl: child.image?.url ?? product.imageUrl,
     // The variant's own title where it has one, falling back to the product's. A bare
     // "Default Title" on its own tells a merchant nothing in a list of ten thousand.
     title:
@@ -240,6 +250,7 @@ export const CATALOG_BULK_QUERY = `
           status
           tags
           updatedAt
+          featuredImage { url }
           collections {
             edges { node { id } }
           }
@@ -253,6 +264,7 @@ export const CATALOG_BULK_QUERY = `
                 price
                 compareAtPrice
                 inventoryQuantity
+                image { url }
                 inventoryItem { unitCost { amount currencyCode } }
               }
             }
