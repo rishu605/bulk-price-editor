@@ -164,4 +164,14 @@ export async function seedFixture(options: SeedOptions): Promise<Fixture> {
  */
 export async function destroyFixture(domain: string): Promise<void> {
   await prisma.shop.deleteMany({ where: { domain } });
+
+  // Errors the app could not attribute to a shop. They have no shop to cascade from,
+  // so nothing else removes them -- and they are counted by the global error rate while
+  // no per-shop rate counts them. `shop-error-spike` asserts on exactly that asymmetry,
+  // so three of these left behind invert its premise and it fails claiming the platform
+  // is unhealthy.
+  //
+  // Three. Not fifty: it took exactly three, recorded while #346 was throwing, to break
+  // it. Any failure that happens before `ensureShop` leaves one.
+  await prisma.errorEvent.deleteMany({ where: { shopId: null } });
 }
