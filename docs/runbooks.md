@@ -35,6 +35,72 @@ always meant something real.
 
 ---
 
+## Alert: webhooks more than five minutes behind
+
+**Metric:** `webhook.lag_ms` — the largest `processedAt - receivedAt` across deliveries
+processed in the last fifteen minutes.
+
+**What it means.** Shopify reached us and we were slow to act on it, so the mirror is
+behind the store. A campaign planned against a stale mirror prices the wrong products: a
+variant created ten minutes ago is not in scope, and one that just moved collection is
+scoped by where it used to be.
+
+**Read the metric carefully.** It measures *our* processing, not Shopify's delivery, and
+it is computed only over events that already have a `processedAt`. That has a consequence
+worth knowing at 3am: **if the worker stops outright, nothing gets a `processedAt`, the
+sample is empty, and this alert goes quiet instead of firing.** The same emptiness zeroes
+the denominator behind *errors spiking*, which needs twenty deliveries before it will
+speak. A worker that is dead rather than slow is caught by **scheduler tick stopped**, and
+by that alert alone — so read sudden silence across all three as a stopped worker until
+something proves otherwise.
+
+**Diagnose.**
+
+1. `SELECT status, count(*) FROM webhook_events WHERE "receivedAt" > now() - interval '1 hour' GROUP BY status;` — a large `RECEIVED` next to a small `PROCESSED` is a worker accepting deliveries and not draining them.
+2. `SELECT topic, count(*), max(now() - "receivedAt") AS oldest FROM webhook_events WHERE "processedAt" IS NULL GROUP BY topic ORDER BY oldest DESC;` — one topic backed up while the others move points at that handler rather than at the worker.
+3. `SELECT "failureReason", count(*) FROM webhook_events WHERE status = 'FAILED' AND "receivedAt" > now() - interval '1 hour' GROUP BY 1 ORDER BY 2 DESC;` — a repeated reason means the handler is throwing and `attempts` is climbing.
+
+**Remediate.** If the queue is draining and merely slow, let it. Restarting mid-drain
+costs the in-flight batch and buys nothing, because delivery is at-least-once and the
+unique constraint on `webhookId` makes the replay safe rather than fast. If it is not
+draining, restart the worker and watch `PROCESSED` climb. Once lag is back under a minute,
+run a catalogue re-sync for any shop that ran a campaign during the window — the mirror
+caught up, but anything planned against it while it was stale did not.
+
+**Do not** clear the backlog by deleting rows. `webhook_events` is how a lost change is
+found afterwards, and a mirror divergence with no delivery history is unexplainable.
+
+---
+
+## Alert: errors spiking
+
+**Metric:** `error_events` in the last fifteen minutes over deliveries processed in the
+same window, firing above 5% — and only once the window holds at least twenty deliveries,
+so one failure on a quiet night is not a 33% error rate.
+
+**What it means.** More than one in twenty is failing. Whatever it is, it is reaching
+merchants now rather than one unlucky merchant. It says nothing yet about *what* is
+failing; the first job is to find out whether this is one cause, one shop, or one route.
+
+**Diagnose.** Start with the shape, not the stack.
+
+1. `SELECT code, count(*) FROM error_events WHERE "createdAt" > now() - interval '1 hour' GROUP BY 1 ORDER BY 2 DESC;` — one code dominating is a single cause. A flat spread is usually infrastructure underneath all of them.
+2. `SELECT "shopId", count(*) FROM error_events WHERE "createdAt" > now() - interval '1 hour' GROUP BY 1 ORDER BY 2 DESC LIMIT 10;` — concentrated on one shop is that shop's data or its rate-limit budget, and is not an outage.
+3. `SELECT route, method, count(*) FROM error_events WHERE "createdAt" > now() - interval '1 hour' GROUP BY 1,2 ORDER BY 3 DESC;` — one route is a deploy; every route is the database or Shopify.
+4. Pick one `errorId` and read its `message`, `stack` and `userMessage` together. `userMessage` is what the merchant was actually told, which decides whether this needs a status note as well as a fix.
+
+**Remediate.** A dominant `SHOPIFY_UNAVAILABLE` is Shopify's, and the retry policy is
+already handling it — confirm it recovers rather than acting. Anything correlated with a
+release should be rolled back before it is diagnosed. If the errors are concentrated in
+execution, check for runs stuck mid-flight before restarting anything: see
+[Stuck run recovery](#stuck-run-recovery), because a restart with rows already in the
+ledger and unsettled is the case that procedure exists for.
+
+**Do not** raise the threshold to stop the paging. The 5% floor and the twenty-delivery
+minimum are both there because the noisy versions of this alert were tried first.
+
+---
+
 ## Alert: scheduler tick stopped
 
 **Metric:** `scheduler.tick` absent for more than three intervals
@@ -131,7 +197,7 @@ single poison job, its failure is in `error_events` with the job id.
 
 ---
 
-## Alert: a shop's budget saturated
+## Watch: a shop's budget saturated
 
 **Metric:** `budget.saturation`
 
