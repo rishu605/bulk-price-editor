@@ -183,13 +183,18 @@ export interface RunOutcome {
    */
   deferredTo?: string;
   /**
-   * Set when the shop's plan does not cover this campaign, so no run was started.
+   * Set when the run was refused before it started, saying why.
    *
-   * Distinct from a failure and from "nothing to do". A caller showing a run report
-   * needs to say "your plan does not cover this" rather than "your sale failed", and an
-   * empty `runId` alone cannot carry that difference.
+   * The shop's plan does not cover the campaign, or its scope is too large to finish
+   * inside the caller's request. Distinct from a failure and from "nothing to do": a
+   * caller showing a run report needs to say "your plan does not cover this" rather
+   * than "your sale failed", and an empty `runId` alone cannot carry that difference.
+   *
+   * Named for the outcome rather than one of its causes, because a caller branching on
+   * it is asking "did this run?" -- and it once said `ByPlan` while carrying a reason
+   * that had nothing to do with billing.
    */
-  refusedByPlan?: string;
+  refused?: string;
 }
 
 export interface RunSummary {

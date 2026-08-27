@@ -14,6 +14,7 @@ import {
   rollbackReport,
   runCampaign,
 } from "../services/campaigns/index.server";
+import { MAX_INLINE_ROWS } from "../lib/execution/inline-budget";
 import { describeSchedule, parseSchedule, scheduleWarnings } from "../lib/scheduling/window";
 import { RunHistoryTable } from "../components/RunHistoryTable";
 import { RunResultSection } from "../components/RunResultSection";
@@ -212,6 +213,8 @@ export const action = withGuard("/app/campaigns/$id", async ({ request, params }
       // Rows the merchant ticked "leave as it is" in the rollback report. Only
       // meaningful on a revert; an apply has no drifted-row conversation to honour.
       skipVariantGids: reverting ? form.getAll("keep").map(String) : undefined,
+      // Written during this request, so it dies with it. See `inline-budget`.
+      inlineRowLimit: MAX_INLINE_ROWS,
     });
 
     const verb = reverting ? "Reverted" : intent === "resume" ? "Resumed" : "Applied";
@@ -222,6 +225,13 @@ export const action = withGuard("/app/campaigns/$id", async ({ request, params }
     // what is happening to the merchant's prices right now.
     if (result.deferredTo) {
       return { ok: true, message: result.messages[0], details: [] };
+    }
+
+    // Refused before anything started. Clean and zero-verified, so the message below
+    // would render it as "Applied 0 variants, all verified" -- a green tick over a
+    // campaign that never ran, and a merchant believing their prices changed.
+    if (result.refused) {
+      return { ok: false, tone: "warning" as const, message: result.refused, details: [] };
     }
 
     return {
@@ -255,6 +265,8 @@ export const action = withGuard("/app/campaigns/$id", async ({ request, params }
 
 type ActionData = {
   ok: boolean;
+  /** Not done, but nothing broke. Red would send the merchant hunting a fault. */
+  tone?: "warning";
   message: string;
   details: string[];
   errorId?: string;
@@ -315,7 +327,7 @@ export default function CampaignDetail() {
   return (
     <PageShell heading={preview.name} backTo={{ href: "/app/campaigns", label: "Campaigns" }}>
       {result ? (
-        <s-banner tone={result.ok ? "success" : "critical"}>
+        <s-banner tone={result.ok ? "success" : (result.tone ?? "critical")}>
           <s-paragraph>{result.message}</s-paragraph>
           {result.details.map((detail) => (
             <s-paragraph key={detail}>{detail}</s-paragraph>

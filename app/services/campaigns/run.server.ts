@@ -22,6 +22,7 @@ import { AppError } from "../../lib/errors/app-error";
 import { guardrailsFor } from "../settings.server";
 import type { RunOutcome } from "./types";
 import { inChunksCounting } from "../../lib/db/chunk";
+import { refuseInline } from "../../lib/execution/inline-budget";
 import { releaseClaim, transitionCampaign } from "./lifecycle.server";
 import type { CampaignState } from "../../lib/lifecycle/transitions";
 import { SKIP_REASON_GROUP } from "../../lib/planning/reasons";
@@ -49,6 +50,15 @@ export interface RunOptions {
    * `runCampaign` reads it.
    */
   claimedFrom?: CampaignState;
+  /**
+   * Refuse rather than start, when the scope is too large to finish inside this
+   * caller's deadline.
+   *
+   * Set by the web routes, which run inside an HTTP request that gets closed after five
+   * minutes. Left unset by the worker and the scheduler, which have no request attached
+   * -- the ceiling is a property of the caller, not of the campaign.
+   */
+  inlineRowLimit?: number;
   /**
    * Fraction of applied rows to read back. Defaults to full verification, which
    * suits the catalogue sizes the sync path handles; the bulk path compares every row
@@ -208,7 +218,51 @@ async function executeCampaignRun(
       };
     }
 
-    const refusal = await refusedByPlan(shopId, campaignId, options.variantGids?.length);
+    // How many variants this run will attempt.
+    //
+    // A subset apply is bounded by the list the caller sent. Everything else has to be
+    // counted, which is only worth doing for a caller that declared a deadline -- and
+    // cheap enough to be worth it now that the scope columns are GIN-indexed. The plan
+    // gate below wants the same number, so it is counted once and passed down.
+    let scopedCount = options.variantGids?.length;
+
+    if (options.inlineRowLimit !== undefined) {
+      scopedCount ??= await prisma.variantIndex.count({
+        where: astToWhere(
+          shopId,
+          await scopeOf(
+            shopId,
+            await prisma.campaign.findFirstOrThrow({
+              where: { id: campaignId, shopId },
+              select: { schedule: true },
+            }),
+          ),
+        ),
+      });
+
+      // Before the plan gate, because a scope too large to finish is too large whatever
+      // tier the shop is on -- telling a merchant to upgrade for a run that would be
+      // cut off either way is worse than useless.
+      const tooBig = refuseInline(scopedCount, options.inlineRowLimit);
+      if (tooBig) {
+        return {
+          runId: "",
+          planned: 0,
+          verified: 0,
+          failed: 0,
+          unverified: 0,
+          // Clean, for the same reason the plan refusal below is: nothing is half-done.
+          // No price moved and no ledger row exists, so putting this campaign into the
+          // needs-attention queue would report a problem the merchant cannot fix by
+          // attending to it.
+          clean: true,
+          messages: [tooBig],
+          refused: tooBig,
+        };
+      }
+    }
+
+    const refusal = await refusedByPlan(shopId, campaignId, scopedCount);
     if (refusal) {
       return {
         runId: "",
@@ -221,7 +275,7 @@ async function executeCampaignRun(
         // queue for a reason the merchant cannot resolve by attending to it.
         clean: true,
         messages: [refusal],
-        refusedByPlan: refusal,
+        refused: refusal,
       };
     }
   }
