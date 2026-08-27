@@ -22,7 +22,8 @@ import { AppError } from "../../lib/errors/app-error";
 import { guardrailsFor } from "../settings.server";
 import type { RunOutcome } from "./types";
 import { inChunksCounting } from "../../lib/db/chunk";
-import { transitionCampaign } from "./lifecycle.server";
+import { releaseClaim, transitionCampaign } from "./lifecycle.server";
+import type { CampaignState } from "../../lib/lifecycle/transitions";
 import { planResume, type LedgerState } from "../../lib/execution/resume";
 import { applyCampaignTags, removeCampaignTags } from "./tags.server";
 import {
@@ -35,6 +36,18 @@ import { metric } from "../../lib/telemetry/metrics";
 
 export interface RunOptions {
   revert?: boolean;
+  /**
+   * The state the caller moved this campaign out of when it claimed it.
+   *
+   * Only the scheduler needs this. It claims a campaign with its own conditional
+   * update -- that update *is* how two overlapping ticks avoid both running the same
+   * transition -- so by the time `runCampaign` looks, the original state is gone. If
+   * planning then fails, this is the only record of where to put the campaign back.
+   *
+   * A manual apply leaves it unset: the campaign is still in its pre-claim state when
+   * `runCampaign` reads it.
+   */
+  claimedFrom?: CampaignState;
   /**
    * Fraction of applied rows to read back. Defaults to full verification, which
    * suits the catalogue sizes the sync path handles; the bulk path compares every row
@@ -85,6 +98,46 @@ export interface RunOptions {
 }
 
 export async function runCampaign(
+  shopId: string,
+  campaignId: string,
+  client: AdminClient,
+  options: RunOptions = {},
+): Promise<RunOutcome> {
+  // The campaign is moved to APPLYING before anything is planned, so that an illegal
+  // action is refused before a price moves. Planning can then fail -- a guardrail
+  // blocks the run, a session expires, a catalogue outgrows one statement -- and until
+  // this wrapper existed every one of those left the campaign claiming to be applying
+  // forever, with an empty ledger behind it and revert refused.
+  //
+  // The guardrail case is the common one, not an exotic one: `planRun` returning
+  // `blocked` throws, so a floor price doing exactly its job stranded the campaign.
+  //
+  // Read before the claim, because afterwards the original state is gone. When the
+  // scheduler claimed the campaign itself -- its `updateMany` from SCHEDULED is how two
+  // overlapping ticks avoid both running the same transition -- this reads APPLYING and
+  // only the scheduler knows what it took, so it passes `claimedFrom`.
+  const before = await prisma.campaign.findUnique({
+    where: { id: campaignId },
+    select: { status: true },
+  });
+  const releaseTo = (options.claimedFrom ?? before?.status) as CampaignState | undefined;
+
+  try {
+    return await executeCampaignRun(shopId, campaignId, client, options);
+  } catch (error) {
+    // Only release to a state that is not itself a claim. A campaign that was already
+    // APPLYING when this was called -- a resume, a second worker -- has nowhere to be
+    // put back to, and `releaseClaim` additionally refuses while any run is still live.
+    if (releaseTo && releaseTo !== "APPLYING" && releaseTo !== "REVERTING") {
+      await releaseClaim(shopId, campaignId, releaseTo, {
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+    throw error;
+  }
+}
+
+async function executeCampaignRun(
   shopId: string,
   campaignId: string,
   client: AdminClient,

@@ -15,6 +15,7 @@ import {
   type Transition,
 } from "../lib/scheduling/window";
 import { runCampaign } from "./campaigns/run.server";
+import type { CampaignState } from "../lib/lifecycle/transitions";
 import { adminClientForShop } from "./admin-client.server";
 import { claimEnrollment, pendingEnrollments } from "./auto-enroll.server";
 import { reclaimStaleRuns } from "./campaigns/reaper.server";
@@ -273,6 +274,14 @@ async function runTransition(
   // Claim the campaign before running. Two ticks overlapping — a slow run, a second
   // worker that briefly held the lock — would otherwise both start the same
   // transition. The status change is the claim.
+  // Read the state we are about to take it out of, so a run that fails before it
+  // starts can be put back there. `updateMany` reports how many rows it changed, not
+  // what they were.
+  const before = await prisma.campaign.findUnique({
+    where: { id: campaignId },
+    select: { status: true },
+  });
+
   const claimed = await prisma.campaign.updateMany({
     where: {
       id: campaignId,
@@ -286,6 +295,7 @@ async function runTransition(
   await runCampaign(shopId, campaignId, client, {
     revert: transition === "revert",
     occurrenceKey,
+    claimedFrom: before?.status as CampaignState | undefined,
   });
 }
 
