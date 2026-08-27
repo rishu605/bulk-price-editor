@@ -123,9 +123,9 @@ describe("counts a merchant reads are grouped, wherever they appear", () => {
   const merchantFacing = [
     "app/components/CountsRow.tsx",
     "app/routes/app._index.tsx",
-    "app/routes/app.reconciliation.tsx",
+    "app/routes/app.prices.live.tsx",
     "app/routes/app.activity.tsx",
-    "app/routes/app.plan.tsx",
+    "app/routes/app.settings.plan.tsx",
     "app/components/RunResultSection.tsx",
   ];
 

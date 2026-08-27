@@ -26,7 +26,7 @@ export function FeedbackForm({ route }: { route: string }) {
         </s-banner>
       ) : null}
 
-      <fetcher.Form method="post" action="/app/feedback">
+      <fetcher.Form method="post" action="/app/settings/feedback">
         <input type="hidden" name="route" value={route} />
         <s-stack gap="base">
           <s-select name="sentiment" label="What kind of thing is this?">

@@ -21,7 +21,7 @@ import { formatMinorUnits } from "../lib/money/format";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 
-export const loader = withGuard("/app/plan", async ({ request }: LoaderFunctionArgs) => {
+export const loader = withGuard("/app/settings/plan", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
 

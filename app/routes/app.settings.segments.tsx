@@ -25,7 +25,7 @@ import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { reportError } from "../services/error-report.server";
 
-export const loader = withGuard("/app/segments", async ({ request }: LoaderFunctionArgs) => {
+export const loader = withGuard("/app/settings/segments", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
 
@@ -47,7 +47,7 @@ type ActionData = {
   errorId?: string;
 };
 
-export const action = withGuard("/app/segments", async ({ request }: ActionFunctionArgs) => {
+export const action = withGuard("/app/settings/segments", async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
   const form = await request.formData();
@@ -138,7 +138,7 @@ export const action = withGuard("/app/segments", async ({ request }: ActionFunct
     const reported = await reportError(error, {
       shopId: shop.id,
       shop: session.shop,
-      route: "/app/segments",
+      route: "/app/settings/segments",
       context: { intent },
     });
     return { ok: false, message: reported.userMessage, errorId: reported.errorId };

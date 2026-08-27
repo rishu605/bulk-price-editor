@@ -18,7 +18,7 @@ import { withGuard } from "../lib/errors/guard.server";
 /** Filters that ride in the query string, so a merchant can bookmark a view. */
 export const RECONCILE_FIELDS = ["q", "surface", "campaign", "state"] as const;
 
-export const loader = withGuard("/app/reconciliation", async ({ request }: LoaderFunctionArgs) => {
+export const loader = withGuard("/app/prices/live", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
 
@@ -49,7 +49,7 @@ export const loader = withGuard("/app/reconciliation", async ({ request }: Loade
   };
 });
 
-export const action = withGuard("/app/reconciliation", async ({ request }: ActionFunctionArgs) => {
+export const action = withGuard("/app/prices/live", async ({ request }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
   const form = await request.formData();

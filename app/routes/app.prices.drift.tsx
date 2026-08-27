@@ -8,13 +8,13 @@ import { pendingDrift, resolveDrift, type DriftResolution } from "../services/dr
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 
-export const loader = withGuard("/app/drift", async ({ request }: LoaderFunctionArgs) => {
+export const loader = withGuard("/app/prices/drift", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
   return { events: await pendingDrift(shop.id) };
 });
 
-export const action = withGuard("/app/drift", async ({ request }: ActionFunctionArgs) => {
+export const action = withGuard("/app/prices/drift", async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
 

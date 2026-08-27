@@ -10,7 +10,7 @@ import { CalendarGrid } from "../components/CalendarGrid";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 
-export const loader = withGuard("/app/calendar", async ({ request }: LoaderFunctionArgs) => {
+export const loader = withGuard("/app/campaigns/calendar", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
 
@@ -60,22 +60,22 @@ export default function Calendar() {
         </s-paragraph>
 
         <s-stack direction="inline" gap="base">
-          <Link to={`/app/calendar?view=${view}&on=${previous}`}>
+          <Link to={`/app/campaigns/calendar?view=${view}&on=${previous}`}>
             <s-button type="button" variant="tertiary">
               Previous
             </s-button>
           </Link>
-          <Link to={`/app/calendar?view=${view}&on=${today}`}>
+          <Link to={`/app/campaigns/calendar?view=${view}&on=${today}`}>
             <s-button type="button" variant="tertiary">
               Today
             </s-button>
           </Link>
-          <Link to={`/app/calendar?view=${view}&on=${next}`}>
+          <Link to={`/app/campaigns/calendar?view=${view}&on=${next}`}>
             <s-button type="button" variant="tertiary">
               Next
             </s-button>
           </Link>
-          <Link to={`/app/calendar?view=${view === "week" ? "month" : "week"}&on=${on}`}>
+          <Link to={`/app/campaigns/calendar?view=${view === "week" ? "month" : "week"}&on=${on}`}>
             <s-button type="button" variant="tertiary">
               {view === "week" ? "Month view" : "Week view"}
             </s-button>

@@ -12,7 +12,7 @@ import { withGuard } from "../lib/errors/guard.server";
 
 const PAGE_SIZE = 50;
 
-export const loader = withGuard("/app/catalog", async ({ request }: LoaderFunctionArgs) => {
+export const loader = withGuard("/app/prices", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
 

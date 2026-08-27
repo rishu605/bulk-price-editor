@@ -294,7 +294,7 @@ export default function CampaignDetail() {
           <s-paragraph>{lifecycle.label}</s-paragraph>
           <s-paragraph>{lifecycle.explanation}</s-paragraph>
           {lifecycle.nextAction?.intent === "drift" ? (
-            <s-button href="/app/drift">{lifecycle.nextAction.label}</s-button>
+            <s-button href="/app/prices/drift">{lifecycle.nextAction.label}</s-button>
           ) : null}
         </s-banner>
       ) : null}

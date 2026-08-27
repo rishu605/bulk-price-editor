@@ -335,7 +335,7 @@ export default function Dashboard() {
                 Re-sync catalogue
               </s-button>
             </fetcher.Form>
-            <s-link href="/app/catalog">Browse variants and baselines</s-link>
+            <s-link href="/app/prices">Browse variants and baselines</s-link>
           </s-stack>
         </s-section>
       )}
@@ -416,7 +416,7 @@ export default function Dashboard() {
 
           <s-stack direction="inline" gap="base">
             <s-link href="/app/campaigns">Campaigns</s-link>
-            <s-link href="/app/drift">Drift queue</s-link>
+            <s-link href="/app/prices/drift">Drift queue</s-link>
             <s-link href="/app/activity">Activity log</s-link>
           </s-stack>
         </s-section>
@@ -464,7 +464,7 @@ export default function Dashboard() {
           </s-paragraph>
           {/* A link, not a button. One click from the dashboard was not enough ceremony
               for the most destructive operation in the app. */}
-          <s-link href="/app/baselines/recapture">Recapture baselines…</s-link>
+          <s-link href="/app/imports/recapture">Recapture baselines…</s-link>
         </s-section>
       ) : null}
     </s-page>

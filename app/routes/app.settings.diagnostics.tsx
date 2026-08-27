@@ -19,7 +19,7 @@ import { EmptyState } from "../components/AsyncState";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 
-export const loader = withGuard("/app/debug", async ({ request }: LoaderFunctionArgs) => {
+export const loader = withGuard("/app/settings/diagnostics", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
 
@@ -148,7 +148,7 @@ export default function Debug() {
               {recent.map((row) => (
                 <s-table-row key={row.errorId}>
                   <s-table-cell>
-                    <s-link href={`/app/debug?id=${row.errorId}`}>{row.errorId}</s-link>
+                    <s-link href={`/app/settings/diagnostics?id=${row.errorId}`}>{row.errorId}</s-link>
                   </s-table-cell>
                   <s-table-cell>
                     <s-badge tone={row.retryable ? "warning" : "critical"}>
