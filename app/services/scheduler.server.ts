@@ -18,6 +18,7 @@ import { runCampaign } from "./campaigns/run.server";
 import { adminClientForShop } from "./admin-client.server";
 import { claimEnrollment, pendingEnrollments } from "./auto-enroll.server";
 import { reclaimStaleRuns } from "./campaigns/reaper.server";
+import { beat } from "./scheduler-heartbeat.server";
 import { checkAlerts } from "./alerting.server";
 import { sendDueDigests } from "./digest.server";
 import { auditMirror } from "./mirror-audit.server";
@@ -60,6 +61,11 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
     failures: [],
   };
 
+  // Before anything else, including before the alert check below reads it. This is the
+  // only signal that separates a stopped scheduler from a quiet one, and a tick that did
+  // any work first would be reporting liveness it had already spent time not having.
+  await beat(now);
+
   // First, before anything is scheduled. A run whose process died still holds its
   // campaign in APPLYING, and a campaign in APPLYING is invisible to the query below
   // -- so without reclaiming first, a dead run would block every future occurrence of
@@ -93,6 +99,13 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
       now,
     );
     if (!transition) continue;
+
+    // Beaten again per campaign, not only at the top of the tick. `runTransition` below
+    // can spend minutes on a large catalogue, and a heartbeat that only fires between
+    // ticks would go stale during precisely the work that proves the scheduler is
+    // alive — turning a busy scheduler into a stopped one. One upsert per due campaign
+    // is nothing next to the run it precedes.
+    await beat(new Date());
 
     try {
       await runTransition(
