@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useFetcher, useLoaderData } from "react-router";
+import { useFetcher, useLoaderData, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
@@ -16,17 +16,9 @@ import {
   runLedger,
 } from "../services/campaigns/index.server";
 import { describeSchedule, parseSchedule, scheduleWarnings } from "../lib/scheduling/window";
-import { CountsRow } from "../components/CountsRow";
-import { LedgerTable } from "../components/LedgerTable";
-import { RollbackReportTable } from "../components/RollbackReportTable";
-import { downloadCsv, filenameSlug } from "../lib/reporting/csv";
-import { rollbackReportCsv } from "../lib/reporting/rollback";
-import { PreviewTable } from "../components/PreviewTable";
 import { RunHistoryTable } from "../components/RunHistoryTable";
 import { RunResultSection } from "../components/RunResultSection";
 import { campaignResult } from "../services/campaigns/result.server";
-import { ledgerCsv } from "../lib/reporting/ledger-csv";
-import { previewCsv } from "../lib/reporting/preview-csv";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { reportError } from "../services/error-report.server";
 import { withGuard } from "../lib/errors/guard.server";
@@ -41,6 +33,13 @@ import {
 import { transitionHistory } from "../services/campaigns/lifecycle.server";
 import { approvalFor, decideApproval, requestApproval, SelfApprovalError } from "../services/approvals.server";
 import { PageShell } from "../components/PageShell";
+import { CampaignTabs, currentTab, type CampaignTab } from "../components/campaign/CampaignTabs";
+import { CampaignActions } from "../components/campaign/CampaignActions";
+import { CampaignOverviewTab } from "../components/campaign/CampaignOverviewTab";
+import { CampaignPreviewTab } from "../components/campaign/CampaignPreviewTab";
+import { CampaignRevertTab } from "../components/campaign/CampaignRevertTab";
+import { CampaignLedgerTab } from "../components/campaign/CampaignLedgerTab";
+import type { CampaignDetailProps } from "../components/campaign/props";
 
 export const loader = withGuard("/app/campaigns/$id", async ({ request, params }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
@@ -279,6 +278,34 @@ export default function CampaignDetail() {
   // undermines the promise the merchant was given when they chose practice.
   const canApply = !practice && !preview.blocked && canTransition(state, "APPLYING");
 
+  // Tabs a campaign has nothing for are not offered. A DRAFT campaign has no runs, and
+  // a Runs tab opening onto an empty state reads as something having gone missing.
+  const tabs: CampaignTab[] = [
+    { id: "overview", label: "Overview", available: true },
+    { id: "preview", label: "Preview", available: true },
+    { id: "runs", label: "Runs", available: runs.length > 0, badge: runs.length },
+    {
+      id: "revert",
+      label: "Revert",
+      available: Boolean(rollback && rollback.counts.total > 0),
+      // Drifted rows are the reason to open this tab rather than press the button, so
+      // the count belongs on the label.
+      badge: rollback?.counts.drifted || undefined,
+    },
+    { id: "ledger", label: "Ledger", available: ledger.length > 0, badge: ledger.length },
+  ];
+  const [params] = useSearchParams();
+  const tab = currentTab(tabs, params.get("tab"));
+
+  // One bundle rather than threading twenty props through five components. These are
+  // not reusable widgets -- they are this page, split so it can be read.
+  const detail = {
+    rollback, practice, preview, runs, ledger, result: runResult, selectedRunId,
+    scheduleText, timeZone, warnings, autoEnroll, enrollPendingAt, lifecycle, approval,
+    state, needsAttention: attention, history, fetcher, busy, canApply, attention,
+  } as CampaignDetailProps;
+
+
   return (
     <PageShell heading={preview.name}>
       {result ? (
@@ -310,373 +337,39 @@ export default function CampaignDetail() {
         </s-banner>
       ) : null}
 
-      <s-section heading="Preview">
-        <CountsRow
-          items={[
-            { label: "Will change", value: preview.counts.planned },
-            { label: "Already correct", value: preview.counts.noop },
-            { label: "Skipped", value: preview.counts.skipped },
-            { label: "Clamped", value: preview.counts.clamped },
-          ]}
-        />
 
-        <s-paragraph>
-          <s-text>
-            Write path: {preview.writePath} — {preview.writePathReason}
-          </s-text>
-        </s-paragraph>
-
-        {approval.required ? (
-          <s-section heading="Approval">
-            <s-paragraph>
-              <s-text>
-                {approval.state === "approved"
-                  ? `Approved by ${approval.who}.`
-                  : approval.state === "declined"
-                    ? `Declined by ${approval.who}${approval.note ? `: ${approval.note}` : "."}`
-                    : approval.state === "pending"
-                      ? `${approval.who} asked for approval. Somebody else has to sign it off — including you, if you were not the one who asked.`
-                      : "This campaign changes enough products to need a second person's approval before it can run."}
-              </s-text>
-            </s-paragraph>
-
-            <s-stack direction="inline" gap="base">
-              {approval.state === "none" || approval.state === "declined" ? (
-                <fetcher.Form method="post">
-                  <input type="hidden" name="intent" value="request-approval" />
-                  <s-button type="submit" loading={busy || undefined}>
-                    Ask for approval
-                  </s-button>
-                </fetcher.Form>
-              ) : null}
-
-              {approval.state === "pending" ? (
-                <>
-                  <fetcher.Form method="post">
-                    <input type="hidden" name="intent" value="approve" />
-                    <s-button type="submit" variant="primary" loading={busy || undefined}>
-                      Approve
-                    </s-button>
-                  </fetcher.Form>
-                  <fetcher.Form method="post">
-                    <input type="hidden" name="intent" value="decline" />
-                    <s-button type="submit" tone="critical" loading={busy || undefined}>
-                      Decline
-                    </s-button>
-                  </fetcher.Form>
-                </>
-              ) : null}
-            </s-stack>
-          </s-section>
-        ) : null}
-
-        {preview.margin ? (
-          <s-section heading="What this does to your margins">
-            <s-paragraph>
-              <s-text>{preview.margin.summary}</s-text>
-            </s-paragraph>
-            <s-paragraph>
-              {/* Said plainly, because overstating causality in a pricing tool is how
-                  merchants make expensive decisions on bad inference. */}
-              <s-text tone="neutral">
-                This is arithmetic on your prices and costs. It does not predict what you
-                will sell.
-              </s-text>
-            </s-paragraph>
-
-            {preview.margin.belowCost.length > 0 ? (
-              <s-banner tone="critical">
-                <s-paragraph>
-                  {preview.margin.belowCost.length} of these would sell at or below cost:
-                </s-paragraph>
-                <s-unordered-list>
-                  {preview.margin.belowCost.map((row) => (
-                    <s-list-item key={row.variantGid}>
-                      {row.title} — {row.after.toFixed(1)}% margin
-                    </s-list-item>
-                  ))}
-                </s-unordered-list>
-              </s-banner>
-            ) : null}
-
-            {preview.margin.belowTarget.length > 0 ? (
-              <s-banner tone="warning">
-                <s-paragraph>
-                  {preview.margin.belowTarget.length} would fall below your target margin,
-                  worst first:
-                </s-paragraph>
-                <s-unordered-list>
-                  {preview.margin.belowTarget.map((row) => (
-                    <s-list-item key={row.variantGid}>
-                      {row.title} — {row.before.toFixed(1)}% becomes {row.after.toFixed(1)}%
-                    </s-list-item>
-                  ))}
-                </s-unordered-list>
-              </s-banner>
-            ) : null}
-          </s-section>
-        ) : null}
-
-        {preview.markets.length > 0 ? (
-          <s-section heading="Markets">
-            <s-paragraph>
-              <s-text>
-                Each market is priced from its own normal price in its own currency,
-                not converted from the base sale price.
-              </s-text>
-            </s-paragraph>
-
-            {preview.markets.map((market) => (
-              <s-paragraph key={market.priceListGid}>
-                <s-text>{market.explanation}</s-text>
-                {market.clamped > 0 || market.skipped > 0 ? (
-                  <s-text tone="caution">
-                    {" "}
-                    A guardrail affects {market.clamped + market.skipped} of them here
-                    {market.clamped > 0 ? ` (${market.clamped} raised to the floor)` : ""}
-                    {market.skipped > 0 ? ` (${market.skipped} left alone)` : ""}.
-                  </s-text>
-                ) : null}
-              </s-paragraph>
-            ))}
-          </s-section>
-        ) : null}
-
-        {preview.blastRadius ? (
-          <s-banner tone="warning">
-            <s-paragraph>
-              This campaign changes more than 1,000 variants. Re-read the preview
-              before applying.
-            </s-paragraph>
-          </s-banner>
-        ) : null}
-
-        <PreviewTable rows={preview.rows} markets={preview.markets} />
-
-        <s-button
-          type="button"
-          variant="tertiary"
-          onClick={() =>
-            downloadCsv(
-              `preview-${filenameSlug(preview.name) || "campaign"}.csv`,
-              previewCsv(preview.rows, preview.markets),
-            )
-          }
-        >
-          Export this preview (CSV)
-        </s-button>
-      </s-section>
-
-      {runResult ? <RunResultSection result={runResult} /> : null}
-
-      {runs.length > 0 ? (
-        <s-section heading="Run history">
-          <RunHistoryTable runs={runs} selectedRunId={selectedRunId} timeZone={timeZone} />
-        </s-section>
-      ) : null}
-
-      {rollback && rollback.counts.total > 0 ? (
-        <s-section heading="If you revert this campaign">
-          <s-paragraph>
-            <s-text>
-              {rollback.straightforward
-                ? `All ${rollback.counts.total} variants are still at the price this campaign set. Reverting recomputes each one without it.`
-                : `${rollback.counts.drifted} of ${rollback.counts.total} variants have been changed since this campaign set them. Someone edited those on purpose — tick any you want left alone, then revert.`}
-            </s-text>
-          </s-paragraph>
-
-          {rollback.counts.deleted > 0 ? (
-            <s-paragraph>
-              <s-text>
-                {rollback.counts.deleted} variant
-                {rollback.counts.deleted === 1 ? " was" : "s were"} deleted in Shopify.
-                Nothing is written for {rollback.counts.deleted === 1 ? "it" : "them"}.
-              </s-text>
-            </s-paragraph>
-          ) : null}
-
-          <fetcher.Form method="post">
-            <input type="hidden" name="intent" value="revert" />
-            <RollbackReportTable rows={rollback.rows} />
-            <s-stack direction="inline" gap="base">
-              <s-button type="submit" tone="critical" loading={busy || undefined}>
-                Revert, keeping the ticked edits
-              </s-button>
-              <s-button
-                type="button"
-                variant="tertiary"
-                onClick={() =>
-                  downloadCsv(
-                    `rollback-${filenameSlug(preview.name) || "campaign"}.csv`,
-                    rollbackReportCsv(rollback),
-                  )
-                }
-              >
-                Export this report (CSV)
-              </s-button>
-            </s-stack>
-          </fetcher.Form>
-        </s-section>
-      ) : null}
-
-      {ledger.length > 0 ? (
-        <s-section heading="Ledger">
-          <s-paragraph>
-            <s-text>
-              Every row we wrote, with what it was and what we intended. Retained
-              indefinitely on every plan. Reverting a single variant takes it out of
-              this campaign for good — including future scheduled runs — and recomputes
-              its price without it.
-            </s-text>
-          </s-paragraph>
-          <s-button
-            type="button"
-            variant="tertiary"
-            onClick={() =>
-              downloadCsv(
-                `ledger-${filenameSlug(preview.name) || "campaign"}.csv`,
-                ledgerCsv(ledger),
-              )
-            }
-          >
-            Export this ledger (CSV)
-          </s-button>
-
-          <LedgerTable
-            rows={ledger}
-            renderAction={(row) =>
-              // Only rows this campaign actually wrote. Offering to revert a row that
-              // failed or was skipped would promise to undo something that never
-              // happened.
-              row.status === "VERIFIED" || row.status === "APPLIED" ? (
-                <fetcher.Form method="post">
-                  <input type="hidden" name="intent" value="revert-variant" />
-                  <input type="hidden" name="variantGid" value={row.variantGid} />
-                  <s-button type="submit" variant="tertiary" loading={busy || undefined}>
-                    Revert this variant
-                  </s-button>
-                </fetcher.Form>
-              ) : (
-                <s-text>—</s-text>
-              )
-            }
-          />
-        </s-section>
-      ) : null}
-
-      <s-section slot="aside" heading="Actions">
-        {practice ? (
-          <s-banner tone="info">
-            <s-paragraph>
-              This is a practice campaign. The preview above is exactly what would
-              happen, and nothing has been or will be written to your storefront.
-              Create a real campaign with the same scope and rule when you are ready.
-            </s-paragraph>
-          </s-banner>
-        ) : null}
-
-        <s-stack gap="base">
-          <fetcher.Form method="post">
-            <input type="hidden" name="intent" value="apply" />
-            <s-button
-              type="submit"
-              variant="primary"
-              loading={busy || undefined}
-              disabled={!canApply}
-            >
-              Apply to storefront
-            </s-button>
-          </fetcher.Form>
-
-          {lifecycle.nextAction?.intent === "resume" ? (
-            <fetcher.Form method="post">
-              <input type="hidden" name="intent" value="resume" />
-              <s-button type="submit" variant="primary" loading={busy || undefined}>
-                Resume — retry the rows that did not complete
-              </s-button>
-            </fetcher.Form>
-          ) : null}
-
-          {rollback && !rollback.straightforward ? (
-            // Deliberately not a button. There are edits to decide about, and a
-            // one-click revert here would silently overwrite them -- the decision
-            // belongs in the report, where the merchant can see what they are
-            // choosing between.
-            <s-paragraph>
-              <s-text>
-                {rollback.counts.drifted} variant
-                {rollback.counts.drifted === 1 ? " has" : "s have"} been changed since
-                this campaign set {rollback.counts.drifted === 1 ? "it" : "them"}.
-                Review them above before reverting.
-              </s-text>
-            </s-paragraph>
-          ) : (
-            <fetcher.Form method="post">
-              <input type="hidden" name="intent" value="revert" />
-              <s-button type="submit" tone="critical" loading={busy || undefined}>
-                Revert
-              </s-button>
-            </fetcher.Form>
-          )}
+      {/* Status and the one action a merchant is most likely to want, above the tabs
+          and visible in every state. PARTIAL and HELD are the product's whole trust
+          proposition; putting them inside a tab would be hiding exactly the states that
+          must not be hidden. */}
+      <s-section>
+        <s-stack direction="inline" gap="base">
+          <s-badge tone={lifecycle.tone === "critical" ? "critical" : lifecycle.tone === "warning" ? "warning" : "info"}>
+            {lifecycle.label}
+          </s-badge>
+          {scheduleText ? <s-text tone="neutral">{scheduleText}</s-text> : null}
         </s-stack>
-
-        <s-paragraph>
-          <s-text>
-            Reverting recomputes each price without this campaign. If another campaign
-            still covers a variant, that campaign&rsquo;s price stays — it does not
-            snap back to full price.
-          </s-text>
-        </s-paragraph>
+        <CampaignActions {...detail} />
       </s-section>
 
-      <s-section slot="aside" heading="Schedule">
-        <s-paragraph>{scheduleText}</s-paragraph>
-        {warnings.map((warning) => (
-          <s-banner key={warning} tone="warning">
-            <s-paragraph>{warning}</s-paragraph>
-          </s-banner>
-        ))}
-      </s-section>
+      <CampaignTabs tabs={tabs} current={tab} />
 
-      <s-section slot="aside" heading="New products">
-        <s-paragraph>
-          {autoEnroll
-            ? "Products that enter this campaign's scope while it runs are priced automatically, from their own normal price."
-            : "Products added while this campaign runs are left at their current price."}
-        </s-paragraph>
-        {enrollPendingAt ? (
-          <s-banner tone="info">
-            <s-paragraph>
-              New products found; they are priced on the next scheduler run.
-            </s-paragraph>
-          </s-banner>
+      {tab === "overview" ? <CampaignOverviewTab {...detail} /> : null}
+      {tab === "preview" ? <CampaignPreviewTab {...detail} /> : null}
+      {tab === "runs" ? (
+        <>
+        {runResult ? <RunResultSection result={runResult} /> : null}
+
+        {runs.length > 0 ? (
+          <s-section heading="Run history">
+            <RunHistoryTable runs={runs} selectedRunId={selectedRunId} timeZone={timeZone} />
+          </s-section>
         ) : null}
-      </s-section>
 
-      <s-section slot="aside" heading="Status">
-        <s-paragraph>
-          <s-badge tone={lifecycle.tone}>{lifecycle.label}</s-badge>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>{lifecycle.explanation}</s-text>
-        </s-paragraph>
-
-        {history.length > 0 ? (
-          <>
-            <s-divider />
-            <s-paragraph>
-              <s-text>How it got here</s-text>
-            </s-paragraph>
-            {history.map((entry) => (
-              <s-paragraph key={`${entry.at}-${entry.to}`}>
-                <s-text>
-                  {entry.from} → {entry.to} · {entry.reason || entry.actor}
-                </s-text>
-              </s-paragraph>
-            ))}
-          </>
-        ) : null}
-      </s-section>
+        </>
+      ) : null}
+      {tab === "revert" ? <CampaignRevertTab {...detail} /> : null}
+      {tab === "ledger" ? <CampaignLedgerTab {...detail} /> : null}
     </PageShell>
   );
 }
