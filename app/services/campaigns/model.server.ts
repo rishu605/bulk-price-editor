@@ -17,11 +17,32 @@ import {
 } from "../../lib/money/rounding-policy";
 import type {
   CompareAtPolicy,
+  GuardrailViolationPolicy,
   Guardrails,
   ResolvableCampaign,
 } from "../../lib/pricing/types";
 import { segmentToAst, type FilterAst } from "../segments.server";
+import { readSettings } from "../settings.server";
 import type { CampaignInput } from "./types";
+
+/**
+ * Narrows a stored policy string to the union the resolver expects.
+ *
+ * The column is a plain `String` with a `"clamp"` default, so anything could be in it
+ * -- an older row, a hand-edited record, a value from a future version rolled back.
+ * Unknown values fall back to `clamp` rather than throwing: refusing to resolve a
+ * campaign because its policy string is unfamiliar would take a merchant's live prices
+ * out of our reach entirely, and clamp is the option that keeps a price valid.
+ */
+function asViolationPolicy(stored: string): GuardrailViolationPolicy {
+  return stored === "skip" || stored === "block" ? stored : "clamp";
+}
+
+/** The shop's floor-violation setting, for a campaign being created now. */
+async function violationPolicyFor(shopId: string): Promise<GuardrailViolationPolicy> {
+  const settings = await readSettings(shopId);
+  return settings.violationPolicy;
+}
 
 export async function createCampaign(shopId: string, input: CampaignInput) {
   return prisma.campaign.create({
@@ -37,7 +58,15 @@ export async function createCampaign(shopId: string, input: CampaignInput) {
       compareAtPolicy: input.compareAtPolicy as never,
       compareAtViolationPolicy: "clear",
       guardrails: (input.guardrails ?? {}) as never,
-      guardrailViolationPolicy: "clamp",
+      // The shop's answer to "when a price would breach a floor", not a literal.
+      // It was hardcoded here and again in `toResolvable`, so the setting the merchant
+      // picked -- including "leave those variants alone" and "refuse the run" -- was
+      // silently replaced by "write the floor price anyway" (#338).
+      //
+      // Copied onto the campaign rather than read live at resolution time, so changing
+      // the store default does not retroactively change what a running campaign does
+      // to prices already on a storefront.
+      guardrailViolationPolicy: await violationPolicyFor(shopId),
       // Rounding and scope ride along in the schedule blob so the shape can evolve
       // without a migration; parseSchedule ignores the extra keys.
       schedule: {
@@ -138,6 +167,7 @@ export function toResolvable(
     | "ruleRows"
     | "compareAtPolicy"
     | "guardrails"
+    | "guardrailViolationPolicy"
     | "schedule"
     | "createdAt"
     | "excludedVariantGids"
@@ -158,7 +188,10 @@ export function toResolvable(
     compareAtViolationPolicy: "clear",
     roundingPolicy: roundingFor(schedule.rounding),
     guardrails: (campaign.guardrails ?? undefined) as unknown as Guardrails | undefined,
-    guardrailViolationPolicy: "clamp",
+    // Read from the campaign, not hardcoded. See #338: every layer below this
+    // implemented `skip` and `block` correctly and none of them could ever be reached,
+    // because this line threw the answer away.
+    guardrailViolationPolicy: asViolationPolicy(campaign.guardrailViolationPolicy),
     // Variants reverted out of this campaign individually. Carried into resolution
     // rather than filtered out beforehand, so an excluded variant falls through to
     // whatever else still controls it instead of jumping to full price.

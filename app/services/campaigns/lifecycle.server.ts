@@ -86,6 +86,81 @@ export async function transitionCampaign(
   return { changed: true, from, to };
 }
 
+/** The two states that mean "a run has claimed this campaign and may be writing". */
+const CLAIM_STATES: ReadonlySet<CampaignState> = new Set<CampaignState>(["APPLYING", "REVERTING"]);
+
+/**
+ * Puts a campaign back where it was when a run claimed it and then never started.
+ *
+ * `runCampaign` moves the campaign to APPLYING before it plans, so that an illegal
+ * action is refused before a price moves. But planning can fail -- a guardrail blocks
+ * the run, the catalogue is too large for one statement, the shop's session expired --
+ * and until this existed, every one of those left the campaign claiming to be applying
+ * forever. `PRICES_MAY_BE_LIVE` includes APPLYING, so the whole app then believed the
+ * storefront might be carrying this campaign's prices when the ledger was empty. Revert
+ * was refused (APPLYING -> REVERTING is not a legal edge) and the merchant's only way
+ * out was to press apply again, which is the one action that sounds most dangerous.
+ *
+ * The guardrail case is not exotic: `planRun` returning `blocked` *throws*, so a floor
+ * price doing exactly its job stranded the campaign every single time.
+ *
+ * This is deliberately not `transitionCampaign`. APPLYING -> DRAFT is not a legal
+ * transition and should not become one: it is not the campaign progressing, it is a
+ * claim being given back, and the difference matters when reading an audit trail six
+ * months later. Adding those edges to the state machine would also let any caller move
+ * a genuinely-running campaign back to DRAFT, which is precisely the corruption the
+ * machine exists to prevent.
+ *
+ * Refuses when the campaign is not in a claim state, or when a run is still executing,
+ * because in either case something may have been written and the honest answer is
+ * PARTIAL rather than "nothing happened".
+ */
+export async function releaseClaim(
+  shopId: string,
+  campaignId: string,
+  to: CampaignState,
+  options: TransitionOptions,
+): Promise<TransitionResult> {
+  const campaign = await prisma.campaign.findFirstOrThrow({
+    where: { id: campaignId, shopId },
+    select: { status: true },
+  });
+
+  const from = campaign.status as CampaignState;
+
+  // Someone else already moved it on -- a concurrent run finishing, a cancel. Their
+  // state is newer than ours and must not be clobbered.
+  if (!CLAIM_STATES.has(from)) return { changed: false, from, to };
+
+  const executing = await prisma.campaignRun.count({
+    where: { campaignId, status: { in: ["PLANNING", "QUEUED", "EXECUTING", "VERIFYING"] } },
+  });
+  if (executing > 0) {
+    // A run is live. Releasing now would tell the merchant nothing is happening while
+    // prices are being written, which is worse than the stuck state this fixes.
+    logger.info("campaign claim not released, a run is still live", {
+      campaignId,
+      from,
+      executing,
+    });
+    return { changed: false, from, to };
+  }
+
+  const updated = await prisma.campaign.updateMany({
+    where: { id: campaignId, shopId, status: from },
+    data: { status: to },
+  });
+
+  if (updated.count === 0) return { changed: false, from, to };
+
+  await recordTransition(shopId, campaignId, from, to, {
+    ...options,
+    reason: `claim released without running: ${options.reason}`,
+  });
+
+  return { changed: true, from, to };
+}
+
 /**
  * Records the move.
  *
