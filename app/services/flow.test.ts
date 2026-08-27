@@ -16,8 +16,23 @@ describe("refusing to send a price", () => {
       containsPrice({
         "campaign id": "c1",
         "campaign name": "Summer sale",
-        "products affected": 412,
+        "products affected": "412",
         outcome: "clean",
+      }),
+    ).toBe(false);
+  });
+
+  it("does not mistake a count for a price now that counts are strings", () => {
+    // Counts travel as strings because Flow trigger fields are all text. A bare integer
+    // string is not money-shaped — the detector wants two decimal places — so widening
+    // these to strings did not quietly start blocking every trigger it was meant to send.
+    expect(
+      containsPrice({
+        "campaign id": "c1",
+        "campaign name": "Summer sale",
+        "products affected": "412",
+        "products reverted": "0",
+        "products drifted": "1299",
       }),
     ).toBe(false);
   });
@@ -54,8 +69,8 @@ describe("refusing to send a price", () => {
     expect(
       containsPrice({
         "campaign id": "gid://shopify/Campaign/12345",
-        "products affected": 412,
-        "products reverted": 0,
+        "products affected": "412",
+        "products reverted": "0",
       }),
     ).toBe(false);
   });

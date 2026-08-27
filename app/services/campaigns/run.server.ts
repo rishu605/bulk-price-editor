@@ -978,7 +978,7 @@ async function fireCampaignTrigger(
         "campaign id": campaignId,
         "campaign name": campaignName,
         outcome: result.clean ? "clean" : "partial",
-        "products reverted": result.verified,
+        "products reverted": String(result.verified),
       });
       return;
     }
@@ -986,7 +986,7 @@ async function fireCampaignTrigger(
     await fireTriggerForShop(shopId, "campaign-started", {
       "campaign id": campaignId,
       "campaign name": campaignName,
-      "products affected": outcome.counts.planned,
+      "products affected": String(outcome.counts.planned),
     });
   } catch (error) {
     const { logger } = await import("../../lib/logging/logger");

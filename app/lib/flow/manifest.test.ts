@@ -55,6 +55,10 @@ runtime_url = "https://example.test/flow/actions/end-campaign"
       handle: "end-campaign",
       type: "flow_action",
       fieldKeys: ["campaign-id", "reason"],
+      fields: [
+        { key: "campaign-id", type: "single_line_text_field" },
+        { key: "reason", type: "single_line_text_field" },
+      ],
     });
   });
 
@@ -88,6 +92,54 @@ describe("every action route reads the keys its manifest declares", () => {
 
     expect(read.length).toBeGreaterThan(0);
     expect(new Set(read)).toEqual(new Set(manifest.fieldKeys));
+  });
+});
+
+describe("every trigger field's declared type matches what the payload sends", () => {
+  /**
+   * The bug this exists to stop, found by firing a real trigger at Shopify:
+   *
+   *   Type error for field 'products reverted': 18 is not a String.
+   *
+   * Flow's trigger schema has no integer type — `number_integer` is rejected — so every
+   * field in these manifests is `single_line_text_field`. `TriggerPayload` typed the
+   * three counts as `number`, so Shopify refused the whole trigger, and `fireTrigger`
+   * swallows that deliberately: a campaign must not fail because an automation could not
+   * be told about it. All three triggers silently never fired.
+   *
+   * Nothing in the repo could catch it. The mismatch is between a TOML file and a
+   * TypeScript interface, and only Shopify validates the pair — which is the argument for
+   * asserting it here, statically, rather than hoping somebody runs a live trigger again.
+   */
+  const triggers = manifests().filter((manifest) => manifest.type === "flow_trigger");
+  const server = readFileSync(join(process.cwd(), "app", "services", "flow.server.ts"), "utf8");
+  const payload = server.slice(
+    server.indexOf("export interface TriggerPayload"),
+    server.indexOf("export function containsPrice"),
+  );
+
+  it("declares every trigger field as text, because Flow has no integer type", () => {
+    const declared = triggers.flatMap((trigger) => trigger.fields);
+    expect(declared.length).toBeGreaterThan(0);
+    for (const field of declared) {
+      expect(field.type, `${field.key} is ${field.type}`).toBe("single_line_text_field");
+    }
+  });
+
+  it.each(triggers)("$handle sends a string for every field", (manifest) => {
+    for (const field of manifest.fields) {
+      // The declared TS type for this key, whatever it is.
+      const declaration = new RegExp(`"?${field.key}"?\\??:\\s*([^;]+);`).exec(payload);
+      expect(declaration, `${field.key} is not on TriggerPayload`).not.toBeNull();
+
+      const tsType = declaration![1].trim();
+      // A union of string literals is still a string on the wire; a number is not.
+      expect(
+        /^(string|"(?:[^"]*")(?:\s*\|\s*"[^"]*")*)$/.test(tsType),
+        `${manifest.handle}.${field.key} is declared ${field.type} but typed ${tsType} — ` +
+          `Shopify will refuse the trigger and fireTrigger will swallow the refusal`,
+      ).toBe(true);
+    }
   });
 });
 

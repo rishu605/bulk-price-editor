@@ -14,12 +14,20 @@
  * for the extension's.
  */
 
+export interface FlowField {
+  key: string;
+  /** The declared field type, e.g. `single_line_text_field`. */
+  type: string;
+}
+
 export interface FlowManifest {
   /** `handle` — also the route filename and the last segment of `runtime_url`. */
   handle: string;
   /** `flow_action` or `flow_trigger`. */
   type: string;
-  /** Every `key` under `[[settings.fields]]`, in declaration order. */
+  /** Every field under `[[settings.fields]]`, in declaration order. */
+  fields: FlowField[];
+  /** Just the keys, for the callers that only care about those. */
   fieldKeys: string[];
 }
 
@@ -30,7 +38,8 @@ export function parseFlowManifest(toml: string): FlowManifest {
   let section = "";
   let handle = "";
   let type = "";
-  const fieldKeys: string[] = [];
+  const fields: FlowField[] = [];
+  let pendingType = "";
 
   for (const raw of toml.split("\n")) {
     const line = raw.trim();
@@ -51,10 +60,16 @@ export function parseFlowManifest(toml: string): FlowManifest {
     if (section === "extensions") {
       if (key === "handle") handle = value;
       if (key === "type") type = value;
-    } else if (section === "settings.fields" && key === "key") {
-      fieldKeys.push(value);
+    } else if (section === "settings.fields") {
+      // A field's own `type` precedes its `key` in the generated scaffold, so the type is
+      // stashed and claimed by the next key rather than looked up afterwards.
+      if (key === "type") pendingType = value;
+      if (key === "key") {
+        fields.push({ key: value, type: pendingType });
+        pendingType = "";
+      }
     }
   }
 
-  return { handle, type, fieldKeys };
+  return { handle, type, fields, fieldKeys: fields.map((field) => field.key) };
 }
