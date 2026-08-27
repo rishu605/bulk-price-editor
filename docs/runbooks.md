@@ -274,6 +274,52 @@ how they got there.
 **Resume** from the campaign page. A resumed run reads the ledger and continues from the
 rows that never settled — it does not replan.
 
+### The case with no run at all
+
+Everything above starts from `campaign_runs`. A campaign can be stuck without having one.
+
+`runCampaign` moves the campaign to APPLYING *before* it plans, so that an illegal action
+is refused before a price moves. Planning can then fail — a guardrail blocks the run, the
+session expires, a catalogue outgrows one statement — and the crash lands in the window
+between that transition and the run row being created.
+
+**The reaper cannot help.** It reads `campaign_runs`, so a campaign with none is invisible
+to it. An operator working through the steps above finds nothing in flight and concludes
+nothing is stuck, while the merchant sees a campaign that has been "applying" for hours.
+
+**Recognise it.** A campaign in a claim state with no run behind it:
+
+```sql
+SELECT c.id, c.name, c.status
+FROM campaigns c
+LEFT JOIN campaign_runs r ON r."campaignId" = c.id
+WHERE c.status IN ('APPLYING','REVERTING')
+GROUP BY c.id, c.name, c.status
+HAVING count(r.id) = 0;
+```
+
+**What the merchant sees.** Revert is refused — APPLYING → REVERTING is not a legal
+transition — so the only control that appears to work is Apply, which is the one that
+sounds most dangerous. `PRICES_MAY_BE_LIVE` includes APPLYING, so the rest of the app
+also believes the storefront may be carrying this campaign's prices. It is not: the
+ledger is empty and nothing was written.
+
+**Remediate.** Since #339 this self-heals — `releaseClaim` puts the campaign back where
+the claim took it from and records "claim released without running" in the audit log, so
+a campaign in this state now means either an older stranding or a case where a run *is*
+live and the release correctly refused. Check the second before doing anything:
+
+```sql
+SELECT status, count(*) FROM campaign_runs WHERE "campaignId" = '<id>' GROUP BY status;
+```
+
+If that returns nothing, retrying Apply is safe and is what the merchant would do anyway
+— the resolver is idempotent and the ledger is empty, so there is nothing to write twice.
+
+**Do not** move the campaign out of APPLYING with an UPDATE. If a run *is* live, that
+tells the app nothing is happening while prices are being written, which is worse than
+the stuck state. Let `releaseClaim` decide; it refuses while any run is in flight.
+
 ---
 
 ## Data restore

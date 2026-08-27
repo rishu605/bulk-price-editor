@@ -61,7 +61,7 @@ const LEGAL: Record<CampaignState, readonly CampaignState[]> = {
 };
 
 /** States where prices this campaign wrote may be live on the storefront. */
-const PRICES_MAY_BE_LIVE: ReadonlySet<CampaignState> = new Set<CampaignState>([
+export const PRICES_MAY_BE_LIVE: ReadonlySet<CampaignState> = new Set<CampaignState>([
   "APPLYING",
   "ACTIVE",
   "HELD",
