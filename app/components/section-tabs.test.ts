@@ -62,6 +62,29 @@ describe("drift is countable without being opened", () => {
   });
 });
 
+describe("the tab bar's semantics", () => {
+  it("is a navigation landmark, not loose links in the page body", () => {
+    // Polaris has no tabs element and `accessibilityRole` offers no `tablist`, so this
+    // is the correct role that is actually available — and it is the right one anyway:
+    // these move between URLs, where ARIA tabs are for switching panels within a page.
+    expect(tabs).toContain('accessibilityRole="navigation"');
+    expect(tabs).toContain("accessibilityLabel=");
+  });
+
+  it("tells a screen reader which tab is current, not only the eye", () => {
+    // The filled pill says it to everyone who can see it and nothing to anyone who
+    // cannot.
+    expect(tabs).toContain('accessibilityVisibility="exclusive"');
+    expect(tabs).toMatch(/current section/i);
+  });
+
+  it("does not link the tab you are already on", () => {
+    // A link to the page you are on is a control that does nothing.
+    const currentBranch = tabs.slice(tabs.indexOf("current ?"), tabs.indexOf(") : ("));
+    expect(currentBranch).not.toContain("<Link");
+  });
+});
+
 describe("search on an embedded surface", () => {
   it("never uses a native form element", () => {
     // A plain GET submit replaces the whole query string, including the host and

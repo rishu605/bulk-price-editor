@@ -39,6 +39,23 @@ export interface SectionTab {
  *   views am I looking at" is the one question this component exists to answer.
  * - **Every tab is padded to the same box**, current or not, so nothing shifts when the
  *   selection moves. Padding only the selected one makes the row twitch on every click.
+ *
+ * ## Why these stay links
+ *
+ * Polaris web components have **no tabs element** — the tag list contains `s-table*` and
+ * nothing else matching. `Tabs` lives in `@shopify/polaris`, the React library, which
+ * this app does not use: the `s-*` elements are rendered by Shopify's own runtime and
+ * there is no Polaris stylesheet loaded, so React Polaris would render unstyled and put
+ * two design systems in one app.
+ *
+ * `accessibilityRole` is no help either — it accepts `main | header | footer | section |
+ * aside | navigation | ordered-list | list-item`, and no `tab` or `tablist`.
+ *
+ * That constraint happens to point at the right answer. These move between URLs, and
+ * ARIA tabs are for switching panels *within* a page — a tablist here would be
+ * semantically wrong even if it were available. `navigation` is the role that fits, and
+ * Polaris provides it. Keeping real links also keeps middle-click, open-in-new-tab and
+ * copy-link-address working, which a button cannot do.
  */
 export function SectionTabs({ tabs }: { tabs: SectionTab[] }) {
   const { pathname } = useLocation();
@@ -50,6 +67,11 @@ export function SectionTabs({ tabs }: { tabs: SectionTab[] }) {
 
   return (
     <s-box
+      // A navigation landmark, which is what a row of links between URLs actually is.
+      // Screen readers can jump to it, and it stops the row being announced as loose
+      // links in the middle of the page content.
+      accessibilityRole="navigation"
+      accessibilityLabel="Sections"
       // Only the block-end edge carries a width, so this is a rule under the row rather
       // than a box around it. Polaris orders the four values block-start, block-end,
       // inline-start, inline-end -- not the CSS order, which is the easy thing to get
@@ -71,7 +93,12 @@ export function SectionTabs({ tabs }: { tabs: SectionTab[] }) {
               borderRadius="base"
               background="subdued"
             >
+              {/* Not a link: the current tab has nowhere to go, and a link to the page
+                  you are on is a control that does nothing. The visually hidden word is
+                  what tells a screen-reader user which one is selected — the filled pill
+                  says it to everyone else and says nothing to them. */}
               <s-text type="strong">{label}</s-text>
+              <s-text accessibilityVisibility="exclusive"> (current section)</s-text>
             </s-box>
           ) : (
             <s-box key={tab.href} padding={PAD.control}>
