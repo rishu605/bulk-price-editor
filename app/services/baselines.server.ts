@@ -13,6 +13,7 @@
  */
 
 import prisma from "../db.server";
+import { inChunks } from "../lib/db/chunk";
 import type { BaselineSource } from "@prisma/client";
 
 export interface CaptureResult {
@@ -46,12 +47,11 @@ export async function captureBaselines(
 ): Promise<CaptureResult> {
   const result: CaptureResult = { captured: 0, alreadyCurrent: 0, superseded: 0 };
 
-  const entries = await prisma.priceSurfaceEntry.findMany({
-    where: {
-      shopId,
-      ...(options.variantGids ? { variantGid: { in: options.variantGids } } : {}),
-    },
-  });
+  const entries = options.variantGids
+    ? await inChunks(options.variantGids, (batch) =>
+        prisma.priceSurfaceEntry.findMany({ where: { shopId, variantGid: { in: batch } } }),
+      )
+    : await prisma.priceSurfaceEntry.findMany({ where: { shopId } });
 
   const existing = await prisma.baseline.findMany({
     where: { shopId, supersededAt: null },

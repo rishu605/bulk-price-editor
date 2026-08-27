@@ -19,6 +19,7 @@
  */
 
 import prisma from "../../db.server";
+import { inChunks } from "../../lib/db/chunk";
 import { format } from "../../lib/money/format";
 import { money } from "../../lib/money/money";
 import { planRun } from "../../lib/planning/plan";
@@ -146,14 +147,18 @@ async function mirrorState(
   if (variantGids.length === 0) return new Map();
 
   const [entries, index] = await Promise.all([
-    prisma.priceSurfaceEntry.findMany({
-      where: { shopId, variantGid: { in: variantGids }, surfaceKind: "BASE", priceListGid: "" },
-      select: { variantGid: true, livePrice: true, currency: true },
-    }),
-    prisma.variantIndex.findMany({
-      where: { shopId, variantGid: { in: variantGids } },
-      select: { variantGid: true, deletedAt: true, currency: true },
-    }),
+    inChunks(variantGids, (batch) =>
+      prisma.priceSurfaceEntry.findMany({
+        where: { shopId, variantGid: { in: batch }, surfaceKind: "BASE", priceListGid: "" },
+        select: { variantGid: true, livePrice: true, currency: true },
+      }),
+    ),
+    inChunks(variantGids, (batch) =>
+      prisma.variantIndex.findMany({
+        where: { shopId, variantGid: { in: batch } },
+        select: { variantGid: true, deletedAt: true, currency: true },
+      }),
+    ),
   ]);
 
   const tombstones = new Map(index.map((row) => [row.variantGid, row.deletedAt !== null]));
