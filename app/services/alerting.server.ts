@@ -19,6 +19,7 @@
 
 import prisma from "../db.server";
 import { logger } from "../lib/logging/logger";
+import { metric } from "../lib/telemetry/metrics";
 import { evaluate, type AlertCondition, type SignalWindow } from "../lib/observability/alerts";
 import { secondsSinceBeat } from "./scheduler-heartbeat.server";
 
@@ -149,6 +150,12 @@ export async function checkAlerts(
   try {
     const window = await gather(now);
     if (options.queueDepth !== undefined) window.executionQueueDepth = options.queueDepth;
+
+    // Reported whether or not it crosses the alert threshold. An SLO panel needs the
+    // ordinary values to have any idea what abnormal looks like, and this one was named
+    // in the runbook before anything emitted it — so an operator following the page went
+    // looking for a graph that did not exist.
+    if (window.webhookLagMs !== null) metric("webhook.lag_ms", window.webhookLagMs);
 
     const fired = evaluate(window);
     let sent = 0;
