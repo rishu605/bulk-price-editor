@@ -28,6 +28,7 @@ import {
   titleMapFor,
 } from "../../app/services/campaigns/candidates.server";
 import { captureBaselines } from "../../app/services/baselines.server";
+import { previewCampaign } from "../../app/services/campaigns/preview.server";
 import { withChaos } from "../harness/scenario";
 
 /** Comfortably past the ceiling, and past a whole number of chunks. */
@@ -116,6 +117,46 @@ describe("chaos: a campaign wider than one prepared statement", () => {
         expect(titles.size).toBe(OVER_CEILING);
         expect(products.size).toBe(OVER_CEILING);
         expect(titles.get(gids[OVER_CEILING - 1])).toBe(`Wide ${OVER_CEILING - 1}`);
+      },
+    );
+  });
+
+  it("previews a campaign past the ceiling, negations and all", async () => {
+    await withChaos(
+      "bind-variable-ceiling-preview",
+      { catalog: { products: 1, variantsPerProduct: 1 }, percent: -15 },
+      async (ctx) => {
+        const { shopId, campaignId } = ctx.fixture;
+
+        // The campaign page reads costs for every variant in the plan, filtered with
+        // `cost: { not: null }`. That negation is the part that matters: Prisma splits a
+        // long IN list by itself, badly (#324) -- but it refuses to split a query
+        // carrying a negation at all, so this one failed outright with P2029 rather
+        // than degrading. The ceiling test above could not have caught it, because
+        // every query it exercises is splittable.
+        const gids = await seedWide(shopId, OVER_CEILING);
+        await captureBaselines(shopId, { variantGids: gids, source: "INSTALL_CAPTURE" });
+
+        // Costs on every baseline, so the negated filter matches rather than trivially
+        // excluding the rows and shrinking the list.
+        await prisma.baseline.updateMany({
+          where: { shopId, surfaceKind: "BASE" },
+          data: { cost: BigInt(5_000) },
+        });
+
+        // Scope the campaign at the whole catalogue so the plan is the wide one.
+        await prisma.campaign.update({
+          where: { id: campaignId },
+          data: { schedule: { kind: "manual", rounding: "none", ast: { groups: [] } } as never },
+        });
+
+        const preview = await previewCampaign(shopId, campaignId);
+
+        expect(
+          preview.counts.planned,
+          "the campaign page must render for a campaign of any size",
+        ).toBeGreaterThan(32_767);
+        expect(preview.blocked).toBeUndefined();
       },
     );
   });

@@ -24,6 +24,7 @@ import {
   type SurfaceCell,
 } from "./types";
 import { rowsThatFit } from "../../lib/ui/table-budget";
+import { inChunks } from "../../lib/db/chunk";
 
 export interface PreviewOptions {
   /** Preview the revert instead of the apply. */
@@ -295,17 +296,24 @@ async function marketCellsFor(
 async function costsFor(shopId: string, variantGids: readonly string[]) {
   if (variantGids.length === 0) return new Map<string, Money>();
 
-  const rows = await prisma.baseline.findMany({
-    where: {
-      shopId,
-      surfaceKind: "BASE",
-      priceListGid: "",
-      supersededAt: null,
-      variantGid: { in: [...variantGids] },
-      cost: { not: null },
-    },
-    select: { variantGid: true, cost: true, currency: true },
-  });
+  // Chunked, and this one cannot be left to Prisma at all. A long `IN` list is
+  // normally split by the query engine -- badly, which is #324 -- but `cost: { not:
+  // null }` is a negation, and Prisma refuses to split a query that has one. The whole
+  // statement fails with P2029 rather than degrading, so the campaign page returned a
+  // generic error screen for every campaign over ~32,765 variants (#346).
+  const rows = await inChunks([...variantGids], (batch) =>
+    prisma.baseline.findMany({
+      where: {
+        shopId,
+        surfaceKind: "BASE",
+        priceListGid: "",
+        supersededAt: null,
+        variantGid: { in: batch },
+        cost: { not: null },
+      },
+      select: { variantGid: true, cost: true, currency: true },
+    }),
+  );
 
   return new Map(
     rows.map((row) => [row.variantGid, money(Number(row.cost), row.currency)] as const),

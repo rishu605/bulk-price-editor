@@ -25,6 +25,7 @@ import { money, parseMoney, type Money } from "../../lib/money/money";
 import { planRun } from "../../lib/planning/plan";
 import type { PlanOutcome } from "../../lib/planning/types";
 import type { Guardrails, ResolvableCampaign } from "../../lib/pricing/types";
+import { inChunks } from "../../lib/db/chunk";
 
 export interface MarketList {
   priceListGid: string;
@@ -315,15 +316,19 @@ async function captureMarketBaselines(
     // conversion in play — so the currency check below passes and the number is right.
     // The check stays anyway: the day a B2B catalogue is priced in another currency is
     // the day this would otherwise be wrong by an exchange rate, silently.
-    const entries = await prisma.priceSurfaceEntry.findMany({
-      where: {
-        shopId,
-        priceListGid: list.priceListGid,
-        variantGid: { in: variantGids },
-        livePrice: { not: null },
-      },
-      select: { variantGid: true, livePrice: true, currency: true },
-    });
+    // `livePrice: { not: null }` is a negation, so Prisma will not split this query
+    // however long the gid list is -- it fails outright with P2029 (#346).
+    const entries = await inChunks(variantGids, (batch) =>
+      prisma.priceSurfaceEntry.findMany({
+        where: {
+          shopId,
+          priceListGid: list.priceListGid,
+          variantGid: { in: batch },
+          livePrice: { not: null },
+        },
+        select: { variantGid: true, livePrice: true, currency: true },
+      }),
+    );
 
     for (const entry of entries) {
       found.set(entry.variantGid, money(Number(entry.livePrice), entry.currency || list.currency));

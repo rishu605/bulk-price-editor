@@ -23,6 +23,7 @@ import type { QuantityTier } from "../../lib/pricing/quantity-breaks";
 import { logger } from "../../lib/logging/logger";
 import { metric } from "../../lib/telemetry/metrics";
 import { planQuantityBreaks, type B2BVariantInput } from "./b2b-plan.server";
+import { inChunks } from "../../lib/db/chunk";
 
 export interface B2BSurfaceOutcome {
   priceListGid: string;
@@ -205,21 +206,25 @@ export async function revertQuantityBreaks(
 
   // Only variants this campaign actually gave a ladder to. Clearing one it never touched
   // would take away a ladder somebody else set.
-  const written = await prisma.variantChange.findMany({
-    where: {
-      shopId,
-      priceListGid: list.priceListGid,
-      surfaceKind: "B2B",
-      variantGid: { in: [...variantGids] },
-      status: { in: ["VERIFIED", "CLAMPED"] },
-      // Rows that *gave* a ladder. A clearing row from an earlier revert carries none,
-      // and re-clearing would be a harmless no-op — this narrows the write rather than
-      // guarding correctness, which is why removing it fails no test.
-      quantityBreaks: { not: Prisma.DbNull },
-    },
-    select: { variantGid: true },
-    distinct: ["variantGid"],
-  });
+  // Chunked: `quantityBreaks: { not: … }` is a negation, and Prisma will not split a
+  // query that has one -- it fails outright rather than degrading (#346).
+  const written = await inChunks([...variantGids], (batch) =>
+    prisma.variantChange.findMany({
+      where: {
+        shopId,
+        priceListGid: list.priceListGid,
+        surfaceKind: "B2B",
+        variantGid: { in: batch },
+        status: { in: ["VERIFIED", "CLAMPED"] },
+        // Rows that *gave* a ladder. A clearing row from an earlier revert carries none,
+        // and re-clearing would be a harmless no-op — this narrows the write rather than
+        // guarding correctness, which is why removing it fails no test.
+        quantityBreaks: { not: Prisma.DbNull },
+      },
+      select: { variantGid: true },
+      distinct: ["variantGid"],
+    }),
+  );
 
   const ours = [...new Set(written.map((row) => row.variantGid))];
   if (ours.length === 0) return null;
