@@ -53,10 +53,15 @@ describe("a brand new shop", () => {
     expect(html).toContain("Sync catalogue");
   });
 
+  it("keeps a step's actions on one row", () => {
+    // `s-clickable` and `s-link` are block-level, so an inline stack still gave each its
+    // own line: badge and title, then "Why?", then the action — three rows per step,
+    // for a checklist whose whole job is being scannable.
+    expect(html).toContain("<s-button-group>");
+    expect(html).not.toContain("<s-clickable");
+  });
+
   it("keeps each step's Why with its own step, not the one below", () => {
-    // The row wraps on a narrow column. With the toggle last it wrapped onto its own
-    // line and read as belonging to the next step — an explanation attached to the
-    // wrong step is worse than no explanation.
     const step = html.slice(html.indexOf("Capture your baselines"));
     expect(
       step.indexOf("Why?") < step.indexOf("Sync catalogue"),
