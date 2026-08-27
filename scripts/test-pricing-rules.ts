@@ -216,6 +216,54 @@ async function main() {
   // shows a permanent fake discount, which is the thing regulators care about.
   check("compare-at cleared when the sale ended", ended.compareAt, null);
 
+
+  // ------------------------------------------- 5. never below cost, if cost exists
+  console.log("5. a campaign may not price below cost");
+
+  // Cost per item lives on the inventory item, and writing it needs `write_inventory`
+  // — a scope this app deliberately does not hold (#249). So this cannot set up its own
+  // fixture: it checks real cost data if the store has any, and says so plainly if not.
+  // Reporting a pass on a store with no costs would be the test lying about coverage.
+  const priced = await prisma.baseline.findFirst({
+    where: { shopId: shop.id, supersededAt: null, cost: { not: null } },
+    select: { variantGid: true, basePrice: true, cost: true },
+  });
+
+  if (!priced) {
+    console.log(
+      "   SKIP  no variant on this store has a cost per item, so there is nothing to " +
+        "check. Set one in the Shopify admin (Products → variant → Cost per item), " +
+        "re-sync, and run again.",
+    );
+  } else {
+    const floor = Number(priced.cost) / 100;
+    const campaign = await createCampaign(shop.id, {
+      name: `Below cost ${Date.now()}`,
+      priority: 940,
+      // Deep enough that the rule alone would land under cost, so the guardrail is what
+      // decides the answer rather than the arithmetic happening to stay above it.
+      rule: { kind: "percent-change", percent: -90 },
+      compareAtPolicy: { kind: "leave" },
+      rounding: { default: "none", byCurrency: {} },
+      guardrails: { neverBelowCost: true },
+      ast: { groups: [{ conditions: [{ field: "variantGid" as const, value: priced.variantGid }] }] },
+      schedule: { kind: "manual" },
+    } as never);
+    created.push(campaign.id);
+
+    await runCampaign(shop.id, campaign.id, client, {});
+    const held = await live(client, priced.variantGid);
+    check("Shopify never holds a price below cost", Number(held.price) >= floor, true);
+    console.log(`   cost ${floor.toFixed(2)}, live ${held.price}`);
+
+    await runCampaign(shop.id, campaign.id, client, { revert: true });
+    check(
+      "reverted to its baseline",
+      (await livePrice(client, priced.variantGid)),
+      (Number(priced.basePrice) / 100).toFixed(2),
+    );
+  }
+
   // ------------------------------------------------------------------- clean up
   for (const id of created) {
     await prisma.campaign.delete({ where: { id } }).catch(() => {});
