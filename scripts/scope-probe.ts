@@ -12,6 +12,7 @@
  */
 
 import prisma from "../app/db.server";
+import { chooseShop, shopArg } from "../app/lib/seed/target-shop";
 import { adminClientForShop } from "../app/services/admin-client.server";
 import {
   classifyProbe,
@@ -28,7 +29,16 @@ const MARK: Record<ProbeResult["verdict"], string> = {
 };
 
 async function main() {
-  const shop = await prisma.shop.findFirstOrThrow();
+  // Name the store or be told which exist. These scripts write real prices to a real
+  // storefront, so guessing is the one behaviour not on offer — the same rule the seeder
+  // and the perf scripts already follow.
+  const installed = await prisma.shop.findMany({
+    where: { uninstalledAt: null },
+    select: { domain: true },
+  });
+  const shop = await prisma.shop.findUniqueOrThrow({
+    where: { domain: chooseShop(installed, shopArg(process.argv.slice(2))).domain },
+  });
   const client = await adminClientForShop(shop.domain);
   if (!client) throw new Error(`No usable session for ${shop.domain}. Reinstall the app.`);
 
