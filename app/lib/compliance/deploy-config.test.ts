@@ -43,6 +43,48 @@ function environmentKeys(): Set<string> {
   return keys;
 }
 
+describe("the webhooks the manifest subscribes to", () => {
+  /**
+   * A declared topic with no route, or a route no topic reaches.
+   *
+   * Both fail silently and in opposite directions. Shopify posts a declared `uri` and
+   * gets a 404 — deliveries fail, the subscription is eventually disabled, and the first
+   * symptom is a mirror that has quietly stopped tracking the store. A route with no
+   * subscription is worse in the other direction: the handler is written, reviewed and
+   * tested, and simply never runs, while everybody believes the topic is covered.
+   *
+   * Neither is visible by reading, and `shopify.app.toml` is rewritten by the CLI on
+   * every `shopify app dev`, so this is a file that drifts without anybody editing it.
+   *
+   * The compliance topics route is exempt from the uri-to-filename rule below because
+   * Shopify addresses all three of `customers/data_request`, `customers/redact` and
+   * `shop/redact` at one uri.
+   */
+  const manifest = readFileSync(join(ROOT, "shopify.app.toml"), "utf8");
+
+  const declared = [...manifest.matchAll(/^\s*uri\s*=\s*"([^"]+)"/gm)].map(([, uri]) => uri);
+
+  /** `/webhooks/app/uninstalled` -> `webhooks.app.uninstalled.tsx`, the flat-route form. */
+  const routeFileFor = (uri: string) => `${uri.replace(/^\//, "").replace(/\//g, ".")}.tsx`;
+
+  const routeFiles = readdirSync(join(ROOT, "app/routes")).filter(
+    (file) => file.startsWith("webhooks.") && file.endsWith(".tsx"),
+  );
+
+  it("declares at least one webhook, so the checks below mean something", () => {
+    expect(declared.length).toBeGreaterThan(0);
+    expect(routeFiles.length).toBeGreaterThan(0);
+  });
+
+  it.each(declared)("%s is served by a route", (uri) => {
+    expect(routeFiles).toContain(routeFileFor(uri));
+  });
+
+  it("has no webhook route that nothing is subscribed to", () => {
+    expect(new Set(routeFiles)).toEqual(new Set(declared.map(routeFileFor)));
+  });
+});
+
 describe("the Railway runbook", () => {
   it("documents every environment variable the app reads", () => {
     // Variables the platform or the image sets, which nobody has to be told about.

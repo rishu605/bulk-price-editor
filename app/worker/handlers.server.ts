@@ -31,6 +31,15 @@ export async function handleJob(name: QueueName, ref: JobRef): Promise<void> {
     case "verification":
     case "webhooks":
       return;
+    default: {
+      // Exhaustiveness, not defensiveness. Without it, adding a name to `QUEUE_NAMES`
+      // compiles: the runtime gives it a Queue and a Worker, this switch falls straight
+      // through, and every job on it is marked complete having done nothing. Silence is
+      // the worst outcome available here, so `never` turns it into a build failure and
+      // the throw covers a name arriving from outside TypeScript.
+      const unhandled: never = name;
+      throw new Error(`No handler for queue ${String(unhandled)}`);
+    }
   }
 }
 
