@@ -28,6 +28,7 @@ const quiet: SignalWindow = {
   divergenceRate: 0,
   executionQueueDepth: 0,
   unpriceableVariants: 0,
+  shopRates: null,
 };
 
 const ids = (window: Partial<SignalWindow>) =>
@@ -76,6 +77,7 @@ describe("what a missing signal means", () => {
         divergenceRate: null,
         executionQueueDepth: null,
         unpriceableVariants: null,
+        shopRates: null,
       }),
     ).toEqual([]);
   });
@@ -122,6 +124,7 @@ describe("every alert is actionable", () => {
       divergenceRate: 0.5,
       executionQueueDepth: 5_000,
       unpriceableVariants: 400,
+      shopRates: [{ shopId: "shop-1", errors: 40, requests: 100 }],
     });
 
     expect(all.length).toBeGreaterThan(0);
@@ -138,6 +141,67 @@ describe("every alert is actionable", () => {
     for (const entry of NOT_ALERTS) {
       expect(entry.because.length).toBeGreaterThan(20);
     }
+  });
+});
+
+describe("one shop failing while the rest are fine", () => {
+  const quiet = {
+    secondsSinceTick: 10,
+    webhookLagMs: 1_000,
+    errors: 0,
+    requests: 500,
+    divergenceRate: 0,
+    executionQueueDepth: 0,
+    unpriceableVariants: 0,
+  };
+
+  const ids = (window: Parameters<typeof evaluate>[0]) => evaluate(window).map((a) => a.id);
+
+  it("fires when one shop is failing inside a healthy global rate", () => {
+    // The incident the global rate cannot see. 30 failures out of 60 for this shop is
+    // total failure for that merchant, and 30 out of 5,000 platform-wide is 0.6% — well
+    // under the global floor, so `error-spike` stays silent and should.
+    const window = {
+      ...quiet,
+      errors: 30,
+      requests: 5_000,
+      shopRates: [{ shopId: "unlucky", errors: 30, requests: 60 }],
+    };
+
+    expect(ids(window)).toContain("shop-error-spike");
+    expect(ids(window)).not.toContain("error-spike");
+  });
+
+  it("ignores a shop too quiet for its rate to mean anything", () => {
+    // Three deliveries and one failure is 33%, and says nothing at all.
+    expect(
+      ids({ ...quiet, shopRates: [{ shopId: "quiet", errors: 1, requests: 3 }] }),
+    ).not.toContain("shop-error-spike");
+  });
+
+  it("does not fire for a shop with errors below the rate", () => {
+    expect(
+      ids({ ...quiet, shopRates: [{ shopId: "busy", errors: 1, requests: 100 }] }),
+    ).not.toContain("shop-error-spike");
+  });
+
+  it("says nothing when nobody has looked", () => {
+    expect(ids({ ...quiet, shopRates: null })).not.toContain("shop-error-spike");
+  });
+
+  it("fires once for the worst shop rather than once per shop", () => {
+    // Three shops failing is one incident to a human, and three pages is three chances to
+    // mute the channel.
+    const fired = evaluate({
+      ...quiet,
+      shopRates: [
+        { shopId: "a", errors: 30, requests: 60 },
+        { shopId: "b", errors: 50, requests: 60 },
+        { shopId: "c", errors: 40, requests: 60 },
+      ],
+    }).filter((a) => a.id === "shop-error-spike");
+
+    expect(fired).toHaveLength(1);
   });
 });
 
@@ -182,12 +246,13 @@ describe("every alert leads somewhere", () => {
     divergenceRate: 0.5,
     executionQueueDepth: 5_000,
     unpriceableVariants: 400,
+    shopRates: [{ shopId: "shop-1", errors: 40, requests: 100 }],
   });
 
   it("fires every condition, so this file cannot silently stop covering one", () => {
     // If a condition is added and this number is not, the assertions below stop being
     // exhaustive without failing — which is the same rot they exist to prevent.
-    expect(all.length).toBe(6);
+    expect(all.length).toBe(7);
   });
 
   for (const alert of all) {

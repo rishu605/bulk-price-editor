@@ -191,6 +191,35 @@ surface row. Six code paths write both, and the invariant only holds because eac
 does; the fix is in whichever one stopped, not in healing harder. `git log -S
 "priceSurfaceEntry" -- app/services` is the fastest way to see which one changed.
 
+## Alert: one shop is failing
+
+**Metric:** `error_events` over processed webhook deliveries, **per shop**, in the last
+fifteen minutes — above 5% and only once that shop has produced at least 25 deliveries.
+
+**What it means.** One merchant is failing while the platform is fine. The global *errors
+spiking* alert cannot see this: a single shop's failures are a handful against everybody
+else's traffic, so the average stays healthy and nothing fires while that merchant's
+prices sit wrong.
+
+**Diagnose.** The shop id is the whole lead — start there, not in the aggregate.
+
+1. `SELECT code, count(*) FROM error_events WHERE "shopId" = $1 AND "createdAt" > now() - interval '1 hour' GROUP BY 1 ORDER BY 2 DESC;` — a single dominant code is the usual shape here, and it is usually one of the three below.
+2. `NO_SESSION` or `UNAUTHENTICATED` — the token is gone. The merchant uninstalled and reinstalled, or revoked access. `SELECT shop, "isOnline", expires FROM "Session" WHERE shop = $1;` confirms it. Nothing is retryable until they reinstall.
+3. `SHOPIFY_REJECTED` concentrated on one shop is their data, not ours: a price below a market's minimum, a variant Shopify will not accept a price for. The ledger row carries the reason Shopify gave.
+4. `SHOPIFY_THROTTLED` on one shop alone means we are competing with something else on that shop's budget — another app, or two of our own runs. Check for overlapping runs before assuming Shopify.
+
+**Remediate.** Depends entirely on the code, which is why step 1 comes first. A token
+problem needs the merchant, and the app already tells them so — confirm the message they
+are seeing says *reinstall* rather than something generic. Data rejections are per-row and
+already ledgered; the run reports them and the merchant can act. Only throttling is ours
+to fix, and the fix is fewer concurrent runs on that shop, never more.
+
+**Do not** treat this as a platform incident until at least a second shop appears. One
+shop failing alone is almost never the platform, and the global alert is the one that
+would say so.
+
+---
+
 ## Alert: queue depth rising
 
 **Metric:** `queue.depth`, per queue

@@ -46,6 +46,22 @@ export interface SignalWindow {
    * check cannot see it.
    */
   unpriceableVariants: number | null;
+  /**
+   * Errors and requests broken down by shop, or null when nobody has looked.
+   *
+   * The global rate above cannot see the incident this is for. One shop whose every
+   * campaign is failing — a revoked token, a poisoned catalogue, one market misconfigured
+   * — is a handful of errors against everybody else's traffic, so it stays under the
+   * global floor and nothing fires while that merchant's prices are stuck. RFC §11 asked
+   * for per-shop spikes for exactly this reason.
+   */
+  shopRates: ShopRate[] | null;
+}
+
+export interface ShopRate {
+  shopId: string;
+  errors: number;
+  requests: number;
 }
 
 /** How long the scheduler may go quiet before it is presumed stopped. */
@@ -56,6 +72,16 @@ export const WEBHOOK_LAG_MS = 5 * 60_000;
 
 /** Errors as a fraction of requests. Above this is a spike, not background noise. */
 export const ERROR_RATE = 0.05;
+
+/**
+ * Requests a single shop must have produced before its rate means anything.
+ *
+ * Higher than the global minimum of twenty, and deliberately so: a per-shop denominator
+ * is small by construction, and a quiet shop with three deliveries and one failure is a
+ * 33% error rate that says nothing. This is the number that decides whether the alert is
+ * useful or is the reason somebody mutes the channel.
+ */
+export const SHOP_SAMPLE_MINIMUM = 25;
 
 /**
  * Variants the audit could not make priceable. The healthy value is zero.
@@ -133,6 +159,27 @@ export function evaluate(window: SignalWindow): AlertCondition[] {
         "More than one request in twenty is failing. Whatever it is, it is affecting " +
         "merchants right now rather than one unlucky one.",
       runbook: "docs/runbooks.md#alert-errors-spiking",
+    });
+  }
+
+  // Per shop, and separate from the global rate rather than replacing it. The two catch
+  // different incidents: the global one is the platform failing everybody a little, this
+  // one is one merchant failing completely while the average stays healthy.
+  const worst = (window.shopRates ?? [])
+    .filter((shop) => shop.requests >= SHOP_SAMPLE_MINIMUM)
+    .filter((shop) => shop.errors / shop.requests > ERROR_RATE)
+    .sort((a, b) => b.errors / b.requests - a.errors / a.requests)[0];
+
+  if (worst) {
+    firing.push({
+      id: "shop-error-spike",
+      severity: "page",
+      title: "One shop is failing while the rest are fine",
+      because:
+        "More than one request in twenty is failing for a single shop, which the global " +
+        "error rate cannot see. That merchant's prices are the ones stuck, and they are " +
+        "stuck for a reason particular to them rather than to the platform.",
+      runbook: "docs/runbooks.md#alert-one-shop-is-failing",
     });
   }
 
