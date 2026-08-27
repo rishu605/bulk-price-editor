@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const tabs = readFileSync(
-  join(process.cwd(), "app", "components", "prices", "PricesTabs.tsx"),
+  join(process.cwd(), "app", "components", "SectionTabs.tsx"),
   "utf8",
 );
 const layout = readFileSync(

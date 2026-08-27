@@ -140,7 +140,21 @@ export default function Settings() {
         </s-banner>
       ) : null}
 
-      <s-section heading="Guardrails">
+      {/* Three long sections in one page, so a merchant who came here to change one
+          number does not scroll past the other two hunting for it. In-page anchors
+          rather than more routes: these settings are read together — a rounding rule
+          that pushes a price under a floor is a conversation between two of them —
+          and splitting them across pages is what made the nav sixteen items long. */}
+      <s-section>
+        <s-stack direction="inline" gap="base">
+          <s-text tone="neutral">Jump to</s-text>
+          <s-link href="#guardrails">Guardrails</s-link>
+          <s-link href="#rounding">Rounding</s-link>
+          <s-link href="#notifications">Alerts</s-link>
+        </s-stack>
+      </s-section>
+
+      <s-section id="guardrails" heading="Guardrails">
         <s-paragraph>
           Floors that no campaign may price below. They are checked after rounding,
           so a rounding rule cannot push a price under them.
@@ -212,7 +226,7 @@ export default function Settings() {
         </fetcher.Form>
       </s-section>
 
-      <s-section heading="Rounding">
+      <s-section id="rounding" heading="Rounding">
         <s-paragraph>
           <s-text>
             How campaign prices are tidied up after the discount is calculated. Set
@@ -285,7 +299,7 @@ export default function Settings() {
         </fetcher.Form>
       </s-section>
 
-      <s-section heading="Notifications">
+      <s-section id="notifications" heading="Notifications">
         <s-paragraph>
           <s-text>
             A campaign over a large catalogue runs for a while. These let you close the
