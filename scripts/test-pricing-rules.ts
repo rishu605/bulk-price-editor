@@ -34,11 +34,26 @@ type Client = NonNullable<Awaited<ReturnType<typeof adminClientForShop>>>;
 
 /** The price Shopify itself reports. Never the mirror — that is the thing under test. */
 async function livePrice(client: Client, variantGid: string): Promise<string> {
-  const result = await client.request<{ productVariant: { price: string } }>(
-    `query PricingRulesPrice($id: ID!) { productVariant(id: $id) { price } }`,
+  return (await live(client, variantGid)).price;
+}
+
+/** Price and compare-at together, as Shopify reports them. */
+async function live(
+  client: Client,
+  variantGid: string,
+): Promise<{ price: string; compareAt: string | null }> {
+  const result = await client.request<{
+    productVariant: { price: string; compareAtPrice: string | null };
+  }>(
+    `query PricingRulesPrice($id: ID!) {
+       productVariant(id: $id) { price compareAtPrice }
+     }`,
     { id: variantGid },
   );
-  return result.data?.productVariant?.price ?? "";
+  return {
+    price: result.data?.productVariant?.price ?? "",
+    compareAt: result.data?.productVariant?.compareAtPrice ?? null,
+  };
 }
 
 async function createProbe(client: Client, price: string) {
@@ -169,6 +184,37 @@ async function main() {
   console.log(`   live price: ${charmedPrice}`);
   await runCampaign(shop.id, charmed.id, client, { revert: true });
   check("reverted to the baseline", await livePrice(client, probe.variantGid), "200.00");
+
+
+  // ------------------------------------------------- 4. compare-at strike-through
+  console.log("4. a sale that looks like a sale");
+  const struck = await createCampaign(shop.id, {
+    name: `Struck ${Date.now()}`,
+    priority: 930,
+    rule: { kind: "percent-change", percent: -25 },
+    // The baseline goes into compare-at, which is what puts the line through the old
+    // price on the storefront. Without it a sale is just a lower number.
+    compareAtPolicy: { kind: "set-to-baseline" },
+    compareAtViolationPolicy: "clear",
+    rounding: { default: "none", byCurrency: {} },
+    ast: scoped,
+    schedule: { kind: "manual" },
+  } as never);
+  created.push(struck.id);
+
+  await runCampaign(shop.id, struck.id, client, {});
+  const onSale = await live(client, probe.variantGid);
+  check("the sale price", onSale.price, "150.00");
+  check("compare-at carries the baseline", onSale.compareAt, "200.00");
+  check("compare-at is above the price, or it is not a strike-through",
+    Number(onSale.compareAt) > Number(onSale.price), true);
+
+  await runCampaign(shop.id, struck.id, client, { revert: true });
+  const ended = await live(client, probe.variantGid);
+  check("price back to the baseline", ended.price, "200.00");
+  // The sale is over, so the strike-through must go with it. A compare-at left behind
+  // shows a permanent fake discount, which is the thing regulators care about.
+  check("compare-at cleared when the sale ended", ended.compareAt, null);
 
   // ------------------------------------------------------------------- clean up
   for (const id of created) {
