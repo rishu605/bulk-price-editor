@@ -85,6 +85,11 @@ describe("native HTML inside the embedded app", () => {
     ["routes/app.settings.diagnostics.tsx", "no Polaris equivalent for a stack trace"],
     // No progress component exists; `s-spinner` is indeterminate and has no bar form.
     ["components/RouteProgress.tsx", "no Polaris progress bar"],
+    // The tab bar's selected-tab indicator. `s-box background="strong"` is the most
+    // intense background Polaris offers and renders around #ebebeb, which against the
+    // admin's grey page is invisible -- the bar shipped once with no visible selection at
+    // all. The indicator has to be `currentColor`, and no Polaris element takes a colour.
+    ["components/TabBar.tsx", "no Polaris background dark enough for an indicator"],
   ]);
 
   it("is confined to the cases that have no Polaris equivalent", () => {

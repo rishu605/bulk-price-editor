@@ -9,7 +9,6 @@ import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
 import { TabBar } from "../components/TabBar";
-import { SPACE } from "../lib/ui/spacing";
 import { CampaignCalendar } from "../components/campaign/CampaignCalendar";
 import { CampaignListView } from "../components/campaign/CampaignListView";
 import { filtersFrom, listCampaigns } from "../services/campaigns/list.server";
@@ -108,34 +107,44 @@ export default function Campaigns() {
         </s-banner>
       ) : null}
 
-      {/* The action and the view choice are two different kinds of thing, and the row
-          that mixed them read as neither. Creating a campaign is the page's primary
-          action; list-versus-calendar is navigation, and now looks like the section
-          tabs and the campaign tabs because it is the same control. */}
-      <s-section>
-        <s-stack direction="block" gap={SPACE.section}>
-          {/* `s-button` takes an href, so this is one anchor styled as a button rather
-              than a button nested inside a link — which is what it was, and which no
-              browser is obliged to make sense of. */}
-          <ActionRow>
-            <s-button variant="primary" href="/app/campaigns/new">
-              Create campaign
-            </s-button>
-          </ActionRow>
+      {/* The page's header, and not a card.
 
-          <TabBar
-            label="Campaign views"
-            tabs={[
-              { label: "List", href: linkTo({ view: "list" }), current: view === "list" },
-              {
-                label: "Calendar",
-                href: linkTo({ view: "calendar" }),
-                current: view === "calendar",
-              },
-            ]}
-          />
-        </s-stack>
-      </s-section>
+          A card is a container for content, and this one held a button and a two-item
+          toggle with nothing else in it — an empty white rectangle above the actual page,
+          which is what the screenshot that prompted this looked wrong for. What belongs
+          here is a header: which view you are in on the left, the one thing you can do
+          about it on the right, a rule under both, and no box around any of it.
+
+          Which view / what you can do is exactly the split `TabBar` and its action slot
+          make, so the row is one control rather than two stacked ones.
+
+          `s-button` takes an href, so the action is one anchor styled as a button rather
+          than a button nested inside a link — which is what it was, and which no browser
+          is obliged to make sense of. */}
+      <TabBar
+        label="Campaign views"
+        action={
+          <s-button variant="primary" href="/app/campaigns/new">
+            Create campaign
+          </s-button>
+        }
+        tabs={[
+          {
+            label: "List",
+            // A glyph each, because these two name a *shape* of view rather than a
+            // subject, and the shape is the thing being chosen between.
+            icon: "list-bulleted",
+            href: linkTo({ view: "list" }),
+            current: view === "list",
+          },
+          {
+            label: "Calendar",
+            icon: "calendar",
+            href: linkTo({ view: "calendar" }),
+            current: view === "calendar",
+          },
+        ]}
+      />
 
       {view === "calendar" && calendar ? (
         <CampaignCalendar {...calendar} />
