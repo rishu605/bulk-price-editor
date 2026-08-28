@@ -3,11 +3,31 @@ import { Children, cloneElement, isValidElement, type ReactNode } from "react";
 import { SPACE } from "../lib/ui/spacing";
 
 /**
- * Every page in the app, at the full width of the screen.
+ * How much of the frame a page occupies, leaving a tenth on each side.
+ *
+ * A percentage rather than a maximum in pixels, deliberately: the admin renders this app
+ * in an iframe whose width is not the window's and changes with the merchant's own
+ * sidebar, so a fixed column would be a different fraction of the frame on every screen.
+ */
+const PAGE_WIDTH = "80%";
+
+/**
+ * Every page in the app, at four fifths of the screen.
  *
  * `s-page` defaults to `inlineSize="base"`, a ~660px column. On a 1300px viewport that
  * left roughly half the screen empty while the tables inside it wrapped — which is a
  * strange thing for an app whose whole job is showing a merchant thousands of rows.
+ *
+ * ## Why 80% and not the whole frame
+ *
+ * `large` is edge to edge, and edge to edge turned out to be the other mistake: cards
+ * that touch both sides of the window have nothing holding them, and a heading pinned to
+ * the far left of a 1900px screen is a long way from the first card it names. A tenth of
+ * the frame on each side is enough to make the page read as a page.
+ *
+ * Polaris offers `small`, `base` and `large` and nothing between, so the inset is a
+ * centred box wrapping the whole `s-page` — the heading included. Insetting only the
+ * content leaves the title hanging off the left edge, aligned to nothing.
  *
  * The catch that makes this more than one attribute: Polaris renders the `aside` slot
  * **only** when `inlineSize` is `"base"`. Nineteen sections across thirteen routes use
@@ -54,6 +74,14 @@ export function PageShell({
   const aside = all.filter(isAside);
   const main = all.filter((child) => !isAside(child));
 
+  const inset = (page: ReactNode) => (
+    // A grid because `justifyItems` is how a box gets centred here; boxes take padding
+    // but not margins, so `margin: auto` is not available.
+    <s-grid justifyItems="center">
+      <s-box inlineSize={PAGE_WIDTH}>{page}</s-box>
+    </s-grid>
+  );
+
   if (aside.length === 0) {
     // Children go straight into `s-page`, with no wrapper of any kind.
     //
@@ -68,14 +96,14 @@ export function PageShell({
     // in `spacing.ts` applies to content this component nests deliberately. Do not
     // "tidy" this into matching the branch below without loading a page that has no
     // aside — `/app/prices/live` is one — and looking at it.
-    return (
+    return inset(
       <s-page heading={heading} inlineSize="large">
         {main}
-      </s-page>
+      </s-page>,
     );
   }
 
-  return (
+  return inset(
     <s-page heading={heading} inlineSize="large">
       <s-grid
         gap={SPACE.page}
@@ -103,6 +131,6 @@ export function PageShell({
           )}
         </s-stack>
       </s-grid>
-    </s-page>
+    </s-page>,
   );
 }
