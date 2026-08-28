@@ -31,6 +31,7 @@ import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { reportError } from "../services/error-report.server";
 import { PageShell } from "../components/PageShell";
+import { HelpNote } from "../components/HelpNote";
 import { SPACE } from "../lib/ui/spacing";
 
 export const loader = withGuard("/app/prices/baselines/recapture", async ({ request }: LoaderFunctionArgs) => {
@@ -202,7 +203,7 @@ export default function Recapture() {
         </fetcher.Form>
       </s-section>
 
-      <s-section slot="aside" heading="If you get this wrong">
+      <HelpNote label="If you get this wrong">
         <s-paragraph>
           <s-text>
             Baselines are append-only: the previous one is kept, marked superseded, with
@@ -214,7 +215,7 @@ export default function Recapture() {
         <s-paragraph>
           <s-text>The Baselines page shows every version of every variant.</s-text>
         </s-paragraph>
-      </s-section>
+      </HelpNote>
     </PageShell>
   );
 }

@@ -23,6 +23,7 @@ import { PageShell } from "../components/PageShell";
 import { EmptyState } from "../components/AsyncState";
 import { ActionRow } from "../components/ActionRow";
 import { ShowingSome } from "../components/Pagination";
+import { HelpNote } from "../components/HelpNote";
 import prisma from "../db.server";
 
 export const loader = withGuard("/app/prices/drift", async ({ request }: LoaderFunctionArgs) => {
@@ -114,7 +115,7 @@ export default function DriftQueue() {
         )}
       </s-section>
 
-      <s-section slot="aside" heading="What the three choices do">
+      <HelpNote label="What the three choices do">
         <s-paragraph>
           <strong>Keep the change</strong> makes the new price the baseline. Use it when
           the edit was a permanent repricing — every future campaign will compute from it.
@@ -133,7 +134,7 @@ export default function DriftQueue() {
             why it is the one marked as consequential.
           </s-text>
         </s-paragraph>
-      </s-section>
+      </HelpNote>
     </PageShell>
   );
 }

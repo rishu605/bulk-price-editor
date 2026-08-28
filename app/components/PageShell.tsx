@@ -53,17 +53,30 @@ export function PageWidth({ children }: { children: ReactNode }) {
  * content leaves the title hanging off the left edge, aligned to nothing.
  *
  * The catch that makes this more than one attribute: Polaris renders the `aside` slot
- * **only** when `inlineSize` is `"base"`. Nineteen sections across thirteen routes use
- * it, and four of them are on the campaign page — including the one holding apply,
- * revert, resume and cancel. Setting `inlineSize="large"` and nothing else would have
- * deleted the apply button with no error and no empty box, which is the kind of
- * failure nobody finds until a merchant reports it.
+ * **only** when `inlineSize` is `"base"`. Nineteen sections were in that slot when this
+ * was written, including the one on the campaign page holding apply, revert, resume and
+ * cancel. Setting `inlineSize="large"` and nothing else would have deleted the apply
+ * button with no error and no empty box, which is the kind of failure nobody finds until
+ * a merchant reports it.
  *
  * So the aside is rebuilt here rather than abandoned. Children marked `slot="aside"`
  * are partitioned out and rendered in a second column, and the routes keep writing
  * exactly what they wrote before. The alternative — hand-editing nineteen JSX blocks
  * out of their pages and into a prop — is the same change with far more opportunity to
  * drop one.
+ *
+ * ## What is allowed in the column
+ *
+ * Four sections across three routes, now: the store card, recent activity, cost coverage
+ * and errors by kind. All four are **facts about this shop**.
+ *
+ * That is the rule, and it is worth stating because the column had drifted the other way.
+ * Ten of the nineteen were prose explaining how the app works — what a baseline is, how
+ * two campaigns resolve — and prose does not vary, so those pages spent a permanent 22rem
+ * column, full height, on a paragraph a merchant reads once. On the catalogue that meant
+ * seven columns of prices compressed into two thirds of the screen so three paragraphs
+ * could have the other third. Those are `HelpNote`s at the foot of their pages now; the
+ * reasoning is in that file.
  *
  * The column collapses under 900px so the aside falls below the content rather than
  * being squeezed into something unreadable. It is a container query, not a media

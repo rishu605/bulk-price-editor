@@ -43,6 +43,7 @@ import { downloadCsv } from "../lib/reporting/csv";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
+import { HelpNote } from "../components/HelpNote";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { SPACE } from "../lib/ui/spacing";
 
@@ -352,7 +353,7 @@ export default function Baselines() {
         </ActionRow>
       </s-section>
 
-      <s-section slot="aside" heading="Reading this page">
+      <HelpNote label="Reading this page">
         <s-paragraph>
           <s-text>
             <strong>Baseline</strong> is the reference price every campaign computes from.
@@ -366,7 +367,7 @@ export default function Baselines() {
             running. Outside one, it means something changed the price elsewhere.
           </s-text>
         </s-paragraph>
-      </s-section>
+      </HelpNote>
     </PageShell>
   );
 }

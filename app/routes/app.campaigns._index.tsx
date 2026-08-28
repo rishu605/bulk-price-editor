@@ -11,6 +11,7 @@ import { PageShell } from "../components/PageShell";
 import { TabBar } from "../components/TabBar";
 import { CampaignCalendar } from "../components/campaign/CampaignCalendar";
 import { CampaignListView } from "../components/campaign/CampaignListView";
+import { HelpNote } from "../components/HelpNote";
 import { filtersFrom, listCampaigns } from "../services/campaigns/list.server";
 import { calendarFor, todayIn } from "../services/calendar.server";
 import { addDays } from "../lib/scheduling/calendar";
@@ -162,7 +163,7 @@ export default function Campaigns() {
         <CampaignListView list={list} filters={filters} linkTo={linkTo} />
       )}
 
-      <s-section slot="aside" heading="How campaigns resolve">
+      <HelpNote label="How campaigns resolve">
         <s-paragraph>
           When two campaigns cover the same variant, exactly one wins — the higher
           priority, then the more recent. They never stack, so a variant cannot end
@@ -172,7 +173,7 @@ export default function Campaigns() {
           Reverting recomputes rather than restoring saved numbers. If another
           campaign still covers a variant, that campaign&rsquo;s price stays in place.
         </s-paragraph>
-      </s-section>
+      </HelpNote>
     </PageShell>
   );
 }

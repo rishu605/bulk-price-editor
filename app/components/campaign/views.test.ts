@@ -77,9 +77,11 @@ describe("the page header is a header, not a card", () => {
     expect(header).not.toContain("<s-section");
   });
 
-  it("leaves the list card as the only card above the fold", () => {
-    // One `s-section` in the route itself -- the aside. The list and the calendar bring
-    // their own.
-    expect(route.split("<s-section").length - 1).toBe(1);
+  it("draws no card of its own at all", () => {
+    // It used to draw one: the "How campaigns resolve" aside. That was prose explaining
+    // the resolver rather than anything about this shop, so it is a `HelpNote` at the
+    // foot of the page now and the route is down to a banner, a header and a view. The
+    // list and the calendar bring their own cards.
+    expect(route.split("<s-section").length - 1).toBe(0);
   });
 });

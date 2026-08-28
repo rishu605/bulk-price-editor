@@ -2,9 +2,11 @@
  * The page shell, and the aside it has to rebuild.
  *
  * Polaris renders `s-page`'s `aside` slot **only** at `inlineSize="base"`. Going full
- * width therefore deletes every aside — silently, with no error and no empty box.
- * Nineteen sections across thirteen routes are in that slot, and four of them are on
- * the campaign page, including the one holding apply, revert, resume and cancel.
+ * width therefore deletes every aside — silently, with no error and no empty box. That
+ * was nineteen sections when this landed, including the one on the campaign page holding
+ * apply, revert, resume and cancel. It is four now — the column is reserved for facts
+ * about the shop, and the prose that used to fill it is in `HelpNote` — which changes the
+ * arithmetic and none of the reasoning.
  *
  * So these assertions are about a merchant losing a button, not about layout taste.
  *
@@ -101,7 +103,7 @@ describe("pages without an aside", () => {
 });
 
 describe("asides that a page renders conditionally", () => {
-  // Three of the nineteen sit inside a ternary — `{count > 0 ? <s-section slot="aside">`
+  // Some sit inside a ternary — `{count > 0 ? <s-section slot="aside">`
   // — so they arrive as a direct child only when the condition holds. A partition that
   // missed them would drop an aside on exactly the pages that had something to say.
   it("are found when the condition holds", () => {
