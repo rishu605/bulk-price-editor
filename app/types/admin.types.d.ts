@@ -71961,7 +71961,10 @@ export type StandardMetaobjectDefinitionFieldTemplate = {
   type: MetafieldDefinitionType;
   /** The configured validations for the standard metafield definition. */
   validations: Array<MetafieldDefinitionValidation>;
-  /** Whether metafields for the definition are by default visible using the Storefront API. */
+  /**
+   * Whether metafields for the definition are by default visible using the Storefront API.
+   * @deprecated Access control at the metaobject field definition level is deprecated and will be removed in 2027-01. Use the access field on the definition instead.
+   */
   visibleToStorefrontApi: Scalars['Boolean']['output'];
 };
 

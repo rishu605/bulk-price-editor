@@ -18,6 +18,16 @@ import { API_VERSION_STRING } from "./app/lib/shopify/api-version";
  * was fine until a second place disagreed — and one did. It now comes from the same
  * constant the app speaks, so the schema these types are generated from is the schema
  * the requests actually hit.
+ *
+ * ## Running this and getting "no changes" while CI disagrees
+ *
+ * `app/types/admin-<version>.schema.json` is a 7MB download and is gitignored, so it is
+ * cached on a developer machine and fetched fresh on every CI run. Codegen reuses the
+ * cache without checking it, which means a schema that has moved upstream produces a
+ * clean local run and a failing pipeline — with the error pointing at the generated
+ * types, which look correct on the machine that generated them.
+ *
+ * Delete the schema file before regenerating to reproduce what CI does.
  */
 function getConfig() {
   const config: IGraphQLConfig = {
