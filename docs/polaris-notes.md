@@ -136,3 +136,45 @@ scroller is not a design anybody chose. Cap the rows and page instead.
 pager. Neither is used yet, and the filters slot has a real flaw: it lives inside the
 table, so it unmounts when the table has no rows — which is exactly when a merchant wants
 the search box.
+
+## A popover activator needs `command`, and the documentation says otherwise
+
+`s-popover` opens when a control names it with `commandFor`. Every example on Shopify's
+[popover page](https://shopify.dev/docs/api/app-home/polaris-web-components/overlays/popover)
+does exactly that and nothing more:
+
+```html
+<s-button commandFor="notifications-popover" icon="notification">Notifications</s-button>
+<s-popover id="notifications-popover">…</s-popover>
+```
+
+That button does nothing. It renders, it focuses, it takes a click, and no popover opens —
+no error, no warning, nothing in the console.
+
+In `polaris.js` the activator's props are built as:
+
+```js
+commandForProps: commandFor && command ? { onClick: () => { … } } : undefined
+```
+
+and the handler re-checks `command` before dispatching the `CommandEvent`. **With no
+`command` prop there is no click listener at all.** The `'--auto'` default in the type
+signature is a default for the *attribute*, not for the absent prop, so it never applies.
+
+The one place the runtime opens a popover itself — the colour field's swatch — passes
+`command: "--toggle"`. Follow the runtime, not the docs:
+
+```tsx
+<s-button commandFor={id} command="--toggle">…</s-button>
+<s-popover id={id}>…</s-popover>
+```
+
+`--show` also works and leaves no way to close it from the control that opened it.
+
+This cost a release: the help notes shipped with `commandFor` alone, looked correct on
+screen, and had nothing behind them. `help-note.test.tsx` now pins the `command`.
+
+**The general shape**, which is the reusable part: the Polaris *types* accept a prop, the
+Polaris *docs* omit it, and the Polaris *runtime* requires it. When a Polaris control does
+nothing, read the minified source at `https://cdn.shopify.com/shopifycloud/polaris.js` —
+it is one grep away and it is the only account of the behaviour that is actually true.
