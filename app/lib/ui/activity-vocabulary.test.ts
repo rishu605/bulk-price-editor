@@ -12,6 +12,12 @@
  * a loader. What can be checked is the property that was broken — that the two sides read
  * their labels through the same function — and that the raw value is still what gets
  * submitted, because a filter that posts a pretty string matches nothing.
+ *
+ * It lives under `lib/ui/` and not beside the route it is about, which is not a filing
+ * preference. React Router's flat-routes reads *every* file in `app/routes/`, so a test
+ * there becomes a route module and gets bundled for the browser — where `node:fs` does not
+ * exist, and the build fails with "readFileSync is not exported by
+ * __vite-browser-external". Vitest is happy either way; only `npm run build` says so.
  */
 
 import { readFileSync } from "node:fs";
@@ -19,7 +25,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { describeAction } from "../lib/audit/action";
+import { describeAction } from "../audit/action";
 
 const ROOT = process.cwd();
 const ROUTE = readFileSync(join(ROOT, "app/routes/app.activity.tsx"), "utf8");
