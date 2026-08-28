@@ -9,7 +9,7 @@ import { formatMoney, money } from "../lib/money/money";
 import { EmptyState, NoMatches } from "../components/AsyncState";
 import { clearedSearch } from "../components/FilterForm";
 import { VariantSearch } from "../components/prices/VariantSearch";
-import { Pagination } from "../components/prices/Pagination";
+import { Pagination } from "../components/Pagination";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";

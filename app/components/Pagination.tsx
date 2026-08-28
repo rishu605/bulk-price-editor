@@ -1,7 +1,7 @@
 import { useSearchParams } from "react-router";
 
-import { formatCount } from "../../lib/format/display";
-import { SPACE } from "../../lib/ui/spacing";
+import { formatCount } from "../lib/format/display";
+import { SPACE } from "../lib/ui/spacing";
 
 /**
  * Paging, and saying where you are in the set.
@@ -21,6 +21,12 @@ import { SPACE } from "../../lib/ui/spacing";
  * The count is `subdued` and tabular. Subdued because it is orientation, not the action;
  * tabular because the digits change on every click, and proportional figures make the
  * two buttons either side of them shuffle sideways each time.
+ *
+ * It lives here rather than under `components/prices/` because it is not the prices
+ * section's. Activity had kept its own to the end -- Previous, "Page 2 of 69", Next --
+ * and a sentence that answers a different question from the one this asks. Two paginations
+ * in one app is the `SectionNav`/`PricesTabs` shape again, and a component sitting in one
+ * section's folder is most of how the second one gets written.
  */
 export function Pagination({
   page,

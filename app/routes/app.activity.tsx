@@ -16,10 +16,13 @@ import { ensureShop } from "../services/shop.server";
 import { activity } from "../services/activity.server";
 import { activityCsv } from "../lib/reporting/activity-csv";
 import { ActivityTable } from "../components/ActivityTable";
+import { ActionRow } from "../components/ActionRow";
+import { Pagination } from "../components/Pagination";
 import { EmptyState, NoMatches } from "../components/AsyncState";
 import { FilterForm, clearedSearch } from "../components/FilterForm";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { downloadCsv } from "../lib/reporting/csv";
+import { describeAction } from "../lib/audit/action";
 import { describeActor } from "../lib/audit/actor";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
@@ -57,16 +60,8 @@ export const loader = withGuard("/app/activity", async ({ request }: LoaderFunct
 export default function Activity() {
   const { entries, total, actors, actions, page, filters, timeZone } =
     useLoaderData<typeof loader>();
-  const [params, setSearchParams] = useSearchParams();
+  const [params] = useSearchParams();
   const filtered = Boolean(filters.actor || filters.action || filters.from || filters.to);
-
-  const pageSize = PAGE_SIZE;
-  const lastPage = Math.max(1, Math.ceil(total / pageSize));
-  const goTo = (next: number) =>
-    setSearchParams((params) => {
-      params.set("page", String(next));
-      return params;
-    });
 
   return (
     <PageShell heading="Activity" backTo={{ href: "/app", label: "Home" }}>
@@ -84,13 +79,18 @@ export default function Activity() {
               ))}
             </s-select>
 
+            {/* `describeAction`, the same call the Action column makes. #388 fixed the
+                column and stopped there, so the page offered `campaign.transition` in
+                this list and rendered "Campaign transition" in the cells it filtered —
+                two vocabularies for one thing, one element apart. The value submitted is
+                still the raw action; only what the merchant reads changes. */}
             <s-select name="action" label="What">
               <s-option value="" defaultSelected={!filters.action}>
                 Any action
               </s-option>
               {actions.map((action) => (
                 <s-option key={action} value={action} defaultSelected={filters.action === action}>
-                  {action}
+                  {describeAction(action)}
                 </s-option>
               ))}
             </s-select>
@@ -117,36 +117,27 @@ export default function Activity() {
           )
         ) : (
           <>
-            <s-stack direction="inline" gap="base">
-              <s-paragraph>
-                <s-text>
-                  {formatCount(total)} entr{total === 1 ? "y" : "ies"} · times shown in {timeZone}
-                </s-text>
-              </s-paragraph>
+            {/* `s-paragraph` is a block element, so an inline stack laid the button out
+                beside a box that owns a whole line of leading and the two never shared a
+                baseline. A run of text is what belongs on a row with a button. */}
+            <ActionRow>
+              <s-text color="subdued" fontVariantNumeric="tabular-nums">
+                {formatCount(total)} entr{total === 1 ? "y" : "ies"} · times shown in{" "}
+                {timeZone}
+              </s-text>
               <s-button
                 type="button"
                 variant="tertiary"
+                icon="download"
                 onClick={() => downloadCsv("anchor-activity.csv", activityCsv(entries))}
               >
                 Export this page (CSV)
               </s-button>
-            </s-stack>
+            </ActionRow>
 
             <ActivityTable entries={entries} timeZone={timeZone} />
 
-            {lastPage > 1 ? (
-              <s-stack direction="inline" gap="base">
-                <s-button disabled={page <= 1} onClick={() => goTo(page - 1)}>
-                  Previous
-                </s-button>
-                <s-text>
-                  Page {page} of {lastPage}
-                </s-text>
-                <s-button disabled={page >= lastPage} onClick={() => goTo(page + 1)}>
-                  Next
-                </s-button>
-              </s-stack>
-            ) : null}
+            <Pagination page={page} total={total} pageSize={PAGE_SIZE} noun="entries" />
           </>
         )}
       </s-section>

@@ -29,7 +29,7 @@ import { ActionRow } from "../components/ActionRow";
 import { EmptyState, NoMatches } from "../components/AsyncState";
 import { clearedSearch } from "../components/FilterForm";
 import { VariantSearch } from "../components/prices/VariantSearch";
-import { Pagination } from "../components/prices/Pagination";
+import { Pagination } from "../components/Pagination";
 import { baselinesCsv } from "../lib/reporting/baselines-csv";
 import { downloadCsv } from "../lib/reporting/csv";
 import { RouteBoundary } from "../components/RouteBoundary";
