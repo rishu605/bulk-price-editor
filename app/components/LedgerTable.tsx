@@ -27,12 +27,12 @@ export function LedgerTable({
   return (
     <s-table>
       <s-table-header-row>
-        <s-table-header>Variant</s-table-header>
-        <s-table-header>Before</s-table-header>
-        <s-table-header>Intended</s-table-header>
-        <s-table-header>State</s-table-header>
-        <s-table-header>Reason</s-table-header>
-        {renderAction ? <s-table-header>Action</s-table-header> : null}
+        <s-table-header listSlot="primary">Variant</s-table-header>
+        <s-table-header listSlot="labeled" format="currency">Before</s-table-header>
+        <s-table-header listSlot="labeled" format="currency">Intended</s-table-header>
+        <s-table-header listSlot="inline">State</s-table-header>
+        <s-table-header listSlot="labeled">Reason</s-table-header>
+        {renderAction ? <s-table-header listSlot="inline">Action</s-table-header> : null}
       </s-table-header-row>
       <s-table-body>
         {rows.map((row) => (

@@ -64,11 +64,11 @@ export default function DriftQueue() {
 
             <s-table>
               <s-table-header-row>
-                <s-table-header>Variant</s-table-header>
-                <s-table-header>Campaign set</s-table-header>
-                <s-table-header>Now shows</s-table-header>
-                <s-table-header>Campaign</s-table-header>
-                <s-table-header>Resolve</s-table-header>
+                <s-table-header listSlot="primary">Variant</s-table-header>
+                <s-table-header listSlot="labeled" format="currency">Campaign set</s-table-header>
+                <s-table-header listSlot="labeled" format="currency">Now shows</s-table-header>
+                <s-table-header listSlot="secondary">Campaign</s-table-header>
+                <s-table-header listSlot="inline">Resolve</s-table-header>
               </s-table-header-row>
               <s-table-body>
                 {events.map((event) => (

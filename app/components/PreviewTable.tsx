@@ -28,16 +28,21 @@ export function PreviewTable({
   return (
     <s-table>
       <s-table-header-row>
-        <s-table-header>Variant</s-table-header>
-        <s-table-header>Before</s-table-header>
-        <s-table-header>After</s-table-header>
-        <s-table-header>Compare at</s-table-header>
+        <s-table-header listSlot="primary">Variant</s-table-header>
+        <s-table-header listSlot="labeled" format="currency">Before</s-table-header>
+        <s-table-header listSlot="labeled" format="currency">After</s-table-header>
+        <s-table-header listSlot="labeled" format="currency">Compare at</s-table-header>
+        {/* A market column holds a price, or "Not sold here" where there is none. Still
+            a money column: a short phrase sitting exactly where the price would have
+            been is the answer to "what does this market do", and left-aligning the whole
+            column so that one phrase can start at the margin costs every other row the
+            decimal alignment that makes a currency scannable. */}
         {markets.map((market) => (
-          <s-table-header key={market.priceListGid}>
+          <s-table-header key={market.priceListGid} listSlot="labeled" format="currency">
             {market.name} ({market.currency})
           </s-table-header>
         ))}
-        <s-table-header>State</s-table-header>
+        <s-table-header listSlot="inline">State</s-table-header>
       </s-table-header-row>
       <s-table-body>
         {rows.map((row) => (

@@ -104,13 +104,13 @@ export default function Catalog() {
           <>
             <s-table>
               <s-table-header-row>
-                <s-table-header>Variant</s-table-header>
-                <s-table-header>SKU</s-table-header>
-                <s-table-header>Live price</s-table-header>
-                <s-table-header>Baseline</s-table-header>
-                <s-table-header>Compare at</s-table-header>
-                <s-table-header>Cost</s-table-header>
-                <s-table-header>State</s-table-header>
+                <s-table-header listSlot="primary">Variant</s-table-header>
+                <s-table-header listSlot="secondary">SKU</s-table-header>
+                <s-table-header listSlot="labeled" format="currency">Live price</s-table-header>
+                <s-table-header listSlot="labeled" format="currency">Baseline</s-table-header>
+                <s-table-header listSlot="labeled" format="currency">Compare at</s-table-header>
+                <s-table-header listSlot="labeled" format="currency">Cost</s-table-header>
+                <s-table-header listSlot="inline">State</s-table-header>
               </s-table-header-row>
               <s-table-body>
                 {rows.map((row) => (

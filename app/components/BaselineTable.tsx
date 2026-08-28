@@ -17,12 +17,16 @@ export function BaselineTable({
   return (
     <s-table>
       <s-table-header-row>
-        <s-table-header>Variant</s-table-header>
-        <s-table-header>SKU</s-table-header>
-        <s-table-header>Baseline</s-table-header>
-        <s-table-header>Live</s-table-header>
-        <s-table-header>Source</s-table-header>
-        <s-table-header>Why</s-table-header>
+        <s-table-header listSlot="primary">Variant</s-table-header>
+        <s-table-header listSlot="secondary">SKU</s-table-header>
+        <s-table-header listSlot="labeled" format="currency">Baseline</s-table-header>
+        <s-table-header listSlot="labeled" format="currency">Live</s-table-header>
+        <s-table-header listSlot="labeled">Source</s-table-header>
+        {/* Was "Why", over two buttons labelled History and Shopify. Whatever it once
+            meant, a merchant reading the header could only conclude the column held a
+            reason -- and in the collapsed form that header is rendered as the label of
+            the pair, so "Why: History Shopify" was the whole of it. */}
+        <s-table-header listSlot="inline">Look up</s-table-header>
       </s-table-header-row>
       <s-table-body>
         {rows.map((row) => (

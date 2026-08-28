@@ -172,11 +172,11 @@ export default function Segments() {
         ) : (
           <s-table>
             <s-table-header-row>
-              <s-table-header>Name</s-table-header>
-              <s-table-header>Kind</s-table-header>
-              <s-table-header>Products</s-table-header>
-              <s-table-header>Used by</s-table-header>
-              <s-table-header>Action</s-table-header>
+              <s-table-header listSlot="primary">Name</s-table-header>
+              <s-table-header listSlot="inline">Kind</s-table-header>
+              <s-table-header listSlot="labeled" format="numeric">Products</s-table-header>
+              <s-table-header listSlot="secondary">Used by</s-table-header>
+              <s-table-header listSlot="inline">Action</s-table-header>
             </s-table-header-row>
             <s-table-body>
               {segments.map((segment) => (
@@ -348,9 +348,9 @@ function ImportReport({ report }: { report: NonNullable<ActionData["report"]> })
           </s-banner>
           <s-table>
             <s-table-header-row>
-              <s-table-header>Line</s-table-header>
-              <s-table-header>Value</s-table-header>
-              <s-table-header>Matches</s-table-header>
+              <s-table-header listSlot="kicker" format="numeric">Line</s-table-header>
+              <s-table-header listSlot="primary">Value</s-table-header>
+              <s-table-header listSlot="inline">Matches</s-table-header>
             </s-table-header-row>
             <s-table-body>
               {report.ambiguous.slice(0, 50).map((row) => (
@@ -375,8 +375,8 @@ function ImportReport({ report }: { report: NonNullable<ActionData["report"]> })
           </s-paragraph>
           <s-table>
             <s-table-header-row>
-              <s-table-header>Line</s-table-header>
-              <s-table-header>Value</s-table-header>
+              <s-table-header listSlot="kicker" format="numeric">Line</s-table-header>
+              <s-table-header listSlot="primary">Value</s-table-header>
             </s-table-header-row>
             <s-table-body>
               {report.unmatched.slice(0, 50).map((row) => (
