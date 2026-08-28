@@ -56,6 +56,28 @@ lives in a cross-origin iframe. Found by bisection: five rows fine, fifty-six no
 Encoded as a cell budget in `app/lib/ui/table-budget.ts`, so a view that grows columns
 loses rows rather than losing the page.
 
+## `s-table` picks grid-or-list itself, and App Home has no `variant="table"`
+
+The base types offer `variant: 'list' | 'table' | 'auto'`. The **App Home** surface then
+narrows it — `TableProps.variant` is `Extract<..., 'list' | 'auto'>` — so `"table"` does
+not compile, and there is no way to pin the grid. Shopify said the same thing about the
+other end in the forums: on mobile the list variant is forced whatever you pass.
+
+`auto` collapses to the stacked layout somewhere around a 490px container. That is not the
+trap. The trap is that a container *close* to it resolves inconsistently: the campaigns
+list sits at ~566px next to a 22rem aside, and the same URL in the same window renders a
+grid on one reload and a stacked list on the next. Flooring the column's `minInlineSize`
+does not change it, so whatever Polaris measures is not the column we give it.
+
+Since the shape cannot be pinned, **both shapes have to be worth looking at**. Every
+`s-table-header` takes `listSlot` — `primary | secondary | kicker | inline | labeled` —
+and it defaults to `labeled`, which is why an undesignated table collapses into a wall of
+"Priority 900" pairs with the row's own name carrying no more weight than its rank. Name
+the primary column and the collapsed form reads as a list row. `format="numeric"` on the
+same element right-aligns a number in the grid.
+
+Only the campaigns table is designated so far; the other twenty are still at the default.
+
 ## A native `<form>` breaks the embedded session
 
 A plain `<form>` — GET or POST — does a full navigation that wipes App Bridge's `host`,

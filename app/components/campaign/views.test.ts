@@ -63,3 +63,23 @@ describe("both views read the same filters", () => {
     ).toBe(true);
   });
 });
+
+describe("the page header is a header, not a card", () => {
+  it("puts the primary action in the tab bar's action slot", () => {
+    // It used to sit in an `s-section` of its own above the tabs: a card holding one
+    // button and a two-item toggle, mostly empty white space, which is the shape a page
+    // takes when nobody has decided what its header is.
+    expect(route).toMatch(/<TabBar[\s\S]*?action=\{[\s\S]*?Create campaign/);
+  });
+
+  it("does not wrap the tabs and the action in a card", () => {
+    const header = route.slice(route.indexOf("<TabBar"), route.indexOf("/>", route.indexOf("tabs={")));
+    expect(header).not.toContain("<s-section");
+  });
+
+  it("leaves the list card as the only card above the fold", () => {
+    // One `s-section` in the route itself -- the aside. The list and the calendar bring
+    // their own.
+    expect(route.split("<s-section").length - 1).toBe(1);
+  });
+});

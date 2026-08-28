@@ -16,11 +16,10 @@ import { SPACE } from "../../lib/ui/spacing";
  *
  * The two directions take different rhythms, and that is the rule rather than an
  * exception to it. Inline, the field and the button share one baseline and read as a
- * single control, so they sit at item rhythm and align on their bottom edge — the label
- * is hidden in that mode, so the two are the same height and `end` is what puts the
- * button on the field's line rather than floating above it. Stacked, every field carries
- * its own visible label, and item rhythm leaves that label crowding the field above it;
- * stacked fields get section rhythm so each one owns its label.
+ * single control, so they sit at item rhythm — the label is hidden in that mode, so the
+ * two are the same height and centring puts the button on the field's line. Stacked,
+ * every field carries its own visible label, and item rhythm leaves that label crowding
+ * the field above it; stacked fields get section rhythm so each one owns its label.
  */
 export function VariantSearch({
   fields,
@@ -47,7 +46,13 @@ export function VariantSearch({
   return (
     <FilterForm fields={fields}>
       {direction === "inline" ? (
-        <s-stack direction="inline" gap={SPACE.item} alignItems="end">
+        // A grid, not an inline stack, for the same reason the block branch below is one.
+        // A search field takes the full width it is offered, so an inline stack had
+        // nothing left for the button: it wrapped onto its own line and sat under the
+        // field's left edge, which reads as an orphaned control rather than as the other
+        // half of the search. `1fr auto` gives the field what is left and the button what
+        // it needs, on one line.
+        <s-grid gridTemplateColumns="1fr auto" gap={SPACE.item} alignItems="center">
           <s-search-field
             name="q"
             label={label}
@@ -55,9 +60,15 @@ export function VariantSearch({
             placeholder={placeholder}
             value={query}
           />
-          {children}
-          <s-button type="submit">Search</s-button>
-        </s-stack>
+          {/* Anything else this tab filters on rides with the button, so the row stays two
+              columns however many controls a tab adds. */}
+          <s-stack direction="inline" gap={SPACE.item} alignItems="center">
+            {children}
+            <s-button type="submit" icon="search">
+              Search
+            </s-button>
+          </s-stack>
+        </s-grid>
       ) : (
         // A grid, not a vertical stack.
         //
