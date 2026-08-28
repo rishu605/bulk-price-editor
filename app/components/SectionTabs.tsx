@@ -1,5 +1,6 @@
 import { useLocation, useSearchParams } from "react-router";
 
+import { PageWidth } from "./PageShell";
 import { TabBar } from "./TabBar";
 
 export interface SectionTab {
@@ -39,14 +40,25 @@ export function SectionTabs({ tabs }: { tabs: SectionTab[] }) {
   const query = carried.toString();
 
   return (
-    <TabBar
-      label="Sections"
-      tabs={tabs.map((tab) => ({
-        label: tab.label,
-        badge: tab.badge,
-        current: pathname === tab.href,
-        href: query ? `${tab.href}?${query}` : tab.href,
-      }))}
-    />
+    // Inset to the same width as the pages below it. A section's tabs are rendered by the
+    // layout route, above the `Outlet`, so they are not inside any `PageShell` — and left
+    // alone they ran edge to edge while the page started a tenth of the way in.
+    <PageWidth>
+      {/* `s-page` insets its own contents by this much, so without it the tabs sit a
+          few pixels left of the card they belong to — which after the inset is the only
+          misalignment left on the page, and the kind that reads as sloppiness rather
+          than as a choice. Matched by putting the two side by side and looking. */}
+      <s-box paddingInline="base">
+        <TabBar
+          label="Sections"
+          tabs={tabs.map((tab) => ({
+            label: tab.label,
+            badge: tab.badge,
+            current: pathname === tab.href,
+            href: query ? `${tab.href}?${query}` : tab.href,
+          }))}
+        />
+      </s-box>
+    </PageWidth>
   );
 }

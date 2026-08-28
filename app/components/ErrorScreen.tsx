@@ -12,6 +12,7 @@
  */
 
 import { ActionRow } from "./ActionRow";
+import { PageShell } from "./PageShell";
 import { helpLabelFor, helpPathFor } from "../lib/errors/help-links";
 
 export interface ErrorScreenProps {
@@ -34,7 +35,7 @@ export function ErrorScreen({
   retryHref,
 }: ErrorScreenProps) {
   return (
-    <s-page heading="Something went wrong">
+    <PageShell heading="Something went wrong">
       <s-section>
         <s-banner tone={retryable ? "warning" : "critical"}>
           <s-paragraph>{userMessage}</s-paragraph>
@@ -86,6 +87,6 @@ export function ErrorScreen({
           </details>
         ) : null}
       </s-section>
-    </s-page>
+    </PageShell>
   );
 }
