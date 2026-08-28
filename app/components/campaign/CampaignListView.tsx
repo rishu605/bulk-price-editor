@@ -1,8 +1,9 @@
 import { humanise } from "../../lib/format/label";
 import { ActionRow } from "../ActionRow";
+import { EmptyState, NoMatches } from "../AsyncState";
 import { FilterForm } from "../FilterForm";
 import { TabBar } from "../TabBar";
-import { PAD, SPACE } from "../../lib/ui/spacing";
+import { SPACE } from "../../lib/ui/spacing";
 import type { listCampaigns, CampaignFilters } from "../../services/campaigns/list.server";
 
 type List = Awaited<ReturnType<typeof listCampaigns>>;
@@ -105,7 +106,18 @@ export function CampaignListView({
         </FilterForm>
 
         {list.campaigns.length === 0 ? (
-          <EmptyState filtered={filtered} clearHref={linkTo({ q: "", status: "" })} />
+          filtered ? (
+            <NoMatches
+              noun="campaigns"
+              description="Nothing here matches the status and search you have set. Clearing them shows every campaign in the shop."
+              clearHref={linkTo({ q: "", status: "" })}
+            />
+          ) : (
+            <EmptyState
+              title="No campaigns yet"
+              description="A campaign is a rule (“20% off this collection”) plus the set of variants it applies to. Nothing is written to your storefront until you apply it, and you can preview the exact result first."
+            />
+          )
         ) : (
           <>
             {/* Every header says what it becomes when the table collapses to a list.
@@ -183,56 +195,5 @@ export function CampaignListView({
         )}
       </s-stack>
     </s-section>
-  );
-}
-
-/**
- * What the card says instead of rows.
- *
- * Two different situations, and conflating them is the usual mistake: a shop with no
- * campaigns needs to be told what a campaign *is*, and a shop whose filter matched
- * nothing needs the filter taken off. The second used to be a sentence saying "clear the
- * filters" with no way to do it.
- *
- * Laid out as an empty state rather than a loose paragraph — a title, a measure short
- * enough to read, and vertical room. A single line of body text flush against the control
- * above it reads as a caption on that control, not as the answer to "where are my rows".
- */
-function EmptyState({ filtered, clearHref }: { filtered: boolean; clearHref: string }) {
-  return (
-    <s-box paddingBlock={PAD.block}>
-      <s-stack direction="block" gap={SPACE.section}>
-        <s-heading>{filtered ? "No campaigns match those filters" : "No campaigns yet"}</s-heading>
-
-        {/* Capped rather than running the width of the card. Body copy set across a wide
-            column is measurably harder to read, and this is the one block on the page
-            that is nothing but body copy. */}
-        <s-box maxInlineSize="520px">
-          <s-paragraph>
-            {filtered ? (
-              <s-text>
-                Nothing here matches the status and search you have set. Clearing them
-                shows every campaign in the shop.
-              </s-text>
-            ) : (
-              <s-text>
-                A campaign is a rule (&ldquo;20% off this collection&rdquo;) plus the set
-                of variants it applies to. Nothing is written to your storefront until you
-                apply it, and you can preview the exact result first.
-              </s-text>
-            )}
-          </s-paragraph>
-        </s-box>
-
-        {filtered ? (
-          <ActionRow>
-            {/* Secondary, not primary. The page's primary action is Create campaign, at
-                the top of the page and still visible from here; a second black button
-                would be two answers to "what should I do next". */}
-            <s-button href={clearHref}>Clear filters</s-button>
-          </ActionRow>
-        ) : null}
-      </s-stack>
-    </s-box>
   );
 }

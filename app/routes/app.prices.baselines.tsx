@@ -25,6 +25,8 @@ import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
 import { baselineHistory, browseBaselines } from "../services/baseline-browser.server";
 import { BaselineTable } from "../components/BaselineTable";
+import { EmptyState, NoMatches } from "../components/AsyncState";
+import { clearedSearch } from "../components/FilterForm";
 import { VariantSearch } from "../components/prices/VariantSearch";
 import { Pagination } from "../components/prices/Pagination";
 import { baselinesCsv } from "../lib/reporting/baselines-csv";
@@ -61,7 +63,12 @@ export const loader = withGuard("/app/prices/baselines", async ({ request }: Loa
 export default function Baselines() {
   const { rows, total, vendors, sources, page, filters, variantGid, history, timeZone } =
     useLoaderData<typeof loader>();
-  const [, setSearchParams] = useSearchParams();
+  const [params, setSearchParams] = useSearchParams();
+
+  // `variant` is in FILTER_FIELDS but is not a filter the merchant set — it is which row
+  // they asked the history for. Counting it here would make an empty result claim to be
+  // filtered on a page where nothing is.
+  const filtered = Boolean(filters.q || filters.vendor || filters.source || filters.divergedOnly);
 
 
   const show = (gid: string) =>
@@ -116,10 +123,19 @@ export default function Baselines() {
         </VariantSearch>
 
         {rows.length === 0 ? (
-          <s-paragraph>
-            Nothing matches. A baseline is the reference price every campaign computes
-            from — captured at install, or imported from your own list.
-          </s-paragraph>
+          filtered ? (
+            <NoMatches
+              noun="baselines"
+              description="A baseline is the reference price every campaign computes from — captured at install, or imported from your own list."
+              clearHref={clearedSearch(params, FILTER_FIELDS)}
+            />
+          ) : (
+            <EmptyState
+              title="No baselines captured yet"
+              description="A baseline is the reference price every campaign computes from, which is what stops a second sale discounting the first one's price. Syncing your catalogue captures one for every variant."
+              action={{ label: "Sync your catalogue", href: "/app" }}
+            />
+          )
         ) : (
           <>
             <s-paragraph>

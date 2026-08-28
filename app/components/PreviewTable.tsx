@@ -1,4 +1,5 @@
 import { humanise } from "../lib/format/label";
+import { EmptyState } from "./AsyncState";
 import type { MarketPreview, PreviewRow } from "../services/campaigns/index.server";
 import { PREVIEW_TONE, toneFor } from "./tone";
 
@@ -18,10 +19,10 @@ export function PreviewTable({
 }) {
   if (rows.length === 0) {
     return (
-      <s-paragraph>
-        Nothing to change. Either every variant already shows the target price, or the
-        scope matched no variants with baselines.
-      </s-paragraph>
+      <EmptyState
+        title="Nothing to change"
+        description="Either every variant in scope already shows the price this rule computes, or the scope matched no variants that have a baseline to compute from."
+      />
     );
   }
 

@@ -1,3 +1,4 @@
+import { NoMatches } from "./AsyncState";
 import type { ReconciliationRow } from "../services/reconciliation.server";
 import { stateLabel } from "../lib/reporting/reconciliation-csv";
 
@@ -11,13 +12,25 @@ import { stateLabel } from "../lib/reporting/reconciliation-csv";
  * looks repetitive until the day the base price reverted and the Japanese one did not —
  * the case a collapsed view could not show at all.
  */
-export function ReconciliationTable({ rows }: { rows: ReconciliationRow[] }) {
+export function ReconciliationTable({
+  rows,
+  clearHref,
+}: {
+  rows: ReconciliationRow[];
+  /** Where Clear filters goes. The route owns the field list, so it builds the link. */
+  clearHref: string;
+}) {
   if (rows.length === 0) {
+    // The old copy guessed: "if you were looking for drifted prices, that is good news."
+    // On a page with four filters, an empty result far more often means the filters
+    // exclude each other -- a campaign on one surface, a state that surface is never in
+    // -- and being congratulated for it is how a merchant concludes the page is broken.
     return (
-      <s-paragraph>
-        Nothing matches these filters. If you were looking for drifted prices, that is
-        good news.
-      </s-paragraph>
+      <NoMatches
+        noun="prices"
+        description="This page lists every variant on every surface it sells on, so a filter that narrows two of those at once can exclude everything."
+        clearHref={clearHref}
+      />
     );
   }
 

@@ -4,6 +4,7 @@ import { useLoaderData } from "react-router";
 import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
 import { PageShell } from "../components/PageShell";
+import { EmptyState } from "../components/AsyncState";
 import { formatCount, formatWhen } from "../lib/format/display";
 import prisma from "../db.server";
 
@@ -59,13 +60,10 @@ export default function Imports() {
     <PageShell heading="Imports">
       <s-section heading="Price files you have imported">
         {imports.length === 0 ? (
-          <s-paragraph>
-            <s-text>
-              Nothing imported yet. Pick a source above — a price file sets prices
-              directly, a baseline file sets the reference every campaign computes from,
-              and a cost file feeds the margin guardrails.
-            </s-text>
-          </s-paragraph>
+          <EmptyState
+            title="Nothing imported yet"
+            description="A price file sets prices directly, a baseline file sets the reference every campaign computes from, and a cost file feeds the margin guardrails. Pick a source above."
+          />
         ) : (
           <>
             <s-table>
