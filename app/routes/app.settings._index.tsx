@@ -9,7 +9,6 @@ import { ensureShop } from "../services/shop.server";
 import { readSettings, shopCurrency, writeSettings } from "../services/settings.server";
 import { readPreferences, writePreferences } from "../services/notifications.server";
 import { actorFor } from "../lib/audit/actor";
-import { ActionRow } from "../components/ActionRow";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import {
@@ -20,6 +19,7 @@ import {
 import { PageShell } from "../components/PageShell";
 import { SettingsSaveBar } from "../components/SettingsSaveBar";
 import { FieldGrid, FullRow } from "../components/FieldGrid";
+import { JumpTo } from "../components/JumpTo";
 import { SPACE } from "../lib/ui/spacing";
 
 export const loader = withGuard("/app/settings", async ({ request }: LoaderFunctionArgs) => {
@@ -145,14 +145,14 @@ export default function Settings() {
           rather than more routes: these settings are read together — a rounding rule
           that pushes a price under a floor is a conversation between two of them —
           and splitting them across pages is what made the nav sixteen items long. */}
-      <s-section>
-        <ActionRow>
-          <s-text color="subdued">Jump to</s-text>
-          <s-button variant="tertiary" href="#guardrails">Guardrails</s-button>
-          <s-button variant="tertiary" href="#rounding">Rounding</s-button>
-          <s-button variant="tertiary" href="#notifications">Alerts</s-button>
-        </ActionRow>
-      </s-section>
+      <JumpTo
+        label="Settings on this page"
+        targets={[
+          { id: "guardrails", label: "Guardrails" },
+          { id: "rounding", label: "Rounding" },
+          { id: "notifications", label: "Alerts" },
+        ]}
+      />
 
       <s-section id="guardrails" heading="Guardrails">
         <s-paragraph>
