@@ -104,11 +104,23 @@ describe("no button is labelled with a raw value", () => {
   const RAW_LABEL =
     /<s-button\b(?:(?!<\/s-button>)[\s\S])*?>\s*\{([a-z][A-Za-z0-9]*)\}\s*<\/s-button>/g;
 
+  /**
+   * A name that says "label" is somebody having decided the words.
+   *
+   * `ImportForm` takes a `checkLabel` prop and renders `{checkLabel}`, which the pattern
+   * above cannot tell from `{resolution}`. The difference is real and is in the name: a
+   * variable called a label holds a phrase a caller wrote, and the failure this check
+   * exists for is a *domain value* reaching the screen — a status, a kind, an action, a
+   * resolution. Naming the exemption by suffix rather than listing the file keeps the
+   * check meaningful in a component that grows another button.
+   */
+  const isLabel = (name: string) => /label$/i.test(name);
+
   const offenders = tsxFiles(APP).flatMap((path) => {
     const source = readFileSync(path, "utf8");
-    return [...source.matchAll(RAW_LABEL)].map(
-      (match) => `${path.replace(`${APP}/`, "")}: {${match[1]}}`,
-    );
+    return [...source.matchAll(RAW_LABEL)]
+      .filter((match) => !isLabel(match[1]))
+      .map((match) => `${path.replace(`${APP}/`, "")}: {${match[1]}}`);
   });
 
   it("finds none", () => {

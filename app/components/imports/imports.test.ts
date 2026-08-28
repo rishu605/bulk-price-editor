@@ -18,6 +18,10 @@ const dropZone = readFileSync(
   join(process.cwd(), "app", "components", "imports", "CsvDropZone.tsx"),
   "utf8",
 );
+const importForm = readFileSync(
+  join(process.cwd(), "app", "components", "imports", "ImportForm.tsx"),
+  "utf8",
+);
 
 describe("dry run stays the default", () => {
   it.each(routes)("%s commits only when explicitly asked", (name) => {
@@ -43,12 +47,20 @@ describe("recapture keeps its guard", () => {
 });
 
 describe("dropping a file", () => {
-  it.each(routes)("%s accepts a file as well as pasted text", (name) => {
-    const s = source(name);
-    expect(s).toContain("<CsvDropZone");
+  // The three routes rendered their own drop zone and textarea until they were collapsed
+  // onto one `ImportForm`. Checking the route source for `<CsvDropZone` stopped meaning
+  // anything at that point — so the guarantee is checked where it now lives, plus that
+  // each route actually goes through the thing that provides it. Two assertions instead
+  // of one, and neither can pass while the merchant has no way to drop a file.
+  it("the shared form offers a drop zone and keeps the textarea", () => {
+    expect(importForm).toContain("<CsvDropZone");
     // The textarea stays: a merchant fixing three rows after a failed dry run needs it,
     // and it is still what the form submits.
-    expect(s).toContain('name="csv"');
+    expect(importForm).toContain('name="csv"');
+  });
+
+  it.each(routes)("%s accepts a file as well as pasted text", (name) => {
+    expect(source(name)).toContain("<ImportForm");
   });
 
   it("tells the Polaris field its value changed", () => {
@@ -65,5 +77,97 @@ describe("dropping a file", () => {
 
   it("explains itself when the file cannot be read, rather than doing nothing", () => {
     expect(dropZone).toMatch(/paste its contents instead/i);
+  });
+});
+
+describe("the three imports are one import", () => {
+  /**
+   * The guard that existed on one of three paths.
+   *
+   * "You cannot commit before you have checked" was implemented in `app.imports.baselines`
+   * and nowhere else, and nothing in the other two said they were different on purpose.
+   * It lives in `ImportForm` now, which is what makes it true on all three at once — and
+   * what makes it impossible to lose from one of them.
+   */
+  it("blocks the commit until a dry run has found rows", () => {
+    expect(importForm).toMatch(/disabled=\{!ready \|\| undefined\}/);
+  });
+
+  it("still defaults to a dry run, so a missing intent falls safe", () => {
+    expect(importForm).toMatch(/name="intent"[\s\S]{0,80}value="dry-run"/);
+  });
+
+  it("marks the commit as the consequential one on every source", () => {
+    // Prices had a plain secondary button for the action that creates a campaign over a
+    // merchant's catalogue, while the other two used `tone="critical"`.
+    expect(importForm).toContain('tone="critical"');
+  });
+
+  it.each(routes)("%s no longer carries its own copy of the form", (name) => {
+    const s = source(name);
+
+    expect(s).not.toContain("<s-text-area");
+    expect(s).not.toContain("submitWith");
+    expect(s).not.toContain('<input type="hidden" name="intent"');
+  });
+
+  it.each(routes)("%s reports its counts as figures rather than a sentence", (name) => {
+    // Prices showed none at all; the other two ran four and five numbers together into
+    // one line of prose. `CountsRow` is how the campaign preview shows the same thing.
+    expect(source(name)).toContain("<ImportReport");
+  });
+
+  it("shows problem rows as a table, not a bullet list", () => {
+    // Two of the three used a list, which puts the line, the identifier and the reason
+    // into one sentence per row — so nothing lines up, and twenty bad rows cannot be
+    // scanned for the thing they have in common.
+    expect(importForm).toContain("<s-table");
+    expect(importForm).not.toContain("<s-unordered-list");
+  });
+
+  it("says how many rows were left out of the table it truncates", () => {
+    // A silent top-25 reads as "these are all of them".
+    expect(importForm).toMatch(/Showing the first \{limit\} of \{problems\.length\}/);
+  });
+});
+
+/**
+ * Source with its comments taken out.
+ *
+ * The repo has been caught by this before — the compliance check that rejects a native
+ * form element greps for `<form`, so the *word* in a comment trips it. The same thing
+ * happened here on the first run: the doc comment explaining why the two segment cards
+ * were merged quotes both of their old headings and the `variant="primary"` they each
+ * carried, so a check for "those headings are gone" failed on the note saying they had
+ * gone.
+ */
+const code = (source: string) =>
+  source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+describe("making a segment is one decision", () => {
+  const segments = code(
+    readFileSync(join(process.cwd(), "app", "routes", "app.settings.segments.tsx"), "utf8"),
+  );
+
+  it("offers one create form, not two competing cards", () => {
+    expect(segments).not.toContain("New segment from a filter");
+    expect(segments).not.toContain("New segment from a list");
+    expect(segments).toContain('heading="New segment"');
+  });
+
+  it("has one black button on the page", () => {
+    // Two sibling cards each ending in a primary button is the two-black-buttons failure
+    // spread thin enough that neither card broke the rule on its own.
+    expect((segments.match(/variant="primary"/g) ?? []).length).toBe(1);
+  });
+
+  it("asks how the products are named, which is the only thing that differed", () => {
+    expect(segments).toContain("<s-choice-list");
+    expect(segments).toContain('<s-choice value="filter"');
+    expect(segments).toContain('<s-choice value="list"');
+  });
+
+  it("sends the intent that matches the choice", () => {
+    expect(segments).toMatch(/how === "filter" \? "create-filter" : "create-from-csv"/);
   });
 });
