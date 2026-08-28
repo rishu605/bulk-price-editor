@@ -1,10 +1,10 @@
 /**
  * Search across the help centre.
  *
- * Twenty-one pages is small enough that scanning all of them per query costs less than a
+ * Twenty pages is small enough that scanning all of them per query costs less than a
  * millisecond, so there is no index to build, invalidate or get wrong. If the help centre
  * ever grows past a few hundred pages this should be reconsidered — but building a search
- * index for twenty-one documents would be answering a question nobody asked.
+ * index for twenty documents would be answering a question nobody asked.
  *
  * The ranking is deliberately crude and explained rather than tuned: a merchant searching
  * "drift" wants the page called drift, not the six pages that mention it in passing.
@@ -15,8 +15,15 @@ import { join } from "node:path";
 
 const ROOT = join(process.cwd(), "docs", "help");
 
-/** The index page is the thing you search *from*; returning it as a result is noise. */
-const EXCLUDED = new Set(["index"]);
+/**
+ * Pages that are in `docs/help` but are not help.
+ *
+ * The index is the thing you search *from*; returning it as a result is noise. The note in
+ * `images/` is for whoever next takes a screenshot — it explains the crop that keeps a
+ * competitor's name out of the picture — and a merchant searching "price" should not be
+ * handed our editorial standards as an answer.
+ */
+const EXCLUDED = new Set(["index", "images/README"]);
 
 export interface HelpHit {
   slug: string;
@@ -90,6 +97,11 @@ export function toProse(markdown: string): string {
     .map(tableRowToProse)
     .join("\n")
     .replace(/^#{1,6}\s+/gm, "")
+    // Images before links, because an image is a link with a `!` in front. Dropped whole
+    // rather than reduced to their alt text: several pages open with a screenshot, and its
+    // alt text is a description of a picture — as the first line of a search result it
+    // reads as the page being about the screenshot rather than about the subject.
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/[*_`>|]/g, "")
     .replace(/\s+/g, " ")

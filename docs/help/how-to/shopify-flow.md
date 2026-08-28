@@ -46,7 +46,7 @@ so it is refused rather than confirmed on your behalf.
 Prices revert, the ledger records it, and Anchor's *Campaign ended* trigger fires — so you
 can chain a Slack message onto the same Flow if you want to be told.
 
-## Another
+## Another worked example
 
 **"Tell the team when a campaign is held because someone edited a price."**
 

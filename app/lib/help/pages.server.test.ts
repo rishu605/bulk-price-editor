@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   escapesRoot,
+  headingId,
   INDEX_SLUG,
   readHelpImage,
   readHelpPage,
@@ -117,7 +118,75 @@ describe("every page renders", () => {
     // A page whose title fell back to the slug has no `#` heading, which means the browser
     // tab and the on-page heading disagree.
     expect(page!.title, `${slug} has no heading`).not.toBe(slug);
-    expect(page!.html).toContain("<h1>");
+    expect(page!.html).toContain(`<h1 id="${headingId(page!.title)}">`);
+  });
+});
+
+/**
+ * The route renders a contents rail beside the prose and a card row under it, and both are
+ * built from what this function returns rather than from a second pass over the HTML.
+ * These assert the parts the reader can see are actually there.
+ */
+describe("a page arrives in the pieces the route lays out", () => {
+  it("lists its own headings, each pointing at an anchor the page has", async () => {
+    const page = (await readHelpPage("concepts/baselines"))!;
+
+    expect(page.headings.map((h) => h.text)).toEqual([
+      "Why it matters",
+      "Where baselines come from",
+      "When to recapture",
+    ]);
+
+    for (const heading of page.headings) {
+      expect(page.html, `no anchor for ${heading.text}`).toContain(`id="${heading.id}"`);
+    }
+  });
+
+  it("lifts the Related list out of the prose, with its links already resolved", async () => {
+    const page = (await readHelpPage("concepts/baselines"))!;
+
+    expect(page.related).toEqual([
+      { href: "/help/concepts/revert", label: "Why revert recomputes" },
+      { href: "/help/how-to/import-baselines", label: "Importing your own prices" },
+    ]);
+
+    // Lifted, not copied: leaving it in as well would render the same two links twice,
+    // once as cards and once as the bullets the cards were built to replace.
+    expect(page.html).not.toContain("Related");
+    expect(page.headings.some((h) => h.text === "Related")).toBe(false);
+  });
+
+  it("leaves a page without a Related section whole", async () => {
+    const page = (await readHelpPage("how-to/first-campaign"))!;
+
+    expect(page.related).toEqual([]);
+    expect(page.html).toContain("Reverting");
+  });
+
+  it("every Related link names a page we publish", async () => {
+    for (const slug of allSlugs()) {
+      for (const link of (await readHelpPage(slug))!.related) {
+        const target = link.href.replace("/help/", "");
+        expect(resolveHelpFile(target), `${slug} points at ${link.href}`).not.toBeNull();
+      }
+    }
+  });
+
+  it("finds Related sections to check — otherwise the assertion above proves nothing", async () => {
+    const counts = await Promise.all(allSlugs().map(async (s) => (await readHelpPage(s))!.related.length));
+
+    expect(counts.reduce((a, b) => a + b, 0)).toBeGreaterThan(3);
+  });
+
+  /**
+   * A table is wider than the column the prose is set in. Without its own scroll box the
+   * whole document scrolls sideways, which is the one thing a reader should never have to
+   * do to finish a sentence.
+   */
+  it("gives a table somewhere to scroll that is not the page", async () => {
+    const page = (await readHelpPage("how-to/shopify-flow"))!;
+
+    expect(page.html).toContain('<div class="scroller"><table>');
   });
 });
 
