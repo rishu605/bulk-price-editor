@@ -20,6 +20,7 @@ import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
 import { CountsRow } from "../components/CountsRow";
+import { Field } from "../components/FieldGrid";
 import { HelpNote } from "../components/HelpNote";
 import { SPACE } from "../lib/ui/spacing";
 
@@ -99,9 +100,16 @@ export default function Debug() {
         <Form method="get">
           {/* The field and its button are one control. `alignItems="end"` because the
               field carries a label above it and the button does not, so without it the
-              button floats level with the label rather than with the box. */}
+              button floats level with the label rather than with the box.
+
+              That was the whole intent and it had never worked: an unbounded Polaris
+              field takes the entire row, so the button wrapped underneath and the two
+              rendered as two controls. `Field` is what makes the row a row -- and a
+              reference is thirteen characters, so it is `short`. */}
           <s-stack direction="inline" gap={SPACE.item} alignItems="end">
-            <s-text-field name="id" label="Reference" value={query} />
+            <Field width="short">
+              <s-text-field name="id" label="Reference" value={query} />
+            </Field>
             <s-button type="submit" variant="primary">
               Find
             </s-button>
@@ -214,10 +222,9 @@ export default function Debug() {
           One code dominating usually means one broken thing, not fifty.
         </s-paragraph>
         <s-paragraph>
-          <s-text>
-            The breakdown counts the fifty most recent failures, which is also what the
-            table lists — so a code with a large share here is worth opening before the
-            newest row is.
+          <s-text color="subdued">
+            The breakdown counts the fifty most recent failures — the same rows the table
+            lists.
           </s-text>
         </s-paragraph>
       </HelpNote>

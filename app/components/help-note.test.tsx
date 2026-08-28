@@ -92,14 +92,22 @@ describe("the note itself", () => {
 });
 
 describe("the prose each page used to keep in a column", () => {
-  /** The ten notes, and a phrase from each that only that explanation would contain. */
+  /**
+   * The ten notes, and a phrase from each that only that explanation would contain.
+   *
+   * These are deliberately short and load-bearing rather than long quotations. The prose
+   * gets edited — it was cut to fit a 320px popover once already — and a test that pins a
+   * whole sentence fails on every rewrite, which trains people to update the phrase
+   * without reading what they broke. A phrase that carries the *point* of the paragraph
+   * still fails when the point goes missing.
+   */
   const MOVED: Array<[route: string, title: string, phrase: string]> = [
-    ["app.prices._index.tsx", "What these mean", "reference price every campaign computes"],
-    ["app.prices.baselines._index.tsx", "Reading this page", "rather than against a previous discount"],
-    ["app.prices.drift.tsx", "What the three choices do", "makes the new price the baseline"],
+    ["app.prices._index.tsx", "What these mean", "the reference every campaign computes from"],
+    ["app.prices.baselines._index.tsx", "Reading this page", "recapture or import"],
+    ["app.prices.drift.tsx", "What the three choices do", "make the new price the baseline"],
     ["app.prices.baselines.recapture.tsx", "If you get this wrong", "Baselines are append-only"],
     ["app.campaigns._index.tsx", "How campaigns resolve", "They never stack"],
-    ["app.campaigns.new.tsx", "Nothing is written yet", "only records the rule"],
+    ["app.campaigns.new.tsx", "Nothing is written yet", "records the rule"],
     ["app.campaigns.import.tsx", "Only price files are listed", "do not record a file yet"],
     ["app.activity.tsx", "What is kept", "Retention is not a paid tier"],
     ["app.settings._index.tsx", "Why floors are checked last", "Rounding down can push"],

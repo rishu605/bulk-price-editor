@@ -644,13 +644,12 @@ export default function NewCampaign() {
 
       <HelpNote label="Nothing is written yet">
         <s-paragraph>
-          Creating a campaign only records the rule. The next screen shows exactly
-          which prices would change, before anything touches your storefront.
+          Creating a campaign records the rule. The next screen shows exactly which prices
+          would change, before anything touches your storefront.
         </s-paragraph>
         <s-paragraph>
-          Every change is computed from each variant&rsquo;s <strong>baseline</strong>,
-          not its current price — so applying twice gives the same result rather than
-          discounting the discount.
+          Every change computes from the variant&rsquo;s <strong>baseline</strong>, not its
+          current price — so applying twice gives the same result.
         </s-paragraph>
       </HelpNote>
     </PageShell>

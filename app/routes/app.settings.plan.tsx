@@ -21,6 +21,7 @@ import { formatMinorUnits } from "../lib/money/format";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
+import { SPACE } from "../lib/ui/spacing";
 
 export const loader = withGuard("/app/settings/plan", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -89,19 +90,23 @@ export default function PlanPage() {
         </s-banner>
       ) : null}
 
-      {/* Four blocks, and the one a merchant arrives wanting — what happens if I
-          downgrade — is under a table of every plan. */}
+      {/* Two cards, and this one answers "what am I on" before "what else is there".
 
-      <s-section heading="What you are on">
-        <s-paragraph>
-          <s-text>
-            {PLANS[current as keyof typeof PLANS].name} · {formatCount(variants)}{" "}
-            variants in your catalogue.
-          </s-text>
-        </s-paragraph>
-      </s-section>
+          It was four. Three of them held prose alone, and the first held a single line
+          — a card, a heading and a border to carry eight words, with the table it is
+          about in a different box. A card is a container for content; one sentence is
+          not content, it is a lead. */}
 
       <s-section heading="Plans">
+        <s-stack gap={SPACE.tight}>
+          <s-text type="strong">
+            You are on {PLANS[current as keyof typeof PLANS].name}
+          </s-text>
+          <s-text color="subdued">
+            {formatCount(variants)} variants in your catalogue.
+          </s-text>
+        </s-stack>
+
         <s-paragraph>
           <s-text>
             Pricing is by how much of your catalogue a campaign manages and which
@@ -143,9 +148,12 @@ export default function PlanPage() {
             ))}
           </s-table-body>
         </s-table>
-      </s-section>
 
-      <s-section heading="Every plan, including free">
+        {/* A sub-heading rather than a fourth card. What every plan includes is a
+            footnote to the table above it -- read while looking at the columns, not
+            after leaving them -- and `spacing.ts` keeps a bare `s-heading` for exactly
+            this: a block that needs a name and does not deserve a card. */}
+        <s-heading>Every plan, including free</s-heading>
         <s-paragraph>
           <s-text>
             Preview before applying. Guardrails that refuse to price below cost or

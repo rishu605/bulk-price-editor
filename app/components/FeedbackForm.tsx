@@ -1,4 +1,5 @@
 import { useFetcher } from "react-router";
+import { Field } from "./FieldGrid";
 import { SPACE } from "../lib/ui/spacing";
 
 /**
@@ -30,21 +31,27 @@ export function FeedbackForm({ route }: { route: string }) {
       <fetcher.Form method="post" action="/app/settings/feedback">
         <input type="hidden" name="route" value={route} />
         <s-stack gap={SPACE.section}>
-          <s-select name="sentiment" label="What kind of thing is this?">
-            <s-option value="problem" defaultSelected>
-              Something is wrong
-            </s-option>
-            <s-option value="idea">An idea</s-option>
-            <s-option value="praise">Something worked well</s-option>
-          </s-select>
+          {/* Three options and a sentence. Unbounded these filled a 970px card, which
+              asks for an essay and offers a dropdown the width of the screen. */}
+          <Field width="medium">
+            <s-select name="sentiment" label="What kind of thing is this?">
+              <s-option value="problem" defaultSelected>
+                Something is wrong
+              </s-option>
+              <s-option value="idea">An idea</s-option>
+              <s-option value="praise">Something worked well</s-option>
+            </s-select>
+          </Field>
 
-          <s-text-area
-            name="message"
-            label="What happened?"
-            rows={4}
-            placeholder="A sentence is enough."
-            details="We can see which screen you are on and what your store looks like, so you do not need to explain that part."
-          />
+          <Field width="long">
+            <s-text-area
+              name="message"
+              label="What happened?"
+              rows={4}
+              placeholder="A sentence is enough."
+              details="We can see which screen you are on and what your store looks like, so you do not need to explain that part."
+            />
+          </Field>
 
           <s-button type="submit" loading={busy || undefined}>
             Send

@@ -205,15 +205,12 @@ export default function Recapture() {
 
       <HelpNote label="If you get this wrong">
         <s-paragraph>
-          <s-text>
-            Baselines are append-only: the previous one is kept, marked superseded, with
-            the date it was replaced. Nothing is destroyed, so a mistaken recapture can
-            be traced — but putting it back means reading that history and setting the
-            old numbers again, which on a large catalogue is a bad afternoon.
-          </s-text>
+          Baselines are append-only: the old one is kept and marked superseded. Nothing is
+          destroyed.
         </s-paragraph>
         <s-paragraph>
-          <s-text>The Baselines page shows every version of every variant.</s-text>
+          Putting it back means reading that history and setting the old numbers again —
+          on a large catalogue, a bad afternoon. Every version is on the Baselines page.
         </s-paragraph>
       </HelpNote>
     </PageShell>

@@ -147,17 +147,12 @@ export default function Activity() {
 
       <HelpNote label="What is kept">
         <s-paragraph>
-          <s-text>
-            Everything, for as long as you have the app. Retention is not a paid tier
-            here — charging for the ability to find out what an app did to your prices
-            would be the wrong trade.
-          </s-text>
+          Everything, for as long as you have the app. Retention is not a paid tier here —
+          charging to find out what an app did to your prices would be the wrong trade.
         </s-paragraph>
         <s-paragraph>
-          <s-text>
-            Actions taken by the scheduler show as “Scheduler”. Anything else carries
-            the staff account that did it.
-          </s-text>
+          Scheduled actions show as &ldquo;Scheduler&rdquo;. Everything else carries the
+          staff account that did it.
         </s-paragraph>
       </HelpNote>
     </PageShell>

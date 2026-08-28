@@ -117,21 +117,20 @@ export default function DriftQueue() {
 
       <HelpNote label="What the three choices do">
         <s-paragraph>
-          <strong>Keep the change</strong> makes the new price the baseline. Use it when
-          the edit was a permanent repricing — every future campaign will compute from it.
+          <strong>Keep the change</strong> — make the new price the baseline. For a
+          permanent repricing.
         </s-paragraph>
         <s-paragraph>
-          <strong>Put it back</strong> rewrites the campaign price on the next run. Use
-          it when the edit was a mistake.
+          <strong>Put it back</strong> — rewrite the campaign price on the next run. For a
+          mistake.
         </s-paragraph>
         <s-paragraph>
-          <strong>Leave it for now</strong> changes nothing and closes this alert. The
-          baseline is untouched, so the next campaign still computes from the old price.
+          <strong>Leave it for now</strong> — close the alert, change nothing.
         </s-paragraph>
         <s-paragraph>
-          <s-text>
-            Only the first of those changes what future campaigns compute from, which is
-            why it is the one marked as consequential.
+          <s-text color="subdued">
+            Only the first changes what future campaigns compute from, which is why it is
+            the one marked consequential.
           </s-text>
         </s-paragraph>
       </HelpNote>

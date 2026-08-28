@@ -355,17 +355,12 @@ export default function Baselines() {
 
       <HelpNote label="Reading this page">
         <s-paragraph>
-          <s-text>
-            <strong>Baseline</strong> is the reference price every campaign computes from.
-            It only changes when you recapture or import, so a discount is always measured
-            against the real price rather than against a previous discount.
-          </s-text>
+          <strong>Baseline</strong> — the reference every campaign computes from. It
+          changes only when you recapture or import.
         </s-paragraph>
         <s-paragraph>
-          <s-text>
-            A live price differing from the baseline is expected while a campaign is
-            running. Outside one, it means something changed the price elsewhere.
-          </s-text>
+          A live price differing from it is expected while a campaign runs. Outside one,
+          something else changed the price.
         </s-paragraph>
       </HelpNote>
     </PageShell>
