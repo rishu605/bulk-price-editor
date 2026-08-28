@@ -8,6 +8,7 @@
  */
 
 import { formatCount } from "../lib/format/display";
+import { CountsRow } from "./CountsRow";
 import type { CampaignResult } from "../services/campaigns/result.server";
 
 export function RunResultSection({ result }: { result: CampaignResult }) {
@@ -22,15 +23,32 @@ export function RunResultSection({ result }: { result: CampaignResult }) {
         <s-paragraph>{result.summary}</s-paragraph>
       </s-banner>
 
-      <s-stack direction="inline" gap="base">
-        <Count label="Verified" value={counts.verified} />
-        {counts.clamped > 0 ? <Count label="Clamped by a guardrail" value={counts.clamped} /> : null}
-        {counts.skipped > 0 ? <Count label="Needed no change" value={counts.skipped} /> : null}
-        {counts.reverted > 0 ? <Count label="Reverted since" value={counts.reverted} /> : null}
-        {counts.unverified > 0 ? <Count label="Not read back" value={counts.unverified} /> : null}
-        {counts.failed > 0 ? <Count label="Failed" value={counts.failed} /> : null}
-        {counts.pending > 0 ? <Count label="Still to run" value={counts.pending} /> : null}
-      </s-stack>
+      {/* `CountsRow`, not a second implementation of it.
+      
+          This was seven bare label-over-figure stacks in an inline stack — the exact
+          shape `CountsRow`'s own doc comment describes replacing, down to the reason: an
+          inline stack sizes each tile to its own content, so "Failed 3" gets a fraction
+          of the width of "Clamped by a guardrail 1,204" and a row of unequal boxes reads
+          as a ranking, with the widest looking the most important. That has nothing to do
+          with what these numbers mean, and on this page — the report a merchant reads
+          after a run that did not go cleanly — the widest label is usually the least
+          urgent number on the row.
+
+          A zero count is left out rather than shown as 0. On a preview, four fixed
+          figures including zeroes are a shape a merchant learns; here the row is the
+          answer to "what happened", and "Failed 0" is not one of the things that
+          happened. */}
+      <CountsRow
+        items={[
+          { label: "Verified", value: counts.verified },
+          { label: "Clamped by a guardrail", value: counts.clamped },
+          { label: "Needed no change", value: counts.skipped },
+          { label: "Reverted since", value: counts.reverted },
+          { label: "Not read back", value: counts.unverified },
+          { label: "Failed", value: counts.failed },
+          { label: "Still to run", value: counts.pending },
+        ].filter((item) => item.value > 0 || item.label === "Verified")}
+      />
 
       {margin.covered > 0 ? (
         <>
@@ -97,14 +115,5 @@ export function RunResultSection({ result }: { result: CampaignResult }) {
         <s-text color="subdued">{result.unavailable}</s-text>
       </s-paragraph>
     </s-section>
-  );
-}
-
-function Count({ label, value }: { label: string; value: number }) {
-  return (
-    <s-stack gap="none">
-      <s-text type="strong">{formatCount(value)}</s-text>
-      <s-text color="subdued">{label}</s-text>
-    </s-stack>
   );
 }

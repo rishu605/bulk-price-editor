@@ -1,5 +1,7 @@
 import { useState } from "react";
 
+import { SPACE } from "../../lib/ui/spacing";
+
 /**
  * Dropping a CSV file instead of opening it and pasting its contents.
  *
@@ -56,7 +58,10 @@ export function CsvDropZone({
   };
 
   return (
-    <s-stack gap="small-200">
+    // The zone and the line reporting what landed in it are one object, so they sit at
+    // item rhythm. `small-200` was a step off the scale entirely — between item and
+    // tight, and therefore telling the reader nothing either of them would have.
+    <s-stack gap={SPACE.item}>
       <s-drop-zone
         label={label}
         accept=".csv,text/csv,text/plain"

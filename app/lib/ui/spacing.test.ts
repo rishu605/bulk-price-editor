@@ -17,7 +17,7 @@
  * on every unrevisited route would be turned off within the week.
  */
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -93,42 +93,93 @@ describe("section padding stays inside what s-section allows", () => {
 });
 
 /**
- * The shared primitives. Every page in the app is assembled from these, so a literal that
- * creeps back in here is not one component drifting — it is the flat rhythm returning
- * everywhere at once.
+ * Nothing in the app sets a distance by hand.
+ *
+ * This checked seven shared primitives when it landed, on the argument that a literal
+ * creeping back into those is the flat rhythm returning everywhere at once. True, and it
+ * left thirty-nine literals across twenty-two other files — every page in the Prices,
+ * Imports and Settings sections, and both halves of the campaign page.
+ *
+ * `gap="base"` is not *wrong*: it is `SPACE.section`. That is what made it survive four
+ * design passes. It says "whatever base happens to be" where `gap={SPACE.section}` says
+ * which relationship is being drawn — and the places that meant **item** rhythm (a row of
+ * buttons, a field and the button that acts on it) were written `base` too, so they
+ * rendered at section rhythm and a row of controls read as a list of unrelated blocks.
+ * A rule that only applies to seven files cannot catch that; there is nothing to compare.
+ *
+ * The exceptions are named, and there are two kinds. Neither is "this one is fine".
  */
-const PRIMITIVES = [
-  "app/components/PageShell.tsx",
-  "app/components/SectionTabs.tsx",
-  "app/components/AsyncState.tsx",
-  "app/components/CountsRow.tsx",
-  "app/components/OnboardingCard.tsx",
-  "app/components/Pagination.tsx",
-  "app/components/prices/VariantSearch.tsx",
-];
 
-describe("the shared primitives take their spacing from the scale", () => {
-  it("is looking at files that exist, so it cannot pass by checking nothing", () => {
-    for (const file of PRIMITIVES) {
-      expect(readFileSync(join(ROOT, file), "utf8").length).toBeGreaterThan(0);
-    }
+/** Rendered outside the embedded admin, with their own CSS and no Polaris scale. */
+const OUTSIDE_THE_ADMIN = ["routes/help.$", "routes/_index"];
+
+function tsxFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return tsxFiles(path);
+    return entry.isFile() && entry.name.endsWith(".tsx") && !entry.name.includes(".test.")
+      ? [path]
+      : [];
+  });
+}
+
+const APP = join(ROOT, "app");
+
+const CHECKED = tsxFiles(APP)
+  .map((path) => path.replace(`${ROOT}/`, ""))
+  .filter((file) => !OUTSIDE_THE_ADMIN.some((skip) => file.includes(skip)))
+  .sort();
+
+/**
+ * Attribute values a component is allowed to spell out.
+ *
+ * `s-section` takes only `base` or `none` and there is no finer control, so `padding="none"`
+ * on a full-bleed table is naming the only other option Polaris offers rather than
+ * choosing a distance. Everything else has to come from the scale.
+ */
+const NOT_A_RHYTHM = ['padding="none"', 'gap="none"'];
+
+describe("nothing in the app sets a distance by hand", () => {
+  it("is looking at the whole app, so it cannot pass by checking nothing", () => {
+    expect(CHECKED.length).toBeGreaterThan(40);
+    expect(CHECKED).toContain("app/components/PageShell.tsx");
+    expect(CHECKED).toContain("app/routes/app.campaigns.new.tsx");
   });
 
-  it.each(PRIMITIVES)("%s", (file) => {
-    const source = readFileSync(join(ROOT, file), "utf8");
+  it.each(CHECKED)("%s", (file) => {
+    // Comments stripped first. The repo has been caught by this twice — the compliance
+    // check that rejects a native form element greps for `<form`, so the word in a
+    // comment trips it — and half the files here explain in prose which literal they
+    // replaced and why.
+    const source = readFileSync(join(ROOT, file), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
 
-    // A literal is how the flat rhythm got in: `gap="base"` is invisible in review and
-    // means "whatever base happens to be" rather than "this is the section rhythm".
-    // `gap={SPACE.section}` says which relationship is being drawn, and moves when the
-    // scale moves.
     const literals = [
-      ...source.matchAll(/\s(gap|padding|paddingBlock|paddingBlockEnd)="([^"]*)"/g),
-    ].map((match) => `${match[1]}="${match[2]}"`);
+      ...source.matchAll(
+        /\s(gap|padding|paddingBlock|paddingBlockEnd|paddingInline)="([^"]*)"/g,
+      ),
+    ]
+      .map((match) => `${match[1]}="${match[2]}"`)
+      .filter((literal) => !NOT_A_RHYTHM.some((allowed) => literal.endsWith(allowed)));
 
     expect(
       literals,
-      `${file} hardcodes spacing — use SPACE or PAD from app/lib/ui/spacing, so the ` +
-        `rhythm is named rather than guessed`,
+      `${file} hardcodes spacing — use SPACE, PAD or PAGE_INSET from app/lib/ui/spacing, ` +
+        `so the rhythm is named rather than guessed`,
     ).toEqual([]);
+  });
+});
+
+describe("the page rhythm is set in exactly one place", () => {
+  it("is PageShell's, and no route sets it", () => {
+    // "Page rhythm has to be the largest gap on the screen to do its job. If a route can
+    // set it, some route eventually sets it smaller than the gaps inside its own
+    // sections, and the page stops having visible structure at all."
+    const offenders = CHECKED.filter(
+      (file) => !file.endsWith("PageShell.tsx") && readFileSync(join(ROOT, file), "utf8").includes("SPACE.page"),
+    );
+
+    expect(offenders).toEqual([]);
   });
 });

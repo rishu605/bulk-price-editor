@@ -2,6 +2,7 @@ import { useLocation, useSearchParams } from "react-router";
 
 import { PageWidth } from "./PageShell";
 import { TabBar } from "./TabBar";
+import { PAGE_INSET } from "../lib/ui/spacing";
 
 export interface SectionTab {
   href: string;
@@ -48,7 +49,7 @@ export function SectionTabs({ tabs }: { tabs: SectionTab[] }) {
           few pixels left of the card they belong to — which after the inset is the only
           misalignment left on the page, and the kind that reads as sloppiness rather
           than as a choice. Matched by putting the two side by side and looking. */}
-      <s-box paddingInline="base">
+      <s-box paddingInline={PAGE_INSET}>
         <TabBar
           label="Sections"
           tabs={tabs.map((tab) => ({

@@ -16,6 +16,7 @@ import { VariantSearch } from "../components/prices/VariantSearch";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
+import { SPACE } from "../lib/ui/spacing";
 
 /** Filters that ride in the query string, so a merchant can bookmark a view. */
 export const RECONCILE_FIELDS = ["q", "surface", "campaign", "state"] as const;
@@ -181,7 +182,10 @@ export default function Reconciliation() {
 
         <fetcher.Form method="post">
           <input type="hidden" name="intent" value="spot-check" />
-          <s-stack direction="inline" gap="base">
+          {/* A field and the button that acts on it are one control, so they share a
+              baseline at item rhythm. At section rhythm they read as two separate
+              things that happen to be adjacent. */}
+          <s-stack direction="inline" gap={SPACE.item} alignItems="end">
             <s-number-field name="size" label="How many to check" value="100" />
             <s-button type="submit" loading={busy || undefined}>
               Check now

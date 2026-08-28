@@ -26,6 +26,7 @@ import { describeAction } from "../lib/audit/action";
 import { describeActor } from "../lib/audit/actor";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
+import { SPACE } from "../lib/ui/spacing";
 
 const FILTER_FIELDS = ["actor", "action", "from", "to"] as const;
 
@@ -67,7 +68,7 @@ export default function Activity() {
     <PageShell heading="Activity" backTo={{ href: "/app", label: "Home" }}>
       <s-section>
         <FilterForm fields={FILTER_FIELDS}>
-          <s-stack gap="base">
+          <s-stack gap={SPACE.section}>
             <s-select name="actor" label="Who">
               <s-option value="" defaultSelected={!filters.actor}>
                 Anyone
