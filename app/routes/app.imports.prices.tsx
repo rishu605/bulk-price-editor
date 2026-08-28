@@ -27,6 +27,7 @@ import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import prisma from "../db.server";
 import { PageShell } from "../components/PageShell";
+import { UnsavedChanges } from "../components/UnsavedChanges";
 import { CsvDropZone } from "../components/imports/CsvDropZone";
 
 export const loader = withGuard("/app/imports/prices", async ({ request }: LoaderFunctionArgs) => {
@@ -110,6 +111,13 @@ export default function ImportPrices() {
 
   return (
     <PageShell heading="Import prices">
+      {/* A pasted CSV can be fifty thousand rows, and none of it exists anywhere until
+          the import runs. */}
+      <UnsavedChanges
+        form={form}
+        describe="this import"
+        saved={Boolean(fetcher.data)}
+      />
       {fetcher.data ? (
         <s-banner tone={fetcher.data.ok ? "success" : "critical"}>
           <s-paragraph>{fetcher.data.message}</s-paragraph>

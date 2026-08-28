@@ -26,6 +26,7 @@ import prisma from "../db.server";
 import { segmentToAst } from "../services/segments.server";
 import { astFrom, compareAtFrom, readerFor, ruleFrom } from "../lib/campaigns/draft-form";
 import { PageShell } from "../components/PageShell";
+import { UnsavedChanges } from "../components/UnsavedChanges";
 import { DraftPreview } from "../components/DraftPreview";
 import { RuleValueField } from "../components/RuleValueField";
 import { FieldGrid, FullRow } from "../components/FieldGrid";
@@ -263,7 +264,14 @@ export default function NewCampaign() {
 
 
   return (
-    <PageShell heading={practice ? "Practice campaign" : guided ? "Your first campaign" : "New campaign"}>
+    <PageShell
+      heading={practice ? "Practice campaign" : guided ? "Your first campaign" : "New campaign"}
+      backTo={{ href: "/app/campaigns", label: "Campaigns" }}
+    >
+      {/* Before anything else on the page, because it is the answer to a click that has
+          already happened. Nothing here is persisted until the campaign is created, so
+          any navigation away is a discard. */}
+      <UnsavedChanges form={formRef} describe="this campaign" />
       {practice ? (
         <s-banner tone="info">
           <s-paragraph>
