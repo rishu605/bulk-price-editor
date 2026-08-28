@@ -44,7 +44,13 @@ import { PAD, SPACE } from "../lib/ui/spacing";
  * merchant cannot pin open long enough to read is not a definition.
  *
  * `s-popover` supplies no padding of its own, so the box is not optional decoration —
- * without it the prose sits against the overlay's edge.
+ * without it the prose sits against the overlay's edge. Nor does it have a width of its
+ * own: left alone it grows to fit its content, which for prose means the whole page.
+ *
+ * Which is the other half of the design. A note that has to fit a 320px column cannot be
+ * three paragraphs of explanation, and it should not have been: a definition a merchant
+ * reads mid-task wants to be scanned, not read. Every note here is a few short lines with
+ * the term in bold at the front of each.
  *
  * ## `command` is required, whatever the documentation shows
  *
@@ -80,10 +86,15 @@ export function HelpNote({ label, children }: { label: string; children: ReactNo
         {label}
       </s-button>
 
-      {/* Pixels, not rem: Polaris types `maxInlineSize` as px, % or 0 only.
-          360 is a readable measure for prose — much wider and the overlay stops being a
-          note and starts being the page again. */}
-      <s-popover id={id} maxInlineSize="360px">
+      {/* `inlineSize`, not `maxInlineSize`. A maximum is a ceiling the popover never
+          reached: with nothing setting a width it sized to its content, and content that
+          is three paragraphs of prose wants the whole page — so the overlay opened a
+          metre wide, over the table, which is the opposite of a note.
+
+          Pixels because Polaris types these as px, % or 0 only. 320 is a column of prose:
+          wide enough not to hyphenate, narrow enough that the eye reads it as an aside
+          rather than as the page having changed. */}
+      <s-popover id={id} inlineSize="320px">
         <s-box padding={PAD.card}>
           <s-stack gap={SPACE.section}>{children}</s-stack>
         </s-box>

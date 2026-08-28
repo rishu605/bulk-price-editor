@@ -18,7 +18,7 @@ import {
 } from "../lib/money/rounding-policy";
 import { PageShell } from "../components/PageShell";
 import { SettingsSaveBar } from "../components/SettingsSaveBar";
-import { FieldGrid, FullRow } from "../components/FieldGrid";
+import { Field, FieldGrid, FullRow } from "../components/FieldGrid";
 import { HelpNote } from "../components/HelpNote";
 import { formatCount } from "../lib/format/display";
 import { SPACE } from "../lib/ui/spacing";
@@ -240,17 +240,21 @@ export default function Settings() {
         </s-paragraph>
 
           <s-stack gap={SPACE.section}>
-            <s-select name="rounding.default" label="Everywhere, unless overridden">
-              {roundingOptions.map((option) => (
-                <s-option
-                  key={option.value}
-                  value={option.value}
-                  defaultSelected={option.value === settings.rounding.default}
-                >
-                  {option.label}
-                </s-option>
-              ))}
-            </s-select>
+            {/* A rounding rule is half a dozen words. Unbounded it was a 970px bar, and
+                the per-currency selects below it were five more. */}
+            <Field width="medium">
+              <s-select name="rounding.default" label="Everywhere, unless overridden">
+                {roundingOptions.map((option) => (
+                  <s-option
+                    key={option.value}
+                    value={option.value}
+                    defaultSelected={option.value === settings.rounding.default}
+                  >
+                    {option.label}
+                  </s-option>
+                ))}
+              </s-select>
+            </Field>
 
             {currencies.length > 1 ? (
               <>
@@ -268,8 +272,8 @@ export default function Settings() {
                   const effective = profileNameFor(settings.rounding, code);
 
                   return (
+                    <Field key={code} width="medium">
                     <s-select
-                      key={code}
                       name={`rounding.${code}`}
                       label={`${code}${code === currency ? " (your store's currency)" : ""}`}
                     >
@@ -289,6 +293,7 @@ export default function Settings() {
                         </s-option>
                       ))}
                     </s-select>
+                    </Field>
                   );
                 })}
               </>
@@ -314,13 +319,15 @@ export default function Settings() {
         ) : null}
 
           <s-stack gap={SPACE.section}>
-            <s-text-field
-              name="email"
-              label="Send to"
-              placeholder="ops@yourshop.com"
-              value={notifications.email ?? ""}
-              details="Leave blank to turn notifications off entirely."
-            />
+            <Field width="medium">
+              <s-text-field
+                name="email"
+                label="Send to"
+                placeholder="ops@yourshop.com"
+                value={notifications.email ?? ""}
+                details="Leave blank to turn notifications off entirely."
+              />
+            </Field>
 
             <s-checkbox
               name="onPartialOrFailure"
@@ -367,14 +374,13 @@ export default function Settings() {
 
       <HelpNote label="Why floors are checked last">
         <s-paragraph>
-          A campaign computes a price from the baseline, rounds it, and only then
-          checks the floor. Rounding down can push an otherwise-legal price under the
-          line, so checking earlier would let it through.
+          A campaign computes from the baseline, rounds, and only then checks the floor.
+          Rounding down can push an otherwise-legal price under the line, so checking
+          earlier would let it through.
         </s-paragraph>
         <s-paragraph>
-          <s-text>
-            A price is never zero or negative regardless of these settings — that
-            floor is always on.
+          <s-text color="subdued">
+            A price is never zero or negative, whatever these settings say.
           </s-text>
         </s-paragraph>
       </HelpNote>

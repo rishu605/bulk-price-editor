@@ -159,18 +159,16 @@ export default function Catalog() {
 
       <HelpNote label="What these mean">
         <s-paragraph>
-          <strong>Live price</strong> is what your storefront shows right now.
+          <strong>Live price</strong> — what your storefront shows now.
         </s-paragraph>
         <s-paragraph>
-          <strong>Baseline</strong> is the reference price every campaign computes
-          from. It only changes when you recapture, so a discount is always measured
-          against your real price rather than a previous discount.
+          <strong>Baseline</strong> — the reference every campaign computes from. It
+          changes only when you recapture, so a discount is never measured against a
+          previous discount.
         </s-paragraph>
         <s-paragraph>
-          <s-text>
-            &ldquo;Not at baseline&rdquo; is expected while a campaign is running.
-            Outside one, it means something changed the price elsewhere.
-          </s-text>
+          <strong>Not at baseline</strong> — expected while a campaign runs. Outside one,
+          something else changed the price.
         </s-paragraph>
       </HelpNote>
     </PageShell>

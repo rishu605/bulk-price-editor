@@ -240,8 +240,8 @@ export default function ImportPrices() {
 
       <HelpNote label="Only price files are listed">
         <s-paragraph>
-          Baseline and cost imports do not record a file yet, so they do not appear here.
-          Their results are shown when you run them, on the pages they belong to.
+          Baseline and cost imports do not record a file yet. Their results are shown when
+          you run them, on the pages they belong to.
         </s-paragraph>
       </HelpNote>
 

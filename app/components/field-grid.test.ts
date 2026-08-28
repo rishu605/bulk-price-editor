@@ -11,7 +11,7 @@
  * reverts: the comma trap, and a checkbox left in a column.
  */
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -61,5 +61,74 @@ describe("the two longest forms use it", () => {
     const fullRow = block.indexOf("<FullRow>");
     expect(fullRow, "the checkbox is not wrapped").toBeGreaterThanOrEqual(0);
     expect(fullRow).toBeLessThan(checkbox);
+  });
+});
+
+
+describe("a single control is sized the same way", () => {
+  /**
+   * The grid solved this for pages that had several fields to lay out, and every page
+   * with *one* field kept the bug. Diagnostics asked for a thirteen-character reference
+   * in a 970px box; Feedback offered three short options in a select the width of the
+   * screen; Segments named a segment in one. Since the app went full width, "the field
+   * fills its card" means something much worse than it used to.
+   */
+  it("names its widths after content, so a caller answers the right question", () => {
+    expect(grid).toMatch(/short:\s*"\d+px"/);
+    expect(grid).toMatch(/medium:\s*"\d+px"/);
+    expect(grid).toMatch(/long:\s*"\d+px"/);
+  });
+
+  it("caps the grid too, because two columns of a wide card are still too wide", () => {
+    expect(grid).toMatch(/maxInlineSize="\d+px"/);
+  });
+});
+
+describe("no settings tab leaves a control unbounded", () => {
+  /**
+   * The rule, checked rather than remembered: a field on a settings page is inside a
+   * `Field` or a `FieldGrid`. Checkboxes and choice lists are exempt — they are a tick
+   * and a sentence, so they take the room their text needs and a cap would wrap the
+   * label under the box.
+   *
+   * Read from the routes directory rather than a list, so the sixth settings tab is
+   * covered without anyone remembering this file exists.
+   */
+  const ROUTES = join(process.cwd(), "app", "routes");
+  const TABS: Array<[name: string, path: string]> = [
+    ...readdirSync(ROUTES)
+      .filter((name) => name.startsWith("app.settings") && name.endsWith(".tsx"))
+      .map((name) => [name, join(ROUTES, name)] as [string, string]),
+    // The Feedback tab renders no field of its own -- they are all in this shared form,
+    // so scanning only the routes would report that tab clean without looking at it.
+    ["FeedbackForm.tsx", join(process.cwd(), "app", "components", "FeedbackForm.tsx")],
+  ];
+
+  /** Fields that hold typed or chosen values, and therefore have a natural width. */
+  const BOUNDED = /<s-(text-field|select|number-field|money-field|text-area|search-field|email-field)\b/g;
+
+  it("finds the tabs, so this cannot pass by checking nothing", () => {
+    expect(TABS.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it.each(TABS)("%s", (name, path) => {
+    const source = readFileSync(path, "utf8");
+
+    /** How many of these are open at this point in the file. */
+    const depth = (tag: string, upTo: number) => {
+      const before = source.slice(0, upTo);
+      const open = before.match(new RegExp(`<${tag}[\\s>]`, "g"))?.length ?? 0;
+      const close = before.match(new RegExp(`</${tag}>`, "g"))?.length ?? 0;
+      return open - close;
+    };
+
+    const unbounded = [...source.matchAll(BOUNDED)].filter(
+      (match) => depth("Field", match.index!) === 0 && depth("FieldGrid", match.index!) === 0,
+    );
+
+    expect(
+      unbounded.map((m) => m[0]),
+      `${name} renders a field with no width — it will fill the card, whatever it holds`,
+    ).toEqual([]);
   });
 });

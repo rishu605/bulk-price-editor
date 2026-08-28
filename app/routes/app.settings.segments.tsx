@@ -28,7 +28,7 @@ import { reportError } from "../services/error-report.server";
 import { PageShell } from "../components/PageShell";
 import { EmptyState } from "../components/AsyncState";
 import { ActionRow } from "../components/ActionRow";
-import { FieldGrid, FullRow } from "../components/FieldGrid";
+import { Field, FieldGrid, FullRow } from "../components/FieldGrid";
 import { SPACE } from "../lib/ui/spacing";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { ShowingSome } from "../components/Pagination";
@@ -228,24 +228,21 @@ export default function Segments() {
       <HelpNote label="Dynamic or frozen">
         <s-paragraph>
           <s-text>
-            <s-badge tone="info">Dynamic</s-badge> re-checks its filter every time a
-            campaign uses it. A product you add to the collection tomorrow joins a sale
-            that is already running.
+            <s-badge tone="info">Dynamic</s-badge> re-checks its filter every time. A
+            product you add tomorrow joins a sale already running.
           </s-text>
         </s-paragraph>
         <s-paragraph>
           <s-text>
-            <s-badge tone="neutral">Frozen</s-badge> pins the products it matches the
-            moment you save it. A campaign hits exactly the list you reviewed, and
-            nothing that appears later.
+            <s-badge tone="neutral">Frozen</s-badge> pins what it matches the moment you
+            save it.
           </s-text>
         </s-paragraph>
         <s-paragraph>
-          <s-text>
-            Neither is safer than the other — they answer different questions. You
-            cannot switch a segment between the two afterwards, because doing so would
-            change what a running campaign prices without you asking it to. Make a new
-            one instead.
+          <s-text color="subdued">
+            Neither is safer — they answer different questions. A segment cannot switch
+            between them, because that would change what a running campaign prices. Make a
+            new one.
           </s-text>
         </s-paragraph>
       </HelpNote>
@@ -300,7 +297,9 @@ function NewSegment({
         <s-stack gap={SPACE.section}>
           <FieldGrid>
             <FullRow>
-              <s-text-field name="name" label="Name" placeholder="Summer collection" required />
+              <Field width="medium">
+                <s-text-field name="name" label="Name" placeholder="Summer collection" required />
+              </Field>
             </FullRow>
 
             <FullRow>
