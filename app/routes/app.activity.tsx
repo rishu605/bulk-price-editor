@@ -67,7 +67,7 @@ export default function Activity() {
     });
 
   return (
-    <PageShell heading="Activity">
+    <PageShell heading="Activity" backTo={{ href: "/app", label: "Home" }}>
       <s-section>
         <FilterForm fields={FILTER_FIELDS}>
           <s-stack gap="base">

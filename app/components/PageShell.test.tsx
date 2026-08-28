@@ -242,3 +242,69 @@ describe("every page in the app goes through the shell", () => {
     expect(tabs).toContain("PageWidth");
   });
 });
+
+describe("the way back", () => {
+  it("is offered on a page the nav menu cannot reach", () => {
+    // A campaign, the editor and the activity log are opened *from* somewhere and have no
+    // nav entry. Before this the only ways back were the browser's button and guessing
+    // which nav item was the parent.
+    const html = render(
+      <PageShell heading="Summer sale" backTo={{ href: "/app/campaigns", label: "Campaigns" }}>
+        <s-section>detail</s-section>
+      </PageShell>,
+    );
+
+    expect(html).toContain('href="/app/campaigns"');
+    expect(html).toContain("Campaigns");
+    expect(html).toContain('icon="arrow-left"');
+  });
+
+  it("sits above the title rather than inside the page", () => {
+    // Under the heading it reads as the first thing *in* the page rather than the way
+    // out of it, and `s-page` takes no slot for one in this version.
+    const html = render(
+      <PageShell heading="Summer sale" backTo={{ href: "/app/campaigns", label: "Campaigns" }}>
+        <s-section>detail</s-section>
+      </PageShell>,
+    );
+
+    expect(html.indexOf('href="/app/campaigns"')).toBeLessThan(html.indexOf("<s-page"));
+  });
+
+  it("is absent on a page that has a tab bar, which is already the way back", () => {
+    const html = render(
+      <PageShell heading="Variants">
+        <s-section>rows</s-section>
+      </PageShell>,
+    );
+
+    expect(html).not.toContain('icon="arrow-left"');
+  });
+});
+
+describe("pages that can lose typed work", () => {
+  const APP_ROUTES = join(process.cwd(), "app", "routes");
+
+  /**
+   * A page holding fields nobody has saved yet needs the guard, or its own back link
+   * becomes the fastest way to throw the work away.
+   *
+   * Settings is exempt: it has the App Bridge save bar, which blocks navigation itself.
+   * Recapture is exempt: its one field is a typed confirmation that costs a second to
+   * retype, and the page it guards is destructive enough that leaving is the good outcome.
+   */
+  const GUARDED = [
+    "app.campaigns.new.tsx",
+    "app.imports.prices.tsx",
+    "app.imports.baselines.tsx",
+    "app.imports.costs.tsx",
+  ];
+
+  it("guard the ones that hold a form worth keeping", () => {
+    const missing = GUARDED.filter(
+      (route) => !readFileSync(join(APP_ROUTES, route), "utf8").includes("<UnsavedChanges"),
+    );
+
+    expect(missing, "these can discard a filled-in form on any navigation").toEqual([]);
+  });
+});

@@ -307,7 +307,7 @@ export default function CampaignDetail() {
 
 
   return (
-    <PageShell heading={preview.name}>
+    <PageShell heading={preview.name} backTo={{ href: "/app/campaigns", label: "Campaigns" }}>
       {result ? (
         <s-banner tone={result.ok ? "success" : "critical"}>
           <s-paragraph>{result.message}</s-paragraph>

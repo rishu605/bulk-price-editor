@@ -1,5 +1,6 @@
 import { Children, cloneElement, isValidElement, type ReactNode } from "react";
 
+import { ActionRow } from "./ActionRow";
 import { SPACE } from "../lib/ui/spacing";
 
 /**
@@ -82,11 +83,47 @@ export function PageWidth({ children }: { children: ReactNode }) {
  *   it, some route eventually sets it smaller than the gaps inside its own sections, and
  *   the page stops having visible structure at all.
  */
+/**
+ * The way back, above the title.
+ *
+ * Above rather than beside: `s-page` renders its own heading and takes no slot for this
+ * in the version pinned here, and a back link under the title would read as the first
+ * thing *in* the page rather than as the way out of it. The padding matches what `s-page`
+ * insets its own contents by, so it lines up with the heading below it.
+ */
+function BackLink({ backTo }: { backTo?: { href: string; label: string } }) {
+  if (!backTo) return null;
+
+  return (
+    <s-box paddingInline="base">
+      <ActionRow>
+        <s-button variant="tertiary" icon="arrow-left" href={backTo.href}>
+          {backTo.label}
+        </s-button>
+      </ActionRow>
+    </s-box>
+  );
+}
+
 export function PageShell({
   heading,
+  backTo,
   children,
 }: {
   heading: string;
+  /**
+   * Where this page came from, for pages the nav menu cannot reach.
+   *
+   * A campaign, the campaign editor and the activity log are all opened *from* somewhere
+   * and have no entry of their own, so until this existed the only ways back were the
+   * browser's button and guessing which nav item was the parent. On a form that is not
+   * merely inconvenient: a merchant who has typed a rule and a scope, and cannot see a
+   * way back, will find one that loses it.
+   *
+   * Pages inside a tabbed section do not take this. Their tab bar is already the way
+   * back, and a second one above it would be two answers to one question.
+   */
+  backTo?: { href: string; label: string };
   children: ReactNode;
 }) {
   const all = Children.toArray(children);
@@ -112,6 +149,7 @@ export function PageShell({
     // aside — `/app/prices/live` is one — and looking at it.
     return (
       <PageWidth>
+        <BackLink backTo={backTo} />
         <s-page heading={heading} inlineSize="large">
           {main}
         </s-page>
@@ -121,6 +159,7 @@ export function PageShell({
 
   return (
     <PageWidth>
+      <BackLink backTo={backTo} />
       <s-page heading={heading} inlineSize="large">
         <s-grid
           gap={SPACE.page}

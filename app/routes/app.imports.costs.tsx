@@ -31,6 +31,7 @@ import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { reportError } from "../services/error-report.server";
 import { PageShell } from "../components/PageShell";
+import { UnsavedChanges } from "../components/UnsavedChanges";
 import { CsvDropZone } from "../components/imports/CsvDropZone";
 
 export const loader = withGuard("/app/imports/costs", async ({ request }: LoaderFunctionArgs) => {
@@ -104,6 +105,13 @@ export default function ImportCosts() {
 
   return (
     <PageShell heading="Import costs">
+      {/* A pasted CSV can be fifty thousand rows, and none of it exists anywhere until
+          the import runs. */}
+      <UnsavedChanges
+        form={form}
+        describe="this import"
+        saved={Boolean(fetcher.data)}
+      />
       {data ? (
         <s-banner tone={data.ok ? "success" : "critical"}>
           <s-paragraph>{data.message}</s-paragraph>
