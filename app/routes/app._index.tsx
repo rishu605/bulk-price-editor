@@ -20,6 +20,7 @@ import { LastRunSummary } from "../components/LastRunSummary";
 import { UpcomingCampaigns } from "../components/UpcomingCampaigns";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { onboarding } from "../lib/onboarding/steps";
+import { homeSections } from "../lib/dashboard/home";
 import { nextMoments } from "../lib/scheduling/upcoming";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
@@ -253,9 +254,15 @@ export default function Dashboard() {
   const result = fetcher.data;
 
   const neverSynced = syncedAt === null;
-  // Something to report is a campaign that exists or a run that happened — not a set of
-  // counters that all read zero.
-  const showLive = campaigns > 0 || lastRun !== null;
+  // Which sections this page shows, decided in one tested place rather than in four
+  // conditionals spread through the markup below. Each of those rules exists because of
+  // a specific way this page used to embarrass itself; see `homeSections`.
+  const sections = homeSections({
+    neverSynced,
+    campaigns,
+    hasRun: lastRun !== null,
+    onboardingComplete: guide.complete,
+  });
 
   return (
     <PageShell heading="Home">
@@ -385,7 +392,7 @@ export default function Dashboard() {
           nothing had happened — the largest block on the page, spent saying "nothing".
           The checklist above is already answering "what now", and answering it with an
           action rather than with four zeroes. */}
-      {showLive ? (
+      {sections.live ? (
         <s-section heading="What is live right now">
           <CountsRow
             items={[
@@ -412,7 +419,7 @@ export default function Dashboard() {
               point at nothing. */}
           <ActionRow>
             <s-button
-              variant={guide.complete ? "primary" : "secondary"}
+              variant={sections.createIsPrimary ? "primary" : "secondary"}
               href="/app/campaigns/new"
             >
               Create campaign
@@ -439,7 +446,7 @@ export default function Dashboard() {
 
       {/* The one case the checklist does not cover: everything on it is done, and the
           campaigns it was done with have since been deleted. */}
-      {!neverSynced && !showLive && guide.complete ? (
+      {sections.emptyState ? (
         <s-section heading="What is live right now">
           <s-paragraph>
             <s-text>
@@ -457,7 +464,7 @@ export default function Dashboard() {
         </s-section>
       ) : null}
 
-      {!neverSynced ? (
+      {sections.catalogue ? (
         <s-section heading="Catalogue">
           {/* The shared component, not a second copy of its markup. This page had
               hand-rolled the same four tiles, so it kept the old flat look after the
