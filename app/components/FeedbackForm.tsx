@@ -1,4 +1,5 @@
 import { useFetcher } from "react-router";
+import { SPACE } from "../lib/ui/spacing";
 
 /**
  * The feedback box, on every screen.
@@ -28,7 +29,7 @@ export function FeedbackForm({ route }: { route: string }) {
 
       <fetcher.Form method="post" action="/app/settings/feedback">
         <input type="hidden" name="route" value={route} />
-        <s-stack gap="base">
+        <s-stack gap={SPACE.section}>
           <s-select name="sentiment" label="What kind of thing is this?">
             <s-option value="problem" defaultSelected>
               Something is wrong

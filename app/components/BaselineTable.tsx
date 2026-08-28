@@ -1,4 +1,5 @@
 import { humanise } from "../lib/format/label";
+import { ActionRow } from "./ActionRow";
 import type { BaselineRow } from "../services/baseline-browser.server";
 
 /**
@@ -47,7 +48,11 @@ export function BaselineTable({
             </s-table-cell>
             <s-table-cell>{row.source ? humanise(row.source) : "—"}</s-table-cell>
             <s-table-cell>
-              <s-stack direction="inline" gap="small">
+              {/* `gap="small"` -- which the scale documents as *larger* than
+                  `small-100` -- so the two halves of one cell sat further apart than
+                  anything else on the row. Two buttons that do the same kind of job are
+                  an ActionRow. */}
+              <ActionRow>
                 <s-button variant="tertiary" onClick={() => onShowHistory(row.variantGid)}>
                   History
                 </s-button>
@@ -62,7 +67,7 @@ export function BaselineTable({
                 >
                   Shopify
                 </s-button>
-              </s-stack>
+              </ActionRow>
             </s-table-cell>
           </s-table-row>
         ))}

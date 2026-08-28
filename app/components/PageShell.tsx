@@ -1,7 +1,7 @@
 import { Children, cloneElement, isValidElement, type ReactNode } from "react";
 
 import { ActionRow } from "./ActionRow";
-import { SPACE } from "../lib/ui/spacing";
+import { PAGE_INSET, SPACE } from "../lib/ui/spacing";
 
 /**
  * How much of the frame a page occupies, leaving a tenth on each side.
@@ -95,7 +95,7 @@ function BackLink({ backTo }: { backTo?: { href: string; label: string } }) {
   if (!backTo) return null;
 
   return (
-    <s-box paddingInline="base">
+    <s-box paddingInline={PAGE_INSET}>
       <ActionRow>
         <s-button variant="tertiary" icon="arrow-left" href={backTo.href}>
           {backTo.label}

@@ -19,6 +19,7 @@ import { EmptyState } from "../components/AsyncState";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
+import { SPACE } from "../lib/ui/spacing";
 
 export const loader = withGuard("/app/settings/diagnostics", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -69,7 +70,10 @@ export default function Debug() {
         </s-paragraph>
 
         <Form method="get">
-          <s-stack direction="inline" gap="base">
+          {/* The field and its button are one control. `alignItems="end"` because the
+              field carries a label above it and the button does not, so without it the
+              button floats level with the label rather than with the box. */}
+          <s-stack direction="inline" gap={SPACE.item} alignItems="end">
             <s-text-field name="id" label="Reference" value={query} />
             <s-button type="submit" variant="primary">
               Find
@@ -95,7 +99,7 @@ export default function Debug() {
         ) : null}
 
         {match ? (
-          <s-stack gap="base">
+          <s-stack gap={SPACE.section}>
             <s-divider />
             <s-heading>{match.errorId}</s-heading>
             <s-paragraph>

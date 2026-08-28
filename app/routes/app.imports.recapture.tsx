@@ -24,6 +24,7 @@ import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { reportError } from "../services/error-report.server";
 import { PageShell } from "../components/PageShell";
+import { SPACE } from "../lib/ui/spacing";
 
 export const loader = withGuard("/app/imports/recapture", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -115,7 +116,7 @@ export default function Recapture() {
         </s-paragraph>
 
         <fetcher.Form method="get">
-          <s-stack gap="base">
+          <s-stack gap={SPACE.section}>
             <s-select name="segment" label="Scope">
               <s-option value="" defaultSelected={!segmentId}>
                 The whole catalogue
@@ -169,7 +170,7 @@ export default function Recapture() {
       <s-section heading="Recapture">
         <fetcher.Form method="post">
           <input type="hidden" name="segment" value={segmentId} />
-          <s-stack gap="base">
+          <s-stack gap={SPACE.section}>
             {assessment.confirmationPhrase ? (
               <s-text-field
                 name="confirmation"

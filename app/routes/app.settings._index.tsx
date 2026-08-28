@@ -20,6 +20,7 @@ import {
 import { PageShell } from "../components/PageShell";
 import { SettingsSaveBar } from "../components/SettingsSaveBar";
 import { FieldGrid, FullRow } from "../components/FieldGrid";
+import { SPACE } from "../lib/ui/spacing";
 
 export const loader = withGuard("/app/settings", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -233,7 +234,7 @@ export default function Settings() {
           </s-text>
         </s-paragraph>
 
-          <s-stack gap="base">
+          <s-stack gap={SPACE.section}>
             <s-select name="rounding.default" label="Everywhere, unless overridden">
               {roundingOptions.map((option) => (
                 <s-option
@@ -307,7 +308,7 @@ export default function Settings() {
           </s-banner>
         ) : null}
 
-          <s-stack gap="base">
+          <s-stack gap={SPACE.section}>
             <s-text-field
               name="email"
               label="Send to"

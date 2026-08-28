@@ -46,7 +46,7 @@ export function DraftPreview({ preview }: { preview: Preview | null }) {
   }
 
   return (
-    <s-stack gap="base">
+    <s-stack gap={SPACE.section}>
       <s-paragraph>
         <s-text>
           <strong>{formatCount(preview.changing)}</strong> of {formatCount(preview.matched)}{" "}

@@ -14,6 +14,7 @@
 import { ActionRow } from "./ActionRow";
 import { PageShell } from "./PageShell";
 import { helpLabelFor, helpPathFor } from "../lib/errors/help-links";
+import { SPACE } from "../lib/ui/spacing";
 
 export interface ErrorScreenProps {
   errorId: string;
@@ -41,7 +42,7 @@ export function ErrorScreen({
           <s-paragraph>{userMessage}</s-paragraph>
         </s-banner>
 
-        <s-stack gap="base">
+        <s-stack gap={SPACE.section}>
           <s-paragraph>
             <s-text>
               No prices were changed by this error. If a run was in progress, open the

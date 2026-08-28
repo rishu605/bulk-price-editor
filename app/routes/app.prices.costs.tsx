@@ -30,6 +30,7 @@ import { ActionRow } from "../components/ActionRow";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
+import { SPACE } from "../lib/ui/spacing";
 
 export const loader = withGuard("/app/prices/costs", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -165,7 +166,7 @@ export default function Costs() {
               buttons set before submitting. One form, because both actions read the same
               rule and duplicating the fields would let them drift apart. */}
           <input type="hidden" name="intent" ref={intent} value="dry-run" readOnly />
-          <s-stack gap="base">
+          <s-stack gap={SPACE.section}>
             <s-select name="vendor" label="Which products">
               <s-option value="" defaultSelected>
                 Every product
@@ -195,7 +196,7 @@ export default function Costs() {
               details="Products with no cost are skipped by the first two rules rather than treated as zero."
             />
 
-            <s-stack direction="inline" gap="base">
+            <ActionRow>
               <s-button
                 type="button"
                 variant="primary"
@@ -212,7 +213,7 @@ export default function Costs() {
               >
                 Change these costs
               </s-button>
-            </s-stack>
+            </ActionRow>
           </s-stack>
         </fetcher.Form>
 

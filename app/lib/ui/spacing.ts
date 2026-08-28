@@ -41,6 +41,14 @@
  * existing `gap="base"` uses already meant, so the routes that have not been revisited
  * yet stay correct rather than becoming subtly wrong while this lands.
  *
+ * That grace period is over. `spacing.test.ts` now rejects a hardcoded `gap` or `padding`
+ * anywhere in `app/`, rather than in the seven shared primitives it started with. The
+ * argument for widening it is the thing the literal hides: `gap="base"` is *correct* where
+ * section rhythm was meant, which is why it survived four design passes — and it is
+ * indistinguishable in a diff from the places that meant **item** rhythm and got section
+ * rhythm instead, so a row of buttons rendered as a list of unrelated blocks. A rule that
+ * covers seven files cannot see that; there is nothing to compare against.
+ *
  * ## Applying it
  *
  * - **Page rhythm** belongs to `PageShell` and nothing else. A route should never set the
@@ -158,6 +166,20 @@ export const PAD = {
   /** Content that must reach the card's edge. A full-bleed table, and little else. */
   flush: "none",
 } as const;
+
+/**
+ * How far `s-page` insets its own contents.
+ *
+ * Not one of the four rhythms, and deliberately separate from `PAD.card` even though the
+ * value is the same today: this is not a decision about how much room something needs, it
+ * is a number belonging to Polaris that two of our components have to match. `PageShell`'s
+ * back link and `SectionTabs`' bar both render *outside* `s-page` and have to line up with
+ * the heading and the card below them.
+ *
+ * If the four rhythms are ever retuned, this must not move with them — it moves when
+ * Polaris moves. Naming it is how those two facts stay separable.
+ */
+export const PAGE_INSET = "base" satisfies Space;
 
 /**
  * The hairline used for tiles and sub-navigation rules.
