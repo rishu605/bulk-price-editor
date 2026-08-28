@@ -13,6 +13,9 @@
  * `inlineSize` and about where the aside content ended up.
  */
 
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
@@ -193,5 +196,49 @@ describe("what the inset must not break", () => {
     expect(html, "a section still asking for a slot is a section nobody sees").not.toContain(
       'slot="aside"',
     );
+  });
+});
+
+describe("every page in the app goes through the shell", () => {
+  const APP = join(process.cwd(), "app");
+
+  const sources = (dir: string): Array<{ path: string; text: string }> =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) return sources(path);
+      if (!entry.name.endsWith(".tsx") || entry.name.includes(".test.")) return [];
+      return [{ path: path.replace(`${APP}/`, ""), text: readFileSync(path, "utf8") }];
+    });
+
+  /**
+   * The two surfaces that are deliberately not admin pages.
+   *
+   * `auth.login` is the shop-domain form served *outside* the Shopify admin, where
+   * `s-page`'s own narrow column is right for a single field and 80% of a browser window
+   * is not. `help.$` is the public help centre: plain HTML, its own shell, no Polaris.
+   */
+  const NOT_ADMIN_PAGES = ["routes/auth.login/route.tsx", "routes/help.$.tsx"];
+
+  it("leaves no page rendering s-page for itself", () => {
+    // A page that misses the shell is edge to edge while every other page is inset, and
+    // — because Polaris only renders the real aside slot at `inlineSize="base"` — it
+    // silently drops any aside it has.
+    const bare = sources(APP)
+      .filter(({ path }) => path !== "components/PageShell.tsx")
+      .filter(({ path }) => !NOT_ADMIN_PAGES.includes(path))
+      .filter(({ text }) => text.includes("<s-page"))
+      .map(({ path }) => path);
+
+    expect(bare, "render these through PageShell so they inset and keep their aside").toEqual(
+      [],
+    );
+  });
+
+  it("insets the one thing that renders outside a page", () => {
+    // A section's tabs come from the layout route, above the `Outlet`. They are the only
+    // markup in the app that has to line up with a page without being inside one.
+    const tabs = readFileSync(join(APP, "components", "SectionTabs.tsx"), "utf8");
+
+    expect(tabs).toContain("PageWidth");
   });
 });

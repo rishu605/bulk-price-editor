@@ -106,8 +106,17 @@ export function TabBar({
             </s-box>
           ) : (
             <s-box key={tab.href} padding={PAD.control}>
+              {/* The label goes through `s-text` because a react-router `Link` renders a
+                  bare `<a>`, and a bare anchor is painted by the browser: these tabs were
+                  the last browser-blue underlined links in the app, and the only ones the
+                  `s-link` sweep could not see.
+
+                  Still a `Link` and not an `s-button href`, which would be the vocabulary
+                  answer everywhere else. A button is an anchor, so it navigates by loading
+                  the document again — and these tabs swap a view several times a minute.
+                  Client-side routing is worth an underline. */}
               <Link to={tab.href} preventScrollReset={preventScrollReset}>
-                {text}
+                <s-text>{text}</s-text>
               </Link>
             </s-box>
           );

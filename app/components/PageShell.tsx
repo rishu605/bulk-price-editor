@@ -12,6 +12,28 @@ import { SPACE } from "../lib/ui/spacing";
 const PAGE_WIDTH = "80%";
 
 /**
+ * The inset itself, for the things that sit outside a page and still have to line up
+ * with one.
+ *
+ * There is exactly one: a section's tab bar is rendered by the layout route, above the
+ * `Outlet` that renders the page, so it is not inside any `PageShell`. Left alone it ran
+ * edge to edge while the page below it started a tenth of the way in — the tabs and the
+ * card they belong to visibly detached from each other.
+ *
+ * Both are 80% of the same parent, so they align rather than nesting: this does not
+ * inset something already inset.
+ */
+export function PageWidth({ children }: { children: ReactNode }) {
+  // A grid because `justifyItems` is how a box gets centred here; boxes take padding but
+  // not margins, so `margin: auto` is not available.
+  return (
+    <s-grid justifyItems="center">
+      <s-box inlineSize={PAGE_WIDTH}>{children}</s-box>
+    </s-grid>
+  );
+}
+
+/**
  * Every page in the app, at four fifths of the screen.
  *
  * `s-page` defaults to `inlineSize="base"`, a ~660px column. On a 1300px viewport that
@@ -74,14 +96,6 @@ export function PageShell({
   const aside = all.filter(isAside);
   const main = all.filter((child) => !isAside(child));
 
-  const inset = (page: ReactNode) => (
-    // A grid because `justifyItems` is how a box gets centred here; boxes take padding
-    // but not margins, so `margin: auto` is not available.
-    <s-grid justifyItems="center">
-      <s-box inlineSize={PAGE_WIDTH}>{page}</s-box>
-    </s-grid>
-  );
-
   if (aside.length === 0) {
     // Children go straight into `s-page`, with no wrapper of any kind.
     //
@@ -96,41 +110,45 @@ export function PageShell({
     // in `spacing.ts` applies to content this component nests deliberately. Do not
     // "tidy" this into matching the branch below without loading a page that has no
     // aside — `/app/prices/live` is one — and looking at it.
-    return inset(
-      <s-page heading={heading} inlineSize="large">
-        {main}
-      </s-page>,
+    return (
+      <PageWidth>
+        <s-page heading={heading} inlineSize="large">
+          {main}
+        </s-page>
+      </PageWidth>
     );
   }
 
-  return inset(
-    <s-page heading={heading} inlineSize="large">
-      <s-grid
-        gap={SPACE.page}
-        // The column gap is the page rhythm too, not a smaller one. Two columns set
-        // closer together than the sections stacked within them read as one column of
-        // torn paper, because the strongest gap on the screen would then be running the
-        // wrong way.
-        //
-        // One comma only. Polaris splits a responsive value on the comma to separate
-        // "when the query matches" from "otherwise", so a `minmax(0, 1fr)` in here
-        // takes its own comma as that separator and the whole value stops parsing --
-        // which silently falls back to `none` and stacks the aside underneath, looking
-        // exactly like a layout choice rather than a broken string.
-        gridTemplateColumns="@container (inline-size <= 900px) 1fr, 1fr 22rem"
-        // Without this the aside column stretches to the height of the main content, so
-        // a one-line sidebar next to a long table becomes a very tall empty card.
-        alignItems="start"
-      >
-        <s-stack gap={SPACE.page}>{main}</s-stack>
-        <s-stack gap={SPACE.page}>
-          {aside.map((child) =>
-            // The slot is meaningless now that these are ordinary grid children, and
-            // leaving it on would have them looking for a slot no ancestor provides.
-            isValidElement(child) ? cloneElement(child, { slot: undefined } as never) : child,
-          )}
-        </s-stack>
-      </s-grid>
-    </s-page>,
+  return (
+    <PageWidth>
+      <s-page heading={heading} inlineSize="large">
+        <s-grid
+          gap={SPACE.page}
+          // The column gap is the page rhythm too, not a smaller one. Two columns set
+          // closer together than the sections stacked within them read as one column of
+          // torn paper, because the strongest gap on the screen would then be running the
+          // wrong way.
+          //
+          // One comma only. Polaris splits a responsive value on the comma to separate
+          // "when the query matches" from "otherwise", so a `minmax(0, 1fr)` in here
+          // takes its own comma as that separator and the whole value stops parsing --
+          // which silently falls back to `none` and stacks the aside underneath, looking
+          // exactly like a layout choice rather than a broken string.
+          gridTemplateColumns="@container (inline-size <= 900px) 1fr, 1fr 22rem"
+          // Without this the aside column stretches to the height of the main content, so
+          // a one-line sidebar next to a long table becomes a very tall empty card.
+          alignItems="start"
+        >
+          <s-stack gap={SPACE.page}>{main}</s-stack>
+          <s-stack gap={SPACE.page}>
+            {aside.map((child) =>
+              // The slot is meaningless now that these are ordinary grid children, and
+              // leaving it on would have them looking for a slot no ancestor provides.
+              isValidElement(child) ? cloneElement(child, { slot: undefined } as never) : child,
+            )}
+          </s-stack>
+        </s-grid>
+      </s-page>
+    </PageWidth>
   );
 }
