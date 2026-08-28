@@ -21,6 +21,7 @@ import { formatMinorUnits } from "../lib/money/format";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
+import { JumpTo } from "../components/JumpTo";
 
 export const loader = withGuard("/app/settings/plan", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -89,7 +90,19 @@ export default function PlanPage() {
         </s-banner>
       ) : null}
 
-      <s-section heading="What you are on">
+      {/* Four blocks, and the one a merchant arrives wanting — what happens if I
+          downgrade — is under a table of every plan. */}
+      <JumpTo
+        label="Plan details on this page"
+        targets={[
+          { id: "current", label: "What you are on" },
+          { id: "plans", label: "Plans" },
+          { id: "included", label: "Every plan" },
+          { id: "downgrade", label: "If you downgrade" },
+        ]}
+      />
+
+      <s-section id="current" heading="What you are on">
         <s-paragraph>
           <s-text>
             {PLANS[current as keyof typeof PLANS].name} · {formatCount(variants)}{" "}
@@ -98,7 +111,7 @@ export default function PlanPage() {
         </s-paragraph>
       </s-section>
 
-      <s-section heading="Plans">
+      <s-section id="plans" heading="Plans">
         <s-paragraph>
           <s-text>
             Pricing is by how much of your catalogue a campaign manages and which
@@ -142,7 +155,7 @@ export default function PlanPage() {
         </s-table>
       </s-section>
 
-      <s-section heading="Every plan, including free">
+      <s-section id="included" heading="Every plan, including free">
         <s-paragraph>
           <s-text>
             Preview before applying. Guardrails that refuse to price below cost or
@@ -158,7 +171,7 @@ export default function PlanPage() {
         </s-paragraph>
       </s-section>
 
-      <s-section heading="If you downgrade">
+      <s-section id="downgrade" heading="If you downgrade">
         <s-paragraph>
           <s-text>
             Running campaigns finish, including their scheduled reverts. Nothing is

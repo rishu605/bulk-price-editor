@@ -56,8 +56,24 @@ describe("everything that moved into settings is still reachable", () => {
 });
 
 describe("the long settings page can be navigated without scrolling it", () => {
-  it.each(["guardrails", "rounding", "notifications"])("has an anchor for %s", (id) => {
+  // The page names its targets and `JumpTo` turns each into an anchor, so checking the
+  // route for `href="#guardrails"` stopped meaning anything. Both halves are checked
+  // instead: the section exists and the page asks to jump to it, and the component that
+  // renders the ask still renders a real link.
+  it.each(["guardrails", "rounding", "notifications"])("has a section for %s", (id) => {
     expect(index).toContain(`id="${id}"`);
-    expect(index).toContain(`href="#${id}"`);
+    expect(index).toMatch(new RegExp(`\\{ id: "${id}", label: "[^"]+" \\}`));
+  });
+
+  it("renders those as real links, not click handlers on a span", () => {
+    const jumpTo = readFileSync(
+      join(process.cwd(), "app", "components", "JumpTo.tsx"),
+      "utf8",
+    );
+
+    // Middle-click, open-in-new-tab and copy-link-address all depend on the href being
+    // there. The scroll handler is an enhancement over a thing that already means
+    // something.
+    expect(jumpTo).toContain("href={`#${target.id}`}");
   });
 });
