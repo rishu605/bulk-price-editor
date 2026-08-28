@@ -124,9 +124,19 @@ export default function Campaigns() {
       <TabBar
         label="Campaign views"
         action={
-          <s-button variant="primary" href="/app/campaigns/new">
-            Create campaign
-          </s-button>
+          // Two ways in, one of them black. A spreadsheet of exact prices creates a
+          // campaign just as a rule does -- it was filed under an "Imports" nav item,
+          // which read as a fourth kind of import rather than as the second way to start
+          // a sale. Secondary, not primary: most campaigns are a rule, and two black
+          // buttons is two answers to "what should I do next".
+          <ActionRow>
+            <s-button variant="secondary" icon="import" href="/app/campaigns/import">
+              From a spreadsheet
+            </s-button>
+            <s-button variant="primary" href="/app/campaigns/new">
+              Create campaign
+            </s-button>
+          </ActionRow>
         }
         tabs={[
           {

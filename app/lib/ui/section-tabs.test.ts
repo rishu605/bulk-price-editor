@@ -48,8 +48,10 @@ const SECTIONS = sections();
 
 describe("a section's tab bar lists the section's own index", () => {
   it("finds the tabbed sections", () => {
-    // Prices, imports, settings.
-    expect(SECTIONS.map((s) => s.section).sort()).toEqual(["imports", "prices", "settings"]);
+    // Prices and settings. Imports was a third until it was dissolved: it was a nav item
+    // named after a verb, and two of its five tabs — Baselines and Costs — were nouns
+    // that already had a tab of their own under Prices.
+    expect(SECTIONS.map((s) => s.section).sort()).toEqual(["prices", "settings"]);
   });
 
   it("every one of them has a landing page", () => {

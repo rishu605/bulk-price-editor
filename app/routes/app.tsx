@@ -27,7 +27,6 @@ export default function App() {
         <s-link href="/app">Home</s-link>
         <s-link href="/app/campaigns">Campaigns</s-link>
         <s-link href="/app/prices">Prices</s-link>
-        <s-link href="/app/imports">Imports</s-link>
         <s-link href="/app/settings">Settings</s-link>
         {/* Absolute and a new tab: this renders in an iframe on admin.shopify.com,
             where a relative href would resolve against Shopify rather than us. */}
