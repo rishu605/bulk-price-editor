@@ -8,6 +8,7 @@
  */
 
 import { RollbackReportTable } from "../../components/RollbackReportTable";
+import { ActionRow } from "../ActionRow";
 import { downloadCsv, filenameSlug } from "../../lib/reporting/csv";
 import { rollbackReportCsv } from "../../lib/reporting/rollback";
 import type { CampaignDetailProps } from "./props";
@@ -25,6 +26,17 @@ export function CampaignRevertTab({ rollback, preview, fetcher, busy }: Campaign
             </s-text>
           </s-paragraph>
 
+          {/* Moved here from the actions card, which is gone. It is the one thing about
+              reverting a merchant is most likely to have wrong, and it belongs beside the
+              button that does it rather than beside the button that applies. */}
+          <s-paragraph>
+            <s-text>
+              Reverting recomputes each price <s-text>without this campaign</s-text>. If
+              another campaign still covers a variant, that campaign&rsquo;s price stays
+              — it does not snap back to full price.
+            </s-text>
+          </s-paragraph>
+
           {rollback.counts.deleted > 0 ? (
             <s-paragraph>
               <s-text>
@@ -38,13 +50,14 @@ export function CampaignRevertTab({ rollback, preview, fetcher, busy }: Campaign
           <fetcher.Form method="post">
             <input type="hidden" name="intent" value="revert" />
             <RollbackReportTable rows={rollback.rows} />
-            <s-stack direction="inline" gap="base">
+            <ActionRow>
               <s-button type="submit" tone="critical" loading={busy || undefined}>
                 Revert, keeping the ticked edits
               </s-button>
               <s-button
                 type="button"
                 variant="tertiary"
+                icon="download"
                 onClick={() =>
                   downloadCsv(
                     `rollback-${filenameSlug(preview.name) || "campaign"}.csv`,
@@ -54,7 +67,7 @@ export function CampaignRevertTab({ rollback, preview, fetcher, busy }: Campaign
               >
                 Export this report (CSV)
               </s-button>
-            </s-stack>
+            </ActionRow>
           </fetcher.Form>
         </s-section>
       ) : null}

@@ -6,6 +6,7 @@
  */
 
 import { LedgerTable } from "../../components/LedgerTable";
+import { ActionRow } from "../ActionRow";
 import { downloadCsv, filenameSlug } from "../../lib/reporting/csv";
 import { ledgerCsv } from "../../lib/reporting/ledger-csv";
 import type { CampaignDetailProps } from "./props";
@@ -23,18 +24,21 @@ export function CampaignLedgerTab({ preview, ledger, fetcher, busy }: CampaignDe
               its price without it.
             </s-text>
           </s-paragraph>
-          <s-button
-            type="button"
-            variant="tertiary"
-            onClick={() =>
-              downloadCsv(
-                `ledger-${filenameSlug(preview.name) || "campaign"}.csv`,
-                ledgerCsv(ledger),
-              )
-            }
-          >
-            Export this ledger (CSV)
-          </s-button>
+          <ActionRow>
+            <s-button
+              type="button"
+              variant="tertiary"
+              icon="download"
+              onClick={() =>
+                downloadCsv(
+                  `ledger-${filenameSlug(preview.name) || "campaign"}.csv`,
+                  ledgerCsv(ledger),
+                )
+              }
+            >
+              Export this ledger (CSV)
+            </s-button>
+          </ActionRow>
 
           <LedgerTable
             rows={ledger}

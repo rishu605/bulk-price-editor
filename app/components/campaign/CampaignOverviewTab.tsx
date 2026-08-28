@@ -5,9 +5,21 @@
  * campaign doing and when -- so they are one tab.
  */
 
+import { formatWhen } from "../../lib/format/display";
+import { describeActor } from "../../lib/audit/actor";
+import { ALL_STATES, describeState } from "../../lib/lifecycle/transitions";
+import { humanise } from "../../lib/format/label";
 import type { CampaignDetailProps } from "./props";
 
-export function CampaignOverviewTab({ scheduleText, warnings, autoEnroll, enrollPendingAt, lifecycle, history }: CampaignDetailProps) {
+export function CampaignOverviewTab({
+  scheduleText,
+  warnings,
+  autoEnroll,
+  enrollPendingAt,
+  lifecycle,
+  history,
+  timeZone,
+}: CampaignDetailProps) {
   return (
     <>
       <s-section heading="Status">
@@ -17,23 +29,43 @@ export function CampaignOverviewTab({ scheduleText, warnings, autoEnroll, enroll
         <s-paragraph>
           <s-text>{lifecycle.explanation}</s-text>
         </s-paragraph>
-
-        {history.length > 0 ? (
-          <>
-            <s-divider />
-            <s-paragraph>
-              <s-text>How it got here</s-text>
-            </s-paragraph>
-            {history.map((entry) => (
-              <s-paragraph key={`${entry.at}-${entry.to}`}>
-                <s-text>
-                  {entry.from} → {entry.to} · {entry.reason || entry.actor}
-                </s-text>
-              </s-paragraph>
-            ))}
-          </>
-        ) : null}
       </s-section>
+
+      {history.length > 0 ? (
+        // Its own section rather than a run of paragraphs under a bare `s-paragraph`
+        // acting as a heading. Three things were wrong with what was here, and all three
+        // are the kind of thing a merchant reads as "this screen is for someone else":
+        //
+        //  - the states were the database's — `DRAFT → ACTIVE`, which is what #381 swept
+        //    out of every badge in the app and did not reach here;
+        //  - the actor was the raw staff id, where every other surface says "Scheduler"
+        //    or names the account;
+        //  - `at` was loaded, carried through the loader, and never rendered, so the one
+        //    column a history is *for* was missing.
+        <s-section heading="How it got here">
+          <s-table>
+            <s-table-header-row>
+              <s-table-header listSlot="kicker">When</s-table-header>
+              <s-table-header listSlot="primary">Change</s-table-header>
+              <s-table-header listSlot="secondary">Why</s-table-header>
+              <s-table-header listSlot="inline">Who</s-table-header>
+            </s-table-header-row>
+            <s-table-body>
+              {history.map((entry) => (
+                <s-table-row key={`${entry.at}-${entry.to}`}>
+                  <s-table-cell>{formatWhen(entry.at, timeZone)}</s-table-cell>
+                  <s-table-cell>
+                    {stateName(entry.from)} → {stateName(entry.to)}
+                  </s-table-cell>
+                  <s-table-cell>{entry.reason || "—"}</s-table-cell>
+                  <s-table-cell>{describeActor(entry.actor)}</s-table-cell>
+                </s-table-row>
+              ))}
+            </s-table-body>
+          </s-table>
+        </s-section>
+      ) : null}
+
       <s-section heading="Schedule">
         <s-paragraph>{scheduleText}</s-paragraph>
         {warnings.map((warning) => (
@@ -59,4 +91,19 @@ export function CampaignOverviewTab({ scheduleText, warnings, autoEnroll, enroll
       </s-section>
     </>
   );
+}
+
+/**
+ * A state out of the audit log, named the way the rest of the app names it.
+ *
+ * Guarded, because `describeState` has no default branch: the audit entry's `from` is
+ * `"—"` for the transition that created the campaign, and calling it with that returns
+ * `undefined` and throws on `.label`. `humanise` is the same fallback the activity log
+ * uses for an action nobody anticipated — a readable phrase beats a crash, and beats a
+ * lookup table that goes stale the first time a state is added.
+ */
+function stateName(state: string): string {
+  return ALL_STATES.includes(state as never)
+    ? describeState(state as never).label
+    : humanise(state);
 }

@@ -34,7 +34,7 @@ import { transitionHistory } from "../services/campaigns/lifecycle.server";
 import { approvalFor, decideApproval, requestApproval, SelfApprovalError } from "../services/approvals.server";
 import { PageShell } from "../components/PageShell";
 import { CampaignTabs, currentTab, type CampaignTab } from "../components/campaign/CampaignTabs";
-import { CampaignActions } from "../components/campaign/CampaignActions";
+import { CampaignHeader } from "../components/campaign/CampaignHeader";
 import { CampaignOverviewTab } from "../components/campaign/CampaignOverviewTab";
 import { CampaignPreviewTab } from "../components/campaign/CampaignPreviewTab";
 import { CampaignRevertTab } from "../components/campaign/CampaignRevertTab";
@@ -337,20 +337,23 @@ export default function CampaignDetail() {
         </s-banner>
       ) : null}
 
+      {/* Up here with the other banners rather than inside the actions, which is where
+          it was. It qualifies the whole page — nothing on it will ever write a price —
+          not the row of buttons it happened to sit above. */}
+      {practice ? (
+        <s-banner tone="info">
+          <s-paragraph>
+            This is a practice campaign. The preview is exactly what would happen, and
+            nothing has been or will be written to your storefront. Create a real
+            campaign with the same scope and rule when you are ready.
+          </s-paragraph>
+        </s-banner>
+      ) : null}
 
-      {/* Status and the one action a merchant is most likely to want, above the tabs
-          and visible in every state. PARTIAL and HELD are the product's whole trust
-          proposition; putting them inside a tab would be hiding exactly the states that
-          must not be hidden. */}
-      <s-section>
-        <s-stack direction="inline" gap="base">
-          <s-badge tone={lifecycle.tone === "critical" ? "critical" : lifecycle.tone === "warning" ? "warning" : "info"}>
-            {lifecycle.label}
-          </s-badge>
-          {scheduleText ? <s-text color="subdued">{scheduleText}</s-text> : null}
-        </s-stack>
-        <CampaignActions {...detail} />
-      </s-section>
+      {/* Status and what to do about it, above the tabs and visible in every state.
+          PARTIAL and HELD are the product's whole trust proposition; putting them inside
+          a tab would be hiding exactly the states that must not be hidden. */}
+      <CampaignHeader {...detail} />
 
       <CampaignTabs tabs={tabs} current={tab} />
 
