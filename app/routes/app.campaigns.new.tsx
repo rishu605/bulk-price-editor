@@ -30,6 +30,7 @@ import { UnsavedChanges } from "../components/UnsavedChanges";
 import { DraftPreview } from "../components/DraftPreview";
 import { RuleValueField } from "../components/RuleValueField";
 import { FieldGrid, FullRow } from "../components/FieldGrid";
+import { SPACE } from "../lib/ui/spacing";
 import type { DraftPreview as Preview } from "../services/campaigns/draft-preview.server";
 
 export const loader = withGuard("/app/campaigns/new", async ({ request }: LoaderFunctionArgs) => {
@@ -361,9 +362,12 @@ export default function NewCampaign() {
             <s-text-field name="title" label="Title contains" value={selected.title} />
           </FieldGrid>
 
-          <s-stack direction="inline" gap="base">
+          {/* Was an inline stack around exactly one button. A stack with one child lays
+              nothing out; ActionRow is what a row of actions is, and this is a row of
+              one. */}
+          <ActionRow>
             <s-button type="submit">Update match count</s-button>
-          </s-stack>
+          </ActionRow>
         </FilterForm>
 
         <s-paragraph>
@@ -391,65 +395,63 @@ export default function NewCampaign() {
           <input type="hidden" name="vendor" value={selected.vendor} />
           <input type="hidden" name="title" value={selected.title} />
 
-          <s-stack gap="base">
-            <s-text-field name="name" label="Campaign name" value="Sale" required />
+          <s-stack gap={SPACE.section}>
+            {/* The rule, and nothing else, first.
 
-            <RuleValueField currency={currencies[0] ?? "USD"} />
+                This block was one flat stack of about fifteen full-width controls -- name,
+                rule, compare-at, rounding, priority, tags, auto-enrol, a checkbox per
+                market, a select per currency, four schedule fields and a revert buffer.
+                `FieldGrid` exists for exactly that failure and its doc comment names it:
+                a select holding one word rendered twelve hundred pixels wide is "the
+                single most unstyled-looking thing in this app". Step 1 above already used
+                it; the longer form, the one a merchant actually fills in, did not. */}
+            <FieldGrid>
+              {/* The one field that keeps the whole row. It names the thing being made,
+                  and a title above the settings that describe it is the shape every form
+                  of this kind takes. */}
+              <FullRow>
+                <s-text-field name="name" label="Campaign name" value="Sale" required />
+              </FullRow>
 
-            <s-select name="compareAt" label="Compare-at price">
-              <s-option value="set-to-baseline" defaultSelected>
-                Set to baseline (shows a strike-through)
-              </s-option>
-              <s-option value="leave">Leave unchanged</s-option>
-              <s-option value="clear">Clear it</s-option>
-            </s-select>
+              {/* Not wrapped in a `FullRow`, deliberately. This renders *two* fields — the
+                  adjustment and its amount — as a fragment, so as bare grid children they
+                  land side by side, which is the pair a merchant reads as one decision.
+                  Inside a `FullRow` they would both go in one cell and stack. */}
+              <RuleValueField currency={currencies[0] ?? "USD"} />
 
-            <s-select name="rounding.default" label="Rounding">
-              {roundingOptions.map((option) => (
-                <s-option
-                  key={option.value}
-                  value={option.value}
-                  defaultSelected={option.value === storeRounding.default}
-                >
-                  {option.label}
+              <s-select name="compareAt" label="Compare-at price">
+                <s-option value="set-to-baseline" defaultSelected>
+                  Set to baseline (shows a strike-through)
                 </s-option>
-              ))}
-            </s-select>
-            <s-paragraph>
-              <s-text>
-                Starts from your store setting. Change it here to round this campaign
-                differently.
-              </s-text>
-            </s-paragraph>
+                <s-option value="leave">Leave unchanged</s-option>
+                <s-option value="clear">Clear it</s-option>
+              </s-select>
+
+              <s-select
+                name="rounding.default"
+                label="Rounding"
+                details="Starts from your store setting. Change it here to round this campaign differently."
+              >
+                {roundingOptions.map((option) => (
+                  <s-option
+                    key={option.value}
+                    value={option.value}
+                    defaultSelected={option.value === storeRounding.default}
+                  >
+                    {option.label}
+                  </s-option>
+                ))}
+              </s-select>
+            </FieldGrid>
 
             {/* What this rule does to prices, from the same resolver the run uses --
                 not an estimate of it. Sits with the rule rather than at the bottom of
                 the page, because it exists to answer "did I mean -20% or x0.20?" while
-                the merchant is still deciding. */}
+                the merchant is still deciding. With the rarely-touched settings moved to
+                the end, it now lands directly under the rule it is previewing. */}
             <s-divider />
             <s-heading>What this would do</s-heading>
             <DraftPreview preview={previewFetcher.data ?? null} />
-
-            <s-number-field
-              name="priority"
-              label="Priority"
-              value="100"
-              details="Higher wins when two campaigns cover the same variant. They never stack."
-            />
-
-            <s-text-field
-              name="tagKit"
-              label="Storefront tags (optional)"
-              placeholder="SALE, SUMMER"
-              details="Comma separated. Added to each product while the campaign runs and removed when it ends, so your theme can badge sale items. Tags a product already has are never removed."
-            />
-
-            <s-checkbox
-              name="autoEnroll"
-              label="Price products that join this campaign while it runs"
-              checked
-              details="A product you add to the sale later is priced from its own normal price, not the sale price."
-            />
 
             {priceLists.length > 0 ? (
               <>
@@ -508,26 +510,30 @@ export default function NewCampaign() {
                   </s-text>
                 </s-paragraph>
 
-                {currencies.map((code) => (
-                  <s-select key={code} name={`rounding.${code}`} label={`Rounding for ${code}`}>
-                    <s-option
-                      value="inherit"
-                      defaultSelected={!storeRounding.byCurrency[code]}
-                    >
-                      Same as this campaign&rsquo;s rounding (
-                      {ROUNDING_LABELS[profileNameFor(storeRounding, code)].toLowerCase()})
-                    </s-option>
-                    {roundingOptions.map((option) => (
+                {/* One select per currency, in columns. A store selling in six currencies
+                    rendered six full-width bars each holding the phrase "Ends in .99". */}
+                <FieldGrid>
+                  {currencies.map((code) => (
+                    <s-select key={code} name={`rounding.${code}`} label={`Rounding for ${code}`}>
                       <s-option
-                        key={option.value}
-                        value={option.value}
-                        defaultSelected={storeRounding.byCurrency[code] === option.value}
+                        value="inherit"
+                        defaultSelected={!storeRounding.byCurrency[code]}
                       >
-                        {option.label}
+                        Same as this campaign&rsquo;s rounding (
+                        {ROUNDING_LABELS[profileNameFor(storeRounding, code)].toLowerCase()})
                       </s-option>
-                    ))}
-                  </s-select>
-                ))}
+                      {roundingOptions.map((option) => (
+                        <s-option
+                          key={option.value}
+                          value={option.value}
+                          defaultSelected={storeRounding.byCurrency[code] === option.value}
+                        >
+                          {option.label}
+                        </s-option>
+                      ))}
+                    </s-select>
+                  ))}
+                </FieldGrid>
               </>
             ) : null}
 
@@ -544,13 +550,13 @@ export default function NewCampaign() {
             {/* Date and time as two fields, because Polaris has no datetime component:
                 `s-date-field` is date-only. Two Polaris fields beat one native
                 datetime-local that would style itself differently from everything
-                around it, and the two are recombined server-side. */}
-            <s-stack direction="inline" gap="base">
-              <s-date-field
-                name="startDate"
-                label="Start"
-                value={presetStart.slice(0, 10)}
-              />
+                around it, and the two are recombined server-side.
+
+                The grid rather than an inline stack, so the two pairs line up with each
+                other: a stack sizes each child to its content, so End sat a few pixels
+                left of Start and the four fields read as four rather than as two pairs. */}
+            <FieldGrid>
+              <s-date-field name="startDate" label="Start" value={presetStart.slice(0, 10)} />
               <s-text-field
                 name="startTime"
                 label="Start time"
@@ -558,9 +564,6 @@ export default function NewCampaign() {
                 value={presetStart.slice(11)}
                 details="24-hour, in your store's zone."
               />
-            </s-stack>
-
-            <s-stack direction="inline" gap="base">
               <s-date-field name="endDate" label="End (optional)" />
               <s-text-field
                 name="endTime"
@@ -568,18 +571,72 @@ export default function NewCampaign() {
                 placeholder="23:59"
                 details="Defaults to the end of that day."
               />
-            </s-stack>
+            </FieldGrid>
 
-            <s-number-field
-              name="revertBuffer"
-              label="Revert this many minutes early"
-              value="5"
-              details="A busy bulk queue takes time; starting early means prices are back before the window closes."
-            />
+            <s-divider />
 
-            <s-button type="submit" variant="primary">
-              {practice ? "Preview it — nothing will be written" : "Create and preview"}
-            </s-button>
+            {/* The pressure valve.
+
+                Four controls a first campaign never touches, all with defaults that are
+                right for almost everybody: priority only matters once two campaigns
+                overlap, tags only matter if the theme reads them, auto-enrol is on, and
+                the revert buffer is meaningless without an end date. They were sitting
+                between the rule and the schedule, so the merchant read four settings they
+                had no opinion about before reaching the one thing they came to set.
+
+                Named "optional" rather than hidden: Polaris has no disclosure element —
+                all 57 tags checked, there is no `s-details` and no accordion — so a
+                collapsible here would be hand-rolled chrome in an app that has none. A
+                heading that says a block can be skipped does the same job honestly. */}
+            <s-heading>Advanced (optional)</s-heading>
+            <s-paragraph>
+              <s-text color="subdued">
+                Every one of these has a default that suits most campaigns. Skip them
+                unless you have a reason.
+              </s-text>
+            </s-paragraph>
+
+            <FieldGrid>
+              <s-number-field
+                name="priority"
+                label="Priority"
+                value="100"
+                details="Higher wins when two campaigns cover the same variant. They never stack."
+              />
+
+              <s-number-field
+                name="revertBuffer"
+                label="Revert this many minutes early"
+                value="5"
+                details="A busy bulk queue takes time; starting early means prices are back before the window closes."
+              />
+
+              <FullRow>
+                <s-text-field
+                  name="tagKit"
+                  label="Storefront tags (optional)"
+                  placeholder="SALE, SUMMER"
+                  details="Comma separated. Added to each product while the campaign runs and removed when it ends, so your theme can badge sale items. Tags a product already has are never removed."
+                />
+              </FullRow>
+
+              <FullRow>
+                <s-checkbox
+                  name="autoEnroll"
+                  label="Price products that join this campaign while it runs"
+                  checked
+                  details="A product you add to the sale later is priced from its own normal price, not the sale price."
+                />
+              </FullRow>
+            </FieldGrid>
+
+            <s-divider />
+
+            <ActionRow>
+              <s-button type="submit" variant="primary">
+                {practice ? "Preview it — nothing will be written" : "Create and preview"}
+              </s-button>
+            </ActionRow>
           </s-stack>
         </Form>
       </s-section>
