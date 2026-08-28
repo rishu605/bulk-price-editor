@@ -19,11 +19,15 @@ export function ActivityTable({
 }) {
   return (
     <s-table>
+      {/* Collapsed, an audit row reads "at 14:02 · Campaign transition · Summer sale
+          became Active", which is the sentence a merchant is looking for. The timestamp
+          is a kicker rather than a labeled pair: it qualifies the entry, and "When:
+          28 Aug 2026, 14:02" above the thing that happened buries it. */}
       <s-table-header-row>
-        <s-table-header>When</s-table-header>
-        <s-table-header>Who</s-table-header>
-        <s-table-header>Action</s-table-header>
-        <s-table-header>What changed</s-table-header>
+        <s-table-header listSlot="kicker">When</s-table-header>
+        <s-table-header listSlot="inline">Who</s-table-header>
+        <s-table-header listSlot="primary">Action</s-table-header>
+        <s-table-header listSlot="secondary">What changed</s-table-header>
       </s-table-header-row>
       <s-table-body>
         {entries.map((entry) => (

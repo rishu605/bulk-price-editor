@@ -221,10 +221,10 @@ function ImportReport({ result }: { result: BaselineImportResult }) {
 
           <s-table>
             <s-table-header-row>
-              <s-table-header>Line</s-table-header>
-              <s-table-header>Identifier</s-table-header>
-              <s-table-header>Problem</s-table-header>
-              <s-table-header>What to do</s-table-header>
+              <s-table-header listSlot="kicker" format="numeric">Line</s-table-header>
+              <s-table-header listSlot="primary">Identifier</s-table-header>
+              <s-table-header listSlot="inline">Problem</s-table-header>
+              <s-table-header listSlot="secondary">What to do</s-table-header>
             </s-table-header-row>
             <s-table-body>
               {problems.slice(0, 25).map((problem) => (

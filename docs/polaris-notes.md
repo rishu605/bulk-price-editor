@@ -76,7 +76,22 @@ and it defaults to `labeled`, which is why an undesignated table collapses into 
 the primary column and the collapsed form reads as a list row. `format="numeric"` on the
 same element right-aligns a number in the grid.
 
-Only the campaigns table is designated so far; the other twenty are still at the default.
+`format` is the other half and is easy to miss: `currency` and `numeric` both
+right-align a column, and a price column that does not is a price column that will not
+line up on the decimal with the one beside it. On the catalogue page four of them sit
+together.
+
+Every table in the app is designated now, and `app/lib/ui/table-designation.test.ts`
+keeps it that way. Two of its rules are not stylistic:
+
+- **One `primary` per table.** Polaris takes the last of any others, so a second one
+  silently unslots a column rather than failing.
+- **`kicker` comes before `primary` in the collapsed form**, so a column designated
+  `kicker` must also be written first in the header row and first in each body row, or
+  the grid and the list disagree about the order. Reconciliation (surface before
+  product), Activity (when before what), Imports (when before file) and Diagnostics
+  (when before reference) all had their cells reordered to match, which is a change to
+  the *grid* made for the list's benefit — worth knowing before someone "fixes" it back.
 
 ## A native `<form>` breaks the embedded session
 

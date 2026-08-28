@@ -109,12 +109,16 @@ export default function PlanPage() {
 
         <s-table>
           <s-table-header-row>
-            <s-table-header>Plan</s-table-header>
-            <s-table-header>Price</s-table-header>
-            <s-table-header>Variants</s-table-header>
-            <s-table-header>Markets</s-table-header>
-            <s-table-header>Wholesale</s-table-header>
-            <s-table-header>Trial</s-table-header>
+            <s-table-header listSlot="primary">Plan</s-table-header>
+            <s-table-header listSlot="secondary" format="currency">Price</s-table-header>
+            {/* Numeric, and it holds "Unlimited" on the top plan. A ceiling and the
+                absence of one belong in the same column, right-aligned together: the
+                comparison a merchant is making down this column is how far each plan
+                lets them go. */}
+            <s-table-header listSlot="inline" format="numeric">Variants</s-table-header>
+            <s-table-header listSlot="labeled">Markets</s-table-header>
+            <s-table-header listSlot="labeled">Wholesale</s-table-header>
+            <s-table-header listSlot="labeled">Trial</s-table-header>
           </s-table-header-row>
           <s-table-body>
             {plans.map((plan) => (

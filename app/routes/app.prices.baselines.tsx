@@ -152,23 +152,25 @@ export default function Baselines() {
             <s-text>{variantGid}</s-text>
           </s-paragraph>
           <s-table>
+            {/* One variant's baselines over time, so the row's identity is when it was
+                captured, not what the number was. */}
             <s-table-header-row>
-              <s-table-header>Price</s-table-header>
-              <s-table-header>Compare at</s-table-header>
-              <s-table-header>Source</s-table-header>
-              <s-table-header>Captured</s-table-header>
-              <s-table-header>Superseded</s-table-header>
+              <s-table-header listSlot="primary">Captured</s-table-header>
+              <s-table-header listSlot="inline" format="currency">Price</s-table-header>
+              <s-table-header listSlot="labeled" format="currency">Compare at</s-table-header>
+              <s-table-header listSlot="labeled">Source</s-table-header>
+              <s-table-header listSlot="labeled">Superseded</s-table-header>
             </s-table-header-row>
             <s-table-body>
               {history.map((entry) => (
                 <s-table-row key={entry.capturedAt}>
+                  <s-table-cell>{formatWhen(entry.capturedAt, timeZone)}</s-table-cell>
                   <s-table-cell>
                     {entry.price}
                     {entry.current ? " (current)" : ""}
                   </s-table-cell>
                   <s-table-cell>{entry.compareAt ?? "—"}</s-table-cell>
                   <s-table-cell>{humanise(entry.source)}</s-table-cell>
-                  <s-table-cell>{formatWhen(entry.capturedAt, timeZone)}</s-table-cell>
                   <s-table-cell>
                     {entry.supersededAt ? formatWhen(entry.supersededAt, timeZone) : "—"}
                   </s-table-cell>

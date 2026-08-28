@@ -149,8 +149,10 @@ export default function Recapture() {
 
           <s-table>
             <s-table-header-row>
-              <s-table-header>Campaign</s-table-header>
-              <s-table-header>Variants in this scope</s-table-header>
+              <s-table-header listSlot="primary">Campaign</s-table-header>
+              <s-table-header listSlot="inline" format="numeric">
+                Variants in this scope
+              </s-table-header>
             </s-table-header-row>
             <s-table-body>
               {assessment.overlaps.map((overlap) => (

@@ -140,14 +140,15 @@ export default function Debug() {
         ) : (
           <s-table>
             <s-table-header-row>
-              <s-table-header>Reference</s-table-header>
-              <s-table-header>Code</s-table-header>
-              <s-table-header>Route</s-table-header>
-              <s-table-header>When</s-table-header>
+              <s-table-header listSlot="kicker">When</s-table-header>
+              <s-table-header listSlot="primary">Reference</s-table-header>
+              <s-table-header listSlot="inline">Code</s-table-header>
+              <s-table-header listSlot="secondary">Route</s-table-header>
             </s-table-header-row>
             <s-table-body>
               {recent.map((row) => (
                 <s-table-row key={row.errorId}>
+                  <s-table-cell>{row.createdAt}</s-table-cell>
                   <s-table-cell>
                     <s-button
                       variant="tertiary"
@@ -162,7 +163,6 @@ export default function Debug() {
                     </s-badge>
                   </s-table-cell>
                   <s-table-cell>{row.route ?? "—"}</s-table-cell>
-                  <s-table-cell>{row.createdAt}</s-table-cell>
                 </s-table-row>
               ))}
             </s-table-body>

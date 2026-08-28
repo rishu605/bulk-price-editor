@@ -70,19 +70,21 @@ export default function Imports() {
           <>
             <s-table>
               <s-table-header-row>
-                <s-table-header>File</s-table-header>
-                <s-table-header>Imported</s-table-header>
-                <s-table-header>Rows read</s-table-header>
-                <s-table-header>Matched a variant</s-table-header>
-                <s-table-header>By</s-table-header>
+                <s-table-header listSlot="kicker">Imported</s-table-header>
+                <s-table-header listSlot="primary">File</s-table-header>
+                <s-table-header listSlot="labeled" format="numeric">Rows read</s-table-header>
+                <s-table-header listSlot="secondary" format="numeric">
+                  Matched a variant
+                </s-table-header>
+                <s-table-header listSlot="labeled">By</s-table-header>
               </s-table-header-row>
               <s-table-body>
                 {imports.map((row) => (
                   <s-table-row key={row.id}>
+                    <s-table-cell>{row.createdAt}</s-table-cell>
                     <s-table-cell>
                       {row.name} <s-text color="subdued">({row.currency})</s-text>
                     </s-table-cell>
-                    <s-table-cell>{row.createdAt}</s-table-cell>
                     <s-table-cell>{formatCount(row.rowsRead)}</s-table-cell>
                     <s-table-cell>
                       {/* The gap between these two is the number worth reading: rows

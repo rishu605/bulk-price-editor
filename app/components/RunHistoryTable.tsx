@@ -16,13 +16,13 @@ export function RunHistoryTable({ runs, selectedRunId, timeZone }: Props) {
   return (
     <s-table>
       <s-table-header-row>
-        <s-table-header>Run</s-table-header>
-        <s-table-header>Status</s-table-header>
-        <s-table-header>Planned</s-table-header>
-        <s-table-header>Verified</s-table-header>
-        <s-table-header>Failed</s-table-header>
-        <s-table-header>Finished</s-table-header>
-        <s-table-header></s-table-header>
+        <s-table-header listSlot="primary">Run</s-table-header>
+        <s-table-header listSlot="inline">Status</s-table-header>
+        <s-table-header listSlot="labeled" format="numeric">Planned</s-table-header>
+        <s-table-header listSlot="labeled" format="numeric">Verified</s-table-header>
+        <s-table-header listSlot="labeled" format="numeric">Failed</s-table-header>
+        <s-table-header listSlot="kicker">Finished</s-table-header>
+        <s-table-header listSlot="inline"></s-table-header>
       </s-table-header-row>
       <s-table-body>
         {runs.map((run) => (

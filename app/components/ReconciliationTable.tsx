@@ -23,17 +23,22 @@ export function ReconciliationTable({ rows }: { rows: ReconciliationRow[] }) {
 
   return (
     <s-table>
+      {/* Rows are variant x surface, so the same product name appears once per market
+          it sells in. The surface is a kicker for that reason: it is the qualifier that
+          tells two otherwise identical rows apart, and it has to be read before the name
+          rather than found in a labelled pair underneath it. */}
       <s-table-header-row>
-        <s-table-header>Product</s-table-header>
-        <s-table-header>Surface</s-table-header>
-        <s-table-header>Live</s-table-header>
-        <s-table-header>Baseline</s-table-header>
-        <s-table-header>Because of</s-table-header>
-        <s-table-header>State</s-table-header>
+        <s-table-header listSlot="kicker">Surface</s-table-header>
+        <s-table-header listSlot="primary">Product</s-table-header>
+        <s-table-header listSlot="labeled" format="currency">Live</s-table-header>
+        <s-table-header listSlot="labeled" format="currency">Baseline</s-table-header>
+        <s-table-header listSlot="secondary">Because of</s-table-header>
+        <s-table-header listSlot="inline">State</s-table-header>
       </s-table-header-row>
       <s-table-body>
         {rows.map((row) => (
           <s-table-row key={`${row.variantGid}-${row.priceListGid}`}>
+            <s-table-cell>{row.surface}</s-table-cell>
             <s-table-cell>
               {/* A whole column of blue is what makes a table read as link soup — and
                   this table is the one a merchant scans when prices disagree, so its
@@ -43,7 +48,6 @@ export function ReconciliationTable({ rows }: { rows: ReconciliationRow[] }) {
                 {row.title}
               </s-button>
             </s-table-cell>
-            <s-table-cell>{row.surface}</s-table-cell>
             <s-table-cell>{row.live ?? "—"}</s-table-cell>
             <s-table-cell>{row.baseline ?? "—"}</s-table-cell>
             <s-table-cell>

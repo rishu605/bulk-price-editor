@@ -68,10 +68,10 @@ export default function FeedbackPage() {
         <s-section heading="What you have sent">
           <s-table>
             <s-table-header-row>
-              <s-table-header>When</s-table-header>
-              <s-table-header>Kind</s-table-header>
-              <s-table-header>What you said</s-table-header>
-              <s-table-header>Where it got to</s-table-header>
+              <s-table-header listSlot="kicker">When</s-table-header>
+              <s-table-header listSlot="inline">Kind</s-table-header>
+              <s-table-header listSlot="primary">What you said</s-table-header>
+              <s-table-header listSlot="inline">Where it got to</s-table-header>
             </s-table-header-row>
             <s-table-body>
               {sent.map((entry) => (

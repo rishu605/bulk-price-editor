@@ -23,12 +23,15 @@ export function RollbackReportTable({ rows }: { rows: RollbackRow[] }) {
   return (
     <s-table>
       <s-table-header-row>
-        <s-table-header>Variant</s-table-header>
-        <s-table-header>State</s-table-header>
-        <s-table-header>We applied</s-table-header>
-        <s-table-header>Live now</s-table-header>
-        <s-table-header>Reverts to</s-table-header>
-        <s-table-header>Keep the edit</s-table-header>
+        <s-table-header listSlot="primary">Variant</s-table-header>
+        <s-table-header listSlot="inline">State</s-table-header>
+        <s-table-header listSlot="labeled" format="currency">We applied</s-table-header>
+        <s-table-header listSlot="labeled" format="currency">Live now</s-table-header>
+        <s-table-header listSlot="labeled" format="currency">Reverts to</s-table-header>
+        {/* Inline, so the checkbox stays on the row it decides about however the table
+            lands. As a labeled pair it becomes "Keep the edit: [ ] Leave as it is",
+            which asks the same question twice and reads as two controls. */}
+        <s-table-header listSlot="inline">Keep the edit</s-table-header>
       </s-table-header-row>
       <s-table-body>
         {rows.map((row) => (

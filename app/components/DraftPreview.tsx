@@ -82,9 +82,12 @@ export function DraftPreview({ preview }: { preview: Preview | null }) {
       {preview.rows.length > 0 ? (
         <s-table>
           <s-table-header-row>
-            <s-table-header>Variant</s-table-header>
-            <s-table-header>Now</s-table-header>
-            <s-table-header>Would become</s-table-header>
+            <s-table-header listSlot="primary">Variant</s-table-header>
+            <s-table-header listSlot="inline" format="currency">Now</s-table-header>
+            {/* Inline, both of them: collapsed, the row reads "Cotton tee - $24.00
+                $19.20", which is the whole question this panel answers. Labelled pairs
+                would put the two halves of a before-and-after on separate lines. */}
+            <s-table-header listSlot="inline" format="currency">Would become</s-table-header>
           </s-table-header-row>
           <s-table-body>
             {preview.rows.map((row) => (
