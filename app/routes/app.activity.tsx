@@ -26,6 +26,7 @@ import { describeAction } from "../lib/audit/action";
 import { describeActor } from "../lib/audit/actor";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
+import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { SPACE } from "../lib/ui/spacing";
 
 const FILTER_FIELDS = ["actor", "action", "from", "to"] as const;
@@ -39,7 +40,7 @@ const FILTER_FIELDS = ["actor", "action", "from", "to"] as const;
  * message to find. Twenty-five is well inside that and is a better page size for a log
  * somebody is scanning anyway.
  */
-export const PAGE_SIZE = 25;
+export const PAGE_SIZE = ROWS_PER_VIEW;
 
 export const loader = withGuard("/app/activity", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);

@@ -8,13 +8,14 @@
  */
 
 import prisma from "../../db.server";
+import { ROWS_PER_VIEW } from "../../lib/ui/table-budget";
 import {
   describeState,
   needsAttention,
   type CampaignState,
 } from "../../lib/lifecycle/transitions";
 
-export const PAGE_SIZE = 25;
+export const PAGE_SIZE = ROWS_PER_VIEW;
 
 export interface CampaignFilters {
   /** Matches the campaign name. */

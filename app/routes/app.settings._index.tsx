@@ -19,7 +19,6 @@ import {
 import { PageShell } from "../components/PageShell";
 import { SettingsSaveBar } from "../components/SettingsSaveBar";
 import { FieldGrid, FullRow } from "../components/FieldGrid";
-import { JumpTo } from "../components/JumpTo";
 import { SPACE } from "../lib/ui/spacing";
 
 export const loader = withGuard("/app/settings", async ({ request }: LoaderFunctionArgs) => {
@@ -145,16 +144,8 @@ export default function Settings() {
           rather than more routes: these settings are read together — a rounding rule
           that pushes a price under a floor is a conversation between two of them —
           and splitting them across pages is what made the nav sixteen items long. */}
-      <JumpTo
-        label="Settings on this page"
-        targets={[
-          { id: "guardrails", label: "Guardrails" },
-          { id: "rounding", label: "Rounding" },
-          { id: "notifications", label: "Alerts" },
-        ]}
-      />
 
-      <s-section id="guardrails" heading="Guardrails">
+      <s-section heading="Guardrails">
         <s-paragraph>
           Floors that no campaign may price below. They are checked after rounding,
           so a rounding rule cannot push a price under them.
@@ -226,7 +217,7 @@ export default function Settings() {
           </FieldGrid>
       </s-section>
 
-      <s-section id="rounding" heading="Rounding">
+      <s-section heading="Rounding">
         <s-paragraph>
           <s-text>
             How campaign prices are tidied up after the discount is calculated. Set
@@ -291,7 +282,7 @@ export default function Settings() {
           </s-stack>
       </s-section>
 
-      <s-section id="notifications" heading="Notifications">
+      <s-section heading="Notifications">
         <s-paragraph>
           <s-text>
             A campaign over a large catalogue runs for a while. These let you close the

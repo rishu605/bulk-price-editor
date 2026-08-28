@@ -30,7 +30,6 @@ import { ActionRow } from "../components/ActionRow";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
-import { JumpTo } from "../components/JumpTo";
 import { ImportForm, ImportReport, type ImportProblem } from "../components/imports/ImportForm";
 import { importCosts, type CostImportResult } from "../services/cost-import.server";
 import { costErrorCsv } from "../lib/reporting/cost-errors";
@@ -211,16 +210,8 @@ export default function Costs() {
         </s-banner>
       ) : null}
 
-      <JumpTo
-        label="Costs on this page"
-        targets={[
-          { id: "coverage", label: "Coverage" },
-          { id: "bulk", label: "Change in bulk" },
-          { id: "import", label: "Import" },
-        ]}
-      />
 
-      <s-section id="coverage" heading="What your cost floors can protect">
+      <s-section heading="What your cost floors can protect">
         <s-paragraph>
           <s-text>
             {withCost} of {variants} variants have a cost ({coverage}%). Cost-based
@@ -230,7 +221,7 @@ export default function Costs() {
         </s-paragraph>
       </s-section>
 
-      <s-section id="bulk" heading="Change costs in bulk">
+      <s-section heading="Change costs in bulk">
         {fetcher.data ? (
           <s-banner tone={fetcher.data.ok ? "success" : "critical"}>
             <s-paragraph>{fetcher.data.message}</s-paragraph>
@@ -302,7 +293,6 @@ export default function Costs() {
         ) : null}
       </s-section>
       <ImportForm
-        id="import"
         heading="Import costs from a spreadsheet"
         fetcher={fetcher}
         busy={busy}

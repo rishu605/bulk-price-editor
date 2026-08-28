@@ -13,8 +13,9 @@ import { Pagination } from "../components/Pagination";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
+import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = ROWS_PER_VIEW;
 
 /** What the search box on this tab owns, and therefore what Clear filters removes. */
 const CATALOGUE_FIELDS = ["q"] as const;

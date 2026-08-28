@@ -45,7 +45,6 @@ import { SPACE } from "../../lib/ui/spacing";
 export const INTENT = { check: "dry-run", commit: "commit" } as const;
 
 export function ImportForm({
-  id,
   heading,
   description,
   placeholder,
@@ -57,8 +56,6 @@ export function ImportForm({
   intent = INTENT,
   children,
 }: {
-  /** Set when the page carries a `JumpTo` that points at this section. */
-  id?: string;
   heading: string;
   /** What this file is, and what happens when it lands. */
   description: ReactNode;
@@ -99,7 +96,7 @@ export function ImportForm({
   };
 
   return (
-    <s-section id={id} heading={heading}>
+    <s-section heading={heading}>
       {/* A pasted CSV can be fifty thousand rows, and none of it exists anywhere until
           the import runs. */}
       <UnsavedChanges form={form} describe="this import" saved={Boolean(fetcher.data)} />

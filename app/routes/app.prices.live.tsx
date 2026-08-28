@@ -12,6 +12,13 @@ import { reconciliationCsv } from "../lib/reporting/reconciliation-csv";
 import { downloadCsv } from "../lib/reporting/csv";
 import { ReconciliationTable } from "../components/ReconciliationTable";
 import { clearedSearch } from "../components/FilterForm";
+import { Pagination } from "../components/Pagination";
+// The size the pager counts by comes from the scale, not from the service that queries
+// with it. Importing it from `reconciliation.server` compiled and passed every test, and
+// failed the *build*: a `.server` module referenced by anything a route exports besides
+// its loader is pulled into the client bundle, which React Router refuses. Both sides
+// read `ROWS_PER_VIEW`, so they cannot disagree either way.
+import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { VariantSearch } from "../components/prices/VariantSearch";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
@@ -28,7 +35,11 @@ export const loader = withGuard("/app/prices/live", async ({ request }: LoaderFu
   const url = new URL(request.url);
   const state = url.searchParams.get("state") ?? "";
 
-  const page = await reconcile(
+  // `page` is the number; `result` is the page of rows. They were one name, which is
+  // most of why the pager was missing: `{...page}` looked like it spread a page number.
+  const page = Math.max(1, Number(url.searchParams.get("page") ?? 1) || 1);
+
+  const result = await reconcile(
     shop.id,
     shop.domain,
     {
@@ -38,11 +49,12 @@ export const loader = withGuard("/app/prices/live", async ({ request }: LoaderFu
       driftedOnly: state === "drifted",
       offBaselineOnly: state === "off-baseline",
     },
-    Number(url.searchParams.get("page") ?? 1) || 1,
+    page,
   );
 
   return {
-    ...page,
+    ...result,
+    page,
     selected: {
       q: url.searchParams.get("q") ?? "",
       surface: url.searchParams.get("surface") ?? "any",
@@ -76,7 +88,8 @@ export const action = withGuard("/app/prices/live", async ({ request }: ActionFu
 });
 
 export default function Reconciliation() {
-  const { rows, total, surfaces, campaigns, counts, selected } = useLoaderData<typeof loader>();
+  const { rows, total, page, surfaces, campaigns, counts, selected } =
+    useLoaderData<typeof loader>();
   const [params] = useSearchParams();
   const fetcher = useFetcher<{ ok: boolean; message: string }>();
   const busy = fetcher.state !== "idle";
@@ -196,6 +209,12 @@ export default function Reconciliation() {
 
       <s-section heading="Prices">
         <ReconciliationTable rows={rows} clearHref={clearedSearch(params, RECONCILE_FIELDS)} />
+
+        {/* This page has been paged server-side since it was written and had no pager, so
+            row 26 was unreachable by anything but typing `?page=2` into a URL a merchant
+            cannot see. The loader already read the parameter and the service already
+            returned the total; only the control was missing. */}
+        <Pagination page={page} total={total} pageSize={ROWS_PER_VIEW} noun="prices" />
 
         <s-button
           type="button"

@@ -68,3 +68,33 @@ export function Pagination({
     </s-stack>
   );
 }
+
+/**
+ * What a capped table is not showing.
+ *
+ * Rendered as its own line rather than folded into a heading, because the number it
+ * carries changes the meaning of everything above it: a table that shows fifteen of
+ * fifteen and a table that shows fifteen of three thousand look identical.
+ */
+export function ShowingSome({
+  shown,
+  total,
+  noun,
+  suffix,
+}: {
+  shown: number;
+  total: number;
+  noun: string;
+  /** What to do about the rest — an export, a filter, a next page. */
+  suffix?: string;
+}) {
+  if (total <= shown) return null;
+
+  return (
+    <s-paragraph>
+      <s-text color="subdued" fontVariantNumeric="tabular-nums">
+        Showing {formatCount(shown)} of {formatCount(total)} {noun}.{suffix ? ` ${suffix}` : ""}
+      </s-text>
+    </s-paragraph>
+  );
+}

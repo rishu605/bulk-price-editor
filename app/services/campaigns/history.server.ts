@@ -6,6 +6,7 @@
  */
 
 import prisma from "../../db.server";
+import { ROWS_PER_VIEW } from "../../lib/ui/table-budget";
 import { formatMinorUnits } from "../../lib/money/format";
 import { titleMapFor } from "./candidates.server";
 import type { LedgerRow, RunSummary } from "./types";
@@ -44,7 +45,7 @@ export async function campaignRuns(
 export async function runLedger(
   shopId: string,
   runId: string,
-  limit = 200,
+  limit = ROWS_PER_VIEW * 4,
 ): Promise<LedgerRow[]> {
   const changes = await prisma.variantChange.findMany({
     where: { shopId, runId },

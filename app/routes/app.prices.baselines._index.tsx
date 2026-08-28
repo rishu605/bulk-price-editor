@@ -26,7 +26,6 @@ import { ensureShop } from "../services/shop.server";
 import { baselineHistory, browseBaselines } from "../services/baseline-browser.server";
 import { BaselineTable } from "../components/BaselineTable";
 import { ActionRow } from "../components/ActionRow";
-import { JumpTo } from "../components/JumpTo";
 import { ImportForm, ImportReport, type ImportProblem } from "../components/imports/ImportForm";
 import { importBaselines, type BaselineImportResult } from "../services/baseline-import.server";
 import { importErrorCsv } from "../lib/reporting/baseline-errors";
@@ -44,6 +43,7 @@ import { downloadCsv } from "../lib/reporting/csv";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
+import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { SPACE } from "../lib/ui/spacing";
 
 const FILTER_FIELDS = ["q", "vendor", "source", "diverged", "variant"] as const;
@@ -160,16 +160,8 @@ export default function Baselines() {
         </s-banner>
       ) : null}
 
-      <JumpTo
-        label="Baselines on this page"
-        targets={[
-          { id: "browse", label: "Your baselines" },
-          { id: "import", label: "Import" },
-          { id: "recapture", label: "Recapture" },
-        ]}
-      />
 
-      <s-section id="browse">
+      <s-section>
         {/* The card's blocks at section rhythm. It was set nowhere, so they ran together:
             the count landed directly under the Search button, close enough to read as a
             caption on the control above it rather than as the size of what came back. */}
@@ -253,7 +245,7 @@ export default function Baselines() {
 
               <BaselineTable rows={rows} onShowHistory={show} />
 
-              <Pagination page={page} total={total} pageSize={25} noun="baselines" />
+              <Pagination page={page} total={total} pageSize={ROWS_PER_VIEW} noun="baselines" />
             </>
           )}
         </s-stack>
@@ -295,7 +287,6 @@ export default function Baselines() {
       ) : null}
 
       <ImportForm
-        id="import"
         heading="Import baselines from a spreadsheet"
         fetcher={fetcher}
         busy={busy}
@@ -345,7 +336,7 @@ export default function Baselines() {
           scope that can be half a million variants and cross-references every running
           campaign — neither of which belongs on a page a merchant opens to look one
           price up. */}
-      <s-section id="recapture" heading="Recapture baselines">
+      <s-section heading="Recapture baselines">
         <s-paragraph>
           <s-text>
             Replaces the reference price of every variant in scope with the price its

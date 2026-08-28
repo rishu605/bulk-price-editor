@@ -103,3 +103,36 @@ a blank page. Use `FilterForm` for GET or React Router's `<Form>` for POST.
 
 Calling something from one in a component gives `undefined` at click time with no build
 error. Hit three times before it stuck: rollback CSV, activity CSV, `describeActor`.
+
+A fourth, with the opposite symptom: importing a *constant* from one into a component
+fails `npm run build` outright — "Server-only module referenced by client" — because React
+Router only strips server code from `loader`, `action`, `middleware` and `headers`, and
+anything else in the file that references the module drags it into the browser bundle.
+Typecheck and vitest both pass. `polaris-traps.test.ts` now rejects a value import from a
+`*.server` module anywhere under `app/components`; a `import type` is fine, because types
+are erased.
+
+## A table's page size is not its cell budget
+
+Two different limits, and conflating them costs either a blank page or an unreadable one.
+
+`CELL_BUDGET` is the hard one: past a few hundred cells `s-table` blanks the page. It is a
+cell count rather than a row count because a preview with three markets has twice the
+columns of a base-only one.
+
+`ROWS_PER_VIEW` is the judgement: how many rows a merchant should be shown at once. The
+app had six answers to it (50, 25, 100, 200, and two tables that rendered everything), and
+three of those had no pager, so the page scrolled for screens with the table's header long
+gone off the top.
+
+**There is no scroll container to reach for.** `s-box` takes `overflow: 'hidden' |
+'visible'` and nothing else. A native `div` would give up more than it buys: the header row
+is inside Polaris' shadow DOM so it could not be made to stick, and `s-table` decides for
+itself whether to render a grid or a stacked list — a stacked list inside a fixed-height
+scroller is not a design anybody chose. Cap the rows and page instead.
+
+**`s-table` has `filters` and pagination props of its own.** `filters` is a slot (like
+`details` on `s-choice`), and `paginate`/`hasNextPage`/`onNextPage` render Polaris' own
+pager. Neither is used yet, and the filters slot has a real flaw: it lives inside the
+table, so it unmounts when the table has no rows — which is exactly when a merchant wants
+the search box.

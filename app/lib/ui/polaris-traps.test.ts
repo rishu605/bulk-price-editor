@@ -108,3 +108,104 @@ describe("no native form on an embedded surface", () => {
     ).toBe(false);
   });
 });
+
+/**
+ * A fourth trap, from React Router rather than Polaris, and the same shape as the three
+ * above: it compiles, it typechecks, every test passes, and it fails at `npm run build`.
+ *
+ * React Router strips `loader`, `action`, `middleware` and `headers` from the client
+ * bundle, so a route may import a `*.server` module for those. Anything *else* in the
+ * file that references one drags it into the browser build, which the bundler refuses
+ * with "Server-only module referenced by client".
+ *
+ * `docs/polaris-notes.md` records this having been hit three times — "rollback CSV,
+ * activity CSV, `describeActor`". It has now been hit a fourth: a component reading a
+ * `PAGE_SIZE` constant out of `reconciliation.server` so its pager could not disagree
+ * with the query. Reasonable, and unbuildable. The constant lives in the UI scale now,
+ * which both sides read.
+ *
+ * Components are the checkable half: they have no loader, so a value imported from a
+ * `*.server` module in one is always this bug. A type is fine — types are erased.
+ */
+describe("no component pulls a server module into the browser bundle", () => {
+  function componentFiles(dir: string): string[] {
+    return readdirSync(join(ROOT, dir), { withFileTypes: true }).flatMap((entry) => {
+      const path = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) return componentFiles(path);
+      return /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [path] : [];
+    });
+  }
+
+  const files = componentFiles("app/components").map((path) => ({
+    path,
+    source: readFileSync(join(ROOT, path), "utf8"),
+  }));
+
+  it("finds the components, so it cannot pass by checking nothing", () => {
+    expect(files.length).toBeGreaterThan(20);
+  });
+
+  /**
+   * Whether an import clause survives compilation.
+   *
+   * `import type { X }` and `import { type X }` are both erased; `import { X }` is not.
+   * The first version of this checked for an optional `type` group in one pattern, and a
+   * lazy `[\s\S]*?` beside an optional group simply skips it — every type-only import in
+   * the app was reported as a bundle error. A clause is easier to reason about than a
+   * regex with a hole in it.
+   */
+  const erased = (clause: string) => {
+    const trimmed = clause.trim();
+    if (trimmed.startsWith("type ")) return true;
+
+    const named = /^\{([\s\S]*)\}$/.exec(trimmed);
+    if (!named) return false;
+
+    return named[1]
+      .split(",")
+      .map((binding) => binding.trim())
+      .filter(Boolean)
+      .every((binding) => binding.startsWith("type "));
+  };
+
+  /**
+   * The import statements in a file, reassembled from its lines.
+   *
+   * Not a regex over the whole source. A lazy `[\s\S]*?` between `import` and `from`
+   * happily spans *earlier* import statements, so the first version read three imports as
+   * one and attributed the wrong clause to the server module at the end of them — which
+   * reported every type-only import in the app as a bundle error. Walking back from the
+   * `from` line to the `import` that opened it cannot do that.
+   */
+  const importStatements = (source: string): string[] => {
+    const lines = source.split("\n");
+    const statements: string[] = [];
+
+    lines.forEach((line, index) => {
+      if (!/\bfrom\s+"/.test(line)) return;
+
+      let start = index;
+      while (start > 0 && !lines[start].trimStart().startsWith("import")) start -= 1;
+      if (!lines[start].trimStart().startsWith("import")) return;
+
+      statements.push(lines.slice(start, index + 1).join("\n"));
+    });
+
+    return statements;
+  };
+
+  it("imports server modules for their types only", () => {
+    const offenders = files.flatMap(({ path, source }) =>
+      importStatements(source)
+        .map((statement) => /^import\s+([\s\S]*?)\s+from\s+"([^"]*\.server)"/.exec(statement))
+        .filter((match): match is RegExpExecArray => match !== null && !erased(match[1]))
+        .map((match) => `${path} -> ${match[2]}`),
+    );
+
+    expect(
+      offenders,
+      "these import a value from a *.server module; `npm run build` refuses it, and " +
+        "nothing before the build will tell you",
+    ).toEqual([]);
+  });
+});
