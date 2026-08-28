@@ -19,6 +19,7 @@ import {
 import { PageShell } from "../components/PageShell";
 import { SettingsSaveBar } from "../components/SettingsSaveBar";
 import { FieldGrid, FullRow } from "../components/FieldGrid";
+import { HelpNote } from "../components/HelpNote";
 import { SPACE } from "../lib/ui/spacing";
 
 export const loader = withGuard("/app/settings", async ({ request }: LoaderFunctionArgs) => {
@@ -351,7 +352,7 @@ export default function Settings() {
 
       <SettingsSaveBar form={formRef} saving={busy} />
 
-      <s-section slot="aside" heading="Why floors are checked last">
+      <HelpNote label="Why floors are checked last">
         <s-paragraph>
           A campaign computes a price from the baseline, rounds it, and only then
           checks the floor. Rounding down can push an otherwise-legal price under the
@@ -363,7 +364,7 @@ export default function Settings() {
             floor is always on.
           </s-text>
         </s-paragraph>
-      </s-section>
+      </HelpNote>
 
       <s-section slot="aside" heading="Cost data">
         <s-paragraph>

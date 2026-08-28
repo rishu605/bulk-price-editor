@@ -26,6 +26,7 @@ import { describeAction } from "../lib/audit/action";
 import { describeActor } from "../lib/audit/actor";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
+import { HelpNote } from "../components/HelpNote";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { SPACE } from "../lib/ui/spacing";
 
@@ -144,7 +145,7 @@ export default function Activity() {
         )}
       </s-section>
 
-      <s-section slot="aside" heading="What is kept">
+      <HelpNote label="What is kept">
         <s-paragraph>
           <s-text>
             Everything, for as long as you have the app. Retention is not a paid tier
@@ -158,7 +159,7 @@ export default function Activity() {
             the staff account that did it.
           </s-text>
         </s-paragraph>
-      </s-section>
+      </HelpNote>
     </PageShell>
   );
 }

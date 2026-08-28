@@ -30,6 +30,7 @@ import { UnsavedChanges } from "../components/UnsavedChanges";
 import { DraftPreview } from "../components/DraftPreview";
 import { RuleValueField } from "../components/RuleValueField";
 import { FieldGrid, FullRow } from "../components/FieldGrid";
+import { HelpNote } from "../components/HelpNote";
 import { SPACE } from "../lib/ui/spacing";
 import type { DraftPreview as Preview } from "../services/campaigns/draft-preview.server";
 
@@ -641,7 +642,7 @@ export default function NewCampaign() {
         </Form>
       </s-section>
 
-      <s-section slot="aside" heading="Nothing is written yet">
+      <HelpNote label="Nothing is written yet">
         <s-paragraph>
           Creating a campaign only records the rule. The next screen shows exactly
           which prices would change, before anything touches your storefront.
@@ -651,7 +652,7 @@ export default function NewCampaign() {
           not its current price — so applying twice gives the same result rather than
           discounting the discount.
         </s-paragraph>
-      </s-section>
+      </HelpNote>
     </PageShell>
   );
 }

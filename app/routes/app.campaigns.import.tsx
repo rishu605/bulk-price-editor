@@ -42,6 +42,7 @@ import { PageShell } from "../components/PageShell";
 import { formatCount, formatWhen } from "../lib/format/display";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { EmptyState } from "../components/AsyncState";
+import { HelpNote } from "../components/HelpNote";
 import { isCommit } from "../lib/imports/intent";
 import {
   ImportForm,
@@ -237,12 +238,12 @@ export default function ImportPrices() {
         )}
       </s-section>
 
-      <s-section slot="aside" heading="Only price files are listed">
+      <HelpNote label="Only price files are listed">
         <s-paragraph>
           Baseline and cost imports do not record a file yet, so they do not appear here.
           Their results are shown when you run them, on the pages they belong to.
         </s-paragraph>
-      </s-section>
+      </HelpNote>
 
       {result ? (
         <ImportReport

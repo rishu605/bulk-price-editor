@@ -62,9 +62,16 @@ describe("routes that use the aside slot", () => {
   it("still have somewhere for it to land", () => {
     const withAside = renderingRoutes().filter(({ source }) => source.includes('slot="aside"'));
 
-    // Not a nice-to-have: four of these are on the campaign page, one of them holding
-    // apply, revert, resume and cancel.
-    expect(withAside.length, "the asides this guards should still exist").toBeGreaterThan(5);
+    // Not a nice-to-have: an aside that stops rendering does so silently, and the ones
+    // left are the store card, recent activity, cost coverage and errors by kind — the
+    // only things on their pages that say what state this shop is actually in.
+    //
+    // Three routes, not the thirteen this started with. The other ten were prose
+    // explaining the app rather than facts about the shop, and prose does not need a
+    // column of its own — see `HelpNote`. The floor moves down with them rather than
+    // being deleted: it is here so that "the partition quietly stopped matching anything"
+    // fails, and a floor of zero cannot do that.
+    expect(withAside.length, "the asides this guards should still exist").toBeGreaterThan(2);
 
     for (const { name, source } of withAside) {
       expect(source, `${name} uses slot="aside" but does not render inside PageShell`).toContain(

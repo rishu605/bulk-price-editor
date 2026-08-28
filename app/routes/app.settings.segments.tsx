@@ -32,6 +32,7 @@ import { FieldGrid, FullRow } from "../components/FieldGrid";
 import { SPACE } from "../lib/ui/spacing";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { ShowingSome } from "../components/Pagination";
+import { HelpNote } from "../components/HelpNote";
 
 export const loader = withGuard("/app/settings/segments", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -224,7 +225,7 @@ export default function Segments() {
 
       <NewSegment available={available} fetcher={fetcher} busy={busy} />
 
-      <s-section slot="aside" heading="Dynamic or frozen">
+      <HelpNote label="Dynamic or frozen">
         <s-paragraph>
           <s-text>
             <s-badge tone="info">Dynamic</s-badge> re-checks its filter every time a
@@ -247,7 +248,7 @@ export default function Segments() {
             one instead.
           </s-text>
         </s-paragraph>
-      </s-section>
+      </HelpNote>
     </PageShell>
   );
 }

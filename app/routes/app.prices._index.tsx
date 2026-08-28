@@ -13,6 +13,7 @@ import { Pagination } from "../components/Pagination";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
+import { HelpNote } from "../components/HelpNote";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 
 const PAGE_SIZE = ROWS_PER_VIEW;
@@ -156,7 +157,7 @@ export default function Catalog() {
         )}
       </s-section>
 
-      <s-section slot="aside" heading="What these mean">
+      <HelpNote label="What these mean">
         <s-paragraph>
           <strong>Live price</strong> is what your storefront shows right now.
         </s-paragraph>
@@ -171,7 +172,7 @@ export default function Catalog() {
             Outside one, it means something changed the price elsewhere.
           </s-text>
         </s-paragraph>
-      </s-section>
+      </HelpNote>
     </PageShell>
   );
 }
