@@ -1,4 +1,5 @@
 import { humanise } from "../lib/format/label";
+import { ShowingSome } from "./Pagination";
 import type { ReactNode } from "react";
 
 import type { LedgerRow } from "../services/campaigns/index.server";
@@ -12,6 +13,7 @@ import { LEDGER_TONE, toneFor } from "./tone";
  */
 export function LedgerTable({
   rows,
+  total,
   /**
    * Optional per-row control, rendered in a trailing column.
    *
@@ -22,9 +24,18 @@ export function LedgerTable({
   renderAction,
 }: {
   rows: LedgerRow[];
+  /**
+   * Every row this run wrote, not just the ones handed over.
+   *
+   * The table was given up to two hundred rows and said nothing about it, so a run of
+   * three thousand rendered its first two hundred and read as the whole ledger — on the
+   * one screen in the app whose entire job is being the evidence.
+   */
+  total?: number;
   renderAction?: (row: LedgerRow) => ReactNode;
 }) {
   return (
+    <>
     <s-table>
       <s-table-header-row>
         <s-table-header listSlot="primary">Variant</s-table-header>
@@ -49,5 +60,15 @@ export function LedgerTable({
         ))}
       </s-table-body>
     </s-table>
+    {total === undefined ? null : (
+      <ShowingSome
+        shown={rows.length}
+        total={total}
+        noun="rows"
+        suffix="The export has every one of them."
+      />
+    )}
+    </>
   );
 }
+

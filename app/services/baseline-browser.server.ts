@@ -14,6 +14,7 @@
 import { Prisma } from "@prisma/client";
 
 import prisma from "../db.server";
+import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { formatMinorUnits } from "../lib/money/format";
 import { astToWhere, type FilterAst } from "./segments.server";
 
@@ -50,7 +51,7 @@ export interface BaselinePage {
   sources: readonly string[];
 }
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = ROWS_PER_VIEW;
 
 export async function browseBaselines(
   shopId: string,

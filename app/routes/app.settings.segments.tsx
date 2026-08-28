@@ -30,6 +30,8 @@ import { EmptyState } from "../components/AsyncState";
 import { ActionRow } from "../components/ActionRow";
 import { FieldGrid, FullRow } from "../components/FieldGrid";
 import { SPACE } from "../lib/ui/spacing";
+import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
+import { ShowingSome } from "../components/Pagination";
 
 export const loader = withGuard("/app/settings/segments", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -431,7 +433,7 @@ function ImportReport({ report }: { report: NonNullable<ActionData["report"]> })
               <s-table-header listSlot="inline">Matches</s-table-header>
             </s-table-header-row>
             <s-table-body>
-              {report.ambiguous.slice(0, 50).map((row) => (
+              {report.ambiguous.slice(0, ROWS_PER_VIEW).map((row) => (
                 <s-table-row key={`${row.line}-${row.value}`}>
                   <s-table-cell>{row.line}</s-table-cell>
                   <s-table-cell>{row.value}</s-table-cell>
@@ -440,6 +442,11 @@ function ImportReport({ report }: { report: NonNullable<ActionData["report"]> })
               ))}
             </s-table-body>
           </s-table>
+          <ShowingSome
+            shown={Math.min(report.ambiguous.length, ROWS_PER_VIEW)}
+            total={report.ambiguous.length}
+            noun="rows"
+          />
         </>
       ) : null}
 
@@ -457,7 +464,7 @@ function ImportReport({ report }: { report: NonNullable<ActionData["report"]> })
               <s-table-header listSlot="primary">Value</s-table-header>
             </s-table-header-row>
             <s-table-body>
-              {report.unmatched.slice(0, 50).map((row) => (
+              {report.unmatched.slice(0, ROWS_PER_VIEW).map((row) => (
                 <s-table-row key={`${row.line}-${row.value}`}>
                   <s-table-cell>{row.line}</s-table-cell>
                   <s-table-cell>{row.value}</s-table-cell>
@@ -465,6 +472,11 @@ function ImportReport({ report }: { report: NonNullable<ActionData["report"]> })
               ))}
             </s-table-body>
           </s-table>
+          <ShowingSome
+            shown={Math.min(report.unmatched.length, ROWS_PER_VIEW)}
+            total={report.unmatched.length}
+            noun="rows"
+          />
         </>
       ) : null}
 

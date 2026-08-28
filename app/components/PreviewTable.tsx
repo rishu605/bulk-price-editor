@@ -1,5 +1,6 @@
 import { humanise } from "../lib/format/label";
 import { EmptyState } from "./AsyncState";
+import { ShowingSome } from "./Pagination";
 import type { MarketPreview, PreviewRow } from "../services/campaigns/index.server";
 import { PREVIEW_TONE, toneFor } from "./tone";
 
@@ -13,9 +14,19 @@ import { PREVIEW_TONE, toneFor } from "./tone";
 export function PreviewTable({
   rows,
   markets = [],
+  total,
 }: {
   rows: PreviewRow[];
   markets?: MarketPreview[];
+  /**
+   * Every row the campaign would change, not just the ones that fit.
+   *
+   * `rowsThatFit` caps this table to keep Polaris from blanking the page, and the cap
+   * shrinks as markets add columns — so the same campaign shows fewer rows to the
+   * merchant who has most reason to check them. Saying the number out loud is the
+   * difference between a preview and a sample presented as a preview.
+   */
+  total?: number;
 }) {
   if (rows.length === 0) {
     return (
@@ -27,6 +38,7 @@ export function PreviewTable({
   }
 
   return (
+    <>
     <s-table>
       <s-table-header-row>
         <s-table-header listSlot="primary">Variant</s-table-header>
@@ -67,6 +79,15 @@ export function PreviewTable({
         ))}
       </s-table-body>
     </s-table>
+    {total === undefined ? null : (
+      <ShowingSome
+        shown={rows.length}
+        total={total}
+        noun="rows"
+        suffix="Every row is priced the same way, and the export has all of them."
+      />
+    )}
+    </>
   );
 }
 

@@ -22,11 +22,20 @@ import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
 import { EmptyState } from "../components/AsyncState";
 import { ActionRow } from "../components/ActionRow";
+import { ShowingSome } from "../components/Pagination";
+import prisma from "../db.server";
 
 export const loader = withGuard("/app/prices/drift", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
-  return { events: await pendingDrift(shop.id) };
+  // The count as well as the page: a queue that shows fifteen of forty and says nothing
+  // reads as forty resolved decisions when it is fifteen.
+  const [events, pending] = await Promise.all([
+    pendingDrift(shop.id),
+    prisma.driftEvent.count({ where: { shopId: shop.id, resolution: "PENDING" } }),
+  ]);
+
+  return { events, pending };
 });
 
 export const action = withGuard("/app/prices/drift", async ({ request }: ActionFunctionArgs) => {
@@ -51,7 +60,7 @@ export const action = withGuard("/app/prices/drift", async ({ request }: ActionF
 type ActionData = { ok: boolean; message: string };
 
 export default function DriftQueue() {
-  const { events } = useLoaderData<typeof loader>();
+  const { events, pending } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
   const busy = fetcher.state !== "idle";
 
@@ -94,6 +103,13 @@ export default function DriftQueue() {
                 ))}
               </s-table-body>
             </s-table>
+
+            <ShowingSome
+              shown={events.length}
+              total={pending}
+              noun="drifted prices"
+              suffix="Resolve these and the next appear."
+            />
           </>
         )}
       </s-section>

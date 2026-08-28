@@ -24,9 +24,10 @@
  */
 
 import prisma from "../db.server";
+import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { formatMinorUnits } from "../lib/money/format";
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = ROWS_PER_VIEW;
 
 export interface ReconciliationFilters {
   q?: string;

@@ -11,6 +11,7 @@
  */
 
 import prisma from "../db.server";
+import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import type { ActivityEntry } from "../lib/reporting/activity-csv";
 
 // Re-exported so callers have one import for "the activity log", while the serialiser
@@ -34,7 +35,7 @@ export interface ActivityPage {
 }
 
 /** Matches the page's own page size; see the note there for why it is small. */
-const PAGE_SIZE = 25;
+const PAGE_SIZE = ROWS_PER_VIEW;
 
 export async function activity(
   shopId: string,

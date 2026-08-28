@@ -73,42 +73,22 @@ describe("every set of tabs uses the shared bar", () => {
   });
 
   /**
-   * The app's own navigation, and what each one is.
+   * A tab bar is a navigation landmark. The app's own sections are the only navigation
+   * this app renders -- everything else is Shopify's chrome -- so a second file claiming
+   * the role is a second bar, whatever it is called.
    *
-   * This started as "exactly one file claims the navigation role, because a tab bar is a
-   * navigation landmark and a second one is a second bar, whatever it is called". That
-   * premise stopped being true when `JumpTo` landed: an in-page index is navigation and
-   * is emphatically not a bar — it was built to stop looking like one.
-   *
-   * So the rule is sharpened rather than the file exempted. Anything new claiming the
-   * role has to be added here, deliberately, with what it is; and the thing that actually
-   * makes a tab bar a tab bar — marking one of its items as the one you are on — stays
-   * the property of exactly one component.
+   * This briefly allowed a second entry, for an in-page index of jump links. That was
+   * removed: a row of chips under the tab bar read as more chrome rather than as help,
+   * and the page it was meant to make navigable is better served by being shorter.
    */
-  const LANDMARKS = {
-    "app/components/TabBar.tsx": "the one tab bar",
-    "app/components/JumpTo.tsx": "an index of the page you are already on",
-  };
-
   it("finds no fourth implementation", () => {
     const landmarks = files
       .filter((file) => file.source.includes('accessibilityRole="navigation"'))
       .map((file) => file.path);
 
-    expect(landmarks.sort(), "one bar, one landmark").toEqual(Object.keys(LANDMARKS).sort());
+    expect(landmarks, "one bar, one landmark").toEqual(["app/components/TabBar.tsx"]);
   });
 
-  it("leaves only the tab bar able to say which one you are on", () => {
-    // A jump row has no current item and cannot have one: every target is on the page
-    // you are looking at. That is the difference between an index and a bar, and it is
-    // what keeps a second selectable row from being written as "not a tab bar".
-    const marksCurrent = files
-      .filter((file) => file.source.includes('accessibilityRole="navigation"'))
-      .filter((file) => /\bcurrent\b/.test(file.source))
-      .map((file) => file.path);
-
-    expect(marksCurrent).toEqual(["app/components/TabBar.tsx"]);
-  });
 
   it("never links the tab you are already on", () => {
     // The index toggle did exactly this: `<s-link href={current}>` around the view you

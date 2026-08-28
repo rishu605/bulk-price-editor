@@ -17,6 +17,7 @@ import { newErrorId } from "../lib/errors/error-id";
 import { logger } from "../lib/logging/logger";
 import { redact, redactText } from "../lib/logging/redact";
 import { captureError, setShopContext } from "../lib/observability/sentry.server";
+import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 
 export interface ReportContext {
   shopId?: string | null;
@@ -118,7 +119,7 @@ function stackOf(error: AppError): string | undefined {
 }
 
 /** Recent failures for the debug page, newest first. */
-export async function recentErrors(shopId: string, limit = 50) {
+export async function recentErrors(shopId: string, limit = ROWS_PER_VIEW) {
   return prisma.errorEvent.findMany({
     where: { OR: [{ shopId }, { shopId: null }] },
     orderBy: { createdAt: "desc" },

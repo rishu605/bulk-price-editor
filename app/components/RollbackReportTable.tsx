@@ -1,4 +1,6 @@
 import type { RollbackRow } from "../services/campaigns/index.server";
+import { ShowingSome } from "./Pagination";
+import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 
 /**
  * What reverting would do, row by row, with the drifted ones first.
@@ -19,8 +21,34 @@ const STATE: Record<RollbackRow["kind"], { label: string; tone: "info" | "warnin
   clean: { label: "Unchanged", tone: "info" },
 };
 
+/**
+ * Which rows this table may leave out, and which it may not.
+ *
+ * It rendered every row a revert would touch — thousands on a large campaign — and that
+ * is what made the campaign page scroll for screens. But it cannot simply be capped: each
+ * drifted row carries a checkbox, and a decision a merchant cannot reach is a decision
+ * made for them. Reverting over somebody's deliberate edit is the exact failure this
+ * table exists to prevent.
+ *
+ * So the two kinds are treated differently, which is what the table was already saying in
+ * its own doc comment without acting on it. **Every drifted and deleted row is rendered**,
+ * however many there are: those are the decisions. Clean rows are capped, because their
+ * purpose is reassurance — "seeing that 3,412 rows will revert without argument is what
+ * makes the eleven that need attention legible" — and a count does that as well as three
+ * thousand identical rows do, in one line instead of eighty screens.
+ */
+export function rowsToShow(rows: RollbackRow[]): RollbackRow[] {
+  const decisions = rows.filter((row) => row.kind !== "clean");
+  const clean = rows.filter((row) => row.kind === "clean");
+
+  return [...decisions, ...clean.slice(0, Math.max(0, ROWS_PER_VIEW - decisions.length))];
+}
+
 export function RollbackReportTable({ rows }: { rows: RollbackRow[] }) {
+  const shown = rowsToShow(rows);
+
   return (
+    <>
     <s-table>
       <s-table-header-row>
         <s-table-header listSlot="primary">Variant</s-table-header>
@@ -34,7 +62,7 @@ export function RollbackReportTable({ rows }: { rows: RollbackRow[] }) {
         <s-table-header listSlot="inline">Keep the edit</s-table-header>
       </s-table-header-row>
       <s-table-body>
-        {rows.map((row) => (
+        {shown.map((row) => (
           <s-table-row key={row.variantGid}>
             <s-table-cell>{row.title}</s-table-cell>
             <s-table-cell>
@@ -57,5 +85,12 @@ export function RollbackReportTable({ rows }: { rows: RollbackRow[] }) {
         ))}
       </s-table-body>
     </s-table>
+    <ShowingSome
+      shown={shown.length}
+      total={rows.length}
+      noun="rows"
+      suffix="The rest are unchanged and revert without argument; the export lists every one."
+    />
+    </>
   );
 }

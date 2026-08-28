@@ -80,6 +80,14 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
   const selectedRunId = requested ?? runs[0]?.id ?? null;
   const ledger = selectedRunId ? await runLedger(shop.id, selectedRunId) : [];
 
+  // How many rows that run wrote in total, so the table can say what it is not showing.
+  // The ledger is capped — `s-table` blanks the page past a few hundred cells — and a
+  // capped table that says nothing reads as the whole record, on the one screen whose
+  // entire job is being the record.
+  const ledgerTotal = selectedRunId
+    ? await prisma.variantChange.count({ where: { shopId: shop.id, runId: selectedRunId } })
+    : 0;
+
   // What that run actually did, as opposed to what the preview said it would. The ledger
   // is the evidence; the preview is the intention, and a partial run is exactly where the
   // two stop agreeing.
@@ -99,6 +107,7 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     preview,
     runs,
     ledger,
+    ledgerTotal,
     result,
     selectedRunId,
     scheduleText,
@@ -249,6 +258,7 @@ export default function CampaignDetail() {
     preview,
     runs,
     ledger,
+    ledgerTotal,
     // Renamed: `result` in this component is the fetcher's reply to the last action,
     // and two different "results" on one page is how the wrong one gets rendered.
     result: runResult,
@@ -300,7 +310,7 @@ export default function CampaignDetail() {
   // One bundle rather than threading twenty props through five components. These are
   // not reusable widgets -- they are this page, split so it can be read.
   const detail = {
-    rollback, practice, preview, runs, ledger, result: runResult, selectedRunId,
+    rollback, practice, preview, runs, ledger, ledgerTotal, result: runResult, selectedRunId,
     scheduleText, timeZone, warnings, autoEnroll, enrollPendingAt, lifecycle, approval,
     state, needsAttention: attention, history, fetcher, busy, canApply, attention,
   } as CampaignDetailProps;

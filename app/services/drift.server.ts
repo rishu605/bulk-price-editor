@@ -20,6 +20,7 @@
 import { createHash } from "node:crypto";
 
 import prisma from "../db.server";
+import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { notify } from "./notifications.server";
 import { formatMinorUnits } from "../lib/money/format";
 import { holdForDrift } from "./campaigns/lifecycle.server";
@@ -191,7 +192,7 @@ export interface DriftRow {
   detectedAt: string;
 }
 
-export async function pendingDrift(shopId: string, limit = 100): Promise<DriftRow[]> {
+export async function pendingDrift(shopId: string, limit = ROWS_PER_VIEW): Promise<DriftRow[]> {
   const events = await prisma.driftEvent.findMany({
     where: { shopId, resolution: "PENDING" },
     orderBy: { detectedAt: "desc" },

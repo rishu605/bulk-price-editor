@@ -40,6 +40,7 @@ import { withGuard } from "../lib/errors/guard.server";
 import prisma from "../db.server";
 import { PageShell } from "../components/PageShell";
 import { formatCount, formatWhen } from "../lib/format/display";
+import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { EmptyState } from "../components/AsyncState";
 import { isCommit } from "../lib/imports/intent";
 import {
@@ -55,7 +56,7 @@ export const loader = withGuard("/app/campaigns/import", async ({ request }: Loa
   const imports = await prisma.priceImport.findMany({
     where: { shopId: shop.id },
     orderBy: { createdAt: "desc" },
-    take: 25,
+    take: ROWS_PER_VIEW,
     select: {
       id: true,
       name: true,

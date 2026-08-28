@@ -11,7 +11,13 @@ import { downloadCsv, filenameSlug } from "../../lib/reporting/csv";
 import { ledgerCsv } from "../../lib/reporting/ledger-csv";
 import type { CampaignDetailProps } from "./props";
 
-export function CampaignLedgerTab({ preview, ledger, fetcher, busy }: CampaignDetailProps) {
+export function CampaignLedgerTab({
+  preview,
+  ledger,
+  ledgerTotal,
+  fetcher,
+  busy,
+}: CampaignDetailProps) {
   return (
     <>
       {ledger.length > 0 ? (
@@ -42,6 +48,7 @@ export function CampaignLedgerTab({ preview, ledger, fetcher, busy }: CampaignDe
 
           <LedgerTable
             rows={ledger}
+            total={ledgerTotal}
             renderAction={(row) =>
               // Only rows this campaign actually wrote. Offering to revert a row that
               // failed or was skipped would promise to undo something that never

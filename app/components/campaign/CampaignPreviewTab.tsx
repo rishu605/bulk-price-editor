@@ -27,33 +27,15 @@ import { PreviewTable } from "../../components/PreviewTable";
 import { downloadCsv, filenameSlug } from "../../lib/reporting/csv";
 import { previewCsv } from "../../lib/reporting/preview-csv";
 import { ActionRow } from "../ActionRow";
-import { JumpTo } from "../JumpTo";
 import type { CampaignDetailProps } from "./props";
 
 export function CampaignPreviewTab({ preview, approval, fetcher, busy }: CampaignDetailProps) {
-  // Built from what this campaign has, not from what the tab could show. A jump to a
-  // margins block that is not on the page is a control that does nothing, which is the
-  // defect this row was fixed for.
-  const targets = [
-    approval.required ? { id: "approval", label: "Approval" } : null,
-    { id: "preview", label: "Preview" },
-    preview.margin ? { id: "margins", label: "Margins" } : null,
-    preview.markets.length > 0 ? { id: "markets", label: "Markets" } : null,
-  ].filter((target) => target !== null);
 
   return (
     <>
-      {/* Only when there is somewhere to go. Two chips under a tab bar is furniture; the
-          case this earns is the one where a merchant wants the margins and has a preview
-          table of up to five hundred rows between them and it.
-
-          Chips rather than anything text-shaped matters more here than anywhere: this
-          renders directly beneath the campaign's tab bar, and a second row of labels
-          would read as two tab bars disagreeing about which tab is current. */}
-      {targets.length > 2 ? <JumpTo label="Preview sections" targets={targets} /> : null}
 
       {approval.required ? (
-        <s-section id="approval" heading="Approval">
+        <s-section heading="Approval">
           <s-paragraph>
             <s-text>
               {approval.state === "approved"
@@ -96,7 +78,7 @@ export function CampaignPreviewTab({ preview, approval, fetcher, busy }: Campaig
         </s-section>
       ) : null}
 
-      <s-section id="preview" heading="Preview">
+      <s-section heading="Preview">
         <CountsRow
           items={[
             { label: "Will change", value: preview.counts.planned },
@@ -121,7 +103,11 @@ export function CampaignPreviewTab({ preview, approval, fetcher, busy }: Campaig
           </s-banner>
         ) : null}
 
-        <PreviewTable rows={preview.rows} markets={preview.markets} />
+        <PreviewTable
+          rows={preview.rows}
+          markets={preview.markets}
+          total={preview.counts.planned}
+        />
 
         <ActionRow>
           <s-button
@@ -141,7 +127,7 @@ export function CampaignPreviewTab({ preview, approval, fetcher, busy }: Campaig
       </s-section>
 
       {preview.margin ? (
-        <s-section id="margins" heading="What this does to your margins">
+        <s-section heading="What this does to your margins">
           <s-paragraph>
             <s-text>{preview.margin.summary}</s-text>
           </s-paragraph>
@@ -188,7 +174,7 @@ export function CampaignPreviewTab({ preview, approval, fetcher, busy }: Campaig
       ) : null}
 
       {preview.markets.length > 0 ? (
-        <s-section id="markets" heading="Markets">
+        <s-section heading="Markets">
           <s-paragraph>
             <s-text>
               Each market is priced from its own normal price in its own currency,
