@@ -48,7 +48,16 @@ export function Field({
   width: keyof typeof FIELD;
   children: ReactNode;
 }) {
-  return <s-box maxInlineSize={FIELD[width]}>{children}</s-box>;
+  // `inlineSize`, not `maxInlineSize`. A maximum is only a ceiling, and in an inline
+  // stack — which is exactly where Diagnostics needs this — the box shrinks to its
+  // content instead, so an empty text field rendered 68px wide. A definite width with
+  // `maxInlineSize="100%"` gives the field its size and still lets it shrink below that
+  // on a narrow container rather than overflowing.
+  return (
+    <s-box inlineSize={FIELD[width]} maxInlineSize="100%">
+      {children}
+    </s-box>
+  );
 }
 
 /**

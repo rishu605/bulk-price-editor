@@ -178,3 +178,32 @@ screen, and had nothing behind them. `help-note.test.tsx` now pins the `command`
 Polaris *docs* omit it, and the Polaris *runtime* requires it. When a Polaris control does
 nothing, read the minified source at `https://cdn.shopify.com/shopifycloud/polaris.js` —
 it is one grep away and it is the only account of the behaviour that is actually true.
+
+## `s-table` can fall back to its stacked list, and a sibling can cause it
+
+The Plans table on `/app/settings/plan` rendered as a normal grid — Plan · Price · Variants
+· Markets · Wholesale · Trial — until its section was rearranged. Afterwards, on the same
+viewport, it rendered as `s-table`'s **stacked list**: one block per row, headers gone,
+values as label/value pairs, and the Trial value orphaned with no label at all.
+
+Nothing about the table changed. What changed around it, in one commit:
+
+- an `s-stack` was added as the section's first child, before the paragraph and table;
+- a bare `s-heading` and two paragraphs were added *after* the table, inside the same
+  section, replacing a separate section.
+
+Reverting both restored the grid. **Which of the two did it is not established** — they
+shipped together and each verification round costs a deploy — so the honest statement is
+the shape, not the mechanism:
+
+> A section that contains an `s-table` should contain the table and prose. Introducing
+> other layout components as its siblings can change how the table measures itself, and
+> the failure is silent: no error, no warning, and a stacked list is a legitimate
+> rendering that looks like a deliberate choice on a narrow screen.
+
+Related, and already known: `s-table` decides grid-versus-list for itself and there is no
+prop to force either. See the cell budget note above.
+
+If this needs pinning down, the cheap experiment is to add back one of the two and look —
+not to reason about it. Layout only runs in the browser, and none of the 2200 tests in this
+repo can see it.
