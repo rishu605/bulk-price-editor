@@ -86,16 +86,21 @@ export function HelpNote({ label, children }: { label: string; children: ReactNo
         {label}
       </s-button>
 
-      {/* `inlineSize`, not `maxInlineSize`. A maximum is a ceiling the popover never
-          reached: with nothing setting a width it sized to its content, and content that
-          is three paragraphs of prose wants the whole page — so the overlay opened a
-          metre wide, over the table, which is the opposite of a note.
+      {/* The width goes on the box, not on the overlay, and that is not a style choice.
+          `maxInlineSize` on the popover did nothing — a ceiling it never reached, so it
+          sized to its content and three paragraphs of prose opened a metre wide over the
+          table. Setting `inlineSize` on the popover did fix that, and took every
+          `s-table` in the app down with it: the catalogue and the plans table both fell
+          back to `s-table`'s stacked list, on pages whose tables had not been touched.
+          The Polaris bundle was byte-identical across the two deploys, and the one page
+          with a table and no note rendered normally, so the overlay was the difference.
 
-          Pixels because Polaris types these as px, % or 0 only. 320 is a column of prose:
-          wide enough not to hyphenate, narrow enough that the eye reads it as an aside
-          rather than as the page having changed. */}
-      <s-popover id={id} inlineSize="320px">
-        <s-box padding={PAD.card}>
+          Sizing the content instead gets the same 320px column — the popover shrink-wraps
+          the box — without putting a definite size on the overlay element. Written up in
+          `docs/polaris-notes.md`. Do not move this attribute up onto the `s-popover`
+          without loading a page that has a table on it. */}
+      <s-popover id={id}>
+        <s-box padding={PAD.card} inlineSize="320px" maxInlineSize="100%">
           <s-stack gap={SPACE.section}>{children}</s-stack>
         </s-box>
       </s-popover>

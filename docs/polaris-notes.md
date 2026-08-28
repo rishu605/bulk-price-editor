@@ -179,7 +179,7 @@ Polaris *docs* omit it, and the Polaris *runtime* requires it. When a Polaris co
 nothing, read the minified source at `https://cdn.shopify.com/shopifycloud/polaris.js` —
 it is one grep away and it is the only account of the behaviour that is actually true.
 
-## `s-table` can fall back to its stacked list, and a sibling can cause it
+## `s-table` can fall back to its stacked list — **see the correction below**
 
 The Plans table on `/app/settings/plan` rendered as a normal grid — Plan · Price · Variants
 · Markets · Wholesale · Trial — until its section was rearranged. Afterwards, on the same
@@ -207,3 +207,34 @@ prop to force either. See the cell budget note above.
 If this needs pinning down, the cheap experiment is to add back one of the two and look —
 not to reason about it. Layout only runs in the browser, and none of the 2200 tests in this
 repo can see it.
+
+## Correction: what actually broke `s-table`
+
+The note above blamed a section's siblings. That was wrong, and reverting them did not
+bring the tables back — worth leaving on the page, because the wrong answer was reached by
+reasoning about one observation and the right one by taking a second.
+
+The real cause was `inlineSize` on an **`s-popover`**, added to stop the help notes opening
+a metre wide. Every page carrying a `HelpNote` had its `s-table` fall back to the stacked
+list — the catalogue and the plans table both, on tables nobody had touched. The evidence
+that settles it:
+
+- `https://cdn.shopify.com/shopifycloud/polaris.js` was **byte-identical** across the two
+  deploys, so it was not Shopify changing under us;
+- `/app/prices/costs`, the one page with a table and no note, rendered normally;
+- the popover was the only change common to both broken pages.
+
+**Size the popover's content, not the popover.** It shrink-wraps its box, so
+`<s-box inlineSize="320px">` inside gives the same column with no definite size on the
+overlay element:
+
+```tsx
+<s-popover id={id}>
+  <s-box padding="base" inlineSize="320px" maxInlineSize="100%">…</s-box>
+</s-popover>
+```
+
+The general lesson is the one this file keeps re-learning: **an overlay is not free of the
+page**. A Polaris overlay participates in its container enough to change what a sibling
+measures, and every symptom of that is a silent, legitimate-looking rendering somewhere
+else entirely.
