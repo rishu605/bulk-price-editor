@@ -1,6 +1,6 @@
 # What drift means
 
-![The drift page with nothing to review: a single line reading "No drift detected. Prices set by your campaigns are still in place.", beside a panel explaining what Adopt, Reassert and Ignore each do.](../images/drift-empty.png)
+![The drift page with nothing to review: a heading reading "No drift detected", beside a panel explaining what each of the three choices does.](../images/drift-empty.png)
 
 **Drift** is when a price on your storefront is not what this app last wrote.
 
@@ -19,11 +19,24 @@ So drift is surfaced and you decide.
 
 ## What to do about it
 
-On the **What is live** page, anything drifted is flagged with both numbers: what we wrote
-and what is there now.
+Every drifted price waits for you on **Prices → Drift**, with both numbers side by side:
+what the campaign set, and what the storefront shows now. Anything drifted is flagged on
+the **What is live** page too.
 
-- **Keep the change** — the app adopts the new price and stops flagging it.
-- **Put it back** — the app rewrites what the campaign says it should be.
+There are three answers, and the first is the only one that changes anything permanently:
+
+- **Keep the change** — the new price becomes the baseline. Use it when the edit was a
+  permanent repricing: every future campaign computes its discount from this number
+  instead of the old one. This is the one worth being sure about, and it is the only one
+  the page marks as consequential.
+- **Put it back** — the campaign rewrites its own price on the next run. Use it when the
+  edit was a mistake.
+- **Leave it for now** — nothing changes and the alert closes. The baseline is untouched,
+  so the next campaign still computes from the old price and the edit stands until
+  something else changes it.
+
+Nothing is decided for you and nothing expires: a price stays on this page until you
+answer.
 
 When you revert a campaign, drifted products are listed separately with a tick box, so
 ending a sale never silently discards a price you set on purpose.

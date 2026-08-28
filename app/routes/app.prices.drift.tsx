@@ -1,14 +1,27 @@
-import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
+import type { ComponentProps } from "react";
+import { useRef } from "react";
+import type {
+  ActionFunctionArgs,
+  FetcherWithComponents,
+  HeadersFunction,
+  LoaderFunctionArgs,
+} from "react-router";
 import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
-import { pendingDrift, resolveDrift, type DriftResolution } from "../services/drift.server";
+import {
+  pendingDrift,
+  resolveDrift,
+  type DriftResolution,
+  type DriftRow,
+} from "../services/drift.server";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
 import { EmptyState } from "../components/AsyncState";
+import { ActionRow } from "../components/ActionRow";
 
 export const loader = withGuard("/app/prices/drift", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -77,27 +90,7 @@ export default function DriftQueue() {
               </s-table-header-row>
               <s-table-body>
                 {events.map((event) => (
-                  <s-table-row key={event.id}>
-                    <s-table-cell>{event.title}</s-table-cell>
-                    <s-table-cell>{event.expected ?? "—"}</s-table-cell>
-                    <s-table-cell>
-                      <s-badge tone="warning">{event.observed ?? "—"}</s-badge>
-                    </s-table-cell>
-                    <s-table-cell>{event.campaignName ?? "—"}</s-table-cell>
-                    <s-table-cell>
-                      <s-stack direction="inline" gap="small">
-                        {(["adopt", "reassert", "ignore"] as const).map((resolution) => (
-                          <fetcher.Form method="post" key={resolution}>
-                            <input type="hidden" name="eventId" value={event.id} />
-                            <input type="hidden" name="resolution" value={resolution} />
-                            <s-button type="submit" loading={busy || undefined}>
-                              {resolution}
-                            </s-button>
-                          </fetcher.Form>
-                        ))}
-                      </s-stack>
-                    </s-table-cell>
-                  </s-table-row>
+                  <DriftDecision key={event.id} event={event} fetcher={fetcher} busy={busy} />
                 ))}
               </s-table-body>
             </s-table>
@@ -107,20 +100,21 @@ export default function DriftQueue() {
 
       <s-section slot="aside" heading="What the three choices do">
         <s-paragraph>
-          <strong>Adopt</strong> makes the new price the baseline. Use it when the edit
-          was a permanent repricing — every future campaign will compute from it.
+          <strong>Keep the change</strong> makes the new price the baseline. Use it when
+          the edit was a permanent repricing — every future campaign will compute from it.
         </s-paragraph>
         <s-paragraph>
-          <strong>Reassert</strong> puts the campaign price back on the next run. Use it
-          when the edit was a mistake.
+          <strong>Put it back</strong> rewrites the campaign price on the next run. Use
+          it when the edit was a mistake.
         </s-paragraph>
         <s-paragraph>
-          <strong>Ignore</strong> leaves the price alone this time and closes the alert.
+          <strong>Leave it for now</strong> changes nothing and closes this alert. The
+          baseline is untouched, so the next campaign still computes from the old price.
         </s-paragraph>
         <s-paragraph>
           <s-text>
-            Only adopt changes what future campaigns compute from, so it is the one
-            worth being sure about.
+            Only the first of those changes what future campaigns compute from, which is
+            why it is the one marked as consequential.
           </s-text>
         </s-paragraph>
       </s-section>
@@ -135,3 +129,97 @@ export function ErrorBoundary() {
 export const headers: HeadersFunction = (headersArgs) => {
   return boundary.headers(headersArgs);
 };
+
+/**
+ * The three decisions, in the words the help centre already uses for them.
+ *
+ * They were rendered straight out of the enum — `adopt` `reassert` `ignore`, lower case,
+ * on the page whose entire job is a considered choice about somebody's storefront.
+ * `docs/help/concepts/drift.md` has had merchant wording for two of them since before
+ * this page existed; the page and the documentation of the page had never been read next
+ * to each other.
+ *
+ * `tone` is doing real work in the third field rather than decorating. The aside says
+ * only one of the three changes what future campaigns compute from, and until now the
+ * page rendered all three identically while the panel beside it explained that one of
+ * them was different. It is the same treatment Revert carries on a campaign, which is
+ * also less destruction than a decision worth being sure about.
+ */
+const RESOLUTIONS = [
+  { value: "adopt", label: "Keep the change", tone: "critical" },
+  { value: "reassert", label: "Put it back", tone: "auto" },
+  { value: "ignore", label: "Leave it for now", tone: "auto" },
+] as const satisfies readonly {
+  value: DriftResolution;
+  label: string;
+  tone: ComponentProps<"s-button">["tone"];
+}[];
+
+/**
+ * One drifted price, and the choice about it.
+ *
+ * Named for the decision rather than the row, so it does not collide with the
+ * `DriftRow` the service returns — one is what we know, the other is what to do.
+ *
+ * Its own component so that the row can own a ref. `s-button` takes no `name` or `value`,
+ * so the app's pattern for a form with several submits is a hidden field the buttons set
+ * before submitting — which needs a ref, and a ref created inside a `.map()` is a new ref
+ * on every render.
+ *
+ * Worth the component rather than the three separate `fetcher.Form`s it replaces. Three
+ * forms in one cell is three elements laying themselves out independently, and they
+ * carried `gap="small"` — which the spacing scale documents as *larger* than `small-100`,
+ * so the three halves of one decision sat further apart than the parts of any other row
+ * in the app.
+ */
+function DriftDecision({
+  event,
+  fetcher,
+  busy,
+}: {
+  event: DriftRow;
+  fetcher: FetcherWithComponents<ActionData>;
+  busy: boolean;
+}) {
+  const form = useRef<HTMLFormElement>(null);
+  const resolution = useRef<HTMLInputElement>(null);
+
+  const resolve = (value: DriftResolution) => {
+    if (resolution.current) resolution.current.value = value;
+    form.current?.requestSubmit();
+  };
+
+  return (
+    <s-table-row>
+      <s-table-cell>{event.title}</s-table-cell>
+      <s-table-cell>{event.expected ?? "—"}</s-table-cell>
+      {/* Was a warning badge wrapped round the price. A badge is a status and a price is
+          a value, so the column could not align with the one beside it and the number a
+          merchant came here to compare rendered as a label. Every row on this page is
+          drift; the page says so once, at the top, rather than once per row. */}
+      <s-table-cell>{event.observed ?? "—"}</s-table-cell>
+      <s-table-cell>{event.campaignName ?? "—"}</s-table-cell>
+      <s-table-cell>
+        <fetcher.Form method="post" ref={form}>
+          <input type="hidden" name="eventId" value={event.id} />
+          {/* Defaults to the choice that changes nothing. A missing or unrecognised
+              intent should fall safe, the way the imports' dry run does. */}
+          <input type="hidden" name="resolution" ref={resolution} value="ignore" readOnly />
+          <ActionRow>
+            {RESOLUTIONS.map((choice) => (
+              <s-button
+                key={choice.value}
+                type="button"
+                tone={choice.tone}
+                loading={busy || undefined}
+                onClick={() => resolve(choice.value)}
+              >
+                {choice.label}
+              </s-button>
+            ))}
+          </ActionRow>
+        </fetcher.Form>
+      </s-table-cell>
+    </s-table-row>
+  );
+}

@@ -16,7 +16,7 @@
  */
 
 import { humanise } from "../lib/format/label";
-import { formatWhen } from "../lib/format/display";
+import { formatCount, formatWhen } from "../lib/format/display";
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useLoaderData, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -25,6 +25,7 @@ import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
 import { baselineHistory, browseBaselines } from "../services/baseline-browser.server";
 import { BaselineTable } from "../components/BaselineTable";
+import { ActionRow } from "../components/ActionRow";
 import { EmptyState, NoMatches } from "../components/AsyncState";
 import { clearedSearch } from "../components/FilterForm";
 import { VariantSearch } from "../components/prices/VariantSearch";
@@ -34,6 +35,7 @@ import { downloadCsv } from "../lib/reporting/csv";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
+import { SPACE } from "../lib/ui/spacing";
 
 const FILTER_FIELDS = ["q", "vendor", "source", "diverged", "variant"] as const;
 
@@ -80,13 +82,16 @@ export default function Baselines() {
   return (
     <PageShell heading="Baselines">
       <s-section>
-        <VariantSearch
-          fields={FILTER_FIELDS}
-          query={filters.q ?? ""}
-          label="Title, SKU or variant ID"
-          direction="block"
-        >
-
+        {/* The card's blocks at section rhythm. It was set nowhere, so they ran together:
+            the count landed directly under the Search button, close enough to read as a
+            caption on the control above it rather than as the size of what came back. */}
+        <s-stack direction="block" gap={SPACE.section}>
+          <VariantSearch
+            fields={FILTER_FIELDS}
+            query={filters.q ?? ""}
+            label="Title, SKU or variant ID"
+            direction="block"
+          >
             <s-select name="vendor" label="Vendor">
               <s-option value="" defaultSelected={!filters.vendor}>
                 Any vendor
@@ -113,53 +118,57 @@ export default function Baselines() {
                 a column sized for a select leaves it stranded in white space. */}
             <s-grid-item gridColumn="span 3">
               <s-checkbox
-              name="diverged"
-              value="1"
-              label="Only variants whose live price differs from their baseline"
-              checked={filters.divergedOnly || undefined}
-            />
+                name="diverged"
+                value="1"
+                label="Only variants whose live price differs from their baseline"
+                checked={filters.divergedOnly || undefined}
+              />
             </s-grid-item>
+          </VariantSearch>
 
-        </VariantSearch>
-
-        {rows.length === 0 ? (
-          filtered ? (
-            <NoMatches
-              noun="baselines"
-              description="A baseline is the reference price every campaign computes from — captured at install, or imported from your own list."
-              clearHref={clearedSearch(params, FILTER_FIELDS)}
-            />
+          {rows.length === 0 ? (
+            filtered ? (
+              <NoMatches
+                noun="baselines"
+                description="A baseline is the reference price every campaign computes from — captured at install, or imported from your own list."
+                clearHref={clearedSearch(params, FILTER_FIELDS)}
+              />
+            ) : (
+              <EmptyState
+                title="No baselines captured yet"
+                description="A baseline is the reference price every campaign computes from, which is what stops a second sale discounting the first one's price. Syncing your catalogue captures one for every variant."
+                action={{ label: "Sync your catalogue", href: "/app" }}
+              />
+            )
           ) : (
-            <EmptyState
-              title="No baselines captured yet"
-              description="A baseline is the reference price every campaign computes from, which is what stops a second sale discounting the first one's price. Syncing your catalogue captures one for every variant."
-              action={{ label: "Sync your catalogue", href: "/app" }}
-            />
-          )
-        ) : (
-          <>
-            <s-paragraph>
-              <s-text>
-                {total} variants
-              </s-text>
-            </s-paragraph>
+            <>
+              {/* The count and the export on one baseline, at item rhythm, because the
+                  count is exactly what the export exports — saying that on one line is the
+                  whole relationship between the two controls. Stacked, as they were, the
+                  button read as belonging to the sentence above it. */}
+              <ActionRow>
+                <s-text fontVariantNumeric="tabular-nums">
+                  {formatCount(total)} {total === 1 ? "baseline" : "baselines"}
+                </s-text>
+                {/* Exports what the filters currently show, not the whole catalogue. A
+                    merchant who narrowed to one vendor means that vendor, and handing them
+                    500K rows instead is not being generous. */}
+                <s-button
+                  type="button"
+                  variant="tertiary"
+                  icon="download"
+                  onClick={() => downloadCsv("anchor-baselines.csv", baselinesCsv(rows))}
+                >
+                  Export these (CSV)
+                </s-button>
+              </ActionRow>
 
-            {/* Exports what the filters currently show, not the whole catalogue. A
-                merchant who narrowed to one vendor means that vendor, and handing them
-                500K rows instead is not being generous. */}
-            <s-button
-              type="button"
-              variant="tertiary"
-              onClick={() => downloadCsv("anchor-baselines.csv", baselinesCsv(rows))}
-            >
-              Export these baselines (CSV)
-            </s-button>
+              <BaselineTable rows={rows} onShowHistory={show} />
 
-            <BaselineTable rows={rows} onShowHistory={show} />
-
-            <Pagination page={page} total={total} pageSize={25} noun="baselines" />
-          </>
-        )}
+              <Pagination page={page} total={total} pageSize={25} noun="baselines" />
+            </>
+          )}
+        </s-stack>
       </s-section>
 
       {variantGid && history.length > 0 ? (
