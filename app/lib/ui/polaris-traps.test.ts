@@ -80,6 +80,56 @@ describe("s-button is never given name or value", () => {
   });
 });
 
+/**
+ * The nav menu's links are app routes, not links.
+ *
+ * Shopify's documentation for `s-app-nav` is explicit: an item's `href` "must be a
+ * relative path within your app", and clicking one "navigates the app to this route
+ * without a full page reload". Nothing in the contract mentions `target`.
+ *
+ * The Help item was an absolute URL to the help centre, with `target="_blank"` on it in
+ * the belief that a relative path would resolve against admin.shopify.com. App Bridge
+ * navigated the embedded frame to it instead — a full load of a non-embedded page, which
+ * takes `host`, `id_token` and `shop` with it, and App Bridge with them. Every nav item
+ * in the admin went inert from that point on: not an error, not a blank page, just
+ * clicks that did nothing.
+ *
+ * It is the session loss the native-form test above guards, reached through a link. This
+ * catches the link.
+ */
+describe("every app nav item is a path inside the app", () => {
+  const layout = readFileSync(join(ROOT, "app/routes/app.tsx"), "utf8");
+
+  const hrefs = (() => {
+    const nav = /<s-app-nav>([\s\S]*?)<\/s-app-nav>/.exec(layout);
+    expect(nav, "the app nav is no longer in app/routes/app.tsx").not.toBeNull();
+
+    return [...nav![1].matchAll(/<s-link[^>]*\shref=(?:"([^"]*)"|\{([^}]*)\})/g)].map(
+      (match) => match[1] ?? match[2],
+    );
+  })();
+
+  it("finds the nav items, so it cannot pass by checking nothing", () => {
+    expect(hrefs.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it.each(hrefs)("%s is a relative path under /app", (href) => {
+    // An expression rather than a literal is the shape the broken one had: the absolute
+    // base came from a loader, so nothing about the JSX looked wrong.
+    expect(href.startsWith("/app"), `${href} is not a path inside the app`).toBe(true);
+  });
+
+  /**
+   * `target` on a nav item is not honoured, and believing it is was half of the bug: it
+   * reads as "this one opens elsewhere" while the element navigates the frame anyway.
+   */
+  it("asks for no new tabs, which the element does not give", () => {
+    const nav = /<s-app-nav>([\s\S]*?)<\/s-app-nav>/.exec(layout)![1];
+
+    expect(nav).not.toContain("target=");
+  });
+});
+
 describe("no native form on an embedded surface", () => {
   /**
    * A plain `<form>`, GET or POST, does a full navigation that wipes App Bridge's `host`,
