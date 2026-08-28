@@ -300,10 +300,30 @@ describe("pages that can lose typed work", () => {
     "app.imports.costs.tsx",
   ];
 
-  it("guard the ones that hold a form worth keeping", () => {
-    const missing = GUARDED.filter(
-      (route) => !readFileSync(join(APP_ROUTES, route), "utf8").includes("<UnsavedChanges"),
+  /**
+   * A route satisfies this by rendering the guard itself, or by rendering the shared
+   * `ImportForm`, which does.
+   *
+   * The indirection is checked rather than assumed: the assertion below pins the guard
+   * inside `ImportForm`, so "route renders ImportForm" is only accepted while ImportForm
+   * is still the thing that guards.
+   */
+  const PROVIDERS = ["<UnsavedChanges", "<ImportForm"];
+
+  it("the shared import form carries the guard the routes delegate to it", () => {
+    const form = readFileSync(
+      join(process.cwd(), "app", "components", "imports", "ImportForm.tsx"),
+      "utf8",
     );
+
+    expect(form).toContain("<UnsavedChanges");
+  });
+
+  it("guard the ones that hold a form worth keeping", () => {
+    const missing = GUARDED.filter((route) => {
+      const source = readFileSync(join(APP_ROUTES, route), "utf8");
+      return !PROVIDERS.some((provider) => source.includes(provider));
+    });
 
     expect(missing, "these can discard a filled-in form on any navigation").toEqual([]);
   });

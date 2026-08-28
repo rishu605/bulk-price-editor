@@ -8,6 +8,7 @@
  * watches products join it unreviewed.
  */
 
+import { useState } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -26,6 +27,9 @@ import { withGuard } from "../lib/errors/guard.server";
 import { reportError } from "../services/error-report.server";
 import { PageShell } from "../components/PageShell";
 import { EmptyState } from "../components/AsyncState";
+import { ActionRow } from "../components/ActionRow";
+import { FieldGrid, FullRow } from "../components/FieldGrid";
+import { SPACE } from "../lib/ui/spacing";
 
 export const loader = withGuard("/app/settings/segments", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -216,86 +220,7 @@ export default function Segments() {
         )}
       </s-section>
 
-      <s-section heading="New segment from a filter">
-        <fetcher.Form method="post">
-          <input type="hidden" name="intent" value="create-filter" />
-          <s-stack gap="base">
-            <s-text-field name="name" label="Name" placeholder="Summer collection" required />
-
-            <s-select name="collection" label="Collection">
-              <s-option value="" defaultSelected>
-                Any collection
-              </s-option>
-              {available.collections.map((c) => (
-                <s-option key={c} value={c}>
-                  {c}
-                </s-option>
-              ))}
-            </s-select>
-
-            <s-select name="tag" label="Tag">
-              <s-option value="" defaultSelected>
-                Any tag
-              </s-option>
-              {available.tags.map((t) => (
-                <s-option key={t} value={t}>
-                  {t}
-                </s-option>
-              ))}
-            </s-select>
-
-            <s-select name="vendor" label="Vendor">
-              <s-option value="" defaultSelected>
-                Any vendor
-              </s-option>
-              {available.vendors.map((v) => (
-                <s-option key={v} value={v}>
-                  {v}
-                </s-option>
-              ))}
-            </s-select>
-
-            <s-select name="kind" label="How it should behave">
-              <s-option value="DYNAMIC" defaultSelected>
-                Dynamic &mdash; re-check the filter every time
-              </s-option>
-              <s-option value="FROZEN">
-                Frozen &mdash; pin the products it matches right now
-              </s-option>
-            </s-select>
-
-            <s-button type="submit" variant="primary" loading={busy || undefined}>
-              Create segment
-            </s-button>
-          </s-stack>
-        </fetcher.Form>
-      </s-section>
-
-      <s-section heading="New segment from a list">
-        <s-paragraph>
-          <s-text>
-            Paste SKUs, barcodes or Shopify IDs — one per line, or the first column of a
-            CSV. This always makes a frozen segment: you are naming specific products,
-            so the list is pinned to exactly those.
-          </s-text>
-        </s-paragraph>
-        <fetcher.Form method="post">
-          <input type="hidden" name="intent" value="create-from-csv" />
-          <s-stack gap="base">
-            <s-text-field name="name" label="Name" placeholder="Clearance list" required />
-            <s-text-area
-              name="csv"
-              label="SKUs, barcodes or IDs"
-              rows={8}
-              placeholder={"SKU-1\nSKU-2\n9781234567897"}
-              details="One per line. Anything we cannot match is reported rather than skipped."
-            />
-            <s-button type="submit" variant="primary" loading={busy || undefined}>
-              Match and create
-            </s-button>
-          </s-stack>
-        </fetcher.Form>
-      </s-section>
+      <NewSegment available={available} fetcher={fetcher} busy={busy} />
 
       <s-section slot="aside" heading="Dynamic or frozen">
         <s-paragraph>
@@ -322,6 +247,158 @@ export default function Segments() {
         </s-paragraph>
       </s-section>
     </PageShell>
+  );
+}
+
+/**
+ * Making a segment, as one decision instead of two cards.
+ *
+ * There were two sibling sections — "New segment from a filter" and "New segment from a
+ * list" — each ending in its own black `variant="primary"` button. A merchant reading
+ * down the page met two equally loud answers to "make a segment" and had to read both
+ * cards to discover they differ only in *how the products are named*. Two black buttons
+ * is the failure `ActionRow` names, spread across two cards so that neither card broke
+ * the rule on its own.
+ *
+ * One card, one name field, and a choice. `s-choice-list` is what a choice between two
+ * mutually exclusive things is — one of the components the epic noted the app had never
+ * used, and this is the case it is for.
+ *
+ * ## Why the behaviour select disappears for a list
+ *
+ * A pasted list of SKUs is always frozen: naming specific products *is* pinning them, and
+ * there is no filter left to re-check. The old CSV card knew that and said so in a
+ * sentence; showing a Dynamic/Frozen select that only applies to one branch would offer a
+ * choice that is not there.
+ */
+function NewSegment({
+  available,
+  fetcher,
+  busy,
+}: {
+  available: { collections: string[]; tags: string[]; vendors: string[] };
+  fetcher: ReturnType<typeof useFetcher<ActionData>>;
+  busy: boolean;
+}) {
+  const [how, setHow] = useState<"filter" | "list">("filter");
+
+  return (
+    <s-section heading="New segment">
+      <fetcher.Form method="post">
+        {/* The two branches were two intents on two forms. One form, and the intent
+            follows the choice — so the name field cannot be filled in on one card and
+            submitted from the other. */}
+        <input
+          type="hidden"
+          name="intent"
+          value={how === "filter" ? "create-filter" : "create-from-csv"}
+        />
+
+        <s-stack gap={SPACE.section}>
+          <FieldGrid>
+            <FullRow>
+              <s-text-field name="name" label="Name" placeholder="Summer collection" required />
+            </FullRow>
+
+            <FullRow>
+              {/* Uncontrolled, like every other field in this app: `defaultSelected` on
+                  the choice, and the state here only decides which fields to render
+                  underneath. Driving the selection from React state as well would put two
+                  owners on one value, and `docs/polaris-notes.md` records what happens
+                  when a Polaris component's own value handling is fought — it wins
+                  quietly. */}
+              <s-choice-list
+                name="how"
+                label="Which products"
+                onChange={(event) =>
+                  setHow(event.currentTarget.values?.includes("list") ? "list" : "filter")
+                }
+              >
+                {/* The supporting line is a slot, not a prop. `s-choice` is one of the
+                    components whose React types `Omit` their `details`, because it is
+                    `ComponentChildren` rather than a string — passing it as an attribute
+                    compiles nowhere and renders nothing. */}
+                <s-choice value="filter" defaultSelected>
+                  Everything matching a filter
+                  <s-text slot="details" color="subdued">
+                    Collection, tag or vendor.
+                  </s-text>
+                </s-choice>
+                <s-choice value="list">
+                  A list of products I name
+                  <s-text slot="details" color="subdued">
+                    SKUs, barcodes or Shopify IDs you paste. Always frozen — you are
+                    naming specific products, so the list is pinned to exactly those.
+                  </s-text>
+                </s-choice>
+              </s-choice-list>
+            </FullRow>
+
+            {how === "filter" ? (
+              <>
+                <s-select name="collection" label="Collection">
+                  <s-option value="" defaultSelected>
+                    Any collection
+                  </s-option>
+                  {available.collections.map((c) => (
+                    <s-option key={c} value={c}>
+                      {c}
+                    </s-option>
+                  ))}
+                </s-select>
+
+                <s-select name="tag" label="Tag">
+                  <s-option value="" defaultSelected>
+                    Any tag
+                  </s-option>
+                  {available.tags.map((t) => (
+                    <s-option key={t} value={t}>
+                      {t}
+                    </s-option>
+                  ))}
+                </s-select>
+
+                <s-select name="vendor" label="Vendor">
+                  <s-option value="" defaultSelected>
+                    Any vendor
+                  </s-option>
+                  {available.vendors.map((v) => (
+                    <s-option key={v} value={v}>
+                      {v}
+                    </s-option>
+                  ))}
+                </s-select>
+
+                <s-select name="kind" label="How it should behave">
+                  <s-option value="DYNAMIC" defaultSelected>
+                    Dynamic &mdash; re-check the filter every time
+                  </s-option>
+                  <s-option value="FROZEN">
+                    Frozen &mdash; pin the products it matches right now
+                  </s-option>
+                </s-select>
+              </>
+            ) : (
+              <FullRow>
+                <s-text-area
+                  name="csv"
+                  label="SKUs, barcodes or IDs"
+                  rows={8}
+                  placeholder={"SKU-1\nSKU-2\n9781234567897"}
+                  details="One per line, or the first column of a CSV. Anything we cannot match is reported rather than skipped."
+                />
+              </FullRow>
+            )}
+          </FieldGrid>
+
+          <ActionRow>
+            <s-button type="submit" variant="primary" loading={busy || undefined}>
+              Create segment
+            </s-button>
+          </ActionRow>
+        </s-stack>
+      </fetcher.Form>
+    </s-section>
   );
 }
 

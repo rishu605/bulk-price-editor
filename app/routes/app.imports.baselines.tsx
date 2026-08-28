@@ -10,9 +10,7 @@
  * so reviewing before writing is the normal path rather than the careful one.
  */
 
-import { humanise } from "../lib/format/label";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useRef } from "react";
 import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
@@ -21,16 +19,18 @@ import { ensureShop } from "../services/shop.server";
 import { shopCurrency } from "../services/settings.server";
 import { importBaselines, type BaselineImportResult } from "../services/baseline-import.server";
 import { importErrorCsv } from "../lib/reporting/baseline-errors";
-import { downloadCsv } from "../lib/reporting/csv";
 import { linesOf } from "../lib/reporting/lines";
 import { actorFor } from "../lib/audit/actor";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { reportError } from "../services/error-report.server";
 import { PageShell } from "../components/PageShell";
-import { EmptyState } from "../components/AsyncState";
-import { UnsavedChanges } from "../components/UnsavedChanges";
-import { CsvDropZone } from "../components/imports/CsvDropZone";
+import { formatCount } from "../lib/format/display";
+import {
+  ImportForm,
+  ImportReport,
+  type ImportProblem,
+} from "../components/imports/ImportForm";
 
 export const loader = withGuard("/app/imports/baselines", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -81,23 +81,16 @@ export default function ImportBaselines() {
   const data = fetcher.data;
   const result = data?.result;
 
-  const form = useRef<HTMLFormElement>(null);
-  const intent = useRef<HTMLInputElement>(null);
-
-  const submitWith = (value: string) => {
-    if (intent.current) intent.current.value = value;
-    form.current?.requestSubmit();
-  };
+  const problems: ImportProblem[] = result
+    ? [
+        ...result.invalid.map((p) => ({ ...p, kind: "Will not parse" })),
+        ...result.unmatched.map((p) => ({ ...p, kind: "No match" })),
+        ...result.ambiguous.map((p) => ({ ...p, kind: "Matches several" })),
+      ].sort((a, b) => a.line - b.line)
+    : [];
 
   return (
     <PageShell heading="Import baselines">
-      {/* A pasted CSV can be fifty thousand rows, and none of it exists anywhere until
-          the import runs. */}
-      <UnsavedChanges
-        form={form}
-        describe="this import"
-        saved={Boolean(fetcher.data)}
-      />
       {data ? (
         <s-banner tone={data.ok ? "success" : "critical"}>
           <s-paragraph>{data.message}</s-paragraph>
@@ -105,62 +98,51 @@ export default function ImportBaselines() {
         </s-banner>
       ) : null}
 
-      <s-section heading="Your reference prices">
-        <s-paragraph>
-          <s-text>
-            Every campaign computes from a variant&rsquo;s baseline, not from its current
-            price. If you keep an MSRP or list price elsewhere, import it here and
-            &ldquo;20% off&rdquo; will mean 20% off that number — permanently, however
-            many campaigns run in between.
-          </s-text>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>
-            One row per variant: a SKU, barcode or variant ID, then the price. A
-            compare-at and a currency column are optional. Prices are read in {currency}{" "}
-            unless a row says otherwise, and must be plain numbers — 1299.00, not
-            $1,299.00.
-          </s-text>
-        </s-paragraph>
+      <ImportForm
+        heading="Your reference prices"
+        fetcher={fetcher}
+        busy={busy}
+        ready={result?.ready ?? null}
+        commitLabel={(ready) => `Import ${formatCount(ready)} baselines`}
+        placeholder={"Variant SKU,Price\nCH-1,129.00\nCH-2,149.00"}
+        description={
+          <>
+            <s-paragraph>
+              <s-text>
+                Every campaign computes from a variant&rsquo;s baseline, not from its
+                current price. If you keep an MSRP or list price elsewhere, import it here
+                and &ldquo;20% off&rdquo; will mean 20% off that number — permanently,
+                however many campaigns run in between.
+              </s-text>
+            </s-paragraph>
+            <s-paragraph>
+              <s-text>
+                One row per variant: a SKU, barcode or variant ID, then the price. A
+                compare-at and a currency column are optional. Prices are read in{" "}
+                {currency} unless a row says otherwise, and must be plain numbers —
+                1299.00, not $1,299.00.
+              </s-text>
+            </s-paragraph>
+          </>
+        }
+      />
 
-        <fetcher.Form method="post" ref={form}>
-          {/* `s-button` takes no name/value, so the intent rides in a hidden field the
-              buttons set before submitting. One form, because both actions read the
-              same rows and duplicating the textarea would let them drift apart. */}
-          <input type="hidden" name="intent" ref={intent} value="dry-run" readOnly />
-          <s-stack gap="base">
-                        <CsvDropZone target="csv" />
-
-                        <s-text-area
-              name="csv"
-              label="Rows"
-              rows={12}
-              details="One variant per line. Paste straight from a spreadsheet."
-            />
-            <s-stack direction="inline" gap="base">
-              <s-button
-                type="button"
-                variant="primary"
-                loading={busy || undefined}
-                onClick={() => submitWith("dry-run")}
-              >
-                Check the file
-              </s-button>
-              <s-button
-                type="button"
-                tone="critical"
-                loading={busy || undefined}
-                disabled={!result || result.ready === 0 || undefined}
-                onClick={() => submitWith("commit")}
-              >
-                Import {result?.ready ?? 0} baselines
-              </s-button>
-            </s-stack>
-          </s-stack>
-        </fetcher.Form>
-      </s-section>
-
-      {result ? <ImportReport result={result} /> : null}
+      {result ? (
+        <ImportReport
+          heading={result.dryRun ? "What would happen" : "What happened"}
+          counts={[
+            { label: "Rows read", value: result.total },
+            { label: "Ready", value: result.ready },
+            { label: "Already correct", value: result.unchanged },
+            { label: "Need attention", value: problems.length },
+          ]}
+          problems={problems}
+          download={{
+            filename: "baseline-import-errors.csv",
+            csv: () => importErrorCsv(result),
+          }}
+        />
+      ) : null}
 
       <s-section slot="aside" heading="Why this is checked first">
         <s-paragraph>
@@ -179,69 +161,6 @@ export default function ImportBaselines() {
         </s-paragraph>
       </s-section>
     </PageShell>
-  );
-}
-
-function ImportReport({ result }: { result: BaselineImportResult }) {
-  const problems = [
-    ...result.invalid.map((p) => ({ ...p, kind: "Will not parse" })),
-    ...result.unmatched.map((p) => ({ ...p, kind: "No match" })),
-    ...result.ambiguous.map((p) => ({ ...p, kind: "Matches several" })),
-  ].sort((a, b) => a.line - b.line);
-
-  return (
-    <s-section heading={result.dryRun ? "What would happen" : "What happened"}>
-      <s-paragraph>
-        <s-text>
-          {result.total} rows read · {result.ready} ready · {result.unchanged} already
-          correct · {problems.length} need attention
-        </s-text>
-      </s-paragraph>
-
-      {problems.length === 0 ? (
-        <EmptyState
-          title="Every row matched a variant and validated"
-          description="Nothing was left out, so the counts above account for the whole file."
-        />
-      ) : (
-        <>
-          <s-stack direction="inline" gap="base">
-            <s-paragraph>
-              <s-text>
-                These rows were left out. Everything else is unaffected — one bad row
-                never fails the file.
-              </s-text>
-            </s-paragraph>
-            <s-button
-              type="button"
-              variant="tertiary"
-              onClick={() => downloadCsv("baseline-import-errors.csv", importErrorCsv(result))}
-            >
-              Download the list
-            </s-button>
-          </s-stack>
-
-          <s-table>
-            <s-table-header-row>
-              <s-table-header listSlot="kicker" format="numeric">Line</s-table-header>
-              <s-table-header listSlot="primary">Identifier</s-table-header>
-              <s-table-header listSlot="inline">Problem</s-table-header>
-              <s-table-header listSlot="secondary">What to do</s-table-header>
-            </s-table-header-row>
-            <s-table-body>
-              {problems.slice(0, 25).map((problem) => (
-                <s-table-row key={`${problem.line}-${problem.identifier}`}>
-                  <s-table-cell>{problem.line}</s-table-cell>
-                  <s-table-cell>{problem.identifier || "—"}</s-table-cell>
-                  <s-table-cell>{humanise(problem.kind)}</s-table-cell>
-                  <s-table-cell>{problem.reason}</s-table-cell>
-                </s-table-row>
-              ))}
-            </s-table-body>
-          </s-table>
-        </>
-      )}
-    </s-section>
   );
 }
 

@@ -8,7 +8,6 @@
  */
 
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useRef } from "react";
 import { redirect, useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
@@ -27,8 +26,12 @@ import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import prisma from "../db.server";
 import { PageShell } from "../components/PageShell";
-import { UnsavedChanges } from "../components/UnsavedChanges";
-import { CsvDropZone } from "../components/imports/CsvDropZone";
+import { formatCount } from "../lib/format/display";
+import {
+  ImportForm,
+  ImportReport,
+  type ImportProblem,
+} from "../components/imports/ImportForm";
 
 export const loader = withGuard("/app/imports/prices", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -97,95 +100,63 @@ export default function ImportPrices() {
   const busy = fetcher.state !== "idle";
   const result = fetcher.data?.result;
 
-  const form = useRef<HTMLFormElement>(null);
-  const intent = useRef<HTMLInputElement>(null);
-
-  const submitWith = (value: string) => {
-    if (intent.current) intent.current.value = value;
-    form.current?.requestSubmit();
-  };
-
-  const problems = result
-    ? [...result.invalid, ...result.unmatched, ...result.ambiguous, ...result.duplicates]
+  const problems: ImportProblem[] = result
+    ? [
+        ...result.invalid.map((p) => ({ ...p, kind: "Will not parse" })),
+        ...result.unmatched.map((p) => ({ ...p, kind: "No match" })),
+        ...result.ambiguous.map((p) => ({ ...p, kind: "Matches several" })),
+        ...result.duplicates.map((p) => ({ ...p, kind: "Listed twice" })),
+      ].sort((a, b) => a.line - b.line)
     : [];
 
   return (
     <PageShell heading="Import prices">
-      {/* A pasted CSV can be fifty thousand rows, and none of it exists anywhere until
-          the import runs. */}
-      <UnsavedChanges
-        form={form}
-        describe="this import"
-        saved={Boolean(fetcher.data)}
-      />
       {fetcher.data ? (
         <s-banner tone={fetcher.data.ok ? "success" : "critical"}>
           <s-paragraph>{fetcher.data.message}</s-paragraph>
         </s-banner>
       ) : null}
 
-      <s-section heading="Set prices from a spreadsheet">
-        <s-paragraph>
-          <s-text>
-            This creates a campaign rather than changing prices straight away. You get a
-            preview of every product first, your guardrails still apply, and you can undo
-            the whole thing in one click &mdash; none of which a direct import would give
-            you.
-          </s-text>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>
-            One row per variant: a SKU, barcode or variant ID, then the price. Prices are
-            read in {currency} and must be plain numbers. A Matrixify export works as it
-            is.
-          </s-text>
-        </s-paragraph>
+      <ImportForm
+        heading="Set prices from a spreadsheet"
+        fetcher={fetcher}
+        busy={busy}
+        ready={result?.ready ?? null}
+        commitLabel={(ready) => `Create a campaign from ${formatCount(ready)} rows`}
+        placeholder={"Variant SKU,Variant Price\nCH-1,129.00\nCH-2,149.00"}
+        description={
+          <>
+            <s-paragraph>
+              <s-text>
+                This creates a campaign rather than changing prices straight away. You get
+                a preview of every product first, your guardrails still apply, and you can
+                undo the whole thing in one click &mdash; none of which a direct import
+                would give you.
+              </s-text>
+            </s-paragraph>
+            <s-paragraph>
+              <s-text>
+                One row per variant: a SKU, barcode or variant ID, then the price. Prices
+                are read in {currency} and must be plain numbers. A Matrixify export works
+                as it is.
+              </s-text>
+            </s-paragraph>
+          </>
+        }
+      >
+        <s-text-field name="name" label="Call this" value="Imported prices" />
+      </ImportForm>
 
-        <fetcher.Form method="post" ref={form}>
-          <input type="hidden" name="intent" ref={intent} value="dry-run" readOnly />
-          <s-stack gap="base">
-            <s-text-field name="name" label="Call this" value="Imported prices" />
-            <CsvDropZone target="csv" />
-
-            <s-text-area
-              name="csv"
-              label="Rows"
-              rows={12}
-              placeholder={"Variant SKU,Variant Price\nCH-1,129.00\nCH-2,149.00"}
-              details="Paste straight from a spreadsheet."
-            />
-
-            <s-stack direction="inline" gap="base">
-              <s-button
-                type="button"
-                variant="primary"
-                loading={busy || undefined}
-                onClick={() => submitWith("dry-run")}
-              >
-                Check the file
-              </s-button>
-              <s-button
-                type="button"
-                loading={busy || undefined}
-                onClick={() => submitWith("commit")}
-              >
-                Create a campaign from it
-              </s-button>
-            </s-stack>
-          </s-stack>
-        </fetcher.Form>
-      </s-section>
-
-      {problems.length > 0 ? (
-        <s-section heading="Rows that need fixing">
-          <s-unordered-list>
-            {problems.slice(0, 25).map((problem) => (
-              <s-list-item key={`${problem.line}-${problem.identifier}`}>
-                Line {problem.line} ({problem.identifier || "no identifier"}): {problem.reason}
-              </s-list-item>
-            ))}
-          </s-unordered-list>
-        </s-section>
+      {result ? (
+        <ImportReport
+          heading={result.dryRun ? "What would happen" : "What happened"}
+          counts={[
+            { label: "Rows read", value: result.total },
+            { label: "Ready", value: result.ready },
+            { label: "Need attention", value: problems.length },
+          ]}
+          problems={problems}
+        />
       ) : null}
     </PageShell>
   );

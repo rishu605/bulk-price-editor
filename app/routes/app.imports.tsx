@@ -13,8 +13,16 @@ import { SectionTabs } from "../components/SectionTabs";
 export default function ImportsSection() {
   return (
     <>
+      {/* The section's own landing page is the first tab.
+
+          It was not in this list at all, so `/app/imports` — the list of files a merchant
+          has imported, and where the nav item points — rendered a bar of four links with
+          *nothing selected*, and no way back to it once you left. `SectionTabs` matches
+          the current path exactly, deliberately (a section root prefixes every tab under
+          it), which is precisely why an index that is not listed can never be current. */}
       <SectionTabs
         tabs={[
+          { href: "/app/imports", label: "Files" },
           { href: "/app/imports/prices", label: "Prices" },
           { href: "/app/imports/baselines", label: "Baselines" },
           { href: "/app/imports/costs", label: "Costs" },
