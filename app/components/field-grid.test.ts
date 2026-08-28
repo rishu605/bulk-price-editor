@@ -82,6 +82,19 @@ describe("a single control is sized the same way", () => {
   it("caps the grid too, because two columns of a wide card are still too wide", () => {
     expect(grid).toMatch(/maxInlineSize="\d+px"/);
   });
+
+  it("gives a single field a definite width, not a ceiling", () => {
+    // `maxInlineSize` alone shipped once and was wrong in the one place it mattered most:
+    // inside an inline stack a box with only a maximum shrinks to its content, so
+    // Diagnostics' empty reference field rendered 68px wide next to its button. A width
+    // plus `100%` sizes the field and still lets it shrink on a narrow container.
+    const field = grid.slice(grid.indexOf("export function Field"));
+
+    expect(field).toMatch(/inlineSize=\{FIELD\[width\]\}/);
+    expect(field, "without this it overflows a narrow card instead of shrinking").toContain(
+      'maxInlineSize="100%"',
+    );
+  });
 });
 
 describe("no settings tab leaves a control unbounded", () => {
