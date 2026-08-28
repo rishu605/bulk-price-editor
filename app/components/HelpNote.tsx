@@ -1,93 +1,94 @@
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 
 import { ActionRow } from "./ActionRow";
-import { SPACE } from "../lib/ui/spacing";
+import { PAD, SPACE } from "../lib/ui/spacing";
 
 /**
- * The prose that explains a page, folded away until it is asked for.
+ * The prose that explains a page, in an overlay under its title.
  *
  * Ten pages carried an explanation of themselves — what a baseline is, how two campaigns
  * resolve, why a floor is checked after rounding — and every one of them was an
- * `s-section slot="aside"`. That put roughly a hundred words in a 22rem column running
- * the full height of the page, next to the table the merchant actually came for. On the
+ * `s-section slot="aside"`. That put roughly a hundred words in a 22rem column running the
+ * full height of the page, next to the table the merchant actually came for. On the
  * catalogue the cost was blunt: seven columns of numbers squeezed into two thirds of the
- * screen so that three paragraphs could sit in the other third, wrapping "Live price"
- * onto two lines while a quarter of the window stayed white.
+ * screen so that three paragraphs could sit in the other third.
  *
  * The prose is not the problem — it is some of the best writing in the app, and the
  * baseline concept genuinely does need teaching. The problem is teaching all of it,
- * permanently, before anyone has asked. `OnboardingCard` had already reached this
+ * permanently, before anyone has asked. `OnboardingCard` had already reached that
  * conclusion for the checklist and its "Why?" toggle; this is the same move applied to
  * the rest of the app.
  *
- * So the aside column is now reserved for **facts about this shop** — the store card,
- * recent activity, cost coverage, errors by kind — and prose explaining how the app works
- * becomes a note: one quiet line at the foot of the page, holding everything that used to
- * occupy the column.
+ * So the aside column is reserved for **facts about this shop** — the store card and the
+ * recent activity feed on the dashboard — and prose explaining how the app works is a
+ * note: one line under the page title, opening into an overlay.
  *
- * ## Why the foot of the page and not the top
+ * ## Two things this got wrong first, both worth keeping written down
  *
- * A note is a footnote. Put above the content it delays the thing the merchant came for
- * on every visit, forever, to answer a question they have on the first visit only. Pages
- * here are sized to fit a screen (`ROWS_PER_VIEW`), so the foot is on screen rather than
- * somewhere to scroll to — which is what makes a footnote findable rather than hidden.
+ * **It was at the foot of the page.** The reasoning was that a note is a footnote and
+ * pages are sized to fit a screen, so the foot is on screen. That is true of a full table
+ * and false of every page that is shorter or longer than the estimate — and it puts the
+ * answer to "what does this column mean?" below the thing the merchant is asking about,
+ * so they have to leave the question to reach the answer. Help goes where the confusion
+ * is, which is the top.
  *
- * The divider is the part that does that work. Without it the toggle reads as one more
- * action belonging to the last card; with it, it reads as the page's own annotation.
+ * **It expanded in place.** A disclosure that pushes the page down moves the table the
+ * merchant is reading, at the exact moment they are trying to read it. `s-popover` is an
+ * overlay: the panel is not in the page's flow at any point, so opening it moves nothing.
+ * That is also why this holds no React state — `commandFor` makes the button the
+ * popover's activator in the platform, and there is no open/closed for us to track, get
+ * wrong, or re-render on.
  *
- * ## Two columns when it opens
+ * A popover rather than `s-tooltip`, which is hover-only and accepts text and paragraphs
+ * only. Half of these notes carry a `<strong>` or an `s-badge`, and a definition a
+ * merchant cannot pin open long enough to read is not a definition.
  *
- * The panel spans the page, and a paragraph set across 1500px is not readable. Opening it
- * into two columns keeps the measure sane *and* keeps the panel short — three paragraphs
- * that were a tall thin column are now two short rows, so the content below is barely
- * pushed and the page does not jump.
- *
- * One comma in the responsive value, as everywhere else: Polaris splits on the comma to
- * separate "when the query matches" from "otherwise", and a second one anywhere in the
- * string stops the whole value parsing.
+ * `s-popover` supplies no padding of its own, so the box is not optional decoration —
+ * without it the prose sits against the overlay's edge.
  *
  * The prop is `label` and not `title` because what it names is a button's label, and
  * `control-vocabulary.test.ts` exempts exactly that: a bare `{identifier}` inside an
- * `s-button` is a domain value reaching the screen unless its name says a caller wrote
- * the words. Calling this what it is keeps that exemption a distinction rather than a
- * hole.
+ * `s-button` is a domain value reaching the screen unless its name says a caller wrote the
+ * words. Calling this what it is keeps that exemption a distinction rather than a hole.
  */
 export function HelpNote({ label, children }: { label: string; children: ReactNode }) {
-  const [open, setOpen] = useState(false);
+  const id = idFor(label);
 
   return (
-    <s-stack gap={SPACE.section}>
-      <s-divider />
+    <ActionRow>
+      {/* Tertiary, and a question mark rather than a chevron. The vocabulary in
+          `ActionRow` reserves chrome for things the page wants done, and reading a
+          definition is not one of them — but the icon still has to say at a glance that
+          the line is help, because a merchant who does not know what "baseline" means is
+          not scanning the page for the word "what".
 
-      <ActionRow>
-        {/* Tertiary, and a question mark rather than a chevron. The vocabulary in
-            `ActionRow` reserves chrome for things the page wants done, and this is not
-            one of them — but the icon still has to say at a glance that the line is help
-            rather than a filter or a link away, because a merchant who does not know what
-            "baseline" means is not scanning the bottom of the page for the word "what".
+          No `command`: the default `--auto` is toggle for a popover, which is what a help
+          affordance wants. Naming `--show` would leave the only way to close it a click
+          somewhere else. */}
+      <s-button variant="tertiary" icon="question-circle" commandFor={id}>
+        {label}
+      </s-button>
 
-            The label does not change when it opens; the panel appearing underneath is the
-            feedback. Assistive technology gets the state through `accessibilityLabel`,
-            which is where a state change belongs when the visible text is a heading. */}
-        <s-button
-          variant="tertiary"
-          icon="question-circle"
-          accessibilityLabel={open ? `Hide: ${label}` : `Show: ${label}`}
-          onClick={() => setOpen((shown) => !shown)}
-        >
-          {label}
-        </s-button>
-      </ActionRow>
-
-      {open ? (
-        <s-grid
-          gridTemplateColumns="@container (inline-size <= 700px) 1fr, 1fr 1fr"
-          gap={SPACE.section}
-          alignItems="start"
-        >
-          {children}
-        </s-grid>
-      ) : null}
-    </s-stack>
+      {/* Pixels, not rem: Polaris types `maxInlineSize` as px, % or 0 only.
+          360 is a readable measure for prose — much wider and the overlay stops being a
+          note and starts being the page again. */}
+      <s-popover id={id} maxInlineSize="360px">
+        <s-box padding={PAD.card}>
+          <s-stack gap={SPACE.section}>{children}</s-stack>
+        </s-box>
+      </s-popover>
+    </ActionRow>
   );
+}
+
+/**
+ * The id linking the button to the overlay it opens.
+ *
+ * Derived from the label rather than `useId`, for two reasons. It is stable across a
+ * server render and its hydration, which an id counter is only accidentally; and it is
+ * legible in the DOM, so an overlay that does not open can be traced to the button that
+ * should have opened it. One note per page, so the label is unique by construction.
+ */
+function idFor(label: string) {
+  return `help-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")}`;
 }

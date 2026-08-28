@@ -1,6 +1,7 @@
 import { Children, cloneElement, isValidElement, type ReactNode } from "react";
 
 import { ActionRow } from "./ActionRow";
+import { HelpNote } from "./HelpNote";
 import { PAGE_INSET, SPACE } from "../lib/ui/spacing";
 
 /**
@@ -67,16 +68,24 @@ export function PageWidth({ children }: { children: ReactNode }) {
  *
  * ## What is allowed in the column
  *
- * Four sections across three routes, now: the store card, recent activity, cost coverage
- * and errors by kind. All four are **facts about this shop**.
+ * Two sections on one route, now: the dashboard's store card and its recent activity
+ * feed. Both are **facts about this shop**, both change every time it is loaded, and a
+ * dashboard is the one page in the app whose job is showing several of those at once.
  *
- * That is the rule, and it is worth stating because the column had drifted the other way.
- * Ten of the nineteen were prose explaining how the app works — what a baseline is, how
- * two campaigns resolve — and prose does not vary, so those pages spent a permanent 22rem
- * column, full height, on a paragraph a merchant reads once. On the catalogue that meant
- * seven columns of prices compressed into two thirds of the screen so three paragraphs
- * could have the other third. Those are `HelpNote`s at the foot of their pages now; the
- * reasoning is in that file.
+ * That is the rule, and it is worth stating because the column had drifted a long way
+ * from it. Ten of the nineteen sections were prose explaining how the app works — what a
+ * baseline is, how two campaigns resolve — and prose does not vary, so those pages spent
+ * a permanent 22rem column, full height, on a paragraph a merchant reads once. On the
+ * catalogue that meant seven columns of prices compressed into two thirds of the screen
+ * so three paragraphs could have the other third. Those are `HelpNote`s now.
+ *
+ * Two more were facts that had been filed away from the thing they qualify: cost coverage
+ * belongs beside the cost-floor settings it decides the scope of, and the breakdown of
+ * failures by code belongs above the failures it counts. Neither needed a column; both
+ * needed to be next to their subject.
+ *
+ * So a new sidebar has to answer: does this change per shop, and is this page a dashboard?
+ * If not, it is a note or it belongs inline.
  *
  * The column collapses under 900px so the aside falls below the content rather than
  * being squeezed into something unreadable. It is a container query, not a media
@@ -143,8 +152,21 @@ export function PageShell({
   const isAside = (child: ReactNode) =>
     isValidElement(child) && (child.props as { slot?: string }).slot === "aside";
 
+  /**
+   * The page's help note, wherever the route happened to write it.
+   *
+   * Matched on the component rather than on a slot, because unlike the aside this is not
+   * a position a route gets to choose. Help belongs directly under the title on every
+   * page — a route that writes its note last, next to the prose it explains, still gets
+   * it rendered first. That is the whole reason the placement lives here: it was at the
+   * foot of the page for one release, which put the answer below the thing being asked
+   * about, and one component is the only way that is fixed once.
+   */
+  const isHelp = (child: ReactNode) => isValidElement(child) && child.type === HelpNote;
+
   const aside = all.filter(isAside);
-  const main = all.filter((child) => !isAside(child));
+  const help = all.filter(isHelp);
+  const main = all.filter((child) => !isAside(child) && !isHelp(child));
 
   if (aside.length === 0) {
     // Children go straight into `s-page`, with no wrapper of any kind.
@@ -164,6 +186,7 @@ export function PageShell({
       <PageWidth>
         <BackLink backTo={backTo} />
         <s-page heading={heading} inlineSize="large">
+          {help}
           {main}
         </s-page>
       </PageWidth>
@@ -191,7 +214,10 @@ export function PageShell({
           // a one-line sidebar next to a long table becomes a very tall empty card.
           alignItems="start"
         >
-          <s-stack gap={SPACE.page}>{main}</s-stack>
+          <s-stack gap={SPACE.page}>
+            {help}
+            {main}
+          </s-stack>
           <s-stack gap={SPACE.page}>
             {aside.map((child) =>
               // The slot is meaningless now that these are ordinary grid children, and

@@ -21,6 +21,7 @@ import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
+import { HelpNote } from "./HelpNote";
 import { PageShell } from "./PageShell";
 
 const render = (node: React.ReactElement) => renderToStaticMarkup(node);
@@ -73,6 +74,56 @@ describe("the aside survives going full width", () => {
 
   it("keeps main content ahead of the aside, so narrow screens read in order", () => {
     expect(html.indexOf("main content")).toBeLessThan(html.indexOf("Apply"));
+  });
+});
+
+describe("the help note, wherever the route wrote it", () => {
+  /**
+   * Position is the shell's decision, not the route's. It shipped at the foot of the page
+   * for one release — which puts the answer to "what does this column mean?" below the
+   * column being asked about, so a merchant has to leave the question to reach it.
+   *
+   * Both branches are checked because they build the main column differently, and a fix
+   * applied to one of them is exactly the kind of thing that looks done.
+   */
+  it("renders under the title, above the content, on a page with no aside", () => {
+    const html = render(
+      <PageShell heading="Catalogue">
+        <s-section>the table</s-section>
+        <HelpNote label="What these mean">
+          <s-paragraph>a definition</s-paragraph>
+        </HelpNote>
+      </PageShell>,
+    );
+
+    expect(html.indexOf("What these mean")).toBeLessThan(html.indexOf("the table"));
+  });
+
+  it("renders under the title on a page that has one", () => {
+    const html = render(
+      <PageShell heading="Home">
+        <s-section>the table</s-section>
+        <HelpNote label="What these mean">
+          <s-paragraph>a definition</s-paragraph>
+        </HelpNote>
+        <s-section slot="aside">store</s-section>
+      </PageShell>,
+    );
+
+    expect(html.indexOf("What these mean")).toBeLessThan(html.indexOf("the table"));
+  });
+
+  it("is taken out of the main flow rather than rendered twice", () => {
+    const html = render(
+      <PageShell heading="Catalogue">
+        <s-section>the table</s-section>
+        <HelpNote label="What these mean">
+          <s-paragraph>a definition</s-paragraph>
+        </HelpNote>
+      </PageShell>,
+    );
+
+    expect(html.split("What these mean").length - 1, "the note is rendered twice").toBe(1);
   });
 });
 

@@ -20,6 +20,7 @@ import { PageShell } from "../components/PageShell";
 import { SettingsSaveBar } from "../components/SettingsSaveBar";
 import { FieldGrid, FullRow } from "../components/FieldGrid";
 import { HelpNote } from "../components/HelpNote";
+import { formatCount } from "../lib/format/display";
 import { SPACE } from "../lib/ui/spacing";
 
 export const loader = withGuard("/app/settings", async ({ request }: LoaderFunctionArgs) => {
@@ -150,6 +151,18 @@ export default function Settings() {
         <s-paragraph>
           Floors that no campaign may price below. They are checked after rounding,
           so a rounding rule cannot push a price under them.
+        </s-paragraph>
+
+        {/* Coverage sits with the fields it qualifies, not in a sidebar card of its own.
+            Two of the controls below — "never price at or below cost" and what to do when
+            a cost-based floor meets a variant without one — mean nothing until you know
+            how many variants that second case actually is. */}
+        <s-paragraph>
+          <s-text color="subdued">
+            {formatCount(withCost)} of {formatCount(variants)} variants have a cost
+            ({costCoverage}%). Cost-based floors only constrain those; the last setting
+            in this section decides the rest.
+          </s-text>
         </s-paragraph>
 
         {settings.neverBelowCost && costCoverage < 100 ? (
@@ -365,18 +378,6 @@ export default function Settings() {
           </s-text>
         </s-paragraph>
       </HelpNote>
-
-      <s-section slot="aside" heading="Cost data">
-        <s-paragraph>
-          {withCost} of {variants} variants have a cost ({costCoverage}%).
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>
-            Cost-based floors only constrain variants that have one. The policy above
-            decides what happens to the others.
-          </s-text>
-        </s-paragraph>
-      </s-section>
     </PageShell>
   );
 }

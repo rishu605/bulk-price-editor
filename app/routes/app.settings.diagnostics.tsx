@@ -19,6 +19,8 @@ import { EmptyState } from "../components/AsyncState";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
+import { CountsRow } from "../components/CountsRow";
+import { HelpNote } from "../components/HelpNote";
 import { SPACE } from "../lib/ui/spacing";
 
 export const loader = withGuard("/app/settings/diagnostics", async ({ request }: LoaderFunctionArgs) => {
@@ -57,8 +59,33 @@ export const loader = withGuard("/app/settings/diagnostics", async ({ request }:
   };
 });
 
+/**
+ * The breakdown as tiles, bounded.
+ *
+ * `CountsRow` gives every item an equal column, so ten codes would be ten slivers of a
+ * number. Four plus a remainder keeps the row readable — and the remainder is its own
+ * tile rather than a silent truncation, because a summary that quietly drops codes is
+ * worse than no summary. Every dropped code is still in the table below, on its own rows.
+ */
+const TILES = 4;
+
+function tilesFor(byCode: Array<[string, number]>) {
+  const top = byCode.slice(0, TILES).map(([label, value]) => ({ label, value }));
+  const rest = byCode.slice(TILES);
+  if (rest.length === 0) return top;
+
+  return [
+    ...top,
+    {
+      label: `${rest.length} other codes`,
+      value: rest.reduce((total, [, count]) => total + count, 0),
+    },
+  ];
+}
+
 export default function Debug() {
   const { query, invalidQuery, match, recent, byCode } = useLoaderData<typeof loader>();
+  const byKind = tilesFor(byCode);
 
   return (
     <PageShell heading="Diagnostics">
@@ -142,54 +169,58 @@ export default function Debug() {
             description="Errors appear here as they happen, with the reference the merchant sees."
           />
         ) : (
-          <s-table>
-            <s-table-header-row>
-              <s-table-header listSlot="kicker">When</s-table-header>
-              <s-table-header listSlot="primary">Reference</s-table-header>
-              <s-table-header listSlot="inline">Code</s-table-header>
-              <s-table-header listSlot="secondary">Route</s-table-header>
-            </s-table-header-row>
-            <s-table-body>
-              {recent.map((row) => (
-                <s-table-row key={row.errorId}>
-                  <s-table-cell>{row.createdAt}</s-table-cell>
-                  <s-table-cell>
-                    <s-button
-                      variant="tertiary"
-                      href={`/app/settings/diagnostics?id=${row.errorId}`}
-                    >
-                      {row.errorId}
-                    </s-button>
-                  </s-table-cell>
-                  <s-table-cell>
-                    <s-badge tone={row.retryable ? "warning" : "critical"}>
-                      {row.code}
-                    </s-badge>
-                  </s-table-cell>
-                  <s-table-cell>{row.route ?? "—"}</s-table-cell>
-                </s-table-row>
-              ))}
-            </s-table-body>
-          </s-table>
+          <>
+            {/* The breakdown sits above the rows it counts rather than in a sidebar.
+                It answers the question the table cannot at a glance -- one broken thing
+                or fifty -- and that question is asked while looking at the table, not
+                across the page from it. */}
+            <CountsRow items={byKind} />
+
+            <s-table>
+              <s-table-header-row>
+                <s-table-header listSlot="kicker">When</s-table-header>
+                <s-table-header listSlot="primary">Reference</s-table-header>
+                <s-table-header listSlot="inline">Code</s-table-header>
+                <s-table-header listSlot="secondary">Route</s-table-header>
+              </s-table-header-row>
+              <s-table-body>
+                {recent.map((row) => (
+                  <s-table-row key={row.errorId}>
+                    <s-table-cell>{row.createdAt}</s-table-cell>
+                    <s-table-cell>
+                      <s-button
+                        variant="tertiary"
+                        href={`/app/settings/diagnostics?id=${row.errorId}`}
+                      >
+                        {row.errorId}
+                      </s-button>
+                    </s-table-cell>
+                    <s-table-cell>
+                      <s-badge tone={row.retryable ? "warning" : "critical"}>
+                        {row.code}
+                      </s-badge>
+                    </s-table-cell>
+                    <s-table-cell>{row.route ?? "—"}</s-table-cell>
+                  </s-table-row>
+                ))}
+              </s-table-body>
+            </s-table>
+          </>
         )}
       </s-section>
 
-      {byCode.length > 0 ? (
-        <s-section slot="aside" heading="By kind">
-          <s-paragraph>
-            <s-text>
-              One code dominating usually means one broken thing, not fifty.
-            </s-text>
-          </s-paragraph>
-          {byCode.map(([code, count]) => (
-            <s-paragraph key={code}>
-              <s-text>
-                {code} — {count}
-              </s-text>
-            </s-paragraph>
-          ))}
-        </s-section>
-      ) : null}
+      <HelpNote label="Reading the failures">
+        <s-paragraph>
+          One code dominating usually means one broken thing, not fifty.
+        </s-paragraph>
+        <s-paragraph>
+          <s-text>
+            The breakdown counts the fifty most recent failures, which is also what the
+            table lists — so a code with a large share here is worth opening before the
+            newest row is.
+          </s-text>
+        </s-paragraph>
+      </HelpNote>
     </PageShell>
   );
 }
