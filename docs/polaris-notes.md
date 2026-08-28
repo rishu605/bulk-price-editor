@@ -210,31 +210,44 @@ repo can see it.
 
 ## Correction: what actually broke `s-table`
 
-The note above blamed a section's siblings. That was wrong, and reverting them did not
-bring the tables back — worth leaving on the page, because the wrong answer was reached by
-reasoning about one observation and the right one by taking a second.
+The note above blamed a section's siblings. That was wrong — reverting them did not bring
+the tables back. It is left on the page because the wrong answer was reached by reasoning
+about one observation, and the right one by taking more.
 
-The real cause was `inlineSize` on an **`s-popover`**, added to stop the help notes opening
-a metre wide. Every page carrying a `HelpNote` had its `s-table` fall back to the stacked
-list — the catalogue and the plans table both, on tables nobody had touched. The evidence
-that settles it:
+Every page carrying a `HelpNote` had its `s-table` fall back to the stacked list — the
+catalogue and the plans table both, on tables nobody had touched. What settles the scope:
 
-- `https://cdn.shopify.com/shopifycloud/polaris.js` was **byte-identical** across the two
-  deploys, so it was not Shopify changing under us;
+- `https://cdn.shopify.com/shopifycloud/polaris.js` was **byte-identical** across the
+  deploys either side, so it was not Shopify changing under us;
 - `/app/prices/costs`, the one page with a table and no note, rendered normally;
-- the popover was the only change common to both broken pages.
+- the note was the only change common to both broken pages.
 
-**Size the popover's content, not the popover.** It shrink-wraps its box, so
-`<s-box inlineSize="320px">` inside gives the same column with no definite size on the
-overlay element:
+Inside the note, the trigger is **a definite `inlineSize` anywhere in the subtree**. It was
+first added to the `s-popover`; moving it onto the box inside did not help, and only
+removing it entirely restored the tables. The last shape with working tables had no
+`inlineSize` at all.
+
+**Why a definite width inside a closed overlay reaches a sibling table is not established.**
+Do not let this section imply that it is. What is established, twice over, is that it does.
+
+### The shape that works
 
 ```tsx
 <s-popover id={id}>
-  <s-box padding="base" inlineSize="320px" maxInlineSize="100%">…</s-box>
+  <s-box padding="base" maxInlineSize="320px">…</s-box>
 </s-popover>
 ```
 
-The general lesson is the one this file keeps re-learning: **an overlay is not free of the
-page**. A Polaris overlay participates in its container enough to change what a sibling
-measures, and every symptom of that is a silent, legitimate-looking rendering somewhere
-else entirely.
+Two things that look interchangeable and are not:
+
+- **`maxInlineSize` on the popover does nothing.** The overlay is sized by its content, so
+  its own ceiling is never the binding constraint — prose opened a metre wide with a 360px
+  maximum set on it. Cap the **content**; the popover shrink-wraps the box.
+- **`inlineSize` is not a stricter `maxInlineSize` here.** It works, and it breaks tables
+  elsewhere on the page.
+
+The general lesson this file keeps re-learning: **an overlay is not free of the page**, and
+a layout symptom surfaces somewhere other than the change that caused it — as a rendering
+that is legitimate at some width and therefore reads as a design rather than a bug. Three
+deploys were spent on causes that turned out to be wrong; all three were narrowed by
+looking at one more page, never by reasoning harder.
