@@ -42,7 +42,15 @@ export function formatCount(value: number): string {
  */
 export function formatWhen(value: Date | string, timeZone: string): string {
   try {
-    return new Date(value).toLocaleString(LOCALE, { timeZone });
+    // Explicit styles rather than the default, which spells the time out to the second.
+    // A column of "27/08/2026, 12:40:38" is asking the reader to skip two characters on
+    // every row to reach a distinction no merchant is making — nothing in this app
+    // happens on a schedule finer than a minute.
+    return new Date(value).toLocaleString(LOCALE, {
+      timeZone,
+      dateStyle: "short",
+      timeStyle: "short",
+    });
   } catch {
     return String(value);
   }

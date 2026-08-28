@@ -1,3 +1,4 @@
+import { humanise } from "../../lib/format/label";
 import { ActionRow } from "../ActionRow";
 import { FilterForm } from "../FilterForm";
 import type { listCampaigns, CampaignFilters } from "../../services/campaigns/list.server";
@@ -106,7 +107,7 @@ export function CampaignListView({
                   <s-table-cell>{campaign.priority}</s-table-cell>
                   <s-table-cell>
                     {campaign.lastRun
-                      ? `${campaign.lastRun.kind} · ${campaign.lastRun.status} · ${campaign.lastRun.verified} verified${
+                      ? `${humanise(campaign.lastRun.kind)} · ${humanise(campaign.lastRun.status)} · ${campaign.lastRun.verified} verified${
                           campaign.lastRun.failed > 0
                             ? `, ${campaign.lastRun.failed} failed`
                             : ""

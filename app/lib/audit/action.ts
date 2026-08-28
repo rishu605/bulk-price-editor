@@ -1,3 +1,5 @@
+import { humanise } from "../format/label";
+
 /**
  * What happened, in words a merchant recognises.
  *
@@ -6,8 +8,7 @@
  * from a variable (`market.${change.kind}`), so there is no closed list of them anywhere
  * and any lookup table here would go stale silently the first time somebody adds a kind.
  *
- * So this is a transformation, not a mapping: it cannot be missing an entry. Dots,
- * hyphens and underscores are word breaks, and the first word is capitalised. That turns
+ * So this is a transformation, not a mapping: it cannot be missing an entry. That turns
  * every action the app writes today into a readable phrase, and every action it writes
  * tomorrow into a readable phrase without anybody remembering to come back here.
  *
@@ -15,11 +16,13 @@
  * transition" rather than "Campaign status changed". Worth it: a plausible sentence for
  * an action nobody anticipated beats a polished one for six actions and a raw
  * `mirror.divergence_rate` for the seventh.
+ *
+ * The transformation itself is `humanise`, which the app's database enums go through too:
+ * `market.added` and `CSV_IMPORT` are the same problem with different separators, and
+ * having two implementations of it is how they would drift apart.
  */
 export function describeAction(action: string): string {
-  const words = action.split(/[.\-_]+/).filter(Boolean).join(" ");
-  if (words.length === 0) return action;
-  return words.charAt(0).toUpperCase() + words.slice(1);
+  return humanise(action);
 }
 
 /**

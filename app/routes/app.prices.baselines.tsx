@@ -15,6 +15,7 @@
  * both the import and recapture pages into showing this table instead.
  */
 
+import { humanise } from "../lib/format/label";
 import { formatWhen } from "../lib/format/display";
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useLoaderData, useSearchParams } from "react-router";
@@ -96,7 +97,7 @@ export default function Baselines() {
               </s-option>
               {sources.map((source) => (
                 <s-option key={source} value={source} defaultSelected={filters.source === source}>
-                  {source.toLowerCase().replace(/_/g, " ")}
+                  {humanise(source)}
                 </s-option>
               ))}
             </s-select>
@@ -166,7 +167,7 @@ export default function Baselines() {
                     {entry.current ? " (current)" : ""}
                   </s-table-cell>
                   <s-table-cell>{entry.compareAt ?? "—"}</s-table-cell>
-                  <s-table-cell>{entry.source.toLowerCase().replace(/_/g, " ")}</s-table-cell>
+                  <s-table-cell>{humanise(entry.source)}</s-table-cell>
                   <s-table-cell>{formatWhen(entry.capturedAt, timeZone)}</s-table-cell>
                   <s-table-cell>
                     {entry.supersededAt ? formatWhen(entry.supersededAt, timeZone) : "—"}

@@ -1,3 +1,4 @@
+import { humanise } from "../lib/format/label";
 import type { BaselineRow } from "../services/baseline-browser.server";
 
 /**
@@ -40,7 +41,7 @@ export function BaselineTable({
                 </>
               ) : null}
             </s-table-cell>
-            <s-table-cell>{row.source?.toLowerCase().replace(/_/g, " ") ?? "—"}</s-table-cell>
+            <s-table-cell>{row.source ? humanise(row.source) : "—"}</s-table-cell>
             <s-table-cell>
               <s-stack direction="inline" gap="small">
                 <s-button variant="tertiary" onClick={() => onShowHistory(row.variantGid)}>

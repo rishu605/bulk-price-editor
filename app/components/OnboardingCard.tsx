@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import type { OnboardingState, OnboardingStep } from "../lib/onboarding/steps";
 import { SPACE } from "../lib/ui/spacing";
+import { ActionRow } from "./ActionRow";
 
 /**
  * The checklist, until the first campaign has run cleanly.
@@ -26,15 +27,21 @@ import { SPACE } from "../lib/ui/spacing";
  *
  * Each step used to be a bordered box holding a stack, and the result was three tall
  * cards inside a card, each with a title on one line, a lone "Why?" on the next and its
- * action on a third — because `s-clickable` and `s-link` are block-level and an inline
- * stack does not change that. Nine lines and three borders to carry three short
- * sentences, with the right two-thirds of every box empty.
+ * action on a third. Nine lines and three borders to carry three short sentences, with
+ * the right two-thirds of every box empty.
  *
- * A grid changes that, where a stack could not: block-level children placed in separate
- * *cells* sit side by side, because it is the cell that decides where they go. So a step
- * is one row — status, title, action — and the steps are separated by hairlines rather
- * than each being drawn as its own card. Same information, a third of the height, and
- * the eye can run down the status column to see where it is up to.
+ * The line breaks were `s-clickable`, which is block-level — it was the "Why?" toggle,
+ * and a block element in the middle of an inline stack breaks the line before it and
+ * after it, which is what put the action on a third row. It is a button now, and buttons
+ * are not block-level. (An earlier version of this comment said `s-link` was too. It is
+ * not; only `s-clickable` is, checked against the rendered components.)
+ *
+ * The grid is still here, and for a different reason than working around that: it lines
+ * the *columns* up across rows. A stack would put each step's action wherever its title
+ * happened to end, and three actions at three different distances from the edge read as
+ * three unrelated things. So a step is one row — status, title, action — the steps are
+ * separated by hairlines rather than each being drawn as its own card, and the eye can
+ * run down the status column to see where it is up to.
  */
 export function OnboardingCard({ state }: { state: OnboardingState }) {
   if (state.complete) return null;
@@ -117,12 +124,10 @@ function Step({ step, isNext }: { step: OnboardingStep; isNext: boolean }) {
           {isNext ? <s-badge tone="info">Next</s-badge> : null}
         </s-stack>
 
-        {/* Both actions in one cell, as their own grid: two block-level elements in a
-            single cell would stack, and this is the pair that used to. Why before the
-            action, deliberately — when the row wraps it is the action that should fall
-            to the next line, not the explanation, which would then read as belonging to
-            the step below it. */}
-        <s-grid gridTemplateColumns="auto auto" gap={SPACE.item} alignItems="center">
+        {/* Why before the action, deliberately: when the row wraps it is the action
+            that should fall to the next line, not the explanation, which would then read
+            as belonging to the step below it. */}
+        <ActionRow>
           {/* Not on a finished step. The reasoning for work already done is the one
               thing on this card nobody needs, and on a completed row — which has no
               action beside it — it was also the only thing left hanging off the right
@@ -141,7 +146,7 @@ function Step({ step, isNext }: { step: OnboardingStep; isNext: boolean }) {
               {step.cta}
             </s-button>
           ) : null}
-        </s-grid>
+        </ActionRow>
       </s-grid>
 
       {/* Progressive disclosure, not a link away. The reasoning belongs next to the step

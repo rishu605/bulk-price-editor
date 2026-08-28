@@ -177,3 +177,12 @@ describe("how long ago", () => {
     expect(formatAgo("not a date", now, "UTC")).toBe("not a date");
   });
 });
+
+describe("a timestamp in a table", () => {
+  it("stops at the minute", () => {
+    // A column of "27/08/2026, 12:40:38" asks the reader to skip two characters on every
+    // row to reach a distinction nobody is making — nothing here happens on a schedule
+    // finer than a minute.
+    expect(formatWhen("2026-08-27T12:40:38.000Z", "Europe/London")).toBe("27/08/2026, 13:40");
+  });
+});

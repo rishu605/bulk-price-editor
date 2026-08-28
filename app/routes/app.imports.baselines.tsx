@@ -10,6 +10,7 @@
  * so reviewing before writing is the normal path rather than the careful one.
  */
 
+import { humanise } from "../lib/format/label";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useRef } from "react";
 import { useFetcher, useLoaderData } from "react-router";
@@ -222,7 +223,7 @@ function ImportReport({ result }: { result: BaselineImportResult }) {
                 <s-table-row key={`${problem.line}-${problem.identifier}`}>
                   <s-table-cell>{problem.line}</s-table-cell>
                   <s-table-cell>{problem.identifier || "—"}</s-table-cell>
-                  <s-table-cell>{problem.kind}</s-table-cell>
+                  <s-table-cell>{humanise(problem.kind)}</s-table-cell>
                   <s-table-cell>{problem.reason}</s-table-cell>
                 </s-table-row>
               ))}

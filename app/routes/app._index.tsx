@@ -263,10 +263,7 @@ export default function Dashboard() {
           {notices.map((notice) => (
             <s-stack key={notice.id} gap={SPACE.item}>
               <s-paragraph>{notice.detail}</s-paragraph>
-              {/* A grid, not an inline stack: the forms are block-level, and in a stack
-                  each one takes its own line — which turned a two-choice question into a
-                  column of buttons that reads as a list of unrelated actions. */}
-              <s-grid gridTemplateColumns="auto auto 1fr" gap={SPACE.item} alignItems="center">
+              <ActionRow>
                 {notice.kind === "added" ? (
                   <fetcher.Form method="post">
                     <input type="hidden" name="intent" value="resolve-notice" />
@@ -296,7 +293,7 @@ export default function Dashboard() {
                     Leave it as it is
                   </s-button>
                 </fetcher.Form>
-              </s-grid>
+              </ActionRow>
             </s-stack>
           ))}
         </s-banner>
