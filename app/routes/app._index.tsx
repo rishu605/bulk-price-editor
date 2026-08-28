@@ -17,9 +17,10 @@ import { ActionRow } from "../components/ActionRow";
 import { ActivityFeed } from "../components/ActivityFeed";
 import { CountsRow } from "../components/CountsRow";
 import { LastRunSummary } from "../components/LastRunSummary";
-import { Meter } from "../components/Meter";
+import { UpcomingCampaigns } from "../components/UpcomingCampaigns";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { onboarding } from "../lib/onboarding/steps";
+import { nextMoments } from "../lib/scheduling/upcoming";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
 import { SPACE } from "../lib/ui/spacing";
@@ -31,7 +32,8 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
   // Counted in parallel and as aggregates, never by loading rows. This is the landing
   // page and it has a sub-second budget; a card that costs a table scan is a card that
   // makes the whole app feel slow.
-  const [health, campaigns, live, upcoming, driftOpen, lastRun, recent] = await Promise.all([
+  const [health, campaigns, live, upcoming, driftOpen, lastRun, recent, scheduled] =
+    await Promise.all([
     baselineHealth(shop.id),
     prisma.campaign.count({ where: { shopId: shop.id } }),
     prisma.campaign.count({ where: { shopId: shop.id, status: { in: ["ACTIVE", "APPLYING"] } } }),
@@ -55,6 +57,21 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
       orderBy: { createdAt: "desc" },
       take: 5,
       select: { id: true, actor: true, action: true, createdAt: true },
+    }),
+    // Campaigns with a start or an end still ahead of them. Which of the two is next
+    // depends on where the clock is, so the rows are narrowed here and ordered in
+    // `nextMoments` — the database can sort by a column, not by "whichever of these two
+    // has not happened yet". A handful more than the four shown, because a campaign
+    // matching this filter may still have both its moments behind it.
+    prisma.campaign.findMany({
+      where: {
+        shopId: shop.id,
+        status: { in: ["SCHEDULED", "APPLYING", "ACTIVE"] },
+        OR: [{ startAt: { gt: new Date() } }, { endAt: { gt: new Date() } }],
+      },
+      orderBy: { startAt: "asc" },
+      take: 8,
+      select: { id: true, name: true, status: true, startAt: true, endAt: true },
     }),
   ]);
 
@@ -113,6 +130,16 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
           campaignName: lastRun.campaign.name,
         }
       : null,
+    upcomingMoments: nextMoments(
+      scheduled.map((campaign) => ({
+        id: campaign.id,
+        name: campaign.name,
+        status: campaign.status,
+        startAt: campaign.startAt?.toISOString() ?? null,
+        endAt: campaign.endAt?.toISOString() ?? null,
+      })),
+      new Date().toISOString(),
+    ),
     recent: recent.map((entry) => ({
       id: entry.id,
       actor: entry.actor,
@@ -213,6 +240,7 @@ export default function Dashboard() {
     onboarding: guide,
     live,
     upcoming,
+    upcomingMoments,
     driftOpen,
     notices,
     needsAttention,
@@ -230,7 +258,7 @@ export default function Dashboard() {
   const showLive = campaigns > 0 || lastRun !== null;
 
   return (
-    <PageShell heading="Anchor">
+    <PageShell heading="Home">
       {result ? (
         <s-banner tone={result.ok ? "success" : "critical"}>
           <s-paragraph>{result.message}</s-paragraph>
@@ -364,10 +392,10 @@ export default function Dashboard() {
               { label: "Campaigns running", value: live },
               { label: "Scheduled", value: upcoming },
               { label: "Need attention", value: needsAttention },
-              // Shorter than "Prices changed outside the app", which was the one label
-              // that wrapped to two lines and made its tile taller than the three beside
-              // it once the page stopped running edge to edge.
-              { label: "Changed outside Anchor", value: driftOpen },
+              // Two words. "Prices changed outside the app" wrapped to three lines in
+              // this column and "Changed outside Anchor" to two, either of which makes
+              // its tile taller than the three beside it.
+              { label: "Changed elsewhere", value: driftOpen },
             ]}
           />
 
@@ -378,11 +406,34 @@ export default function Dashboard() {
             </s-stack>
           ) : null}
 
+          {/* The page's forward action, and the only one that survives the checklist
+              retiring itself. Black only once the checklist has gone: while it is still
+              up, its own next step is what the page is pointing at, and two black buttons
+              point at nothing. */}
           <ActionRow>
-            <s-button href="/app/campaigns">Campaigns</s-button>
-            <s-button href="/app/prices/drift">Drift queue</s-button>
-            <s-button href="/app/activity">Activity log</s-button>
+            <s-button
+              variant={guide.complete ? "primary" : "secondary"}
+              href="/app/campaigns/new"
+            >
+              Create campaign
+            </s-button>
+            <s-button variant="tertiary" href="/app/campaigns">Campaigns</s-button>
+            <s-button variant="tertiary" href="/app/prices/drift">Drift queue</s-button>
+            <s-button variant="tertiary" href="/app/activity">Activity log</s-button>
           </ActionRow>
+        </s-section>
+      ) : null}
+
+      {/* What is about to happen, which "Scheduled: 1" could not say. Only when there is
+          something ahead — an empty "nothing is scheduled" card is the same mistake as the
+          four zeroes this page used to open with. */}
+      {upcomingMoments.length > 0 ? (
+        <s-section heading="Next up">
+          <UpcomingCampaigns
+            moments={upcomingMoments}
+            now={now}
+            timeZone={timeZone}
+          />
         </s-section>
       ) : null}
 
@@ -423,31 +474,18 @@ export default function Dashboard() {
             ]}
           />
 
-          {/* The baselines were their own card in the sidebar, which meant the catalogue
-              was described in two places — and that card's headline figure was the second
-              tile above, restated. One subject, one card.
-
-              Two columns rather than four stacked lines: a label sitting directly under
-              the value above it reads as belonging to it, and the section's own rhythm
-              between children is not large enough to say otherwise. */}
-          <s-grid
-            gridTemplateColumns="@container (inline-size <= 500px) 1fr, 1fr 1fr"
-            gap={SPACE.section}
-          >
-            <s-stack gap={SPACE.tight}>
-              <s-text color="subdued">Baseline coverage</s-text>
-              <Meter value={health.withBaseline} max={health.variants} />
-            </s-stack>
-
-            <s-stack gap={SPACE.tight}>
-              <s-text color="subdued">Oldest captured</s-text>
-              <s-text>
-                {health.oldestCapturedAt
-                  ? formatDay(health.oldestCapturedAt, timeZone)
-                  : "None captured"}
-              </s-text>
-            </s-stack>
-          </s-grid>
+          {/* The coverage bar that used to sit here is gone. Every background token a
+              box can take is a near-white grey, so at 100% — which is where a healthy
+              shop lives — a full bar and an empty one were the same picture. The two
+              tiles above are the same fact, unambiguously. */}
+          <s-stack gap={SPACE.tight}>
+            <s-text color="subdued">Oldest baseline captured</s-text>
+            <s-text>
+              {health.oldestCapturedAt
+                ? formatDay(health.oldestCapturedAt, timeZone)
+                : "None captured"}
+            </s-text>
+          </s-stack>
 
           {health.withBaseline > health.variants ? (
             <s-paragraph>
