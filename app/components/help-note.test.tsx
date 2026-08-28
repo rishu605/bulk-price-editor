@@ -1,14 +1,18 @@
 /**
- * The explanations survived being folded away.
+ * The explanations survived being folded into an overlay.
  *
  * Ten pages had their teaching prose in an `s-section slot="aside"` — a permanent 22rem
- * column, full height, next to the table the merchant came for. Moving it into a
- * disclosure at the foot of the page has one obvious failure and one quiet one:
+ * column, full height, next to the table the merchant came for. Three things can go
+ * wrong in moving it, and only the first is loud:
  *
- * - obvious: the panel never opens, so the prose is gone from the product;
- * - quiet: a paragraph is dropped during the move. Nothing errors, nothing looks wrong,
- *   and the page simply stops explaining what a baseline is. `sections.test.ts` guards
- *   the same failure for the campaign tabs, and for the same reason.
+ * - the popover has no activator, so the prose is unreachable — the button and the
+ *   overlay are linked by an id, and an id that does not match is silent;
+ * - the note drifts back down the page. It shipped at the foot for one release, which put
+ *   the answer below the thing being asked about; `PageShell` decides the position now,
+ *   and this pins it there;
+ * - a paragraph is dropped during the move. Nothing errors, nothing looks wrong, and the
+ *   page simply stops explaining what a baseline is. `sections.test.ts` guards the same
+ *   failure for the campaign tabs, and for the same reason.
  *
  * So the render assertions cover the mechanism and a source scan covers the content: each
  * page still names the thing it used to explain, wherever that prose now lives.
@@ -29,7 +33,7 @@ const ALL_ROUTES = readdirSync(ROUTES).filter((f) => f.endsWith(".tsx"));
 
 const render = (node: React.ReactElement) => renderToStaticMarkup(node);
 
-describe("closed, which is how a page starts", () => {
+describe("the note itself", () => {
   const html = render(
     <HelpNote label="What these mean">
       <s-paragraph>Baseline is the reference price.</s-paragraph>
@@ -38,43 +42,40 @@ describe("closed, which is how a page starts", () => {
 
   it("costs the page one line and no column", () => {
     expect(html).toContain("What these mean");
-    expect(html, "the prose is the whole reason this collapses").not.toContain(
-      "Baseline is the reference price.",
+    expect(html).not.toContain('slot="aside"');
+  });
+
+  it("opens an overlay, so nothing on the page moves when it is read", () => {
+    // The reason this is a popover and not a disclosure. An expanding panel pushes the
+    // table down at the moment the merchant is trying to read it.
+    expect(html).toContain("<s-popover");
+  });
+
+  it("wires the button to that overlay, which is the only thing that opens it", () => {
+    // `commandFor` is an id lookup. A mismatch renders both elements, throws nothing, and
+    // leaves a button that does not work.
+    const id = /<s-popover[^>]*\sid="([^"]+)"/.exec(html)?.[1];
+
+    expect(id, "the popover has no id, so nothing can address it").toBeTruthy();
+    expect(html, "the button opens some other popover, or none").toContain(
+      `commandFor="${id}"`,
     );
   });
 
-  it("says it is help rather than a filter or a link away", () => {
-    // A merchant who does not know what "baseline" means is not scanning the foot of the
-    // page for the word "what". The icon is what makes the line findable.
-    expect(html).toContain('icon="question-circle"');
+  it("gives the prose an interior, because s-popover supplies none", () => {
+    expect(html).toMatch(/<s-popover[^>]*>\s*<s-box padding=/);
   });
 
-  it("names the state for assistive technology, since the label does not change", () => {
-    expect(html).toContain('accessibilityLabel="Show: What these mean"');
+  it("says it is help rather than a filter or a link away", () => {
+    // A merchant who does not know what "baseline" means is not scanning the page for the
+    // word "what". The icon is what makes the line findable.
+    expect(html).toContain('icon="question-circle"');
   });
 
   it("is quiet enough not to compete with the page's actual actions", () => {
     // `ActionRow`'s vocabulary: chrome is for things the page wants done, and reading a
     // definition is not one of them.
     expect(html).toContain('variant="tertiary"');
-  });
-
-  it("rules itself off, so it reads as the page's annotation and not the last card's", () => {
-    expect(html).toContain("<s-divider");
-  });
-});
-
-describe("the page it sits at the foot of", () => {
-  it("does not take a column back to say so", () => {
-    // The whole point. A note that reappeared as an aside would be the original bug with
-    // an extra component in front of it.
-    const html = render(
-      <HelpNote label="How campaigns resolve">
-        <s-paragraph>Exactly one wins.</s-paragraph>
-      </HelpNote>,
-    );
-
-    expect(html).not.toContain('slot="aside"');
   });
 });
 
@@ -113,9 +114,11 @@ describe("the prose each page used to keep in a column", () => {
 
 describe("what stays in the aside", () => {
   /**
-   * The rule the column now follows: an aside carries facts about *this shop*, which
-   * change per merchant and per visit and are therefore worth a permanent column. Prose
-   * about how the app works does not change, so it is a note.
+   * The rule the column follows now: a sidebar carries facts about *this shop*, on the
+   * one page whose job is showing several of them at once. Everything else lost its
+   * column — prose became a note, and two cards that were facts filed away from their
+   * subject moved next to it (cost coverage to the cost-floor settings, failures by code
+   * to the failures they count).
    *
    * Checked rather than written down, because the next explanatory sidebar will be added
    * by someone who has not read `PageShell`.
@@ -123,12 +126,32 @@ describe("what stays in the aside", () => {
   const FACTS = [
     ["app._index.tsx", "Store"],
     ["app._index.tsx", "Recent activity"],
-    ["app.settings._index.tsx", "Cost data"],
-    ["app.settings.diagnostics.tsx", "By kind"],
   ] as const;
 
   it.each(FACTS)("%s keeps its %s card beside the content", (name, heading) => {
     expect(route(name)).toContain(`<s-section slot="aside" heading="${heading}">`);
+  });
+
+  it("is the dashboard and nowhere else", () => {
+    const routes = ALL_ROUTES.filter((name) => route(name).includes('slot="aside"'));
+
+    expect(routes, "a second page with a sidebar is a rule that has started drifting").toEqual(
+      ["app._index.tsx"],
+    );
+  });
+
+  it("moved the two facts that were filed away from their subject", () => {
+    // Both were sidebar cards. Neither was help, and neither needed a column -- they
+    // needed to be next to the thing they qualify.
+    expect(
+      route("app.settings._index.tsx"),
+      "cost coverage belongs with the cost-floor settings whose scope it describes",
+    ).toMatch(/variants have a cost[\s\S]*?name="missingCostPolicy"/);
+
+    expect(
+      route("app.settings.diagnostics.tsx"),
+      "the breakdown belongs above the failures it counts",
+    ).toMatch(/<CountsRow items=\{byKind\}[\s\S]*?<s-table>/);
   });
 
   it("and nothing else does", () => {

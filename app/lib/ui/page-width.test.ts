@@ -62,16 +62,16 @@ describe("routes that use the aside slot", () => {
   it("still have somewhere for it to land", () => {
     const withAside = renderingRoutes().filter(({ source }) => source.includes('slot="aside"'));
 
-    // Not a nice-to-have: an aside that stops rendering does so silently, and the ones
-    // left are the store card, recent activity, cost coverage and errors by kind — the
-    // only things on their pages that say what state this shop is actually in.
+    // Not a nice-to-have: an aside that stops rendering does so silently, and the two
+    // left are the dashboard's store card and its activity feed — the only things on that
+    // page that say what state this shop is actually in.
     //
-    // Three routes, not the thirteen this started with. The other ten were prose
-    // explaining the app rather than facts about the shop, and prose does not need a
-    // column of its own — see `HelpNote`. The floor moves down with them rather than
+    // One route, not the thirteen this started with. Ten were prose explaining the app
+    // rather than facts about the shop and became `HelpNote`s; two were facts filed away
+    // from their subject and moved next to it. The floor moves down with them rather than
     // being deleted: it is here so that "the partition quietly stopped matching anything"
     // fails, and a floor of zero cannot do that.
-    expect(withAside.length, "the asides this guards should still exist").toBeGreaterThan(2);
+    expect(withAside.length, "the asides this guards should still exist").toBeGreaterThan(0);
 
     for (const { name, source } of withAside) {
       expect(source, `${name} uses slot="aside" but does not render inside PageShell`).toContain(
