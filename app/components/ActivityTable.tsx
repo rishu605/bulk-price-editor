@@ -1,5 +1,6 @@
 import { formatWhen } from "../lib/format/display";
 import type { ActivityEntry } from "../lib/reporting/activity-csv";
+import { describeAction } from "../lib/audit/action";
 import { describeActor } from "../lib/audit/actor";
 
 /**
@@ -32,7 +33,10 @@ export function ActivityTable({
                 somebody has to guess at. Staff show as an id rather than a name: the
                 session token carries the id, and names would mean online tokens. */}
             <s-table-cell>{describeActor(entry.actor)}</s-table-cell>
-            <s-table-cell>{entry.action}</s-table-cell>
+            {/* The same words the dashboard's feed uses. This page had the raw
+                `campaign.transition` while the summary of it on Home said "Campaign
+                transition" — the same row, in two vocabularies, one screen apart. */}
+            <s-table-cell>{describeAction(entry.action)}</s-table-cell>
             <s-table-cell>{entry.summary}</s-table-cell>
           </s-table-row>
         ))}

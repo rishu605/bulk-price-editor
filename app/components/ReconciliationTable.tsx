@@ -1,7 +1,5 @@
-import { Link } from "react-router";
-
 import type { ReconciliationRow } from "../services/reconciliation.server";
-import { describeState } from "../lib/reporting/reconciliation-csv";
+import { stateLabel } from "../lib/reporting/reconciliation-csv";
 
 /**
  * Every price, next to the reason it is that price.
@@ -50,14 +48,16 @@ export function ReconciliationTable({ rows }: { rows: ReconciliationRow[] }) {
             <s-table-cell>{row.baseline ?? "—"}</s-table-cell>
             <s-table-cell>
               {row.campaignId ? (
-                <Link to={`/app/campaigns/${row.campaignId}`}>{row.campaignName}</Link>
+                <s-button variant="tertiary" href={`/app/campaigns/${row.campaignId}`}>
+                  {row.campaignName}
+                </s-button>
               ) : (
                 "—"
               )}
             </s-table-cell>
             <s-table-cell>
               <s-badge tone={row.drifted ? "critical" : row.offBaseline ? "info" : "success"}>
-                {describeState(row)}
+                {stateLabel(row)}
               </s-badge>
             </s-table-cell>
           </s-table-row>

@@ -1,4 +1,3 @@
-import { Link } from "react-router";
 
 import { SPACE } from "../lib/ui/spacing";
 
@@ -60,19 +59,24 @@ export function CalendarGrid({ days, today }: { days: CalendarDay[]; today: stri
               minBlockSize="64px"
             >
               <s-stack gap={SPACE.tight}>
-                <Link to={`/app/campaigns/new?startAt=${day.date}`}>
+                {/* `s-clickable`, not a `Link`. A react-router link is a bare anchor, so
+                    every one of the thirty-five dates carried a browser underline and the
+                    grid read as a page of links rather than as a calendar. `s-clickable`
+                    is Polaris' "this is pressable" primitive: it takes an href, so this
+                    is still an anchor, and it brings no styling of its own. */}
+                <s-clickable href={`/app/campaigns/new?startAt=${day.date}`}>
                   <s-text
                     type={day.date === today ? "strong" : "generic"}
                     color={day.inFocus ? "base" : "subdued"}
                   >
                     {dayNumber(day.date)}
                   </s-text>
-                </Link>
+                </s-clickable>
 
                 {day.entries.map((entry) => (
-                  <Link
+                  <s-clickable
                     key={`${day.date}-${entry.campaignId}`}
-                    to={`/app/campaigns/${entry.campaignId}`}
+                    href={`/app/campaigns/${entry.campaignId}`}
                   >
                     <s-badge tone={toneFor(CAMPAIGN_TONE, entry.status)}>
                       {/* Only the starting day carries the name. Repeating it on every
@@ -80,7 +84,7 @@ export function CalendarGrid({ days, today }: { days: CalendarDay[]; today: stri
                           words and hides the days something actually happens. */}
                       {entry.starts ? entry.name : entry.continues ? "→" : "·"}
                     </s-badge>
-                  </Link>
+                  </s-clickable>
                 ))}
 
                 {/* What actually happened that day, as distinct from what was
@@ -88,12 +92,12 @@ export function CalendarGrid({ days, today }: { days: CalendarDay[]; today: stri
                     4th is a merchant's whole question, and a calendar showing only the
                     intention cannot answer it. */}
                 {day.runs.map((run) => (
-                  <Link key={run.runId} to={`/app/campaigns/${run.campaignId}`}>
+                  <s-clickable key={run.runId} href={`/app/campaigns/${run.campaignId}`}>
                     <s-text tone={run.status === "COMPLETED" ? "success" : "critical"}>
                       {run.kind === "REVERT" ? "reverted" : "applied"}
                       {run.status === "COMPLETED" ? "" : ` · ${run.status.toLowerCase()}`}
                     </s-text>
-                  </Link>
+                  </s-clickable>
                 ))}
 
                 {day.entries.length > 1 ? (

@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ReconciliationRow } from "../../services/reconciliation.server";
-import { describeState, reconciliationCsv } from "./reconciliation-csv";
+import { describeState, reconciliationCsv, stateLabel } from "./reconciliation-csv";
 
 const row = (over: Partial<ReconciliationRow> = {}): ReconciliationRow => ({
   variantGid: "gid://shopify/ProductVariant/1",
@@ -84,5 +84,36 @@ describe("the exported file", () => {
 
   it("quotes a title containing a comma", () => {
     expect(reconciliationCsv([row({ title: 'Monitor, 24"' })])).toContain('"Monitor, 24"""');
+  });
+});
+
+describe("the badge label, as distinct from the CSV sentence", () => {
+  const row = (over: Partial<ReconciliationRow>) =>
+    ({ drifted: false, offBaseline: false, campaignName: null, ...over }) as ReconciliationRow;
+
+  it("names the state in a word or two", () => {
+    // The table rendered the CSV sentence inside a badge: "drifted — live price is not
+    // what we wrote" as a pill three times the width of its column, restating the Live
+    // and Baseline columns either side of it.
+    expect(stateLabel(row({ drifted: true }))).toBe("Drifted");
+    expect(stateLabel(row({ offBaseline: true, campaignName: "Summer sale" }))).toBe("On sale");
+    expect(stateLabel(row({ offBaseline: true }))).toBe("Off baseline");
+    expect(stateLabel(row({}))).toBe("At baseline");
+  });
+
+  it("agrees with the sentence about which state a row is in", () => {
+    // Two functions over the same four branches is two chances to disagree, and a
+    // spreadsheet that says "drifted" beside a screen that says "At baseline" is worse
+    // than either alone.
+    const cases = [
+      row({ drifted: true }),
+      row({ offBaseline: true, campaignName: "Summer sale" }),
+      row({ offBaseline: true }),
+      row({}),
+    ];
+
+    for (const each of cases) {
+      expect(describeState(each).toLowerCase()).toContain(stateLabel(each).toLowerCase());
+    }
   });
 });
