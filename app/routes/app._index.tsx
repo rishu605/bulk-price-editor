@@ -225,6 +225,9 @@ export default function Dashboard() {
   const result = fetcher.data;
 
   const neverSynced = syncedAt === null;
+  // Something to report is a campaign that exists or a run that happened — not a set of
+  // counters that all read zero.
+  const showLive = campaigns > 0 || lastRun !== null;
 
   return (
     <PageShell heading="Anchor">
@@ -345,41 +348,35 @@ export default function Dashboard() {
             </s-button>
           </fetcher.Form>
         </s-section>
-      ) : (
+      ) : null}
+
+      {/* Only when there is something live to report.
+
+          It used to render unconditionally, so a shop that had synced and not yet made a
+          campaign got four tiles reading 0, 0, 0, 0 and two paragraphs explaining that
+          nothing had happened — the largest block on the page, spent saying "nothing".
+          The checklist above is already answering "what now", and answering it with an
+          action rather than with four zeroes. */}
+      {showLive ? (
         <s-section heading="What is live right now">
           <CountsRow
             items={[
               { label: "Campaigns running", value: live },
               { label: "Scheduled", value: upcoming },
               { label: "Need attention", value: needsAttention },
-              { label: "Prices changed outside the app", value: driftOpen },
+              // Shorter than "Prices changed outside the app", which was the one label
+              // that wrapped to two lines and made its tile taller than the three beside
+              // it once the page stopped running edge to edge.
+              { label: "Changed outside Anchor", value: driftOpen },
             ]}
           />
-
-          {live === 0 && upcoming === 0 && campaigns === 0 ? (
-            <s-paragraph>
-              <s-text>
-                No campaigns yet. A <strong>campaign</strong> is a rule — “20% off
-                everything tagged Summer” — plus when it should run. Anchor computes each
-                price from that variant&rsquo;s baseline, so running it twice changes
-                nothing the second time, and ending it puts prices back exactly.
-              </s-text>
-            </s-paragraph>
-          ) : null}
 
           {lastRun ? (
             <s-stack gap={SPACE.item}>
               <s-text color="subdued">Last run</s-text>
               <LastRunSummary run={lastRun} now={now} timeZone={timeZone} />
             </s-stack>
-          ) : (
-            <s-paragraph>
-              <s-text>
-                Nothing has been applied to your storefront yet. Every run records what it
-                changed, row by row, and stays readable for as long as you have the app.
-              </s-text>
-            </s-paragraph>
-          )}
+          ) : null}
 
           <ActionRow>
             <s-button href="/app/campaigns">Campaigns</s-button>
@@ -387,22 +384,70 @@ export default function Dashboard() {
             <s-button href="/app/activity">Activity log</s-button>
           </ActionRow>
         </s-section>
-      )}
+      ) : null}
+
+      {/* The one case the checklist does not cover: everything on it is done, and the
+          campaigns it was done with have since been deleted. */}
+      {!neverSynced && !showLive && guide.complete ? (
+        <s-section heading="What is live right now">
+          <s-paragraph>
+            <s-text>
+              Nothing is running. A <strong>campaign</strong> is a rule — “20% off
+              everything tagged Summer” — plus when it should run. Anchor computes each
+              price from that variant&rsquo;s baseline, so running it twice changes
+              nothing the second time, and ending it puts prices back exactly.
+            </s-text>
+          </s-paragraph>
+          <ActionRow>
+            <s-button variant="primary" href="/app/campaigns/new">
+              Create a campaign
+            </s-button>
+          </ActionRow>
+        </s-section>
+      ) : null}
 
       {!neverSynced ? (
         <s-section heading="Catalogue">
           {/* The shared component, not a second copy of its markup. This page had
               hand-rolled the same four tiles, so it kept the old flat look after the
               real one gained borders and equal columns -- and it is the first screen
-              after installing, which is the worst place to be a version behind. */}
+              after installing, which is the worst place to be a version behind.
+
+              Three tiles, not four. "Campaigns" was the fourth and it is a fact about
+              campaigns, which the section above is entirely about. */}
           <CountsRow
             items={[
               { label: "Variants", value: health.variants },
-              { label: "With baseline", value: health.withBaseline },
+              { label: "With a baseline", value: health.withBaseline },
               { label: "Not at baseline", value: health.drifted },
-              { label: "Campaigns", value: campaigns },
             ]}
           />
+
+          {/* The baselines were their own card in the sidebar, which meant the catalogue
+              was described in two places — and that card's headline figure was the second
+              tile above, restated. One subject, one card.
+
+              Two columns rather than four stacked lines: a label sitting directly under
+              the value above it reads as belonging to it, and the section's own rhythm
+              between children is not large enough to say otherwise. */}
+          <s-grid
+            gridTemplateColumns="@container (inline-size <= 500px) 1fr, 1fr 1fr"
+            gap={SPACE.section}
+          >
+            <s-stack gap={SPACE.tight}>
+              <s-text color="subdued">Baseline coverage</s-text>
+              <Meter value={health.withBaseline} max={health.variants} />
+            </s-stack>
+
+            <s-stack gap={SPACE.tight}>
+              <s-text color="subdued">Oldest captured</s-text>
+              <s-text>
+                {health.oldestCapturedAt
+                  ? formatDay(health.oldestCapturedAt, timeZone)
+                  : "None captured"}
+              </s-text>
+            </s-stack>
+          </s-grid>
 
           {health.withBaseline > health.variants ? (
             <s-paragraph>
@@ -415,14 +460,15 @@ export default function Dashboard() {
           ) : null}
 
           <ActionRow>
-            <fetcher.Form method="post">
-              <input type="hidden" name="intent" value="sync" />
-              <s-button type="submit" loading={busy || undefined}>
-                Re-sync catalogue
-              </s-button>
-            </fetcher.Form>
             <s-button variant="tertiary" href="/app/prices">
               Browse variants and baselines
+            </s-button>
+            {/* Tertiary, and the only action on this page deliberately kept quiet. One
+                click was not enough ceremony for the most destructive operation in the
+                app, and a bordered button next to the coverage figure would read as the
+                thing to do about it. */}
+            <s-button variant="tertiary" href="/app/imports/recapture">
+              Recapture baselines…
             </s-button>
           </ActionRow>
         </s-section>
@@ -442,53 +488,22 @@ export default function Dashboard() {
             <s-text color="subdued">Last synced</s-text>
             <s-text>{syncedAt ? formatAgo(syncedAt, now, timeZone) : "Not yet synced"}</s-text>
           </s-stack>
+
+          {/* The action belongs with the fact it acts on. It used to sit in the catalogue
+              card, two columns away from the sentence saying how stale the catalogue
+              was. */}
+          {!neverSynced ? (
+            <ActionRow>
+              <fetcher.Form method="post">
+                <input type="hidden" name="intent" value="sync" />
+                <s-button type="submit" loading={busy || undefined}>
+                  Re-sync catalogue
+                </s-button>
+              </fetcher.Form>
+            </ActionRow>
+          ) : null}
         </s-stack>
       </s-section>
-
-      {!neverSynced ? (
-        <s-section slot="aside" heading="Baselines">
-          <s-stack gap={SPACE.section}>
-            <s-stack gap={SPACE.tight}>
-              <s-text color="subdued">Coverage</s-text>
-              <s-text type="strong">
-                {formatCount(health.withBaseline)} of {formatCount(health.variants)} variants
-              </s-text>
-              <Meter value={health.withBaseline} max={health.variants} />
-            </s-stack>
-
-            <s-stack gap={SPACE.tight}>
-              <s-text color="subdued">Oldest captured</s-text>
-              <s-text>
-                {health.oldestCapturedAt
-                  ? formatDay(health.oldestCapturedAt, timeZone)
-                  : "None captured"}
-              </s-text>
-            </s-stack>
-
-            {/* One sentence, not the six it used to be. The full explanation — what a
-                recapture would catch, and which campaigns are running while you do it —
-                is on the page that performs it, where it can name your actual campaigns
-                instead of describing the idea of one. What has to survive the trim is the
-                irreversibility, and that is what is left. */}
-            <s-paragraph>
-              <s-text color="subdued">
-                Recapturing replaces baselines with today&rsquo;s live prices — done during a
-                sale, that makes the sale price the new normal, permanently.
-              </s-text>
-            </s-paragraph>
-
-            {/* Tertiary, and the only action on this page deliberately kept quiet. One
-                click from the dashboard was not enough ceremony for the most destructive
-                operation in the app, and a bordered button beside a warning would read
-                as the thing to do next. */}
-            <ActionRow>
-              <s-button variant="tertiary" href="/app/imports/recapture">
-                Recapture baselines…
-              </s-button>
-            </ActionRow>
-          </s-stack>
-        </s-section>
-      ) : null}
 
       {!neverSynced && recent.length > 0 ? (
         <s-section slot="aside" heading="Recent activity">

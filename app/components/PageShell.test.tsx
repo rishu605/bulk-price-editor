@@ -78,13 +78,17 @@ describe("pages without an aside", () => {
     </PageShell>,
   );
 
-  it("put their sections straight into the page, with no wrapper", () => {
+  it("put their sections straight into the page, with no wrapper inside it", () => {
     // Not a style preference. Wrapping them — in an `s-stack`, and then in a
     // single-column `s-grid` — rendered the page blank in the admin: heading present,
     // every section gone, no error. Both were found by opening the page, so this
     // assertion is the only thing standing between the next tidy-up and a blank page.
-    expect(html).not.toContain("<s-grid");
-    expect(html).not.toContain("<s-stack");
+    //
+    // *Inside* is the whole rule. The page itself sits in a centring box that insets it
+    // to 80% of the frame, and that is outside `s-page` where it does no harm — checked
+    // by rendering it against the real Polaris components. What must not happen is
+    // anything coming between `s-page` and its sections.
+    expect(html).toMatch(/<s-page[^>]*>\s*<s-section/);
     expect(html).toContain("just rows");
   });
 
@@ -119,7 +123,7 @@ describe("asides that a page renders conditionally", () => {
       </PageShell>,
     );
 
-    expect(html).not.toContain("<s-grid");
+    expect(html).toMatch(/<s-page[^>]*>\s*<s-section/);
   });
 });
 
@@ -151,5 +155,43 @@ describe("the column collapses before it gets unreadable", () => {
   it("asks for two columns when there is room", () => {
     const [, wide] = columns.split(",");
     expect(wide.trim().split(/\s+/), "wide viewports get content plus an aside").toHaveLength(2);
+  });
+});
+
+describe("the inset", () => {
+  const html = render(
+    <PageShell heading="Anchor">
+      <s-section>rows</s-section>
+    </PageShell>,
+  );
+
+  it("leaves a tenth of the frame on each side", () => {
+    expect(html).toContain('inlineSize="80%"');
+  });
+
+  it("insets the heading with the content, not just the content", () => {
+    // A title pinned to the far left of a 1900px screen, with the first card it names
+    // starting a tenth of the way in, reads as two unrelated things. So the box wraps
+    // the whole page rather than its children.
+    expect(html.indexOf('inlineSize="80%"')).toBeLessThan(html.indexOf("<s-page"));
+  });
+});
+
+describe("what the inset must not break", () => {
+  it("keeps the aside, which only exists because this component rebuilds it", () => {
+    // The inset wraps `s-page` from outside. If a future tidy-up moves it inside, the
+    // aside partitioning still runs but Polaris has no aside slot at `large` — and the
+    // sections land in a slot nothing renders, which is how they disappear.
+    const html = render(
+      <PageShell heading="Anchor">
+        <s-section heading="Catalogue">main</s-section>
+        <s-section slot="aside" heading="Store">sidebar</s-section>
+      </PageShell>,
+    );
+
+    expect(html).toContain("sidebar");
+    expect(html, "a section still asking for a slot is a section nobody sees").not.toContain(
+      'slot="aside"',
+    );
   });
 });
