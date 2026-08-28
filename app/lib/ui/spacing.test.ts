@@ -171,6 +171,56 @@ describe("nothing in the app sets a distance by hand", () => {
   });
 });
 
+/**
+ * Sections a route nests still get the page rhythm.
+ *
+ * `s-page` spaces its **direct** children and nothing deeper. The settings page put three
+ * sections inside one `fetcher.Form` — correctly, because one Save button submits all
+ * three — and `s-page` then saw one form rather than three sections. The cards rendered
+ * flush against each other, which reads as one card with a rule through it rather than as
+ * three things a merchant can change independently.
+ *
+ * Nothing caught it: the markup is valid, the sections are all there, and the spacing
+ * lives in a layout Polaris only runs in the browser. So the check is structural — a form
+ * holding more than one section has to hand them to `PageSections`.
+ */
+describe("sections nested inside a route's own wrapper keep the page rhythm", () => {
+  const ROUTES = CHECKED.filter((file) => file.startsWith("app/routes/"));
+
+  /** Each `<Form>`/`<fetcher.Form>` block in a file, with its contents. */
+  function formBlocks(source: string): string[] {
+    const blocks: string[] = [];
+
+    for (const open of source.matchAll(/<((?:\w+\.)?Form)\b/g)) {
+      const close = source.indexOf(`</${open[1]}>`, open.index);
+      if (close !== -1) blocks.push(source.slice(open.index, close));
+    }
+
+    return blocks;
+  }
+
+  it("is looking at routes, so it cannot pass by checking nothing", () => {
+    const withForms = ROUTES.filter((file) => formBlocks(readFileSync(join(ROOT, file), "utf8")).length > 0);
+
+    expect(withForms.length).toBeGreaterThan(5);
+  });
+
+  it.each(ROUTES)("%s", (file) => {
+    const source = readFileSync(join(ROOT, file), "utf8");
+
+    for (const block of formBlocks(source)) {
+      const sections = [...block.matchAll(/<s-section\b/g)].length;
+      if (sections < 2) continue;
+
+      expect(
+        block.includes("<PageSections>"),
+        `${file} puts ${sections} sections inside one form, so s-page cannot space them — ` +
+          `wrap them in PageSections`,
+      ).toBe(true);
+    }
+  });
+});
+
 describe("the page rhythm is set in exactly one place", () => {
   it("is PageShell's, and no route sets it", () => {
     // "Page rhythm has to be the largest gap on the screen to do its job. If a route can

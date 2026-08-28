@@ -127,6 +127,28 @@ function BackLink({ backTo }: { backTo?: { href: string; label: string } }) {
   );
 }
 
+/**
+ * Page rhythm for sections a route has to nest inside something of its own.
+ *
+ * `s-page` spaces its **direct** children, which is why the no-aside branch below hands
+ * them over untouched. A route that wraps its sections in anything — and one does: the
+ * settings page puts three of them inside a single `fetcher.Form`, because one Save
+ * button has to submit all three — is no longer handing `s-page` sections. It is handing
+ * it one form, and the sections inside it come out flush against each other with no gap
+ * at all. Two cards touching read as one card with a line through it.
+ *
+ * So the rhythm is available for that case, and only from here: `spacing.test.ts` refuses
+ * `SPACE.page` in any file but this one, so a route cannot decide the distance between
+ * its own sections — it can only ask for the one the shell already uses.
+ *
+ * An `s-stack` and not an `s-grid`. The note in the no-aside branch below records a
+ * single-column grid rendering the page blank; a stack wrapping sections is the shape the
+ * two-column branch has always used, and it renders.
+ */
+export function PageSections({ children }: { children: ReactNode }) {
+  return <s-stack gap={SPACE.page}>{children}</s-stack>;
+}
+
 export function PageShell({
   heading,
   backTo,

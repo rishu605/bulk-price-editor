@@ -16,7 +16,7 @@ import {
   readRoundingPolicy,
   ROUNDING_LABELS,
 } from "../lib/money/rounding-policy";
-import { PageShell } from "../components/PageShell";
+import { PageSections, PageShell } from "../components/PageShell";
 import { SettingsSaveBar } from "../components/SettingsSaveBar";
 import { Field, FieldGrid, FullRow } from "../components/FieldGrid";
 import { HelpNote } from "../components/HelpNote";
@@ -141,233 +141,235 @@ export default function Settings() {
       ) : null}
 
       <fetcher.Form method="post" ref={formRef}>
-      {/* Three long sections in one page, so a merchant who came here to change one
-          number does not scroll past the other two hunting for it. In-page anchors
-          rather than more routes: these settings are read together — a rounding rule
-          that pushes a price under a floor is a conversation between two of them —
-          and splitting them across pages is what made the nav sixteen items long. */}
+      <PageSections>
+        {/* Three long sections in one page, so a merchant who came here to change one
+            number does not scroll past the other two hunting for it. In-page anchors
+            rather than more routes: these settings are read together — a rounding rule
+            that pushes a price under a floor is a conversation between two of them —
+            and splitting them across pages is what made the nav sixteen items long. */}
 
-      <s-section heading="Guardrails">
-        <s-paragraph>
-          Floors that no campaign may price below. They are checked after rounding,
-          so a rounding rule cannot push a price under them.
-        </s-paragraph>
+        <s-section heading="Guardrails">
+          <s-paragraph>
+            Floors that no campaign may price below. They are checked after rounding,
+            so a rounding rule cannot push a price under them.
+          </s-paragraph>
 
-        {/* Coverage sits with the fields it qualifies, not in a sidebar card of its own.
-            Two of the controls below — "never price at or below cost" and what to do when
-            a cost-based floor meets a variant without one — mean nothing until you know
-            how many variants that second case actually is. */}
-        <s-paragraph>
-          <s-text color="subdued">
-            {formatCount(withCost)} of {formatCount(variants)} variants have a cost
-            ({costCoverage}%). Cost-based floors only constrain those; the last setting
-            in this section decides the rest.
-          </s-text>
-        </s-paragraph>
+          {/* Coverage sits with the fields it qualifies, not in a sidebar card of its own.
+              Two of the controls below — "never price at or below cost" and what to do when
+              a cost-based floor meets a variant without one — mean nothing until you know
+              how many variants that second case actually is. */}
+          <s-paragraph>
+            <s-text color="subdued">
+              {formatCount(withCost)} of {formatCount(variants)} variants have a cost
+              ({costCoverage}%). Cost-based floors only constrain those; the last setting
+              in this section decides the rest.
+            </s-text>
+          </s-paragraph>
 
-        {settings.neverBelowCost && costCoverage < 100 ? (
-          <s-banner tone="warning">
-            <s-paragraph>
-              Only {costCoverage}% of your variants have a cost recorded. With
-              &ldquo;never below cost&rdquo; on, the rest are skipped rather than
-              priced unguarded — they will not be included in any campaign.
-              Variants added since the last catalogue sync have no cost yet, because
-              Shopify&rsquo;s product webhooks do not carry one; a re-sync from the
-              dashboard fills them in.
-            </s-paragraph>
-          </s-banner>
-        ) : null}
+          {settings.neverBelowCost && costCoverage < 100 ? (
+            <s-banner tone="warning">
+              <s-paragraph>
+                Only {costCoverage}% of your variants have a cost recorded. With
+                &ldquo;never below cost&rdquo; on, the rest are skipped rather than
+                priced unguarded — they will not be included in any campaign.
+                Variants added since the last catalogue sync have no cost yet, because
+                Shopify&rsquo;s product webhooks do not carry one; a re-sync from the
+                dashboard fills them in.
+              </s-paragraph>
+            </s-banner>
+          ) : null}
 
-          <FieldGrid>
-            <FullRow>
-            <s-checkbox
-              name="neverBelowCost"
-              label="Never price at or below cost"
-              checked={settings.neverBelowCost || undefined}
-            />
-            </FullRow>
-
-            <s-number-field
-              name="minMarginPercent"
-              label="Minimum margin (%)"
-              value={settings.minMarginPercent?.toString() ?? ""}
-              details="Share of the selling price. 25 means a price of at least cost ÷ 0.75. Leave blank for none."
-            />
-
-            {/* A money field, not a number field. This is a price, and the two differ
-                in how they handle the decimal separator a merchant's locale uses and
-                how many places the currency actually has — a generic number input is
-                where a ¥1,000 floor becomes ¥1,000.00 and then something else. */}
-            <s-money-field
-              name="minPrice"
-              label={`Minimum price (${currency})`}
-              value={settings.minPrice?.toString() ?? ""}
-              details="An absolute floor, whatever the rule computes. Leave blank for none."
-            />
-
-            <s-select name="violationPolicy" label="When a price would breach a floor">
-              <s-option value="clamp" defaultSelected={settings.violationPolicy === "clamp"}>
-                Clamp it to the floor and carry on
-              </s-option>
-              <s-option value="skip" defaultSelected={settings.violationPolicy === "skip"}>
-                Skip that variant, price the rest
-              </s-option>
-              <s-option value="block" defaultSelected={settings.violationPolicy === "block"}>
-                Block the whole campaign
-              </s-option>
-            </s-select>
-
-            <s-select
-              name="missingCostPolicy"
-              label="When a cost-based floor meets a variant with no cost"
-            >
-              <s-option value="skip" defaultSelected={settings.missingCostPolicy === "skip"}>
-                Skip that variant
-              </s-option>
-              <s-option value="error" defaultSelected={settings.missingCostPolicy === "error"}>
-                Fail the campaign
-              </s-option>
-            </s-select>
-          </FieldGrid>
-      </s-section>
-
-      <s-section heading="Rounding">
-        <s-paragraph>
-          <s-text>
-            How campaign prices are tidied up after the discount is calculated. Set
-            once here; each campaign can override it.
-          </s-text>
-        </s-paragraph>
-
-          <s-stack gap={SPACE.section}>
-            {/* A rounding rule is half a dozen words. Unbounded it was a 970px bar, and
-                the per-currency selects below it were five more. */}
-            <Field width="medium">
-              <s-select name="rounding.default" label="Everywhere, unless overridden">
-                {roundingOptions.map((option) => (
-                  <s-option
-                    key={option.value}
-                    value={option.value}
-                    defaultSelected={option.value === settings.rounding.default}
-                  >
-                    {option.label}
-                  </s-option>
-                ))}
-              </s-select>
-            </Field>
-
-            {currencies.length > 1 ? (
-              <>
-                <s-paragraph>
-                  <s-text>
-                    A price ending that looks considered in one currency can look like
-                    a mistake in another, and some currencies have no cents to end in.
-                  </s-text>
-                </s-paragraph>
-
-                {currencies.map((code) => {
-                  // What this currency will actually do, which is not always what the
-                  // default says: a .99 ending has nowhere to go in a currency with no
-                  // decimal places, so it shows as the step rounding it becomes.
-                  const effective = profileNameFor(settings.rounding, code);
-
-                  return (
-                    <Field key={code} width="medium">
-                    <s-select
-                      name={`rounding.${code}`}
-                      label={`${code}${code === currency ? " (your store's currency)" : ""}`}
-                    >
-                      <s-option
-                        value="inherit"
-                        defaultSelected={!settings.rounding.byCurrency[code]}
-                      >
-                        Use the setting above ({ROUNDING_LABELS[effective].toLowerCase()})
-                      </s-option>
-                      {roundingOptions.map((option) => (
-                        <s-option
-                          key={option.value}
-                          value={option.value}
-                          defaultSelected={settings.rounding.byCurrency[code] === option.value}
-                        >
-                          {option.label}
-                        </s-option>
-                      ))}
-                    </s-select>
-                    </Field>
-                  );
-                })}
-              </>
-            ) : null}
-          </s-stack>
-      </s-section>
-
-      <s-section heading="Notifications">
-        <s-paragraph>
-          <s-text>
-            A campaign over a large catalogue runs for a while. These let you close the
-            tab and still find out what happened.
-          </s-text>
-        </s-paragraph>
-
-        {!mailConfigured ? (
-          <s-banner tone="warning">
-            <s-paragraph>
-              Email is not configured on this deployment, so nothing is sent yet. Your
-              preferences are saved and take effect once it is.
-            </s-paragraph>
-          </s-banner>
-        ) : null}
-
-          <s-stack gap={SPACE.section}>
-            <Field width="medium">
-              <s-text-field
-                name="email"
-                label="Send to"
-                placeholder="ops@yourshop.com"
-                value={notifications.email ?? ""}
-                details="Leave blank to turn notifications off entirely."
+            <FieldGrid>
+              <FullRow>
+              <s-checkbox
+                name="neverBelowCost"
+                label="Never price at or below cost"
+                checked={settings.neverBelowCost || undefined}
               />
-            </Field>
+              </FullRow>
 
-            <s-checkbox
-              name="onPartialOrFailure"
-              label="A run did not finish cleanly"
-              details="Something needs you: rows failed, or the run stopped early."
-              checked={notifications.onPartialOrFailure || undefined}
-            />
-            <s-checkbox
-              name="onDrift"
-              label="Someone changed a price outside the app"
-              details="Those edits are held for your decision rather than overwritten."
-              checked={notifications.onDrift || undefined}
-            />
-            <s-checkbox
-              name="onRevert"
-              label="A campaign was reverted"
-              checked={notifications.onRevert || undefined}
-            />
-            <s-checkbox
-              name="onCompletion"
-              label="A run finished cleanly"
-              details="Off by default. Being emailed about every success is how the one email that mattered gets skimmed past."
-              checked={notifications.onCompletion || undefined}
-            />
-            <s-checkbox
-              name="weeklyDigest"
-              label="Weekly summary"
-              checked={notifications.weeklyDigest || undefined}
-            />
-          </s-stack>
+              <s-number-field
+                name="minMarginPercent"
+                label="Minimum margin (%)"
+                value={settings.minMarginPercent?.toString() ?? ""}
+                details="Share of the selling price. 25 means a price of at least cost ÷ 0.75. Leave blank for none."
+              />
 
-        <s-paragraph>
-          <s-text>
-            Emails carry counts only — how many variants changed, failed or were
-            skipped. No prices are ever included, because email is not a place your
-            pricing should end up.
-          </s-text>
-        </s-paragraph>
-      </s-section>
+              {/* A money field, not a number field. This is a price, and the two differ
+                  in how they handle the decimal separator a merchant's locale uses and
+                  how many places the currency actually has — a generic number input is
+                  where a ¥1,000 floor becomes ¥1,000.00 and then something else. */}
+              <s-money-field
+                name="minPrice"
+                label={`Minimum price (${currency})`}
+                value={settings.minPrice?.toString() ?? ""}
+                details="An absolute floor, whatever the rule computes. Leave blank for none."
+              />
 
+              <s-select name="violationPolicy" label="When a price would breach a floor">
+                <s-option value="clamp" defaultSelected={settings.violationPolicy === "clamp"}>
+                  Clamp it to the floor and carry on
+                </s-option>
+                <s-option value="skip" defaultSelected={settings.violationPolicy === "skip"}>
+                  Skip that variant, price the rest
+                </s-option>
+                <s-option value="block" defaultSelected={settings.violationPolicy === "block"}>
+                  Block the whole campaign
+                </s-option>
+              </s-select>
+
+              <s-select
+                name="missingCostPolicy"
+                label="When a cost-based floor meets a variant with no cost"
+              >
+                <s-option value="skip" defaultSelected={settings.missingCostPolicy === "skip"}>
+                  Skip that variant
+                </s-option>
+                <s-option value="error" defaultSelected={settings.missingCostPolicy === "error"}>
+                  Fail the campaign
+                </s-option>
+              </s-select>
+            </FieldGrid>
+        </s-section>
+
+        <s-section heading="Rounding">
+          <s-paragraph>
+            <s-text>
+              How campaign prices are tidied up after the discount is calculated. Set
+              once here; each campaign can override it.
+            </s-text>
+          </s-paragraph>
+
+            <s-stack gap={SPACE.section}>
+              {/* A rounding rule is half a dozen words. Unbounded it was a 970px bar, and
+                  the per-currency selects below it were five more. */}
+              <Field width="medium">
+                <s-select name="rounding.default" label="Everywhere, unless overridden">
+                  {roundingOptions.map((option) => (
+                    <s-option
+                      key={option.value}
+                      value={option.value}
+                      defaultSelected={option.value === settings.rounding.default}
+                    >
+                      {option.label}
+                    </s-option>
+                  ))}
+                </s-select>
+              </Field>
+
+              {currencies.length > 1 ? (
+                <>
+                  <s-paragraph>
+                    <s-text>
+                      A price ending that looks considered in one currency can look like
+                      a mistake in another, and some currencies have no cents to end in.
+                    </s-text>
+                  </s-paragraph>
+
+                  {currencies.map((code) => {
+                    // What this currency will actually do, which is not always what the
+                    // default says: a .99 ending has nowhere to go in a currency with no
+                    // decimal places, so it shows as the step rounding it becomes.
+                    const effective = profileNameFor(settings.rounding, code);
+
+                    return (
+                      <Field key={code} width="medium">
+                      <s-select
+                        name={`rounding.${code}`}
+                        label={`${code}${code === currency ? " (your store's currency)" : ""}`}
+                      >
+                        <s-option
+                          value="inherit"
+                          defaultSelected={!settings.rounding.byCurrency[code]}
+                        >
+                          Use the setting above ({ROUNDING_LABELS[effective].toLowerCase()})
+                        </s-option>
+                        {roundingOptions.map((option) => (
+                          <s-option
+                            key={option.value}
+                            value={option.value}
+                            defaultSelected={settings.rounding.byCurrency[code] === option.value}
+                          >
+                            {option.label}
+                          </s-option>
+                        ))}
+                      </s-select>
+                      </Field>
+                    );
+                  })}
+                </>
+              ) : null}
+            </s-stack>
+        </s-section>
+
+        <s-section heading="Notifications">
+          <s-paragraph>
+            <s-text>
+              A campaign over a large catalogue runs for a while. These let you close the
+              tab and still find out what happened.
+            </s-text>
+          </s-paragraph>
+
+          {!mailConfigured ? (
+            <s-banner tone="warning">
+              <s-paragraph>
+                Email is not configured on this deployment, so nothing is sent yet. Your
+                preferences are saved and take effect once it is.
+              </s-paragraph>
+            </s-banner>
+          ) : null}
+
+            <s-stack gap={SPACE.section}>
+              <Field width="medium">
+                <s-text-field
+                  name="email"
+                  label="Send to"
+                  placeholder="ops@yourshop.com"
+                  value={notifications.email ?? ""}
+                  details="Leave blank to turn notifications off entirely."
+                />
+              </Field>
+
+              <s-checkbox
+                name="onPartialOrFailure"
+                label="A run did not finish cleanly"
+                details="Something needs you: rows failed, or the run stopped early."
+                checked={notifications.onPartialOrFailure || undefined}
+              />
+              <s-checkbox
+                name="onDrift"
+                label="Someone changed a price outside the app"
+                details="Those edits are held for your decision rather than overwritten."
+                checked={notifications.onDrift || undefined}
+              />
+              <s-checkbox
+                name="onRevert"
+                label="A campaign was reverted"
+                checked={notifications.onRevert || undefined}
+              />
+              <s-checkbox
+                name="onCompletion"
+                label="A run finished cleanly"
+                details="Off by default. Being emailed about every success is how the one email that mattered gets skimmed past."
+                checked={notifications.onCompletion || undefined}
+              />
+              <s-checkbox
+                name="weeklyDigest"
+                label="Weekly summary"
+                checked={notifications.weeklyDigest || undefined}
+              />
+            </s-stack>
+
+          <s-paragraph>
+            <s-text>
+              Emails carry counts only — how many variants changed, failed or were
+              skipped. No prices are ever included, because email is not a place your
+              pricing should end up.
+            </s-text>
+          </s-paragraph>
+        </s-section>
+
+      </PageSections>
       </fetcher.Form>
 
       <SettingsSaveBar form={formRef} saving={busy} />
