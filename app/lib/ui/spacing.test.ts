@@ -103,7 +103,7 @@ const PRIMITIVES = [
   "app/components/AsyncState.tsx",
   "app/components/CountsRow.tsx",
   "app/components/OnboardingCard.tsx",
-  "app/components/prices/Pagination.tsx",
+  "app/components/Pagination.tsx",
   "app/components/prices/VariantSearch.tsx",
 ];
 
