@@ -1,3 +1,4 @@
+import { humanise } from "../lib/format/label";
 import type { MarketPreview, PreviewRow } from "../services/campaigns/index.server";
 import { PREVIEW_TONE, toneFor } from "./tone";
 
@@ -52,7 +53,7 @@ export function PreviewTable({
             ))}
             <s-table-cell>
               <s-badge tone={toneFor(PREVIEW_TONE, row.status)}>
-                {row.status}
+                {humanise(row.status)}
                 {row.reason ? ` \u00b7 ${row.reason}` : ""}
               </s-badge>
             </s-table-cell>
@@ -75,7 +76,7 @@ function describeCell(row: PreviewRow, priceListGid: string): string {
   if (!cell) return "Not sold here";
 
   if (cell.status !== "pending") {
-    return cell.reason ? `${cell.status} \u00b7 ${cell.reason}` : cell.status;
+    return cell.reason ? `${humanise(cell.status)} \u00b7 ${cell.reason}` : humanise(cell.status);
   }
 
   const price = cell.after ?? "\u2014";

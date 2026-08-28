@@ -1,4 +1,4 @@
-import { Children, type ReactNode } from "react";
+import type { ReactNode } from "react";
 
 import { SPACE } from "../lib/ui/spacing";
 
@@ -32,36 +32,29 @@ import { SPACE } from "../lib/ui/spacing";
  * `s-button` takes an `href`, so a tertiary button that navigates is still an anchor —
  * middle-click and "open in new tab" behave the way a merchant expects.
  *
- * ## Why the row is a grid
+ * ## Why a component rather than a stack written out each time
  *
- * `s-button`, `s-link` and `s-clickable` are block-level, and an inline `s-stack` does
- * not change that: a stack of three actions renders as three lines. The cells of a grid
- * do, because it is the cell that decides where its child sits. Every action row in the
- * app had been rebuilding that grid by hand, one comma away from silently falling back to
- * a stacked column, which is what this exists to stop.
+ * Not because a stack does not work — it does, and this is one. The app had been writing
+ * that stack out at twenty-odd call sites with four different gaps between them, and a
+ * row of actions is exactly the kind of thing whose spacing has to be the same everywhere
+ * or the pages stop looking like one app. Naming it also gives the vocabulary above
+ * somewhere to live that a reader will actually pass through.
  *
- * `s-button-group` would be the obvious answer and is not usable here: it lays the row
- * out correctly and renders none of the buttons.
+ * ## What is block-level here, precisely
+ *
+ * The checklist carried a comment saying `s-link` and `s-clickable` are block-level and
+ * that an inline stack cannot lay them out in a row, and the first version of this
+ * component repeated it and used a grid to work around it. Checked against the rendered
+ * components, only **`s-clickable`** is: three of them in an inline stack render as three
+ * lines, while buttons and links render as one row and *wrap* when they run out of width,
+ * which a grid of fixed columns does not. So an inline stack is the right primitive, and
+ * a grid is for the cases that genuinely need columns to line up — a status glyph, a
+ * title, and an action pushed to the far edge, as the checklist rows do.
  */
 export function ActionRow({ children }: { children: ReactNode }) {
-  // Conditional actions are the norm — a Previous that only exists on page two — and
-  // `false`/`null` children must not each claim a column, or the row develops gaps where
-  // the actions that were not rendered would have been.
-  const count = Children.toArray(children).length;
-
   return (
-    <s-grid
-      // A trailing `1fr` soaks up the slack so the actions stay tight to the left
-      // instead of spreading across the card.
-      //
-      // One comma only. Polaris reads the comma as the separator between the responsive
-      // value and the default, so a second one anywhere stops the whole value parsing and
-      // it falls back to `none` — which stacks the row and looks like a layout choice.
-      gridTemplateColumns={`@container (inline-size <= 460px) 1fr, ${"auto ".repeat(count)}1fr`}
-      gap={SPACE.item}
-      alignItems="center"
-    >
+    <s-stack direction="inline" gap={SPACE.item} alignItems="center">
       {children}
-    </s-grid>
+    </s-stack>
   );
 }

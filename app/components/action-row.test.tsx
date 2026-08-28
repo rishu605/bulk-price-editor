@@ -14,6 +14,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { ActionRow } from "./ActionRow";
+import { SPACE } from "../lib/ui/spacing";
 
 const APP = join(process.cwd(), "app");
 
@@ -74,45 +75,24 @@ describe("the action vocabulary", () => {
 });
 
 describe("the row itself", () => {
-  const columns = (markup: string) => markup.match(/gridTemplateColumns="([^"]+)"/)?.[1];
+  const markup = renderToStaticMarkup(
+    <ActionRow>
+      <s-button>One</s-button>
+      <s-button>Two</s-button>
+    </ActionRow>,
+  );
 
-  it("gives every action its own column, and the slack to a trailing one", () => {
-    const markup = renderToStaticMarkup(
-      <ActionRow>
-        <s-button>One</s-button>
-        <s-button>Two</s-button>
-      </ActionRow>,
-    );
-
-    expect(columns(markup)).toContain("auto auto 1fr");
+  it("lays its actions out in a row that can wrap", () => {
+    // An inline stack, not a grid of fixed columns. Checked against the rendered
+    // components: buttons and links are not block-level — only `s-clickable` is — and a
+    // stack wraps onto a second line when it runs out of width, where a grid overflows.
+    expect(markup).toContain('direction="inline"');
+    expect(markup).not.toContain("gridTemplateColumns");
   });
 
-  it("does not hand a column to an action that was not rendered", () => {
-    // Conditional actions are the norm — a Previous that only exists on page two — and a
-    // `false` child claiming a column leaves a gap where it would have been.
-    const markup = renderToStaticMarkup(
-      <ActionRow>
-        {false}
-        <s-button>Only</s-button>
-      </ActionRow>,
-    );
-
-    expect(columns(markup)).toContain("auto 1fr");
-    expect(columns(markup)).not.toContain("auto auto");
-  });
-
-  it("keeps one comma in the responsive value", () => {
-    // Polaris splits on the comma to separate "when the query matches" from "otherwise".
-    // A second comma anywhere stops the value parsing and it falls back to `none`, which
-    // stacks the row into a column that looks like a deliberate layout.
-    const markup = renderToStaticMarkup(
-      <ActionRow>
-        <s-button>One</s-button>
-        <s-button>Two</s-button>
-        <s-button>Three</s-button>
-      </ActionRow>,
-    );
-
-    expect(columns(markup)?.split(",")).toHaveLength(2);
+  it("puts one gap between actions everywhere in the app", () => {
+    // The reason this is a component at all: twenty-odd call sites had been writing this
+    // row out with four different gaps between them.
+    expect(markup).toContain(`gap="${SPACE.item}"`);
   });
 });

@@ -1,3 +1,4 @@
+import { humanise } from "../lib/format/label";
 import { formatWhen } from "../lib/format/display";
 import type { RunSummary } from "../services/campaigns/index.server";
 import { RUN_TONE, toneFor } from "./tone";
@@ -26,9 +27,9 @@ export function RunHistoryTable({ runs, selectedRunId, timeZone }: Props) {
       <s-table-body>
         {runs.map((run) => (
           <s-table-row key={run.id}>
-            <s-table-cell>{run.kind}</s-table-cell>
+            <s-table-cell>{humanise(run.kind)}</s-table-cell>
             <s-table-cell>
-              <s-badge tone={toneFor(RUN_TONE, run.status)}>{run.status}</s-badge>
+              <s-badge tone={toneFor(RUN_TONE, run.status)}>{humanise(run.status)}</s-badge>
             </s-table-cell>
             <s-table-cell>{run.planned}</s-table-cell>
             <s-table-cell>{run.verified}</s-table-cell>
