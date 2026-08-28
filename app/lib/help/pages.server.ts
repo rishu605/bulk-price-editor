@@ -1,7 +1,7 @@
 /**
  * Reading a help page off disk, safely.
  *
- * The help centre is twenty-one markdown files in `docs/help`, committed alongside the
+ * The help centre is a directory of markdown files in `docs/help`, committed alongside the
  * code that links to them — which is what keeps the two from drifting. Serving them is
  * what makes those links resolve at all: `HELP_BASE` defaulted to a domain nobody had
  * registered, so every merchant-visible error carried a link to nothing.
@@ -16,7 +16,7 @@
 import { readFile } from "node:fs/promises";
 import { join, normalize, posix, sep } from "node:path";
 
-import { marked, type Tokens } from "marked";
+import { Marked, Renderer, type Token, type Tokens } from "marked";
 
 /** Where the markdown lives, relative to the process's working directory. */
 const ROOT = join(process.cwd(), "docs", "help");
@@ -44,9 +44,25 @@ export interface HelpImage {
 }
 
 export interface HelpPage {
+  /** The path it was read from, so a page can tell where it sits without being told. */
+  slug: string;
   /** The `#` heading, used as the document title. */
   title: string;
   html: string;
+  /** The `##` headings, in order, for the contents rail. */
+  headings: HelpHeading[];
+  /** The `## Related` list, lifted out of the prose so it can be rendered as cards. */
+  related: HelpLink[];
+}
+
+export interface HelpHeading {
+  id: string;
+  text: string;
+}
+
+export interface HelpLink {
+  href: string;
+  label: string;
 }
 
 /**
@@ -180,28 +196,125 @@ export async function readHelpPage(slug: string): Promise<HelpPage | null> {
   // because a browser tab reading "Help" for every page is a tab nobody can find again.
   const heading = /^#\s+(.+)$/m.exec(source)?.[1]?.trim();
 
-  const html = marked.parse(source, {
-    // `async: false` keeps the return type a string rather than a union. The markdown is
-    // ours and committed, so there is nothing untrusted to sanitise — but that is a
-    // property of where it comes from, not of this function, and it stops being true the
-    // moment anything here is written by a merchant.
-    async: false,
-    // Mutating the token rather than overriding the renderer: link text, titles and
-    // nested emphasis keep rendering the way marked already renders them.
-    walkTokens: (token) => {
-      if (token.type === "link") {
-        const link = token as Tokens.Link;
-        link.href = rewriteHelpHref(link.href, slug);
-      }
-      // Images the same way. A browser would resolve `../images/x.svg` correctly from
-      // this URL by accident; rewriting it means the answer does not depend on whether
-      // the page was reached with a trailing slash.
-      if (token.type === "image") {
-        const image = token as Tokens.Image;
-        image.href = rewriteHelpHref(image.href, slug);
-      }
-    },
+  const tokens = markdown.lexer(source);
+
+  // The links are rewritten before anything is split off, so the ones lifted out of the
+  // `Related` section are resolved by exactly the code the prose links go through.
+  markdown.walkTokens(tokens, (token: Token) => {
+    if (token.type === "link") {
+      const link = token as Tokens.Link;
+      link.href = rewriteHelpHref(link.href, slug);
+    }
+    // Images the same way. A browser would resolve `../images/x.svg` correctly from
+    // this URL by accident; rewriting it means the answer does not depend on whether
+    // the page was reached with a trailing slash.
+    if (token.type === "image") {
+      const image = token as Tokens.Image;
+      image.href = rewriteHelpHref(image.href, slug);
+    }
   });
 
-  return { title: heading ?? slug, html };
+  const [body, related] = splitRelated(tokens);
+
+  return {
+    slug,
+    title: heading ?? slug,
+    // The markdown is ours and committed, so there is nothing untrusted to sanitise — but
+    // that is a property of where it comes from, not of this function, and it stops being
+    // true the moment anything here is written by a merchant.
+    html: markdown.parser(body),
+    headings: contentsOf(body),
+    related,
+  };
 }
+
+/**
+ * The prose, and the `## Related` list under it.
+ *
+ * Every page ends with two or three links to the pages next to it, and rendered as
+ * markdown they arrive as the same underlined bullets as everything else — the least
+ * likely thing on the page to be noticed, in the position where a reader who has finished
+ * is deciding whether there is anywhere to go. Lifting them out lets the route render
+ * them as something a person can see.
+ *
+ * A page without the section keeps every token, which is the case for most of them.
+ */
+function splitRelated(tokens: Token[]): [Token[], HelpLink[]] {
+  const at = tokens.findIndex(
+    (token) =>
+      token.type === "heading" &&
+      (token as Tokens.Heading).depth === 2 &&
+      /^related$/i.test((token as Tokens.Heading).text.trim()),
+  );
+
+  if (at === -1) return [tokens, []];
+
+  const links: HelpLink[] = [];
+  markdown.walkTokens(tokens.slice(at + 1), (token: Token) => {
+    if (token.type !== "link") return;
+    const link = token as Tokens.Link;
+    links.push({ href: link.href, label: link.text });
+  });
+
+  return [tokens.slice(0, at), links];
+}
+
+/** The `##` headings, which is the grain a reader scans a page at. */
+function contentsOf(tokens: Token[]): HelpHeading[] {
+  return tokens
+    .filter((token) => token.type === "heading" && (token as Tokens.Heading).depth === 2)
+    .map((token) => {
+      const text = (token as Tokens.Heading).text.trim();
+      return { id: headingId(text), text };
+    });
+}
+
+/**
+ * The anchor for a heading, matching what the renderer emits.
+ *
+ * Both sides call this, so a contents entry cannot point at an id the page does not have
+ * — which is the way hand-rolled anchors always break.
+ */
+export function headingId(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * One configured markdown instance rather than the shared `marked` singleton.
+ *
+ * `marked.use()` is global, and a renderer registered on the singleton would apply to
+ * anything else in the process that ever parses markdown. `async: false` keeps the return
+ * type a string rather than a union.
+ */
+const markdown = new Marked({ async: false });
+
+markdown.use({
+  renderer: {
+    /**
+     * Headings carry their own anchor, so a merchant on a support call can be sent to the
+     * paragraph rather than to the page. It is also what the contents rail links to.
+     */
+    heading(token: Tokens.Heading) {
+      const text = this.parser.parseInline(token.tokens);
+      return `<h${token.depth} id="${headingId(token.text)}">${text}</h${token.depth}>\n`;
+    },
+
+    /**
+     * A table scrolls inside its own box rather than widening the page.
+     *
+     * The prose column is sized for reading and a three-column table of Flow triggers is
+     * wider than it. Without the wrapper the whole document scrolls sideways, which is the
+     * one thing a reader should never have to do to finish a sentence.
+     */
+    table(token: Tokens.Table) {
+      const rendered = renderer.table.call(this, token);
+      return `<div class="scroller">${rendered}</div>\n`;
+    },
+  },
+});
+
+/** The stock renderer, kept so the override above can defer the markup to it. */
+const renderer = new Renderer();

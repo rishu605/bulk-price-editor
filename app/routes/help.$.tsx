@@ -13,6 +13,14 @@
  * public and takes a path from the URL, `resolveHelpFile` is the security boundary; the
  * reasoning is in the note there.
  *
+ * **What this route adds to the markdown.** The docs are a curated set, not a folder, and
+ * the first version of this page threw that away: `index.md` was rendered as markdown and
+ * arrived as thirty underlined blue links in three bulleted lists, with no way to tell a
+ * concept from an emergency. So the index is parsed into a structure (`nav.server.ts`)
+ * and rendered — as a landing page, as the sidebar on every page, as the breadcrumb, and
+ * as the next/previous links at the foot of each one. All four come from the one file a
+ * writer already maintains, so none of them can go stale on their own.
+ *
  * The caveat worth stating plainly: `failures/app-unavailable` is served by the app it
  * describes, so it is missing exactly when it is wanted. `HELP_BASE_URL` overrides the
  * base so the docs can move to independent hosting without touching any call site.
@@ -21,17 +29,42 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { data, isRouteErrorResponse, useLoaderData, useRouteError } from "react-router";
 
-import { INDEX_SLUG, readHelpPage } from "../lib/help/pages.server";
+import {
+  placeInNav,
+  sectionTitleOf,
+  startingPoints,
+  toneOf,
+  TONES,
+  type HelpNav,
+  type HelpNavItem,
+  type HelpPlace,
+} from "../lib/help/nav";
+import { helpNav } from "../lib/help/nav.server";
+import { INDEX_SLUG, readHelpPage, type HelpPage } from "../lib/help/pages.server";
 import { searchHelp, type HelpHit } from "../lib/help/search.server";
+import { HelpStyles } from "../lib/help/styles";
+
+/** A result carries the section it came from, so a reader can tell a concept from a crisis. */
+type SearchResult = HelpHit & { section: string | null };
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const slug = params["*"] || INDEX_SLUG;
+  const nav = helpNav();
 
   // Search is a GET with a query string rather than a route of its own, so a merchant can
   // bookmark or share a result list, and so the back button behaves.
   const query = new URL(request.url).searchParams.get("q")?.trim() ?? "";
   if (query) {
-    return { query, hits: searchHelp(query), page: null, isIndex: false };
+    const hits: SearchResult[] = searchHelp(query).map((hit) => ({
+      ...hit,
+      section: sectionTitleOf(nav, hit.slug),
+    }));
+
+    return { view: "search" as const, query, hits, nav, page: null, place: null, tone: null };
+  }
+
+  if (slug === INDEX_SLUG) {
+    return { view: "index" as const, query, hits: null, nav, page: null, place: null, tone: null };
   }
 
   const page = await readHelpPage(slug);
@@ -40,7 +73,17 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   // silently landing them somewhere else hides that a link in the product is wrong.
   if (!page) throw data({ slug }, { status: 404 });
 
-  return { query, hits: null, page, isIndex: slug === INDEX_SLUG };
+  const place = placeInNav(nav, slug);
+
+  return {
+    view: "page" as const,
+    query,
+    hits: null,
+    nav,
+    page,
+    place,
+    tone: place ? toneOf(nav, place.section) : null,
+  };
 }
 
 export function meta({ data: loaded }: { data?: Awaited<ReturnType<typeof loader>> }) {
@@ -53,42 +96,266 @@ export function meta({ data: loaded }: { data?: Awaited<ReturnType<typeof loader
 }
 
 export default function HelpRoute() {
-  const { page, isIndex, query, hits } = useLoaderData<typeof loader>();
+  const loaded = useLoaderData<typeof loader>();
 
-  if (hits) {
+  if (loaded.view === "search") {
     return (
-      <Shell showBack query={query}>
-        <h1>
-          {hits.length === 0 ? "Nothing matched" : `${hits.length} page${hits.length === 1 ? "" : "s"}`}
-          {" for "}
-          {/* Rendered as text, never as markup: this is the only thing on the page that
-              did not come from a file we wrote. */}
-          <em>{query}</em>
-        </h1>
-        {hits.length === 0 ? (
-          <p>
-            Try a single word — the pages are written in plain language, so the word you
-            would say out loud is usually the one that finds them.
-          </p>
-        ) : (
-          <ol className="hits">
-            {hits.map((hit) => (
-              <li key={hit.slug}>
-                <a href={`/help/${hit.slug}`}>{hit.title}</a>
-                <p>{highlight(hit)}</p>
-              </li>
-            ))}
-          </ol>
-        )}
+      <Shell query={loaded.query}>
+        <Results query={loaded.query} hits={loaded.hits} nav={loaded.nav} />
+      </Shell>
+    );
+  }
+
+  if (loaded.view === "index") {
+    return (
+      <Shell query="">
+        <Landing nav={loaded.nav} />
       </Shell>
     );
   }
 
   return (
-    <Shell showBack={!isIndex} query={query}>
-      {/* The markdown is committed alongside this file — it is our prose, not input. */}
-      <article dangerouslySetInnerHTML={{ __html: page!.html }} />
+    <Shell query={loaded.query}>
+      <Document nav={loaded.nav} page={loaded.page} place={loaded.place} tone={loaded.tone} />
     </Shell>
+  );
+}
+
+/* -- the landing page ------------------------------------------------------ */
+
+function Landing({ nav }: { nav: HelpNav }) {
+  return (
+    <main id="content">
+      <div className="hero bar">
+        <div className="hero-inner">
+          <p className="eyebrow">Help centre</p>
+          <h1>{nav.title}</h1>
+          {nav.lede ? <p className="lede">{nav.lede}</p> : null}
+          <SearchForm query="" size="lg" />
+          <StartHere nav={nav} />
+        </div>
+      </div>
+
+      <div className="bar">
+        {nav.sections.map((section, index) => (
+          <section className="group" key={section.id} data-tone={index % TONES}>
+            <div className="group-head">
+              <h2 id={section.id}>{section.title}</h2>
+              {section.blurb ? <p>{section.blurb}</p> : null}
+            </div>
+            <CardList items={section.items} />
+          </section>
+        ))}
+      </div>
+    </main>
+  );
+}
+
+/**
+ * The first page of each section, as a sentence.
+ *
+ * Somebody who has just installed the app is not browsing — they have a question and are
+ * deciding whether this page is worth their next thirty seconds. Three named destinations
+ * answer that faster than a heading called "Concepts" does.
+ */
+function StartHere({ nav }: { nav: HelpNav }) {
+  const starts = startingPoints(nav);
+  if (starts.length === 0) return null;
+
+  return (
+    <p className="jump">
+      Start with{" "}
+      {starts.map((item, index) => (
+        <span key={item.slug}>
+          {index > 0 ? (index === starts.length - 1 ? " or " : ", ") : ""}
+          <a href={`/help/${item.slug}`}>{lowerFirst(item.title)}</a>
+        </span>
+      ))}
+      .
+    </p>
+  );
+}
+
+/**
+ * Cards, or a list once there are too many for cards to stay scannable.
+ *
+ * Ten failure pages as ten cards is a wall, and the section a merchant reaches during an
+ * incident is the last one that should need reading twice. The threshold is on the count
+ * rather than on the section's name, so it holds for whatever the index says tomorrow.
+ */
+function CardList({ items }: { items: HelpNavItem[] }) {
+  const dense = items.length > 6;
+
+  return (
+    <ul className={dense ? "cards cards-dense" : "cards"}>
+      {items.map((item) => (
+        <li key={item.slug}>
+          <a className="card" href={`/help/${item.slug}`}>
+            <span className="card-title">{item.title}</span>
+            {item.blurb && !dense ? <span className="card-blurb">{item.blurb}</span> : null}
+          </a>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/* -- a page ---------------------------------------------------------------- */
+
+function Document({
+  nav,
+  page,
+  place,
+  tone,
+}: {
+  nav: HelpNav;
+  page: HelpPage;
+  place: HelpPlace | null;
+  tone: number | null;
+}) {
+  return (
+    <div className="layout bar" data-tone={tone ?? undefined}>
+      <Rail nav={nav} here={place ? { slug: page.slug, section: place.section.id } : null} />
+
+      <main id="content" className="doc">
+        <nav className="crumbs" aria-label="Breadcrumb">
+          <a href="/help">Help centre</a>
+          {place ? (
+            <>
+              <span className="sep" aria-hidden="true">/</span>
+              <a href={`/help#${place.section.id}`}>{place.section.title}</a>
+            </>
+          ) : null}
+        </nav>
+
+        {/* The markdown is committed alongside this file — it is our prose, not input. */}
+        <article dangerouslySetInnerHTML={{ __html: page.html }} />
+
+        {page.related.length > 0 ? (
+          <section className="onward">
+            <h2>Related</h2>
+            <div className="pager">
+              {page.related.map((link) => (
+                <a className="step" key={link.href} href={link.href}>
+                  <span className="step-title">{link.label}</span>
+                </a>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {place && (place.previous || place.next) ? (
+          <section className="onward">
+            <h2>{place.section.title}</h2>
+            <div className="pager">
+              {place.previous ? (
+                <a className="step" href={`/help/${place.previous.slug}`}>
+                  <span className="step-kind">← Previous</span>
+                  <span className="step-title">{place.previous.title}</span>
+                </a>
+              ) : (
+                <span />
+              )}
+              {place.next ? (
+                <a className="step step-next" href={`/help/${place.next.slug}`}>
+                  <span className="step-kind">Next →</span>
+                  <span className="step-title">{place.next.title}</span>
+                </a>
+              ) : null}
+            </div>
+          </section>
+        ) : null}
+      </main>
+
+      <Contents page={page} />
+    </div>
+  );
+}
+
+/**
+ * Every page in the centre, with the current one marked.
+ *
+ * `here` names a section as well as a slug because one page is listed twice — guardrails
+ * are both a concept and a thing that stops a run — and marking both entries would tell a
+ * reader they are in two places at once.
+ */
+function Rail({ nav, here }: { nav: HelpNav; here: { slug: string; section: string } | null }) {
+  return (
+    <div className="rail">
+      {nav.sections.map((section, index) => (
+        <nav key={section.id} aria-label={section.title} data-tone={index % TONES}>
+          <p className="rail-head">{section.title}</p>
+          <ul>
+            {section.items.map((item) => {
+              const current = here?.section === section.id && here.slug === item.slug;
+              return (
+                <li key={item.slug}>
+                  <a href={`/help/${item.slug}`} aria-current={current ? "page" : undefined}>
+                    {item.title}
+                  </a>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
+      ))}
+    </div>
+  );
+}
+
+function Contents({ page }: { page: HelpPage }) {
+  // One heading is not a contents list, it is the page. Two is where it starts to help.
+  if (page.headings.length < 2) return null;
+
+  return (
+    <nav className="toc" aria-label="On this page">
+      <p className="toc-head">On this page</p>
+      <ol>
+        {page.headings.map((heading) => (
+          <li key={heading.id}>
+            <a href={`#${heading.id}`}>{heading.text}</a>
+          </li>
+        ))}
+      </ol>
+    </nav>
+  );
+}
+
+/* -- search ---------------------------------------------------------------- */
+
+function Results({ query, hits, nav }: { query: string; hits: SearchResult[]; nav: HelpNav }) {
+  return (
+    <main id="content" className="results bar">
+      <h1>
+        {hits.length === 0 ? "Nothing matched" : `${hits.length} page${hits.length === 1 ? "" : "s"}`}
+        {" for "}
+        {/* Rendered as text, never as markup: this is the only thing on the page that
+            did not come from a file we wrote. */}
+        <em>{query}</em>
+      </h1>
+
+      {hits.length === 0 ? (
+        <>
+          <p className="lede">
+            Try a single word — the pages are written in plain language, so the word you
+            would say out loud is usually the one that finds them.
+          </p>
+          <CardList items={startingPoints(nav)} />
+        </>
+      ) : (
+        <ol className="hits">
+          {hits.map((hit) => (
+            <li key={hit.slug}>
+              <a className="hit" href={`/help/${hit.slug}`}>
+                {hit.section ? <span className="hit-kind">{hit.section}</span> : null}
+                <span className="hit-title">{hit.title}</span>
+                <p className="hit-snippet">{highlight(hit)}</p>
+              </a>
+            </li>
+          ))}
+        </ol>
+      )}
+    </main>
   );
 }
 
@@ -110,138 +377,119 @@ export function ErrorBoundary() {
   const missing = isRouteErrorResponse(error) && error.status === 404;
 
   return (
-    <Shell showBack query="">
-      <h1>{missing ? "No such help page" : "That page could not be loaded"}</h1>
-      <p>
-        {missing
-          ? "The link that brought you here points at a page that does not exist. That is our mistake, not yours — everything we have written is one click away."
-          : "Something went wrong reading this page."}
-      </p>
+    <Shell query="">
+      <main id="content" className="results bar">
+        <p className="eyebrow">{missing ? "404" : "Error"}</p>
+        <h1>{missing ? "No such help page" : "That page could not be loaded"}</h1>
+        <p className="lede">
+          {missing
+            ? "The link that brought you here points at a page that does not exist. That is our mistake, not yours — everything we have written is one click away."
+            : "Something went wrong reading this page. Everything we have written is still one click away."}
+        </p>
+        <p className="jump">
+          <a href="/help">Go to the help centre →</a>
+        </p>
+      </main>
     </Shell>
   );
 }
 
-function Shell({
-  children,
-  showBack,
-  query,
-}: {
-  children: React.ReactNode;
-  showBack: boolean;
-  query: string;
-}) {
+/* -- shell ----------------------------------------------------------------- */
+
+function Shell({ children, query }: { children: React.ReactNode; query: string }) {
   return (
-    <main className="help">
-      <style>{STYLES}</style>
-      <nav>
-        {showBack ? <a href="/help">← Help centre</a> : <span />}
-        {/* A plain GET form: it works before any JavaScript has loaded, which matters on
-            a page a merchant may reach while the rest of the app is misbehaving. */}
-        <form method="get" action="/help" role="search">
-          <label htmlFor="q" className="visually-hidden">
-            Search the help centre
-          </label>
-          <input id="q" type="search" name="q" defaultValue={query} placeholder="Search help" />
-          <button type="submit">Search</button>
-        </form>
-      </nav>
+    <div className="help">
+      <HelpStyles />
+
+      <a className="skip" href="#content">
+        Skip to content
+      </a>
+
+      <header className="masthead">
+        <div className="bar">
+          <a className="brand" href="/help">
+            <AnchorMark />
+            <span>Anchor</span>
+            <span className="brand-sep" aria-hidden="true">
+              /
+            </span>
+            <span className="brand-kind">Help centre</span>
+          </a>
+          <SearchForm query={query} size="sm" />
+        </div>
+      </header>
+
       {children}
-    </main>
+
+      <footer className="colophon">
+        <div className="bar">
+          <p>
+            Anchor manages price campaigns for Shopify stores selling into more than one
+            market. These pages ship with the app, so what they describe is what your store
+            is running.
+          </p>
+          <p>
+            <a href="/help">Help centre</a>
+          </p>
+        </div>
+      </footer>
+    </div>
   );
 }
 
 /**
- * Inline rather than imported: this route is the one a merchant reaches when something
- * else has already gone wrong, and one fewer asset to fetch is one fewer thing to fail.
+ * A plain GET form: it works before any JavaScript has loaded, which matters on a page a
+ * merchant may reach while the rest of the app is misbehaving.
  */
-const STYLES = `
-.help {
-  max-width: 42rem;
-  margin: 0 auto;
-  padding: 2rem 1.25rem 6rem;
-  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  line-height: 1.65;
-  color: #1a1a1a;
+function SearchForm({ query, size }: { query: string; size: "sm" | "lg" }) {
+  const id = `q-${size}`;
+
+  return (
+    <form method="get" action="/help" role="search" className={size === "lg" ? "find find-lg" : "find"}>
+      <label htmlFor={id} className="visually-hidden">
+        Search the help centre
+      </label>
+      <span className="field">
+        <SearchMark />
+        <input
+          id={id}
+          type="search"
+          name="q"
+          defaultValue={query}
+          placeholder={size === "lg" ? "Search every page" : "Search help"}
+        />
+      </span>
+      <button type="submit">Search</button>
+    </form>
+  );
 }
-.help nav {
-  margin-bottom: 2rem;
-  font-size: 0.875rem;
-  display: flex;
-  gap: 1rem;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
+
+function lowerFirst(text: string): string {
+  // "What a baseline is" reads as part of the sentence; "WIP" and "Anchor" must not be
+  // flattened, so only a word that is otherwise lowercase is touched.
+  const [first, rest] = [text.slice(0, 1), text.slice(1)];
+  return rest === rest.toLowerCase() ? first.toLowerCase() + rest : text;
 }
-.help nav form { display: flex; gap: 0.5rem; }
-.help input[type="search"], .help button {
-  font: inherit;
-  padding: 0.35rem 0.6rem;
-  border: 1px solid #8e8e8e;
-  border-radius: 6px;
-  background: transparent;
-  color: inherit;
+
+function AnchorMark() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="5" r="2.4" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="M12 7.4V21M7 11h10M21 15a9 9 0 0 1-18 0"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
 }
-.help button { cursor: pointer; }
-.help mark { background: #ffe9a8; color: inherit; }
-.help ol.hits { list-style: none; padding: 0; }
-.help ol.hits li { margin: 0 0 1.5rem; }
-.help ol.hits p { margin: 0.25rem 0 0; color: #4a4a4a; }
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
+
+function SearchMark() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="2" />
+      <path d="m16 16 4.5 4.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
 }
-.help a { color: #005bd3; }
-.help h1 { font-size: 1.75rem; line-height: 1.3; margin: 0 0 1rem; }
-.help h2 { font-size: 1.25rem; margin: 2.5rem 0 0.75rem; }
-.help h3 { font-size: 1.0625rem; margin: 2rem 0 0.5rem; }
-.help ul, .help ol { padding-left: 1.5rem; }
-.help li { margin: 0.35rem 0; }
-.help code {
-  font-size: 0.875em;
-  background: #f1f1f1;
-  padding: 0.1em 0.35em;
-  border-radius: 3px;
-}
-.help pre { background: #f1f1f1; padding: 1rem; border-radius: 6px; overflow-x: auto; }
-/* Screenshots are captured at admin width and are far wider than this column. Scaling
-   them down keeps the page from scrolling sideways, which is the one thing a reader
-   should never have to do to finish a sentence. */
-.help img {
-  max-width: 100%;
-  height: auto;
-  display: block;
-  margin: 1.5rem 0;
-  border: 1px solid #e1e1e1;
-  border-radius: 6px;
-}
-.help pre code { background: none; padding: 0; }
-.help table { border-collapse: collapse; width: 100%; display: block; overflow-x: auto; }
-.help th, .help td {
-  border: 1px solid #e1e1e1;
-  padding: 0.5rem 0.75rem;
-  text-align: left;
-  vertical-align: top;
-}
-.help blockquote {
-  margin: 1.25rem 0;
-  padding-left: 1rem;
-  border-left: 3px solid #e1e1e1;
-  color: #4a4a4a;
-}
-@media (prefers-color-scheme: dark) {
-  body { background: #1a1a1a; }
-  .help { color: #e3e3e3; }
-  .help a { color: #6aa9ff; }
-  .help code, .help pre { background: #2a2a2a; }
-  .help th, .help td { border-color: #3a3a3a; }
-  .help img { border-color: #3a3a3a; }
-  .help blockquote { border-left-color: #3a3a3a; color: #b5b5b5; }
-  .help ol.hits p { color: #b5b5b5; }
-  .help mark { background: #6b5510; color: #f5f5f5; }
-  .help input[type="search"], .help button { border-color: #707070; }
-}
-`;
