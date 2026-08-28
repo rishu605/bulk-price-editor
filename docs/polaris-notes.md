@@ -99,6 +99,29 @@ A plain `<form>` — GET or POST — does a full navigation that wipes App Bridg
 `id_token` and `shop` parameters. The server then logs `shop: null` and the merchant sees
 a blank page. Use `FilterForm` for GET or React Router's `<Form>` for POST.
 
+## An app nav item is a route, not a link
+
+`s-app-nav`'s children take a **relative path within the app**, and Shopify's docs are
+plain about what happens next: clicking one "navigates the app to this route without a
+full page reload". `target` is not part of that contract.
+
+The Help item was an absolute URL to `/help`, with `target="_blank"` on it, on the
+reasoning that a relative path inside an iframe on admin.shopify.com would resolve
+against Shopify. That reasoning is right for a bare anchor and wrong for this element:
+App Bridge resolves nav hrefs against the app, which is the whole point of it. So the
+frame was navigated to a non-embedded page, losing `host`, `id_token` and `shop` — and
+App Bridge with them.
+
+The symptom is worth knowing because it names nothing: the admin still draws the nav, and
+clicking any item does **nothing at all**. No error, no blank page, no reload. Every page
+after visiting help is dead until the app is reopened from the admin.
+
+Same session loss as the native form above, reached through a link. `/app/help` is a real
+embedded route now, and it sends merchants onward with `s-button target="_blank"` — which
+does work, and is what `ErrorScreen` already used for the same destination.
+`polaris-traps.test.ts` rejects a nav href that is not under `/app`, and rejects `target`
+in the nav at all.
+
 ## `*.server.ts` is stripped from the client bundle
 
 Calling something from one in a component gives `undefined` at click time with no build

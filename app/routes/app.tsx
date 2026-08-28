@@ -4,21 +4,18 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
 
 import { authenticate } from "../shopify.server";
-import { HELP_BASE } from "../lib/errors/help-links.server";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { RouteProgress } from "../components/RouteProgress";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
 
-  // `HELP_BASE` is read from the environment, so it is resolved here rather than in the
-  // component — the loader is stripped from the client bundle, `process.env` is not.
   // eslint-disable-next-line no-undef
-  return { apiKey: process.env.SHOPIFY_API_KEY || "", helpBase: HELP_BASE };
+  return { apiKey: process.env.SHOPIFY_API_KEY || "" };
 };
 
 export default function App() {
-  const { apiKey, helpBase } = useLoaderData<typeof loader>();
+  const { apiKey } = useLoaderData<typeof loader>();
 
   return (
     <AppProvider embedded apiKey={apiKey}>
@@ -28,9 +25,13 @@ export default function App() {
         <s-link href="/app/campaigns">Campaigns</s-link>
         <s-link href="/app/prices">Prices</s-link>
         <s-link href="/app/settings">Settings</s-link>
-        {/* Absolute and a new tab: this renders in an iframe on admin.shopify.com,
-            where a relative href would resolve against Shopify rather than us. */}
-        <s-link href={helpBase} target="_blank">Help</s-link>
+        {/* Relative, like every other item, and pointing at an embedded route rather than
+            at the help centre itself. An `s-app-nav` href must be a path within the app:
+            App Bridge navigates the frame to whatever it is given, so the absolute URL
+            that used to be here loaded a non-embedded page into the frame and took
+            `host`, `id_token` and `shop` with it. Every nav item went inert from then on.
+            `app.help.tsx` has the detail. */}
+        <s-link href="/app/help">Help</s-link>
       </s-app-nav>
       <Outlet />
     </AppProvider>

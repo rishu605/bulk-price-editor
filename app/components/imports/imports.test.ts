@@ -42,14 +42,38 @@ const NAV = read("app/routes/app.tsx");
 const IMPORT_FORM = read("app/components/imports/ImportForm.tsx");
 const DROP_ZONE = read("app/components/imports/CsvDropZone.tsx");
 
-describe("the nav is four items, and none of them is a verb", () => {
+describe("the nav is five items, and none of them is a verb", () => {
   it("no longer offers Imports", () => {
     expect(code(NAV)).not.toContain("/app/imports");
   });
 
-  it("keeps the four nouns", () => {
+  /**
+   * Five, and it was always five on screen.
+   *
+   * This read "four nouns" and passed while a fifth item sat beside them, because Help's
+   * href was an expression — `{helpBase}` — and the pattern below only matches a string
+   * literal. The item this test could not see was the one that was broken: an absolute
+   * URL in an app nav navigates the embedded frame off the app and takes App Bridge with
+   * it, after which every item here is inert. See `docs/polaris-notes.md`.
+   *
+   * So the assertion counts what a merchant sees. An item the pattern cannot match is now
+   * a failure rather than an omission, which is the property that was missing.
+   */
+  it("keeps the five nouns", () => {
     const items = [...code(NAV).matchAll(/<s-link href="(\/app[^"]*)"/g)].map((m) => m[1]);
-    expect(items).toEqual(["/app", "/app/campaigns", "/app/prices", "/app/settings"]);
+    expect(items).toEqual([
+      "/app",
+      "/app/campaigns",
+      "/app/prices",
+      "/app/settings",
+      "/app/help",
+    ]);
+  });
+
+  it("has no nav item the assertion above cannot see", () => {
+    const links = [...code(NAV).matchAll(/<s-link\s/g)].length;
+
+    expect(links, "an s-link whose href is not a literal path is invisible above").toBe(5);
   });
 
   it("stops naming Baselines and Costs twice", () => {
