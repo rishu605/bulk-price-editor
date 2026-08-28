@@ -74,8 +74,23 @@ describe("the note itself", () => {
     );
   });
 
-  it("gives the prose an interior, because s-popover supplies none", () => {
-    expect(html).toMatch(/<s-popover[^>]*>\s*<s-box padding=/);
+  it("gives the prose an interior and a measure, because s-popover supplies neither", () => {
+    expect(html).toMatch(/<s-popover[^>]*>\s*<s-box[^>]*padding=/);
+    expect(html).toMatch(/<s-box[^>]*inlineSize="\d+px"/);
+  });
+
+  it("sizes the box and not the overlay", () => {
+    // Not a preference. `inlineSize` on the `s-popover` itself made every `s-table` in
+    // the app fall back to its stacked list -- the catalogue and the plans table both,
+    // on pages whose tables had not been touched, with the Polaris bundle byte-identical
+    // across the two deploys. The popover shrink-wraps its content, so sizing the box
+    // gets the same column without putting a definite size on the overlay.
+    const popover = /<s-popover([^>]*)>/.exec(html)?.[1] ?? "";
+
+    expect(
+      popover,
+      "a sized overlay breaks table layout app-wide — see docs/polaris-notes.md",
+    ).not.toMatch(/inlineSize/);
   });
 
   it("says it is help rather than a filter or a link away", () => {
