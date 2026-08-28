@@ -46,6 +46,21 @@ import { PAD, SPACE } from "../lib/ui/spacing";
  * `s-popover` supplies no padding of its own, so the box is not optional decoration —
  * without it the prose sits against the overlay's edge.
  *
+ * ## `command` is required, whatever the documentation shows
+ *
+ * Every example on Shopify's popover page activates it with `commandFor` alone. That
+ * renders a button which does nothing: the first version of this shipped that way,
+ * looked correct in the admin, and silently had no help behind it.
+ *
+ * In `polaris.js` the activator's click handler is built as
+ * `commandFor && command ? {...} : undefined`, and the handler re-checks `command` before
+ * dispatching. With no `command` prop there is no listener at all — no error, no warning,
+ * a button that is focusable and inert. Polaris' own colour field, the one place in the
+ * runtime that opens a popover, passes `command: "--toggle"`.
+ *
+ * So `--toggle` here, matching the runtime rather than the docs. `--show` would open it
+ * and leave no way to close it from the control that opened it.
+ *
  * The prop is `label` and not `title` because what it names is a button's label, and
  * `control-vocabulary.test.ts` exempts exactly that: a bare `{identifier}` inside an
  * `s-button` is a domain value reaching the screen unless its name says a caller wrote the
@@ -60,12 +75,8 @@ export function HelpNote({ label, children }: { label: string; children: ReactNo
           `ActionRow` reserves chrome for things the page wants done, and reading a
           definition is not one of them — but the icon still has to say at a glance that
           the line is help, because a merchant who does not know what "baseline" means is
-          not scanning the page for the word "what".
-
-          No `command`: the default `--auto` is toggle for a popover, which is what a help
-          affordance wants. Naming `--show` would leave the only way to close it a click
-          somewhere else. */}
-      <s-button variant="tertiary" icon="question-circle" commandFor={id}>
+          not scanning the page for the word "what". */}
+      <s-button variant="tertiary" icon="question-circle" commandFor={id} command="--toggle">
         {label}
       </s-button>
 

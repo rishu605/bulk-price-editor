@@ -62,6 +62,18 @@ describe("the note itself", () => {
     );
   });
 
+  it("carries a command, without which Polaris attaches no click handler at all", () => {
+    // This shipped once with `commandFor` alone, because that is what every example on
+    // Shopify's popover page shows. The button rendered, looked right, and did nothing.
+    //
+    // `polaris.js` builds the activator as `commandFor && command ? {...} : undefined`
+    // and re-checks `command` inside the handler, so the prop the docs omit is the one
+    // that makes the control exist. Polaris' own colour field passes `--toggle`.
+    expect(html, "a popover activator without a command is an inert button").toMatch(
+      /<s-button[^>]*\scommand="--toggle"/,
+    );
+  });
+
   it("gives the prose an interior, because s-popover supplies none", () => {
     expect(html).toMatch(/<s-popover[^>]*>\s*<s-box padding=/);
   });
