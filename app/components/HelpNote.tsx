@@ -86,21 +86,27 @@ export function HelpNote({ label, children }: { label: string; children: ReactNo
         {label}
       </s-button>
 
-      {/* The width goes on the box, not on the overlay, and that is not a style choice.
-          `maxInlineSize` on the popover did nothing — a ceiling it never reached, so it
-          sized to its content and three paragraphs of prose opened a metre wide over the
-          table. Setting `inlineSize` on the popover did fix that, and took every
-          `s-table` in the app down with it: the catalogue and the plans table both fell
-          back to `s-table`'s stacked list, on pages whose tables had not been touched.
-          The Polaris bundle was byte-identical across the two deploys, and the one page
-          with a table and no note rendered normally, so the overlay was the difference.
+      {/* `maxInlineSize` on the **box**, and no `inlineSize` anywhere in this subtree.
+          Both halves of that are scars.
 
-          Sizing the content instead gets the same 320px column — the popover shrink-wraps
-          the box — without putting a definite size on the overlay element. Written up in
-          `docs/polaris-notes.md`. Do not move this attribute up onto the `s-popover`
-          without loading a page that has a table on it. */}
+          A maximum on the `s-popover` did nothing: the overlay is sized by its content,
+          so its own ceiling was never the binding constraint and three paragraphs opened
+          a metre wide. Capping the *content* is what bites — the box wraps at 320px and
+          the popover shrink-wraps the box.
+
+          Giving anything here a definite `inlineSize` instead made every `s-table` in the
+          app fall back to its stacked list: the catalogue and the plans table both, on
+          tables nobody had touched, with `polaris.js` byte-identical across the deploys
+          and the one page with a table and no note rendering normally. Moving the
+          `inlineSize` from the overlay onto the box did not help, which is what narrows
+          it to the definite width rather than to where it sat.
+
+          Why a definite width inside a closed overlay reaches a sibling table at all is
+          not established, and nothing here should pretend otherwise. What is established
+          is the shape that renders: `docs/polaris-notes.md`. Do not introduce an
+          `inlineSize` here without loading a page that has a table on it. */}
       <s-popover id={id}>
-        <s-box padding={PAD.card} inlineSize="320px" maxInlineSize="100%">
+        <s-box padding={PAD.card} maxInlineSize="320px">
           <s-stack gap={SPACE.section}>{children}</s-stack>
         </s-box>
       </s-popover>

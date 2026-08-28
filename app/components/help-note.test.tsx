@@ -76,21 +76,30 @@ describe("the note itself", () => {
 
   it("gives the prose an interior and a measure, because s-popover supplies neither", () => {
     expect(html).toMatch(/<s-popover[^>]*>\s*<s-box[^>]*padding=/);
-    expect(html).toMatch(/<s-box[^>]*inlineSize="\d+px"/);
+    expect(html).toMatch(/<s-box[^>]*maxInlineSize="\d+px"/);
   });
 
-  it("sizes the box and not the overlay", () => {
-    // Not a preference. `inlineSize` on the `s-popover` itself made every `s-table` in
-    // the app fall back to its stacked list -- the catalogue and the plans table both,
-    // on pages whose tables had not been touched, with the Polaris bundle byte-identical
-    // across the two deploys. The popover shrink-wraps its content, so sizing the box
-    // gets the same column without putting a definite size on the overlay.
+  it("caps the content rather than the overlay, which is what actually binds", () => {
+    // A maximum on the popover is never the binding constraint: the overlay is sized by
+    // its content, so it opened as wide as the prose wanted -- a metre, over the table.
     const popover = /<s-popover([^>]*)>/.exec(html)?.[1] ?? "";
 
+    expect(popover, "a ceiling here does nothing; cap the box").not.toMatch(/InlineSize/);
+  });
+
+  it("gives nothing here a definite width", () => {
+    // Every `s-table` in the app fell back to its stacked list when this subtree carried
+    // an `inlineSize` -- on the overlay, and again when it was moved onto the box. The
+    // catalogue and the plans table both, tables nobody had touched, with `polaris.js`
+    // byte-identical across the deploys and the one page with a table and no note
+    // rendering normally.
+    //
+    // Why a definite width inside a closed overlay reaches a sibling table is not
+    // established. That it does is, twice.
     expect(
-      popover,
-      "a sized overlay breaks table layout app-wide — see docs/polaris-notes.md",
-    ).not.toMatch(/inlineSize/);
+      html,
+      "a definite width here breaks table layout app-wide — see docs/polaris-notes.md",
+    ).not.toMatch(/\sinlineSize="/);
   });
 
   it("says it is help rather than a filter or a link away", () => {
