@@ -31,6 +31,12 @@ export interface SectionTab {
  * The current tab is matched exactly, never by prefix. A section root like `/app/prices`
  * prefixes every other tab in its section, so `startsWith` would light up the first tab
  * on every page.
+ *
+ * The one exception is a tab's own sub-pages. `/app/prices/baselines/recapture` is a page
+ * *of* the Baselines tab — reached from it, and about the thing that tab lists — so the
+ * bar has to say Baselines rather than nothing. Excluding the section root from the
+ * prefix rule is what keeps that from becoming the bug above: every tab in a section is
+ * under the root, so the root is the one href that must never prefix-match.
  */
 export function SectionTabs({ tabs }: { tabs: SectionTab[] }) {
   const { pathname } = useLocation();
@@ -55,11 +61,27 @@ export function SectionTabs({ tabs }: { tabs: SectionTab[] }) {
           tabs={tabs.map((tab) => ({
             label: tab.label,
             badge: tab.badge,
-            current: pathname === tab.href,
+            current: isCurrent(pathname, tab.href, tabs),
             href: query ? `${tab.href}?${query}` : tab.href,
           }))}
         />
       </s-box>
     </PageWidth>
   );
+}
+
+/**
+ * Whether this tab is the one being looked at.
+ *
+ * Exact match, or a page beneath it — but never for the section root, which is a prefix
+ * of every tab in the section and would otherwise be permanently current.
+ *
+ * The root is identified by being a prefix of another tab's href rather than by being
+ * first in the list, so a section that reorders its tabs cannot quietly break this.
+ */
+export function isCurrent(pathname: string, href: string, tabs: { href: string }[]): boolean {
+  if (pathname === href) return true;
+
+  const isRoot = tabs.some((other) => other.href !== href && other.href.startsWith(`${href}/`));
+  return !isRoot && pathname.startsWith(`${href}/`);
 }

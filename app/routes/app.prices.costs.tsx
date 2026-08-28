@@ -30,6 +30,13 @@ import { ActionRow } from "../components/ActionRow";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
+import { JumpTo } from "../components/JumpTo";
+import { ImportForm, ImportReport, type ImportProblem } from "../components/imports/ImportForm";
+import { importCosts, type CostImportResult } from "../services/cost-import.server";
+import { costErrorCsv } from "../lib/reporting/cost-errors";
+import { linesOf } from "../lib/reporting/lines";
+import { isCommit } from "../lib/imports/intent";
+import { reportError } from "../services/error-report.server";
 import { SPACE } from "../lib/ui/spacing";
 
 export const loader = withGuard("/app/prices/costs", async ({ request }: LoaderFunctionArgs) => {
@@ -60,7 +67,27 @@ export const loader = withGuard("/app/prices/costs", async ({ request }: LoaderF
   };
 });
 
-type ActionData = { ok: boolean; message: string; result?: CostEditResult };
+type ActionData = {
+  ok: boolean;
+  message: string;
+  result?: CostEditResult;
+  imported?: CostImportResult;
+  errorId?: string;
+};
+
+/**
+ * The two things a merchant can do to costs in bulk, on one route.
+ *
+ * Importing costs was `/app/imports/costs` — a tab called "Costs" in a nav section named
+ * after a verb, beside a tab called "Costs" in Prices. Two right answers to "where do I
+ * set costs", which is the collision that made Imports worth dissolving.
+ *
+ * They share a route, so they cannot share an `intent`. The import's pair is namespaced
+ * and dispatched first; the bulk editor keeps the bare pair it always had. Both read it
+ * through `isCommit`, so the property that matters — a missing or misspelled intent
+ * writes nothing — is one function with a test rather than two string comparisons.
+ */
+export const IMPORT_INTENT = { check: "import-dry-run", commit: "import-commit" } as const;
 
 export const action = withGuard("/app/prices/costs", async ({ request }: ActionFunctionArgs) => {
   const { session, sessionToken } = await authenticate.admin(request);
@@ -68,6 +95,40 @@ export const action = withGuard("/app/prices/costs", async ({ request }: ActionF
   const form = await request.formData();
 
   const currency = await shopCurrency(shop.id);
+  const intent = form.get("intent");
+
+  if (intent === IMPORT_INTENT.check || intent === IMPORT_INTENT.commit) {
+    try {
+      const imported = await importCosts(
+        shop.id,
+        linesOf(String(form.get("csv") ?? "")),
+        currency,
+        {
+          dryRun: !isCommit(intent, IMPORT_INTENT.commit),
+          actor: actorFor(sessionToken, session.shop),
+        },
+      );
+
+      return {
+        ok: true,
+        imported,
+        message: imported.dryRun
+          ? `${imported.ready} of ${imported.total} rows would be imported. Nothing has been written.`
+          : `Imported ${imported.written} costs.` +
+            (imported.unchanged > 0
+              ? ` ${imported.unchanged} already matched and were left alone.`
+              : ""),
+      };
+    } catch (error) {
+      const reported = await reportError(error, {
+        shopId: shop.id,
+        shop: session.shop,
+        route: "/app/prices/costs",
+      });
+      return { ok: false, message: reported.userMessage, errorId: reported.errorId };
+    }
+  }
+
   const amount = Number(form.get("value") ?? 0);
   const kind = String(form.get("ruleKind") ?? "percent-change");
 
@@ -83,7 +144,7 @@ export const action = withGuard("/app/prices/costs", async ({ request }: ActionF
   const vendor = String(form.get("vendor") ?? "").trim();
   const ast: FilterAst = vendor ? { groups: [{ conditions: [{ field: "vendor", value: vendor }] }] } : { groups: [] };
 
-  const dryRun = String(form.get("intent")) !== "commit";
+  const dryRun = !isCommit(intent);
   const result = await editCosts(shop.id, ast, rule, {
     dryRun,
     actor: actorFor(sessionToken, session.shop),
@@ -113,6 +174,15 @@ export default function Costs() {
   };
 
   const coverage = variants === 0 ? 0 : Math.round((withCost / variants) * 100);
+  const imported = fetcher.data?.imported;
+
+  const problems: ImportProblem[] = imported
+    ? [
+        ...imported.invalid.map((problem) => ({ ...problem, kind: "Will not parse" })),
+        ...imported.unmatched.map((problem) => ({ ...problem, kind: "No match" })),
+        ...imported.ambiguous.map((problem) => ({ ...problem, kind: "Matches several" })),
+      ].sort((a, b) => a.line - b.line)
+    : [];
 
   return (
     <PageShell heading="Costs">
@@ -141,7 +211,16 @@ export default function Costs() {
         </s-banner>
       ) : null}
 
-      <s-section heading="What your cost floors can protect">
+      <JumpTo
+        label="Costs on this page"
+        targets={[
+          { id: "coverage", label: "Coverage" },
+          { id: "bulk", label: "Change in bulk" },
+          { id: "import", label: "Import" },
+        ]}
+      />
+
+      <s-section id="coverage" heading="What your cost floors can protect">
         <s-paragraph>
           <s-text>
             {withCost} of {variants} variants have a cost ({coverage}%). Cost-based
@@ -149,12 +228,9 @@ export default function Costs() {
             price below cost&rdquo; is doing less than it looks.
           </s-text>
         </s-paragraph>
-        <ActionRow>
-          <s-button href="/app/imports/costs">Import costs from a spreadsheet</s-button>
-        </ActionRow>
       </s-section>
 
-      <s-section heading="Change costs in bulk">
+      <s-section id="bulk" heading="Change costs in bulk">
         {fetcher.data ? (
           <s-banner tone={fetcher.data.ok ? "success" : "critical"}>
             <s-paragraph>{fetcher.data.message}</s-paragraph>
@@ -225,6 +301,43 @@ export default function Costs() {
           </s-unordered-list>
         ) : null}
       </s-section>
+      <ImportForm
+        id="import"
+        heading="Import costs from a spreadsheet"
+        fetcher={fetcher}
+        busy={busy}
+        intent={IMPORT_INTENT}
+        ready={imported?.ready ?? null}
+        checkLabel="Check the file"
+        commitLabel={(ready) => `Import ${ready} costs`}
+        placeholder={"Variant SKU,Variant Cost\nCH-1,12.50\nCH-2,14.00"}
+        description={
+          <s-paragraph>
+            <s-text>
+              One row per variant: a SKU, barcode or variant ID, then the cost. Costs are
+              read in {currency} unless a row says otherwise, and must be plain numbers —
+              12.50, not $12.50. A file exported from Matrixify works as it is.
+            </s-text>
+          </s-paragraph>
+        }
+      />
+
+      {imported ? (
+        <ImportReport
+          heading={imported.dryRun ? "What would happen" : "What the file did"}
+          counts={[
+            { label: "Rows read", value: imported.total },
+            { label: "Ready", value: imported.ready },
+            { label: "Written", value: imported.written },
+            { label: "Need attention", value: problems.length },
+          ]}
+          problems={problems}
+          download={{
+            filename: "cost-import-errors.csv",
+            csv: () => costErrorCsv(imported),
+          }}
+        />
+      ) : null}
     </PageShell>
   );
 }

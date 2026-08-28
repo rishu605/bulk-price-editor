@@ -15,6 +15,8 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { isCurrent } from "./SectionTabs";
+
 const tabs = readFileSync(
   join(process.cwd(), "app", "components", "SectionTabs.tsx"),
   "utf8",
@@ -45,9 +47,51 @@ describe("filters survive a tab switch", () => {
 
 describe("the current tab", () => {
   it("matches exactly, because /app/prices prefixes every other tab", () => {
-    // `startsWith` here would light up Variants on every page in the section.
-    expect(tabs).toContain("pathname === tab.href");
-    expect(tabs).not.toContain("pathname.startsWith");
+    // The rule this replaced was a bare `pathname === tab.href`, which was right until a
+    // tab grew a page beneath it: `/app/prices/baselines/recapture` lit up nothing at
+    // all, which is the bug `/app/imports` had. `isCurrent` is exercised directly below
+    // rather than checked for the absence of a `startsWith`, because the interesting part
+    // is now which prefixes are allowed.
+    expect(tabs).toContain("isCurrent(pathname, tab.href, tabs)");
+  });
+});
+
+describe("which tab is the one you are on", () => {
+  const PRICES = [
+    { href: "/app/prices" },
+    { href: "/app/prices/baselines" },
+    { href: "/app/prices/costs" },
+  ];
+
+  it("marks the tab whose page you are on", () => {
+    expect(isCurrent("/app/prices/baselines", "/app/prices/baselines", PRICES)).toBe(true);
+    expect(isCurrent("/app/prices/baselines", "/app/prices/costs", PRICES)).toBe(false);
+  });
+
+  it("marks a tab you are on a page beneath", () => {
+    // Recapture is reached from Baselines and is about what Baselines lists. A bar with
+    // nothing selected is what `/app/imports` used to do, and there was no way back.
+    expect(isCurrent("/app/prices/baselines/recapture", "/app/prices/baselines", PRICES)).toBe(
+      true,
+    );
+  });
+
+  it("never marks the section root from a prefix, which is every page in the section", () => {
+    // `/app/prices` is a prefix of every tab under it. This is the whole reason the
+    // original rule was exact, and the reason the exception has to exclude the root.
+    expect(isCurrent("/app/prices/baselines", "/app/prices", PRICES)).toBe(false);
+    expect(isCurrent("/app/prices/costs", "/app/prices", PRICES)).toBe(false);
+    expect(isCurrent("/app/prices", "/app/prices", PRICES)).toBe(true);
+  });
+
+  it("finds the root by what it is a prefix of, not by where it sits in the list", () => {
+    const reordered = [...PRICES].reverse();
+    expect(isCurrent("/app/prices/costs", "/app/prices", reordered)).toBe(false);
+  });
+
+  it("does not match a sibling that merely starts with the same letters", () => {
+    const tabs = [{ href: "/app/prices" }, { href: "/app/prices/base" }];
+    expect(isCurrent("/app/prices/baselines", "/app/prices/base", tabs)).toBe(false);
   });
 });
 

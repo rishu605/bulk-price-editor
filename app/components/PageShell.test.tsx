@@ -295,9 +295,13 @@ describe("pages that can lose typed work", () => {
    */
   const GUARDED = [
     "app.campaigns.new.tsx",
-    "app.imports.prices.tsx",
-    "app.imports.baselines.tsx",
-    "app.imports.costs.tsx",
+    // A price file makes a campaign, so it moved to campaigns; the other two moved onto
+    // the pages that list the thing they write. The guard travelled with each of them —
+    // which is the point of listing the routes here rather than the section they used to
+    // share.
+    "app.campaigns.import.tsx",
+    "app.prices.baselines._index.tsx",
+    "app.prices.costs.tsx",
   ];
 
   /**

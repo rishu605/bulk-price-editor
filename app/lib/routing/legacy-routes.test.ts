@@ -78,6 +78,10 @@ describe("nothing inside the app links through a redirect", () => {
           continue;
         }
         if (!/\.(ts|tsx)$/.test(entry.name)) continue;
+        // A test is not a link. `imports.test.ts` asserts the nav no longer contains
+        // `/app/imports`, which is the opposite of linking to it, and the pattern below
+        // cannot tell an assertion about a URL from a navigation to one.
+        if (/\.test\.tsx?$/.test(entry.name)) continue;
         // The map itself, and the stubs that read it, are the one place old URLs
         // belong. Keyed on referencing LEGACY_ROUTES at all rather than on a particular
         // call shape: the first version matched `redirect(LEGACY_ROUTES` literally and
@@ -86,7 +90,17 @@ describe("nothing inside the app links through a redirect", () => {
         if (path.includes("legacy-routes")) continue;
         if (source.includes("LEGACY_ROUTES")) continue;
 
-        for (const match of source.matchAll(/["'`](\/app\/[a-z0-9/$._-]*)["'`?#]/gi)) {
+        // Comments stripped first. Backticked paths in prose — "this was
+        // `/app/imports/baselines`" — are how a file explains where it came from, and
+        // the pattern below cannot tell one from a link. This is the fourth time this
+        // repo has been caught grepping source that includes its own commentary; the
+        // compliance check that rejects a native form element still trips on the word
+        // `<form` in a sentence.
+        const code = source
+          .replace(/\/\*[\s\S]*?\*\//g, "")
+          .replace(/^\s*\/\/.*$/gm, "");
+
+        for (const match of code.matchAll(/["'`](\/app\/[a-z0-9/$._-]*)["'`?#]/gi)) {
           found.push({ file: path, url: match[1] });
         }
       }

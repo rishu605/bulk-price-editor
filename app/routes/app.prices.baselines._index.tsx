@@ -17,8 +17,8 @@
 
 import { humanise } from "../lib/format/label";
 import { formatCount, formatWhen } from "../lib/format/display";
-import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useSearchParams } from "react-router";
+import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { useFetcher, useLoaderData, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
@@ -26,6 +26,15 @@ import { ensureShop } from "../services/shop.server";
 import { baselineHistory, browseBaselines } from "../services/baseline-browser.server";
 import { BaselineTable } from "../components/BaselineTable";
 import { ActionRow } from "../components/ActionRow";
+import { JumpTo } from "../components/JumpTo";
+import { ImportForm, ImportReport, type ImportProblem } from "../components/imports/ImportForm";
+import { importBaselines, type BaselineImportResult } from "../services/baseline-import.server";
+import { importErrorCsv } from "../lib/reporting/baseline-errors";
+import { shopCurrency } from "../services/settings.server";
+import { actorFor } from "../lib/audit/actor";
+import { linesOf } from "../lib/reporting/lines";
+import { isCommit } from "../lib/imports/intent";
+import { reportError } from "../services/error-report.server";
 import { EmptyState, NoMatches } from "../components/AsyncState";
 import { clearedSearch } from "../components/FilterForm";
 import { VariantSearch } from "../components/prices/VariantSearch";
@@ -62,10 +71,73 @@ export const loader = withGuard("/app/prices/baselines", async ({ request }: Loa
   return { ...result, page, filters, variantGid, history, timeZone: shop.timezone };
 });
 
+type ActionData = { ok: boolean; message: string; result?: BaselineImportResult; errorId?: string };
+
+/**
+ * Importing baselines, on the page that lists them.
+ *
+ * This was `/app/imports/baselines`, a tab in a nav section named after a verb — so
+ * "Baselines" appeared twice in the sidebar, once meaning *look at them* and once meaning
+ * *replace them from a file*. Both were right, which is what made it a bad question to
+ * ask a merchant.
+ *
+ * The dry run is still the default and still falls safe. `isCommit` is the comparison
+ * rather than a literal spelled out here, so the property is tested against the values
+ * that arrive rather than by grepping this file for a string.
+ */
+export const action = withGuard(
+  "/app/prices/baselines",
+  async ({ request }: ActionFunctionArgs): Promise<ActionData> => {
+    const { session, sessionToken } = await authenticate.admin(request);
+    const shop = await ensureShop(session.shop);
+    const form = await request.formData();
+
+    try {
+      const dryRun = !isCommit(form.get("intent"));
+      const result = await importBaselines(
+        shop.id,
+        linesOf(String(form.get("csv") ?? "")),
+        await shopCurrency(shop.id),
+        { dryRun, actor: actorFor(sessionToken, session.shop) },
+      );
+
+      return {
+        ok: true,
+        result,
+        message: dryRun
+          ? `${result.ready} of ${result.total} rows would be imported. Nothing has been written.`
+          : `Imported ${result.written} baselines.` +
+            (result.unchanged > 0
+              ? ` ${result.unchanged} already matched and were left alone.`
+              : ""),
+      };
+    } catch (error) {
+      const reported = await reportError(error, {
+        shopId: shop.id,
+        shop: session.shop,
+        route: "/app/prices/baselines",
+      });
+      return { ok: false, message: reported.userMessage, errorId: reported.errorId };
+    }
+  },
+);
+
 export default function Baselines() {
   const { rows, total, vendors, sources, page, filters, variantGid, history, timeZone } =
     useLoaderData<typeof loader>();
   const [params, setSearchParams] = useSearchParams();
+  const fetcher = useFetcher<ActionData>();
+  const busy = fetcher.state !== "idle";
+  const data = fetcher.data;
+  const result = data?.result;
+
+  const problems: ImportProblem[] = result
+    ? [
+        ...result.invalid.map((problem) => ({ ...problem, kind: "Will not parse" })),
+        ...result.unmatched.map((problem) => ({ ...problem, kind: "No match" })),
+        ...result.ambiguous.map((problem) => ({ ...problem, kind: "Matches several" })),
+      ].sort((a, b) => a.line - b.line)
+    : [];
 
   // `variant` is in FILTER_FIELDS but is not a filter the merchant set — it is which row
   // they asked the history for. Counting it here would make an empty result claim to be
@@ -81,7 +153,23 @@ export default function Baselines() {
 
   return (
     <PageShell heading="Baselines">
-      <s-section>
+      {data ? (
+        <s-banner tone={data.ok ? "success" : "critical"}>
+          <s-paragraph>{data.message}</s-paragraph>
+          {data.errorId ? <s-paragraph>Reference {data.errorId}</s-paragraph> : null}
+        </s-banner>
+      ) : null}
+
+      <JumpTo
+        label="Baselines on this page"
+        targets={[
+          { id: "browse", label: "Your baselines" },
+          { id: "import", label: "Import" },
+          { id: "recapture", label: "Recapture" },
+        ]}
+      />
+
+      <s-section id="browse">
         {/* The card's blocks at section rhythm. It was set nowhere, so they ran together:
             the count landed directly under the Search button, close enough to read as a
             caption on the control above it rather than as the size of what came back. */}
@@ -205,6 +293,73 @@ export default function Baselines() {
           </s-table>
         </s-section>
       ) : null}
+
+      <ImportForm
+        id="import"
+        heading="Import baselines from a spreadsheet"
+        fetcher={fetcher}
+        busy={busy}
+        ready={result?.ready ?? null}
+        commitLabel={(ready) => `Import ${ready} baselines`}
+        placeholder={"Variant SKU,Price\nCH-1,129.00\nCH-2,149.00"}
+        description={
+          <>
+            <s-paragraph>
+              <s-text>
+                If you keep an MSRP or list price elsewhere, import it here and
+                &ldquo;20% off&rdquo; will mean 20% off that number — permanently, however
+                many campaigns run in between.
+              </s-text>
+            </s-paragraph>
+            <s-paragraph>
+              <s-text>
+                One row per variant: a SKU, barcode or variant ID, then the price. A
+                compare-at and a currency column are optional. Prices are read in your
+                store&rsquo;s currency unless a row says otherwise, and must be plain
+                numbers — 1299.00, not $1,299.00.
+              </s-text>
+            </s-paragraph>
+          </>
+        }
+      />
+
+      {result ? (
+        <ImportReport
+          heading={result.dryRun ? "What would happen" : "What happened"}
+          counts={[
+            { label: "Rows read", value: result.total },
+            { label: "Ready", value: result.ready },
+            { label: "Already correct", value: result.unchanged },
+            { label: "Need attention", value: problems.length },
+          ]}
+          problems={problems}
+          download={{
+            filename: "baseline-import-errors.csv",
+            csv: () => importErrorCsv(result),
+          }}
+        />
+      ) : null}
+
+      {/* Its own page, and deliberately still a link rather than a form here. Recapture
+          is the most destructive thing this app can do, and `planRecapture` counts a
+          scope that can be half a million variants and cross-references every running
+          campaign — neither of which belongs on a page a merchant opens to look one
+          price up. */}
+      <s-section id="recapture" heading="Recapture baselines">
+        <s-paragraph>
+          <s-text>
+            Replaces the reference price of every variant in scope with the price its
+            storefront shows right now. Do it when your real prices have genuinely
+            changed — never while a sale is running, or the sale price becomes the price
+            you discount from next time.
+          </s-text>
+        </s-paragraph>
+        <ActionRow>
+          <s-button href="/app/prices/baselines/recapture">
+            Check a scope and recapture
+          </s-button>
+        </ActionRow>
+      </s-section>
 
       <s-section slot="aside" heading="Reading this page">
         <s-paragraph>

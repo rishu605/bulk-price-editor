@@ -512,7 +512,7 @@ export default function Dashboard() {
                 click was not enough ceremony for the most destructive operation in the
                 app, and a bordered button next to the coverage figure would read as the
                 thing to do about it. */}
-            <s-button variant="tertiary" href="/app/imports/recapture">
+            <s-button variant="tertiary" href="/app/prices/baselines/recapture">
               Recapture baselines…
             </s-button>
           </ActionRow>

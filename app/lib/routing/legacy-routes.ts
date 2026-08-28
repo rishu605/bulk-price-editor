@@ -24,15 +24,24 @@ export const LEGACY_ROUTES: Readonly<Record<string, string>> = {
   "/app/reconciliation": "/app/prices/live",
   "/app/drift": "/app/prices/drift",
 
-  // Imports — one verb that had three destinations.
+  // Imports — a verb that had a nav item, and does not any more.
   //
-  // `/app/prices/import` is the awkward one: it now sits *under* the prices section it
-  // used to sound like it belonged to, so it has to redirect out of its own subtree
-  // rather than be shadowed by it.
-  "/app/prices/import": "/app/imports/prices",
-  "/app/baselines/import": "/app/imports/baselines",
-  "/app/costs/import": "/app/imports/costs",
-  "/app/baselines/recapture": "/app/imports/recapture",
+  // Every one of these now lands on the noun it acts on: baselines and costs are
+  // imported from the pages that list them, and a price file makes a campaign, so it
+  // lives with campaigns. That collapse is why the first four changed destination rather
+  // than being added to — pointing `/app/prices/import` at `/app/imports/prices` and
+  // `/app/imports/prices` onward is exactly the two-hop chain this file's test forbids,
+  // so both go straight to the page.
+  "/app/prices/import": "/app/campaigns/import",
+  "/app/baselines/import": "/app/prices/baselines",
+  "/app/costs/import": "/app/prices/costs",
+  "/app/baselines/recapture": "/app/prices/baselines/recapture",
+
+  "/app/imports": "/app/campaigns/import",
+  "/app/imports/prices": "/app/campaigns/import",
+  "/app/imports/baselines": "/app/prices/baselines",
+  "/app/imports/costs": "/app/prices/costs",
+  "/app/imports/recapture": "/app/prices/baselines/recapture",
 
   // Settings — the things a merchant opens once, or when something is wrong.
   "/app/segments": "/app/settings/segments",

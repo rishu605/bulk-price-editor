@@ -94,13 +94,20 @@ const PAGES = tsxFiles(APP)
   .map(({ path, source }) => ({
     path,
     targets: [...source.matchAll(/\{ id: "([^"]+)", label: "[^"]+" \}/g)].map((m) => m[1]),
-    sections: [...source.matchAll(/<s-section id="([^"]+)"/g)].map((m) => m[1]),
+    // `ImportForm` renders an `s-section` and takes the id for it, so a page that folds
+    // an import in has a target whose section is one component away. Counting only
+    // literal `s-section id=` would report that target as pointing at nothing.
+    sections: [...source.matchAll(/<(?:s-section|ImportForm)\s[^>]*?id="([^"]+)"/g)].map(
+      (m) => m[1],
+    ),
   }));
 
 describe("a jump row cannot point at a section that is not there", () => {
   it("finds the pages that have one", () => {
     expect(PAGES.map((page) => page.path).sort()).toEqual([
       "components/campaign/CampaignPreviewTab.tsx",
+      "routes/app.prices.baselines._index.tsx",
+      "routes/app.prices.costs.tsx",
       "routes/app.settings._index.tsx",
       "routes/app.settings.plan.tsx",
     ]);
@@ -118,7 +125,7 @@ describe("a jump row cannot point at a section that is not there", () => {
 
 describe("it is on the pages that need it and not the ones that do not", () => {
   const routeSections = (source: string) =>
-    [...source.matchAll(/<s-section(?![^>]*slot="aside")[^>]*heading="/g)].length;
+    [...source.matchAll(/<(?:s-section(?![^>]*slot="aside")|ImportForm)\s[^>]*?heading="/g)].length;
 
   it("is absent from every page with fewer than three sections", () => {
     const overreach = tsxFiles(join(APP, "routes"))

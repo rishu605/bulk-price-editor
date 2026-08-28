@@ -36,7 +36,16 @@ import { SPACE } from "../../lib/ui/spacing";
  * The words, the sample rows, and what the file does when it lands — passed in. The
  * shape, the guard, and the order of the two buttons are not.
  */
+/**
+ * The bare pair, for a page whose only check-then-commit is the import.
+ *
+ * Exported so a route reads its action back with the same constant it rendered, rather
+ * than with a string literal that can drift from it by one character.
+ */
+export const INTENT = { check: "dry-run", commit: "commit" } as const;
+
 export function ImportForm({
+  id,
   heading,
   description,
   placeholder,
@@ -45,8 +54,11 @@ export function ImportForm({
   checkLabel = "Check the file",
   commitLabel,
   ready,
+  intent = INTENT,
   children,
 }: {
+  /** Set when the page carries a `JumpTo` that points at this section. */
+  id?: string;
   heading: string;
   /** What this file is, and what happens when it lands. */
   description: ReactNode;
@@ -67,19 +79,27 @@ export function ImportForm({
    * the merchant who should not be writing to their catalogue.
    */
   ready: number | null;
+  /**
+   * The two values this form's `intent` field can take.
+   *
+   * Namespaced when the page already runs a check-then-commit of its own — the cost
+   * import shares a route with the bulk cost editor, and one `intent` field cannot mean
+   * two things. The route reads it back with `isCommit(value, intent.commit)`.
+   */
+  intent?: { check: string; commit: string };
   /** Extra fields this source needs, above the file. */
   children?: ReactNode;
 }) {
   const form = useRef<HTMLFormElement>(null);
-  const intent = useRef<HTMLInputElement>(null);
+  const field = useRef<HTMLInputElement>(null);
 
   const submitWith = (value: string) => {
-    if (intent.current) intent.current.value = value;
+    if (field.current) field.current.value = value;
     form.current?.requestSubmit();
   };
 
   return (
-    <s-section heading={heading}>
+    <s-section id={id} heading={heading}>
       {/* A pasted CSV can be fifty thousand rows, and none of it exists anywhere until
           the import runs. */}
       <UnsavedChanges form={form} describe="this import" saved={Boolean(fetcher.data)} />
@@ -91,7 +111,7 @@ export function ImportForm({
             buttons set before submitting. One form rather than two, because both actions
             read the same rows and duplicating the textarea would let them drift apart —
             which is the mistake this component exists to undo at a larger scale. */}
-        <input type="hidden" name="intent" ref={intent} value="dry-run" readOnly />
+        <input type="hidden" name="intent" ref={field} value={intent.check} readOnly />
         <s-stack gap={SPACE.section}>
           {children}
           <CsvDropZone target="csv" />
@@ -109,7 +129,7 @@ export function ImportForm({
               type="button"
               variant="primary"
               loading={busy || undefined}
-              onClick={() => submitWith("dry-run")}
+              onClick={() => submitWith(intent.check)}
             >
               {checkLabel}
             </s-button>
@@ -118,7 +138,7 @@ export function ImportForm({
               tone="critical"
               loading={busy || undefined}
               disabled={!ready || undefined}
-              onClick={() => submitWith("commit")}
+              onClick={() => submitWith(intent.commit)}
             >
               {commitLabel(ready ?? 0)}
             </s-button>
