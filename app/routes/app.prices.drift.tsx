@@ -8,6 +8,7 @@ import { pendingDrift, resolveDrift, type DriftResolution } from "../services/dr
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
+import { EmptyState } from "../components/AsyncState";
 
 export const loader = withGuard("/app/prices/drift", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -51,9 +52,13 @@ export default function DriftQueue() {
 
       <s-section>
         {events.length === 0 ? (
-          <s-paragraph>
-            No drift detected. Prices set by your campaigns are still in place.
-          </s-paragraph>
+          // Not a NoMatches: this page has no filters, and it is the one empty state in
+          // the app that is good news. It says so, rather than reading as a page that
+          // failed to load.
+          <EmptyState
+            title="No drift detected"
+            description="Every price your campaigns set is still what they set. If somebody edits one in the Shopify admin while a campaign is running, it is held here for your decision rather than overwritten."
+          />
         ) : (
           <>
             <s-paragraph>

@@ -25,6 +25,7 @@ import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { reportError } from "../services/error-report.server";
 import { PageShell } from "../components/PageShell";
+import { EmptyState } from "../components/AsyncState";
 
 export const loader = withGuard("/app/settings/segments", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -165,10 +166,10 @@ export default function Segments() {
 
       <s-section heading="Your segments">
         {segments.length === 0 ? (
-          <s-paragraph>
-            No segments yet. A segment is a saved way of describing which products a
-            campaign covers, so you do not rebuild the same filter for every sale.
-          </s-paragraph>
+          <EmptyState
+            title="No segments yet"
+            description="A segment is a saved way of describing which products a campaign covers, so you do not rebuild the same filter for every sale. Make one below."
+          />
         ) : (
           <s-table>
             <s-table-header-row>

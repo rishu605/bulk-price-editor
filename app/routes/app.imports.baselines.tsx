@@ -28,6 +28,7 @@ import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { reportError } from "../services/error-report.server";
 import { PageShell } from "../components/PageShell";
+import { EmptyState } from "../components/AsyncState";
 import { UnsavedChanges } from "../components/UnsavedChanges";
 import { CsvDropZone } from "../components/imports/CsvDropZone";
 
@@ -198,9 +199,10 @@ function ImportReport({ result }: { result: BaselineImportResult }) {
       </s-paragraph>
 
       {problems.length === 0 ? (
-        <s-paragraph>
-          <s-text>Every row matched a variant and validated.</s-text>
-        </s-paragraph>
+        <EmptyState
+          title="Every row matched a variant and validated"
+          description="Nothing was left out, so the counts above account for the whole file."
+        />
       ) : (
         <>
           <s-stack direction="inline" gap="base">

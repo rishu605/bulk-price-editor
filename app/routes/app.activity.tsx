@@ -16,7 +16,8 @@ import { ensureShop } from "../services/shop.server";
 import { activity } from "../services/activity.server";
 import { activityCsv } from "../lib/reporting/activity-csv";
 import { ActivityTable } from "../components/ActivityTable";
-import { FilterForm } from "../components/FilterForm";
+import { EmptyState, NoMatches } from "../components/AsyncState";
+import { FilterForm, clearedSearch } from "../components/FilterForm";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { downloadCsv } from "../lib/reporting/csv";
 import { describeActor } from "../lib/audit/actor";
@@ -56,7 +57,8 @@ export const loader = withGuard("/app/activity", async ({ request }: LoaderFunct
 export default function Activity() {
   const { entries, total, actors, actions, page, filters, timeZone } =
     useLoaderData<typeof loader>();
-  const [, setSearchParams] = useSearchParams();
+  const [params, setSearchParams] = useSearchParams();
+  const filtered = Boolean(filters.actor || filters.action || filters.from || filters.to);
 
   const pageSize = PAGE_SIZE;
   const lastPage = Math.max(1, Math.ceil(total / pageSize));
@@ -101,11 +103,18 @@ export default function Activity() {
         </FilterForm>
 
         {total === 0 ? (
-          <s-paragraph>
-            Nothing has been recorded yet for these filters. Every action that changes
-            state — applying a campaign, editing a guardrail, resolving drift — is
-            written here as it happens, with who did it and what it changed.
-          </s-paragraph>
+          filtered ? (
+            <NoMatches
+              noun="entries"
+              description="Every action that changes state is written here as it happens — applying a campaign, editing a guardrail, resolving drift — so a narrow window or a specific actor can easily land between two of them."
+              clearHref={clearedSearch(params, FILTER_FIELDS)}
+            />
+          ) : (
+            <EmptyState
+              title="Nothing has been recorded yet"
+              description="Every action that changes state — applying a campaign, editing a guardrail, resolving drift — is written here as it happens, with who did it and what it changed."
+            />
+          )
         ) : (
           <>
             <s-stack direction="inline" gap="base">

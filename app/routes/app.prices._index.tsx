@@ -1,11 +1,13 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useLoaderData } from "react-router";
+import { useLoaderData, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { ensureShop } from "../services/shop.server";
 import { formatMoney, money } from "../lib/money/money";
+import { EmptyState, NoMatches } from "../components/AsyncState";
+import { clearedSearch } from "../components/FilterForm";
 import { VariantSearch } from "../components/prices/VariantSearch";
 import { Pagination } from "../components/prices/Pagination";
 import { RouteBoundary } from "../components/RouteBoundary";
@@ -13,6 +15,9 @@ import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
 
 const PAGE_SIZE = 50;
+
+/** What the search box on this tab owns, and therefore what Clear filters removes. */
+const CATALOGUE_FIELDS = ["q"] as const;
 
 export const loader = withGuard("/app/prices", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -89,17 +94,27 @@ export const loader = withGuard("/app/prices", async ({ request }: LoaderFunctio
 
 export default function Catalog() {
   const { rows, total, page, query, pageSize } = useLoaderData<typeof loader>();
+  const [params] = useSearchParams();
+
   return (
     <PageShell heading="Catalogue">
       <s-section>
-        <VariantSearch fields={["q"]} query={query} />
+        <VariantSearch fields={CATALOGUE_FIELDS} query={query} />
 
         {total === 0 ? (
-          <s-paragraph>
-            {query
-              ? `No variants match “${query}”.`
-              : "No variants yet. Sync your catalogue from the dashboard."}
-          </s-paragraph>
+          query ? (
+            <NoMatches
+              noun="variants"
+              description={`Nothing in your catalogue has “${query}” in its title or SKU.`}
+              clearHref={clearedSearch(params, CATALOGUE_FIELDS)}
+            />
+          ) : (
+            <EmptyState
+              title="No variants yet"
+              description="Anchor mirrors your catalogue so a campaign can be priced without asking Shopify for every variant first. Syncing captures a baseline for each one at the same time."
+              action={{ label: "Sync your catalogue", href: "/app" }}
+            />
+          )
         ) : (
           <>
             <s-table>

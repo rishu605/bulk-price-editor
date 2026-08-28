@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import { PAD, SPACE } from "../lib/ui/spacing";
 
 /**
@@ -13,7 +15,7 @@ export interface EmptyStateProps {
   /** What is missing, in the merchant's words. */
   title: string;
   /** Why it might be missing and what to do about it. */
-  description?: string;
+  description?: ReactNode;
   action?: { label: string; href: string };
 }
 
@@ -27,6 +29,10 @@ export interface EmptyStateProps {
  *
  * The three parts sit at item rhythm: the title, the reason and the way out are one
  * thought, and spacing them apart makes the merchant read three unrelated things.
+ *
+ * The description is capped rather than running the width of the card. This is the one
+ * block on a page that is nothing but body copy, and body copy set across a very wide
+ * column is measurably harder to read.
  */
 export function EmptyState({ title, description, action }: EmptyStateProps) {
   return (
@@ -34,13 +40,55 @@ export function EmptyState({ title, description, action }: EmptyStateProps) {
       <s-stack gap={SPACE.item} alignItems="center">
         <s-heading>{title}</s-heading>
         {description ? (
-          <s-paragraph>
-            <s-text color="subdued">{description}</s-text>
-          </s-paragraph>
+          <s-box maxInlineSize="520px">
+            <s-paragraph>
+              <s-text color="subdued">{description}</s-text>
+            </s-paragraph>
+          </s-box>
         ) : null}
         {action ? <s-button href={action.href}>{action.label}</s-button> : null}
       </s-stack>
     </s-box>
+  );
+}
+
+/**
+ * Empty because of a filter, which is a different situation and needs a different answer.
+ *
+ * Conflating the two is the usual mistake, and the app had been making it on six pages: a
+ * shop with no variants needs telling what a variant is, and a shop whose filter matched
+ * nothing needs the filter taken off. Six of those pages said "nothing matches" and
+ * offered no way to stop matching nothing — one of them, the reconciliation table, went
+ * as far as guessing what the merchant had been looking for.
+ *
+ * A separate export rather than a `filtered` flag on the one above, so the way out cannot
+ * be forgotten: there is no way to call this without saying where Clear filters goes.
+ *
+ * The title names the subject — "No campaigns match those filters" — because the four
+ * pages doing this by hand had four different sentences for one situation, two of which
+ * ("Nothing matches.") did not say what was missing.
+ */
+export function NoMatches({
+  /** Plural, lower case: campaigns, variants, baselines, prices. */
+  noun,
+  /** What clearing them would show. Optional — the title is often the whole of it. */
+  description,
+  /** Where Clear filters goes. See `clearedSearch` in `FilterForm`. */
+  clearHref,
+}: {
+  noun: string;
+  description?: ReactNode;
+  clearHref: string;
+}) {
+  return (
+    <EmptyState
+      title={`No ${noun} match those filters`}
+      description={description}
+      // Secondary, not primary. A page's primary action is its own — Create campaign,
+      // Sync catalogue — and a second black button here would be two answers to "what
+      // should I do next".
+      action={{ label: "Clear filters", href: clearHref }}
+    />
   );
 }
 

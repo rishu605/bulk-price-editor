@@ -15,6 +15,24 @@ import { useSearchParams } from "react-router";
  * router means the data request goes through App Bridge's authenticated fetch rather
  * than around it.
  */
+/**
+ * The same URL with this form's fields taken out of it — where "Clear filters" goes.
+ *
+ * Removing named keys rather than rebuilding the query string is the whole point. `host`,
+ * `embedded`, `id_token` and `shop` are in there too, App Bridge put them there, and a
+ * link that drops them lands the merchant on a blank page — the same trap a native
+ * `<form method="get">` falls into, reached from the other direction.
+ *
+ * `page` goes as well, for the reason it goes on submit: page four of the old filter is
+ * meaningless without it.
+ */
+export function clearedSearch(params: URLSearchParams, fields: readonly string[]): string {
+  const next = new URLSearchParams(params);
+  for (const field of fields) next.delete(field);
+  next.delete("page");
+  return `?${next}`;
+}
+
 export function FilterForm({
   /** Field names this form owns. Anything else in the URL is left untouched. */
   fields,

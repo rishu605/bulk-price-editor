@@ -1,6 +1,6 @@
 import { formatCount } from "../lib/format/display";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useFetcher, useLoaderData } from "react-router";
+import { useFetcher, useLoaderData, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
@@ -11,6 +11,7 @@ import { toAdminClient } from "../services/admin-client.server";
 import { reconciliationCsv } from "../lib/reporting/reconciliation-csv";
 import { downloadCsv } from "../lib/reporting/csv";
 import { ReconciliationTable } from "../components/ReconciliationTable";
+import { clearedSearch } from "../components/FilterForm";
 import { VariantSearch } from "../components/prices/VariantSearch";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
@@ -75,6 +76,7 @@ export const action = withGuard("/app/prices/live", async ({ request }: ActionFu
 
 export default function Reconciliation() {
   const { rows, total, surfaces, campaigns, counts, selected } = useLoaderData<typeof loader>();
+  const [params] = useSearchParams();
   const fetcher = useFetcher<{ ok: boolean; message: string }>();
   const busy = fetcher.state !== "idle";
 
@@ -189,7 +191,7 @@ export default function Reconciliation() {
       </s-section>
 
       <s-section heading="Prices">
-        <ReconciliationTable rows={rows} />
+        <ReconciliationTable rows={rows} clearHref={clearedSearch(params, RECONCILE_FIELDS)} />
 
         <s-button
           type="button"
