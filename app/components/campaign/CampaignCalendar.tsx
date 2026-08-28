@@ -1,5 +1,5 @@
-import { Link } from "react-router";
 
+import { ActionRow } from "../ActionRow";
 import { CalendarGrid } from "../CalendarGrid";
 import type { calendarFor } from "../../services/calendar.server";
 
@@ -38,28 +38,27 @@ export function CampaignCalendar({
           </s-text>
         </s-paragraph>
 
-        <s-stack direction="inline" gap="base">
-          <Link to={`/app/campaigns?view=calendar&period=${period}&on=${previous}`}>
-            <s-button type="button" variant="tertiary">
-              Previous
-            </s-button>
-          </Link>
-          <Link to={`/app/campaigns?view=calendar&period=${period}&on=${today}`}>
-            <s-button type="button" variant="tertiary">
-              Today
-            </s-button>
-          </Link>
-          <Link to={`/app/campaigns?view=calendar&period=${period}&on=${next}`}>
-            <s-button type="button" variant="tertiary">
-              Next
-            </s-button>
-          </Link>
-          <Link to={`/app/campaigns?view=calendar&period=${period === "week" ? "month" : "week"}&on=${on}`}>
-            <s-button type="button" variant="tertiary">
-              {period === "week" ? "Month view" : "Week view"}
-            </s-button>
-          </Link>
-        </s-stack>
+        {/* `s-button` takes an href, so each of these is one anchor styled as a button.
+            They were a button nested inside a `Link`, which is a button inside an anchor —
+            the same shape the campaigns page had, and not markup any browser is obliged
+            to make sense of. */}
+        <ActionRow>
+          <s-button variant="tertiary" href={`/app/campaigns?view=calendar&period=${period}&on=${previous}`}>
+            Previous
+          </s-button>
+          <s-button variant="tertiary" href={`/app/campaigns?view=calendar&period=${period}&on=${today}`}>
+            Today
+          </s-button>
+          <s-button variant="tertiary" href={`/app/campaigns?view=calendar&period=${period}&on=${next}`}>
+            Next
+          </s-button>
+          <s-button
+            variant="tertiary"
+            href={`/app/campaigns?view=calendar&period=${period === "week" ? "month" : "week"}&on=${on}`}
+          >
+            {period === "week" ? "Month view" : "Week view"}
+          </s-button>
+        </ActionRow>
 
         <CalendarGrid days={days} today={today} />
       </s-section>
@@ -84,13 +83,23 @@ export function CampaignCalendar({
                     }.`
                   : ", but have no products in common."}{" "}
               </s-text>
-              {overlap.sharedVariants > 0 ? (
-                <Link to={`/app/campaigns/${overlap.a.id}`}>
-                  See which price each product gets
-                </Link>
-              ) : null}
             </s-paragraph>
           ))}
+
+          {/* Out of the sentence: an action inside a paragraph is the shape the rest of
+              the app stopped using, and there is one of these per overlap. */}
+          {overlaps.some((overlap) => overlap.sharedVariants > 0) ? (
+            <ActionRow>
+              <s-button
+                variant="tertiary"
+                href={`/app/campaigns/${
+                  overlaps.find((overlap) => overlap.sharedVariants > 0)?.a.id
+                }`}
+              >
+                See which price each product gets
+              </s-button>
+            </ActionRow>
+          ) : null}
         </s-section>
       ) : null}
     </>
