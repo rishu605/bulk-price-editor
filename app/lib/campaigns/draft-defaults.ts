@@ -1,15 +1,15 @@
 /**
  * What the campaign editor's form says before a merchant touches it.
  *
- * These used to live only in the JSX, which was fine while the only thing that read the
- * form was the form's own submit. It stopped being fine when the loader started pricing
- * the draft server-side so the preview is populated on first paint: the loader has no
- * form to read, so it has to know what the unedited form would have said, and a second
- * copy of "-20" is a preview that disagrees with the editor it previews.
+ * These used to live only in the JSX, spelled out as literals next to the fields that
+ * rendered them. That is fine while one thing reads the form — its own submit — and it
+ * stops being fine the moment anything has to know what an untouched form would say
+ * without a form in front of it.
  *
- * One object, imported by the fields that render the defaults and by the loader that
- * prices them. `draft-defaults.test.ts` checks the editor still renders these rather
- * than literals of its own.
+ * One object, imported by the fields that render the defaults. `draft-defaults.test.ts`
+ * checks the editor still renders these rather than literals of its own, which is the
+ * property worth keeping: a "-20" written out beside the field is a value that can drift
+ * from every other statement of what this form does.
  */
 export const DRAFT_DEFAULTS = {
   /** Percent change, which is what nearly every campaign is. */
@@ -25,10 +25,15 @@ export const DRAFT_DEFAULTS = {
 } as const;
 
 /**
- * The defaults as form fields, for the loader's first-paint preview.
+ * The defaults as form fields — what the editor posts if a merchant submits it untouched.
  *
- * Rounding is deliberately absent: it comes from the shop's own setting, and seeding a
- * default here would preview a rounding rule the merchant never chose.
+ * Nothing in the app builds this: the preview is asked for by the client, which posts the
+ * real form. It exists so the tests that matter can be written against a value rather
+ * than against a hand-typed copy of one — that both readings of the fields agree, and
+ * that the unedited form prices as a percent discount off the baseline.
+ *
+ * Rounding is deliberately absent: it comes from the shop's own setting, and a default
+ * here would describe a rounding rule the merchant never chose.
  */
 export function draftDefaultParams(): URLSearchParams {
   return new URLSearchParams({

@@ -24,9 +24,6 @@ import { billingFrom } from "../services/billing.server";
 import { canUseSurface } from "../lib/billing/plans";
 import prisma from "../db.server";
 import { astFrom, compareAtFrom, readerFor, ruleFrom } from "../lib/campaigns/draft-form";
-import { draftDefaultParams } from "../lib/campaigns/draft-defaults";
-import { draftCampaignFrom } from "../services/campaigns/draft-input.server";
-import { previewDraft } from "../services/campaigns/draft-preview.server";
 import { PageSections, PageShell } from "../components/PageShell";
 import { UnsavedChanges } from "../components/UnsavedChanges";
 import { DraftPreview } from "../components/DraftPreview";
@@ -95,25 +92,18 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
 
   const billing = billingFrom(shopRecord);
 
-  // The preview the merchant would get if they changed nothing, computed here so the
-  // panel arrives populated rather than saying "set a rule" next to a rule that is
-  // already set. The scope comes from the URL — a merchant who arrived from a segment or
-  // from the calendar has already made that choice — and the rule from the same defaults
-  // the fields render, so this and the first keystroke agree.
-  const seeded = draftDefaultParams();
-  // Rounding is the shop's, not a default of its own: the select renders the store
-  // setting as its chosen option, so a preview built without it would round differently
-  // from the form sitting next to it. `readRoundingPolicy` falls back to "none" when the
-  // field is absent, which is precisely the disagreement to avoid.
-  seeded.set("rounding.default", settings.rounding.default);
-  for (const [code, profile] of Object.entries(settings.rounding.byCurrency)) {
-    seeded.set(`rounding.${code}`, profile);
-  }
-  for (const [key, value] of url.searchParams) if (value) seeded.set(key, value);
-  const preview = await previewDraft(
-    shop.id,
-    await draftCampaignFrom(shop.id, seeded, currency),
-  );
+  // No preview here, deliberately, and this is load-bearing enough to be worth a
+  // paragraph.
+  //
+  // #442 primed the panel from the loader so it arrived populated. `previewDraft` has to
+  // load *every* candidate in scope and plan all of them — the counts are exact, so it
+  // cannot sample — and only then keeps 25 rows to show. In front of first paint that is
+  // a minute of blank page on a 3,669-variant store and worse on a hundred thousand
+  // (#468). Blank is the bad part: nothing has rendered, so there is nothing to put a
+  // spinner in, and the page is indistinguishable from the app being broken.
+  //
+  // The client asks for it instead, once, on mount. Same work, off the critical path,
+  // with somewhere to say it is working.
 
   // Every currency this campaign could price in. Only these are offered: a list of all
   // 180 world currencies would bury the two or three that matter.
@@ -141,7 +131,6 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
     storeRounding: settings.rounding,
     roundingOptions: Object.entries(ROUNDING_LABELS).map(([value, label]) => ({ value, label })),
     facets: available,
-    preview,
     segments,
     usingSegment: segment ? { id: segment.id, name: segment.name, kind: segment.kind } : null,
     practice,
@@ -245,7 +234,6 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
 export default function NewCampaign() {
   const {
     facets: available,
-    preview,
     selected,
     segments,
     usingSegment,
@@ -268,21 +256,33 @@ export default function NewCampaign() {
   const formRef = useRef<HTMLFormElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const submitPreview = useCallback(() => {
+    const form = formRef.current;
+    if (!form) return;
+    previewFetcher.submit(new FormData(form), {
+      method: "post",
+      action: "/app/preview-draft",
+    });
+  }, [previewFetcher]);
+
   const requestPreview = useCallback(() => {
     if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => {
-      const form = formRef.current;
-      if (!form) return;
-      previewFetcher.submit(new FormData(form), {
-        method: "post",
-        action: "/app/preview-draft",
-      });
-    }, 400);
-  }, [previewFetcher]);
+    timer.current = setTimeout(submitPreview, 400);
+  }, [submitPreview]);
 
   // Clear the pending call on unmount, so navigating away mid-type does not fire a
   // request against a page that is gone.
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+
+  // Once, on mount, undebounced. The loader used to do this so the panel arrived
+  // populated, which put a minute of blank page in front of first paint on a catalogue
+  // of any size (#468). Asking from here is the same work with the page already drawn
+  // around it, so there is somewhere to say it is being worked out.
+  //
+  // Empty dependencies deliberately: this is "when the page appears", not "whenever the
+  // submit function changes identity". Every later request comes from `onChange`.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { submitPreview(); }, []);
 
 
   // Numbered from what is actually rendered. Both sections apply today; #445 makes the
@@ -678,7 +678,10 @@ export default function NewCampaign() {
           primes it so the panel arrives populated, and the fetcher replaces it from the
           first keystroke onward. */}
       <s-section slot="aside" heading="What this would do">
-        <DraftPreview preview={previewFetcher.data ?? preview} />
+        <DraftPreview
+          preview={previewFetcher.data ?? null}
+          pending={previewFetcher.state !== "idle"}
+        />
       </s-section>
 
       <HelpNote label="Nothing is written yet">
