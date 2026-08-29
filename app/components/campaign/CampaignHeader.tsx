@@ -32,6 +32,7 @@
 
 import { ActionRow } from "../ActionRow";
 import { ApplyConfirmation, APPLY_MODAL_ID } from "./ApplyConfirmation";
+import { RevertConfirmation, REVERT_MODAL_ID } from "./RevertConfirmation";
 import { SPACE } from "../../lib/ui/spacing";
 import type { CampaignDetailProps } from "./props";
 
@@ -44,6 +45,8 @@ export function CampaignHeader({
   fetcher,
   busy,
   canApply,
+  keepers,
+  keepersPending,
 }: CampaignDetailProps) {
   return (
     <>
@@ -111,15 +114,41 @@ export function CampaignHeader({
             Review {rollback.counts.drifted} edited before reverting
           </s-button>
         ) : (
-          <fetcher.Form method="post">
-            <input type="hidden" name="intent" value="revert" />
-            <s-button type="submit" tone="critical" loading={busy || undefined}>
-              Revert
-            </s-button>
-          </fetcher.Form>
+          // Opens the confirmation. The Revert *tab* already explains the recompute
+          // well, and a merchant who opens it is not the one at risk — this is the
+          // button pressed by somebody who has decided to end a sale and is not
+          // expecting a lesson.
+          <s-button
+            type="button"
+            tone="critical"
+            loading={busy || undefined}
+            commandFor={REVERT_MODAL_ID}
+            command="--show"
+          >
+            Revert
+          </s-button>
         )}
       </ActionRow>
     </s-grid>
+
+      {/* Asked for when the modal opens, not on page load: answering means planning the
+          whole scope again with this campaign excluded, and most visits to a campaign
+          never press Revert. Putting it in the loader would be #468 in a new place. */}
+      {rollback && rollback.straightforward ? (
+        <RevertConfirmation
+          campaignName={preview.name}
+          counts={rollback.counts}
+          keepers={keepers}
+          pending={keepersPending}
+        >
+          <fetcher.Form method="post" slot="primary-action">
+            <input type="hidden" name="intent" value="revert" />
+            <s-button type="submit" tone="critical" loading={busy || undefined}>
+              Revert now
+            </s-button>
+          </fetcher.Form>
+        </RevertConfirmation>
+      ) : null}
 
       {/* Outside the row, because a modal is not an action. Inside `ActionRow` it
           was a third child of a row of buttons, and it put its own primary button in

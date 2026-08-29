@@ -35,6 +35,7 @@ import { transitionHistory } from "../services/campaigns/lifecycle.server";
 import { approvalFor, decideApproval, requestApproval, SelfApprovalError } from "../services/approvals.server";
 import { PageShell } from "../components/PageShell";
 import { CampaignTabs, currentTab, tabsFor } from "../components/campaign/CampaignTabs";
+import { useKeepers } from "../components/campaign/useKeepers";
 import { CampaignHeader } from "../components/campaign/CampaignHeader";
 import { CampaignOverviewTab } from "../components/campaign/CampaignOverviewTab";
 import { CampaignPreviewTab } from "../components/campaign/CampaignPreviewTab";
@@ -298,6 +299,7 @@ export default function CampaignDetail() {
   const canApply = !practice && !preview.blocked && canTransition(state, "APPLYING");
 
   const tabs = tabsFor({ runs, rollback, ledger });
+  const { keepers, pending: keepersPending } = useKeepers(rollback);
   const [params] = useSearchParams();
   const tab = currentTab(tabs, params.get("tab"));
 
@@ -307,6 +309,7 @@ export default function CampaignDetail() {
     rollback, practice, preview, runs, ledger, ledgerTotal, result: runResult, selectedRunId,
     scheduleText, timeZone, warnings, autoEnroll, enrollPendingAt, lifecycle, approval,
     state, needsAttention: attention, history, fetcher, busy, canApply, attention,
+    keepers, keepersPending,
   } as CampaignDetailProps;
 
 

@@ -71,6 +71,17 @@ export interface CampaignInput {
 export interface PreviewRow {
   variantGid: string;
   title: string;
+  /**
+   * The campaign that owns this row.
+   *
+   * Usually the campaign being previewed, and uninteresting. It matters on a *revert*
+   * preview, which plans with this campaign excluded: every row then belongs to whoever
+   * keeps the variant afterwards, which is the answer to "what happens to my prices if I
+   * end this sale" and the thing `docs/help/concepts/revert.md` argues about.
+   *
+   * The planner has always had it; the preview used to drop it.
+   */
+  campaignId?: string;
   before: string | null;
   after: string | null;
   compareAt: string | null;

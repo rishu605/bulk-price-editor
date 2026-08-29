@@ -29,6 +29,8 @@ const EDITOR = code(read("app/routes/app.campaigns.new.tsx"));
 const PREVIEW = code(read("app/components/DraftPreview.tsx"));
 const EXAMPLE = code(read("app/components/StorefrontExample.tsx"));
 const OVERLAP = code(read("app/components/OverlapPanel.tsx"));
+const REVERT_MODAL = code(read("app/components/campaign/RevertConfirmation.tsx"));
+const REVERT_TAB = code(read("app/components/campaign/CampaignRevertTab.tsx"));
 const CONCEPT = read("docs/help/concepts/baselines.md");
 const REVERT = read("docs/help/concepts/revert.md");
 
@@ -81,6 +83,10 @@ describe("everything that mentions the baseline agrees", () => {
       ["the preview", PREVIEW],
       ["the overlap panel", OVERLAP],
       ["the editor", EDITOR],
+      // The two most likely to say it, and the reason this list is not a sample: the
+      // revert confirmation and the revert tab are where a merchant meets the word.
+      ["the revert confirmation", REVERT_MODAL],
+      ["the revert tab", REVERT_TAB],
     ] as const) {
       expect(flat(source), `${name} describes a revert as restoring`).not.toMatch(
         /revert\w*[^.]{0,40}restor/i,
@@ -90,5 +96,15 @@ describe("everything that mentions the baseline agrees", () => {
 
   it("says recompute where it talks about reverting at all", () => {
     expect(flat(OVERLAP)).toContain("recomputes");
+    expect(flat(REVERT_TAB)).toContain("recomputes");
+  });
+
+  it("opens the revert confirmation with the help centre's own correction", () => {
+    // `revert.md` leads with it: "Reverting a campaign does not restore the prices that
+    // were there before. It works out what the price *should* be now, with that campaign
+    // removed, and writes that." It is the first thing in the modal for the same reason
+    // it is the first thing on the page — it is the belief a merchant arrives with.
+    expect(flat(REVERT_MODAL)).toContain("does not put the old prices back");
+    expect(flat(REVERT_MODAL)).toContain("with this campaign removed");
   });
 });
