@@ -24,6 +24,7 @@ import { editCosts, newlyViolating, type CostEditResult } from "../services/cost
 import { describeCostRule, type CostRule } from "../lib/pricing/cost-rules";
 import { money } from "../lib/money/money";
 import { format } from "../lib/money/format";
+import { facetDetails } from "../lib/segments/facets";
 import { facets, type FilterAst } from "../services/segments.server";
 import { actorFor } from "../lib/audit/actor";
 import { ActionRow } from "../components/ActionRow";
@@ -55,6 +56,7 @@ export const loader = withGuard("/app/prices/costs", async ({ request }: LoaderF
     withCost,
     variants,
     vendors: available.vendors,
+    vendorTotal: available.totals.vendors,
     violations: violations.slice(0, 25).map((violation) => ({
       campaignId: violation.campaignId,
       campaignName: violation.campaignName,
@@ -159,7 +161,7 @@ export const action = withGuard("/app/prices/costs", async ({ request }: ActionF
 });
 
 export default function Costs() {
-  const { currency, withCost, variants, vendors, violations, violationCount } =
+  const { currency, withCost, variants, vendors, vendorTotal, violations, violationCount } =
     useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
   const busy = fetcher.state !== "idle";
@@ -234,7 +236,11 @@ export default function Costs() {
               rule and duplicating the fields would let them drift apart. */}
           <input type="hidden" name="intent" ref={intent} value="dry-run" readOnly />
           <s-stack gap={SPACE.section}>
-            <s-select name="vendor" label="Which products">
+            <s-select
+              name="vendor"
+              label="Which products"
+              details={facetDetails(vendorTotal, "vendors")}
+            >
               <s-option value="" defaultSelected>
                 Every product
               </s-option>
