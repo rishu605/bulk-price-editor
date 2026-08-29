@@ -1,4 +1,5 @@
 import { humanise } from "../lib/format/label";
+import { Blank } from "./Blank";
 import { formatWhen } from "../lib/format/display";
 import type { RunSummary } from "../services/campaigns/index.server";
 import { RUN_TONE, toneFor } from "./tone";
@@ -35,7 +36,7 @@ export function RunHistoryTable({ runs, selectedRunId, timeZone }: Props) {
             <s-table-cell>{run.verified}</s-table-cell>
             <s-table-cell>{run.failed}</s-table-cell>
             <s-table-cell>
-              {run.finishedAt ? formatWhen(run.finishedAt, timeZone) : "—"}
+              {run.finishedAt ? formatWhen(run.finishedAt, timeZone) : <Blank />}
             </s-table-cell>
             <s-table-cell>
               {run.id === selectedRunId ? (

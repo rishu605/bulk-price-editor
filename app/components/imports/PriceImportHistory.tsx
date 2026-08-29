@@ -15,6 +15,7 @@
  */
 
 import { EmptyState } from "../AsyncState";
+import { Blank } from "../Blank";
 import { formatCount } from "../../lib/format/display";
 
 export interface PriceImportRow {
@@ -75,7 +76,7 @@ export function PriceImportHistory({
                       </s-text>
                     ) : null}
                   </s-table-cell>
-                  <s-table-cell>{row.createdBy ?? "—"}</s-table-cell>
+                  <s-table-cell>{row.createdBy ?? <Blank />}</s-table-cell>
                 </s-table-row>
               ))}
             </s-table-body>

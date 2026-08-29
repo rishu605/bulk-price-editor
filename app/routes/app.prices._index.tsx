@@ -1,4 +1,6 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { shopCurrency } from "../services/settings.server";
+import { Blank } from "../components/Blank";
 import { useLoaderData, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
@@ -91,11 +93,14 @@ export const loader = withGuard("/app/prices", async ({ request }: LoaderFunctio
     };
   });
 
-  return { rows, total, page, query, pageSize: PAGE_SIZE };
+  // Named once under the table rather than in four column headers. Every amount here is
+  // the base surface in the shop's own currency, and "Live price (USD) · Baseline (USD) ·
+  // Compare at (USD) · Cost (USD)" spends four headings saying one thing.
+  return { rows, total, page, query, pageSize: PAGE_SIZE, currency: await shopCurrency(shop.id) };
 });
 
 export default function Catalog() {
-  const { rows, total, page, query, pageSize } = useLoaderData<typeof loader>();
+  const { rows, total, page, query, pageSize, currency } = useLoaderData<typeof loader>();
   const [params] = useSearchParams();
 
   return (
@@ -133,16 +138,42 @@ export default function Catalog() {
                 {rows.map((row) => (
                   <s-table-row key={row.variantGid}>
                     <s-table-cell>{row.title}</s-table-cell>
-                    <s-table-cell>{row.sku ?? "—"}</s-table-cell>
-                    <s-table-cell>{row.price ?? "—"}</s-table-cell>
-                    <s-table-cell>{row.baseline ?? "—"}</s-table-cell>
-                    <s-table-cell>{row.compareAt ?? "—"}</s-table-cell>
-                    <s-table-cell>{row.cost ?? "—"}</s-table-cell>
+                    <s-table-cell>{row.sku ?? <Blank />}</s-table-cell>
+                    {/* Strong only when it differs from the baseline.
+                    
+                        This is the column the page exists for: everything else is
+                        reference. On a healthy catalogue every live price equals its
+                        baseline, so weighting all of them weights nothing — the eye needs
+                        to land on the handful that moved. */}
+                    <s-table-cell>
+                      {row.price === null ? (
+                        <Blank />
+                      ) : row.atBaseline ? (
+                        row.price
+                      ) : (
+                        <s-text type="strong">{row.price}</s-text>
+                      )}
+                    </s-table-cell>
+                    <s-table-cell>{row.baseline ?? <Blank />}</s-table-cell>
+                    <s-table-cell>{row.compareAt ?? <Blank />}</s-table-cell>
+                    <s-table-cell>{row.cost ?? <Blank />}</s-table-cell>
+                    {/* Only the exceptions carry a colour.
+                    
+                        "At baseline" was a green badge, and on a healthy catalogue that is
+                        every row: a screenful of success badges, each one drawing the eye
+                        to a variant that needs nothing, and the one row that had moved
+                        competing with forty that had not. Colour spent on the normal case
+                        is colour that carries no information.
+                    
+                        Subdued text rather than a neutral badge, because a badge is a
+                        shape as well as a colour — forty grey pills read as forty things
+                        to look at. `colour-signal.test.ts` still holds: each state says
+                        its own name, so nothing here is carried by colour alone. */}
                     <s-table-cell>
                       {row.baseline === null ? (
                         <s-badge tone="warning">No baseline</s-badge>
                       ) : row.atBaseline ? (
-                        <s-badge tone="success">At baseline</s-badge>
+                        <s-text color="subdued">At baseline</s-text>
                       ) : (
                         <s-badge tone="info">Not at baseline</s-badge>
                       )}
@@ -151,6 +182,12 @@ export default function Catalog() {
                 ))}
               </s-table-body>
             </s-table>
+
+            <s-paragraph>
+              <s-text color="subdued">
+                Amounts are your store&rsquo;s base price, in {currency}.
+              </s-text>
+            </s-paragraph>
 
             <Pagination page={page} total={total} pageSize={pageSize} />
           </>

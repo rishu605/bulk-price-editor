@@ -9,6 +9,7 @@
  */
 
 import { useState } from "react";
+import { Blank } from "../components/Blank";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -197,9 +198,11 @@ export default function Segments() {
                   </s-table-cell>
                   <s-table-cell>{segment.size}</s-table-cell>
                   <s-table-cell>
-                    {segment.usedBy.length === 0
-                      ? "—"
-                      : segment.usedBy.map((c) => c.name).join(", ")}
+                    {segment.usedBy.length === 0 ? (
+                      <Blank />
+                    ) : (
+                      segment.usedBy.map((c) => c.name).join(", ")
+                    )}
                   </s-table-cell>
                   <s-table-cell>
                     {segment.usedBy.length > 0 ? (

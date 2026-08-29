@@ -1,4 +1,5 @@
 import { NoMatches } from "./AsyncState";
+import { Blank } from "./Blank";
 import type { ReconciliationRow } from "../services/reconciliation.server";
 import { stateLabel } from "../lib/reporting/reconciliation-csv";
 
@@ -61,15 +62,15 @@ export function ReconciliationTable({
                 {row.title}
               </s-button>
             </s-table-cell>
-            <s-table-cell>{row.live ?? "—"}</s-table-cell>
-            <s-table-cell>{row.baseline ?? "—"}</s-table-cell>
+            <s-table-cell>{row.live ?? <Blank />}</s-table-cell>
+            <s-table-cell>{row.baseline ?? <Blank />}</s-table-cell>
             <s-table-cell>
               {row.campaignId ? (
                 <s-button variant="tertiary" href={`/app/campaigns/${row.campaignId}`}>
                   {row.campaignName}
                 </s-button>
               ) : (
-                "—"
+                <Blank />
               )}
             </s-table-cell>
             <s-table-cell>

@@ -1,4 +1,5 @@
 import type { RollbackRow } from "../services/campaigns/index.server";
+import { Blank } from "./Blank";
 import { ShowingSome } from "./Pagination";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 
@@ -68,9 +69,9 @@ export function RollbackReportTable({ rows }: { rows: RollbackRow[] }) {
             <s-table-cell>
               <s-badge tone={STATE[row.kind].tone}>{STATE[row.kind].label}</s-badge>
             </s-table-cell>
-            <s-table-cell>{row.applied ?? "—"}</s-table-cell>
-            <s-table-cell>{row.live ?? "—"}</s-table-cell>
-            <s-table-cell>{row.revertsTo ?? "—"}</s-table-cell>
+            <s-table-cell>{row.applied ?? <Blank />}</s-table-cell>
+            <s-table-cell>{row.live ?? <Blank />}</s-table-cell>
+            <s-table-cell>{row.revertsTo ?? <Blank />}</s-table-cell>
             <s-table-cell>
               {row.kind === "drifted" ? (
                 // Named `keep`, and read as a list by the revert action. Unchecked by

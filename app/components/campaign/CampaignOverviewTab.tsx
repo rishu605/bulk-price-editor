@@ -6,6 +6,7 @@
  */
 
 import { formatWhen } from "../../lib/format/display";
+import { Blank } from "../Blank";
 import { describeActor } from "../../lib/audit/actor";
 import { ALL_STATES, describeState } from "../../lib/lifecycle/transitions";
 import { humanise } from "../../lib/format/label";
@@ -63,7 +64,7 @@ export function CampaignOverviewTab(props: CampaignDetailProps) {
                   <s-table-cell>
                     {stateName(entry.from)} → {stateName(entry.to)}
                   </s-table-cell>
-                  <s-table-cell>{entry.reason || "—"}</s-table-cell>
+                  <s-table-cell>{entry.reason || <Blank />}</s-table-cell>
                   <s-table-cell>{describeActor(entry.actor)}</s-table-cell>
                 </s-table-row>
               ))}

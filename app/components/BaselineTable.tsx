@@ -1,4 +1,5 @@
 import { humanise } from "../lib/format/label";
+import { Blank } from "./Blank";
 import { ActionRow } from "./ActionRow";
 import type { BaselineRow } from "../services/baseline-browser.server";
 
@@ -33,10 +34,10 @@ export function BaselineTable({
         {rows.map((row) => (
           <s-table-row key={row.variantGid}>
             <s-table-cell>{row.title}</s-table-cell>
-            <s-table-cell>{row.sku ?? "—"}</s-table-cell>
-            <s-table-cell>{row.baseline ?? "—"}</s-table-cell>
+            <s-table-cell>{row.sku ?? <Blank />}</s-table-cell>
+            <s-table-cell>{row.baseline ?? <Blank />}</s-table-cell>
             <s-table-cell>
-              {row.live ?? "—"}
+              {row.live ?? <Blank />}
               {row.diverged ? (
                 // Expected during a campaign, a warning outside one — so the badge
                 // says "differs" rather than "wrong".
@@ -46,7 +47,7 @@ export function BaselineTable({
                 </>
               ) : null}
             </s-table-cell>
-            <s-table-cell>{row.source ? humanise(row.source) : "—"}</s-table-cell>
+            <s-table-cell>{row.source ? humanise(row.source) : <Blank />}</s-table-cell>
             <s-table-cell>
               {/* `gap="small"` -- which the scale documents as *larger* than
                   `small-100` -- so the two halves of one cell sat further apart than

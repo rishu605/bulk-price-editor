@@ -8,6 +8,7 @@
  */
 
 import { formatCount, formatDay } from "../lib/format/display";
+import { Blank } from "../components/Blank";
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -147,9 +148,9 @@ export default function PlanPage() {
                     ? "Unlimited"
                     : formatCount(plan.variantLimit)}
                 </s-table-cell>
-                <s-table-cell>{plan.markets ? "Yes" : "—"}</s-table-cell>
-                <s-table-cell>{plan.b2b ? "Yes" : "—"}</s-table-cell>
-                <s-table-cell>{plan.trialDays > 0 ? `${plan.trialDays} days` : "—"}</s-table-cell>
+                <s-table-cell>{plan.markets ? "Yes" : <Blank />}</s-table-cell>
+                <s-table-cell>{plan.b2b ? "Yes" : <Blank />}</s-table-cell>
+                <s-table-cell>{plan.trialDays > 0 ? `${plan.trialDays} days` : <Blank />}</s-table-cell>
               </s-table-row>
             ))}
           </s-table-body>

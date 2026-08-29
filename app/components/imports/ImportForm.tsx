@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Blank } from "../Blank";
 import { useRef } from "react";
 import type { FetcherWithComponents } from "react-router";
 
@@ -262,7 +263,7 @@ export function ImportReport({
               {problems.slice(0, limit).map((problem) => (
                 <s-table-row key={`${problem.line}-${problem.identifier}-${problem.reason}`}>
                   <s-table-cell>{problem.line}</s-table-cell>
-                  <s-table-cell>{problem.identifier || "—"}</s-table-cell>
+                  <s-table-cell>{problem.identifier || <Blank />}</s-table-cell>
                   <s-table-cell>{problem.kind ?? "Will not import"}</s-table-cell>
                   <s-table-cell>{problem.reason}</s-table-cell>
                 </s-table-row>

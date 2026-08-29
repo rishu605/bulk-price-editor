@@ -1,4 +1,5 @@
 import type { useFetcher } from "react-router";
+import { Blank } from "../Blank";
 
 import { humanise } from "../../lib/format/label";
 import { ActionRow } from "../ActionRow";
@@ -213,7 +214,7 @@ export function CampaignListView({
                               ? `, ${campaign.lastRun.failed} failed`
                               : ""
                           }`
-                        : "—"}
+                        : <Blank />}
                     </s-table-cell>
                     <s-table-cell>
                       <ActionRow>
