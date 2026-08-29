@@ -375,6 +375,29 @@ on every run rather than letting three PASS lines read as "the objective is met"
 
 ## On-call expectations
 
-- **Page-worthy:** scheduler tick stopped, execution queue depth rising for over an hour, mirror divergence above 0.5%. All three mean merchant prices are wrong or about to be.
-- **Next business day:** audit queue backlog, budget saturation, individual run failures. The app is designed so these are visible and resumable rather than urgent.
-- **Never page for:** a single failed variant, a guardrail block, a drift hold. Those are the product working.
+Every alert the app can raise, and what to do when it arrives. Kept in step with
+`app/lib/observability/alerts.ts` by `runbook-coverage.test.ts`: a new alert, a removed one,
+or a changed severity fails CI until this table matches.
+
+**Wake up for these.** All six mean merchant prices are wrong or about to be, which is the
+line `alerts.ts` draws between a page and a graph.
+
+| Alert | Response | Why it cannot wait |
+|---|---|---|
+| `scheduler-stopped` | **Page** | Nothing is running. Scheduled campaigns are not starting and running ones are not finishing. |
+| `mirror-divergence` | **Page** | The app's picture of the store is systematically wrong, so every campaign planned from now on plans against fiction. |
+| `webhook-lag` | **Page** | Price edits are not reaching the mirror, which widens the window in which the app can be wrong about a store. |
+| `error-spike` | **Page** | Something is broken across shops. |
+| `shop-error-spike` | **Page** | One merchant's every campaign is failing inside a healthy global rate — the incident the overall error rate cannot see. |
+| `unpriceable-variants` | **Page** | Variants are mirrored, counted and shown, with no baseline — so campaigns silently skip them and the merchant is told nothing. |
+
+**Look at these next working day.**
+
+| Alert | Response | Why it can wait |
+|---|---|---|
+| `execution-backlog` | **Notice** | Campaigns are queued rather than running. Not urgent on its own; what matters is whether the floor rises over hours. |
+
+**Never page for** a single failed variant, a guardrail block, a drift hold, a saturated
+rate-limit budget, or an audit queue backlog. Those are the product working, and none of
+them raises an alert at all — see `NOT_ALERTS` in `alerts.ts` for the reasoning on each.
+Expect no notification for them, because none will come.
