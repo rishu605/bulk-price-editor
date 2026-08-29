@@ -134,7 +134,9 @@ describe("the prose each page used to keep in a column", () => {
     ["app.prices.baselines.recapture.tsx", "If you get this wrong", "Baselines are append-only"],
     ["app.campaigns._index.tsx", "How campaigns resolve", "They never stack"],
     ["app.campaigns.new.tsx", "Nothing is written yet", "records the rule"],
-    ["app.campaigns.import.tsx", "Only price files are listed", "do not record a file yet"],
+    // Moved with the table it qualifies when the import stopped being a page of its own
+    // (#445). The note is the point, not the file it lives in.
+    ["app.campaigns.new.tsx", "Only price files are listed", "do not record a file yet"],
     ["app.activity.tsx", "What is kept", "Retention is not a paid tier"],
     ["app.settings._index.tsx", "Why floors are checked last", "Rounding down can push"],
     ["app.settings.segments.tsx", "Dynamic or frozen", "re-checks its filter every time"],

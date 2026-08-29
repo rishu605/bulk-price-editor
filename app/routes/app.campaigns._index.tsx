@@ -152,15 +152,15 @@ export default function Campaigns() {
       <TabBar
         label="Campaign views"
         action={
-          // Two ways in, one of them black. A spreadsheet of exact prices creates a
-          // campaign just as a rule does -- it was filed under an "Imports" nav item,
-          // which read as a fourth kind of import rather than as the second way to start
-          // a sale. Secondary, not primary: most campaigns are a rule, and two black
-          // buttons is two answers to "what should I do next".
+          // One way in.
+          //
+          // There were two, and the second was the last of the "Imports" thinking: a
+          // spreadsheet of exact prices creates a campaign exactly as a rule does, so
+          // "From a spreadsheet" was a second door to the same object — and a merchant
+          // had to know which of their two intentions the app had filed their case under
+          // before they could start. It is an option inside the editor now (#445), which
+          // is where the question "how should prices change" is actually asked.
           <ActionRow>
-            <s-button variant="secondary" icon="import" href="/app/campaigns/import">
-              From a spreadsheet
-            </s-button>
             <s-button variant="primary" href="/app/campaigns/new">
               Create campaign
             </s-button>

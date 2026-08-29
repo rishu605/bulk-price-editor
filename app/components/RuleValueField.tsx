@@ -1,6 +1,13 @@
-import { useState } from "react";
-
 import { DRAFT_DEFAULTS } from "../lib/campaigns/draft-defaults";
+
+/**
+ * The rule kind that has no amount, because the file carries every price.
+ *
+ * Named rather than written out at each of the four places that branch on it: the string
+ * is load-bearing — it decides whether a scope section renders — and a typo would produce
+ * a page that silently keeps the wrong half.
+ */
+export const FROM_FILE = "from-file";
 
 /**
  * The rule's amount, which is a percentage or a price depending on the rule.
@@ -20,31 +27,50 @@ import { DRAFT_DEFAULTS } from "../lib/campaigns/draft-defaults";
  */
 export function RuleValueField({
   currency,
+  kind,
+  onKindChange,
   name = "ruleValue",
   selectName = "ruleKind",
 }: {
   currency: string;
+  /**
+   * Which rule is chosen, held by the route rather than here.
+   *
+   * It used to be local state, which was right while every option was an arithmetic on
+   * the baseline. `from-import` is not: choosing it removes the scope section and swaps
+   * the whole rule for a file, and a page cannot react to a choice a component is keeping
+   * to itself.
+   */
+  kind: string;
+  onKindChange: (kind: string) => void;
   name?: string;
   selectName?: string;
 }) {
-  const [kind, setKind] = useState<string>(DRAFT_DEFAULTS.ruleKind);
   const money = kind === "fixed-change" || kind === "set-exact";
 
   return (
     <>
       <s-select
         name={selectName}
-        label="Adjustment"
-        onChange={(event) => setKind(String(event.currentTarget.value))}
+        label="How should prices change?"
+        onChange={(event) => onKindChange(String(event.currentTarget.value))}
       >
         <s-option value={DRAFT_DEFAULTS.ruleKind} defaultSelected>
           Percent change from baseline
         </s-option>
         <s-option value="fixed-change">Fixed change from baseline</s-option>
         <s-option value="set-exact">Set an exact price</s-option>
+        {/* A file is a way prices change, not a different door.
+            
+            #416 dissolved the Imports nav item on the rule that a nav item is a noun; the
+            page survived as a button on the campaigns index, which is the same mistake
+            one size smaller — two merchants wanting the same object, sent through two
+            doors. A spreadsheet is an answer to "how should prices change", so it is an
+            option here. */}
+        <s-option value={FROM_FILE}>From a spreadsheet</s-option>
       </s-select>
 
-      {money ? (
+      {kind === FROM_FILE ? null : money ? (
         <s-money-field
           name={name}
           label={kind === "set-exact" ? `Price (${currency})` : `Amount (${currency})`}

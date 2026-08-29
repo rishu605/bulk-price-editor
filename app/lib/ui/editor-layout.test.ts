@@ -74,7 +74,11 @@ describe("the rule is what a merchant meets first", () => {
     // Sami by picking the field to edit — because it is the decision that was already
     // made before the page loaded.
     expect(at('headings.rule')).toBeLessThan(at('headings.scope'));
-    expect(at('name="name"'), "the campaign's name is below the scope again").toBeLessThan(
+    // `<CampaignNameField`, not `name="name"`. The field moved into a component when it
+    // grew a counter, and the spreadsheet path has a `name="name"` of its own further
+    // down the file — so matching the attribute now finds the wrong one and would pass
+    // or fail for reasons unrelated to the order these sections are in.
+    expect(at("<CampaignNameField"), "the campaign's name is below the scope again").toBeLessThan(
       at('name="collection"'),
     );
     expect(at("<RuleValueField")).toBeLessThan(at('name="collection"'));
