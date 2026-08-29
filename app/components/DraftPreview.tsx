@@ -1,5 +1,6 @@
 import { formatCount } from "../lib/format/display";
 import { EmptyState } from "./AsyncState";
+import { exampleRowFrom, StorefrontExample } from "./StorefrontExample";
 import { SPACE } from "../lib/ui/spacing";
 import type { DraftPreview as Preview } from "../services/campaigns/draft-preview.server";
 
@@ -20,10 +21,19 @@ import type { DraftPreview as Preview } from "../services/campaigns/draft-previe
 export function DraftPreview({
   preview,
   pending = false,
+  surface,
 }: {
   preview: Preview | null;
   /** A request is in flight. See the note on the first branch below. */
   pending?: boolean;
+  /**
+   * Which price the panel is showing, when the shop has more than one.
+   *
+   * `previewDraft` prices the base surface. On a single-market shop that needs no
+   * saying; on a shop with catalogues it very much does, because the merchant is looking
+   * at a card headed "on your storefront" and has three storefronts.
+   */
+  surface?: string;
 }) {
   if (!preview) {
     return (
@@ -67,8 +77,15 @@ export function DraftPreview({
     );
   }
 
+  const example = exampleRowFrom(preview.rows);
+
   return (
     <s-stack gap={SPACE.section}>
+      {/* Above the counts, because it answers a question asked before them: a merchant
+          who has typed a percentage wants to know what it looks like, and only then how
+          many products it reaches. */}
+      {example ? <StorefrontExample row={example} surface={surface} /> : null}
+
       <s-paragraph>
         <s-text>
           <strong>{formatCount(preview.changing)}</strong> of {formatCount(preview.matched)}{" "}
