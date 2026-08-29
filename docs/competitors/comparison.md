@@ -4,50 +4,34 @@
 Sami Bulk Price Editor live on `dartmode-labs`, then walking our own production build on
 the same store in the same browser session.*
 
-The headline is not a feature gap.
+The headline is not a feature gap. We have more of the things that matter than any of
+them — a baseline, a resolver, a ledger, verified-clean runs, drift detection, per-market
+rounding. A merchant on a trial cannot see any of it, and the create flow is where they
+look.
 
 ---
 
-## 0. The finding that outranks everything else
+## 0. A correction, recorded rather than deleted
 
-**Our embedded app does not scroll. Anything below the first viewport is unreachable.**
+The first version of this document opened with a P0: that the embedded app did not scroll,
+and that the campaign editor's Create button was therefore unreachable. **That was wrong.**
+Scrolling works correctly in the admin.
 
-Verified back to back, same browser, same tab, same wheel events, within twenty minutes:
+What actually happened: the browser automation's synthetic wheel events reached the outer
+admin document for the three competitor apps — whose iframes grow to content height, so the
+*admin page* is what scrolls — and did not reach our page's own scroll container inside the
+frame. The supporting evidence was weak in the same way: "focus left the iframe after three
+tab presses" is something App Bridge can cause, and does not mean there were only three
+fields.
 
-| App | Long page | Scrolls? |
-|---|---|---|
-| NA Bulk Price Editor | `/jobs/new` (five steps) | yes |
-| RUBIX Bulk Price Editor | `/CreateTask` (six steps) | yes |
-| Sami Bulk Price Editor | `/tasks/new` (two panes) | yes |
-| **Anchor** | `/app/campaigns/new` | **no** |
-| **Anchor** | `/app/prices` (50-row table) | **no** |
-| **Anchor** | `/app/settings` | **no** |
+It is left here rather than deleted because the failure is instructive and will recur. A
+tool that drives one app successfully is not thereby validated against another, and
+"competitor scrolled, ours did not, same wheel events" is a comparison between two
+different scroll architectures, not a controlled test. **When an observation implies
+something as severe as "the product cannot be used", reproduce it by hand before writing it
+down.**
 
-What that costs, concretely:
-
-- **`/app/campaigns/new` ends after "1 · Scope".** The rule, the amount, compare-at,
-  rounding, markets, the draft preview, the schedule, the advanced block and the
-  **Create button** are all below the fold. Tabbing forward from the last visible field
-  leaves the iframe entirely after three presses. **A merchant cannot create a campaign.**
-- **`/app/prices` shows ten of fifty rows** and no way to reach the eleventh.
-- **`/app/settings` is cut mid-"Rounding"**, so Guardrails cannot be saved.
-
-Prime suspect: `PageWidth` in `app/components/PageShell.tsx` — every page is wrapped in
-`<s-grid justifyItems="center"><s-box inlineSize="80%">…` and App Bridge sizes the frame
-from the document, so a wrapper that does not grow with its content pins the frame to the
-viewport. It is recent (the 80% inset and the aside rebuild both landed 28–29 Aug), which
-matches when this could have appeared. **Reproduce locally before fixing** — this doc
-records a symptom, not a diagnosis.
-
-Why no test and no manual check caught it: `built-for-shopify.test.ts`, `views.test.ts`
-and the rest assert about *markup*, and the markup is fine. The manual checks were run
-against `anchor-perf`, whose production database is empty — so **every page rendered an
-empty state and no page was ever taller than one screen.** The store where verification
-happens has to be the store with data in it.
-
-Everything below this line is worth doing. None of it matters until this is fixed.
-
----
+Filed as #441 and closed as not-a-bug. Nothing in the rest of this document depended on it.
 
 ## 1. The three of them, at a glance
 
@@ -226,7 +210,7 @@ Rubix's own FAQ is the argument, pre-written by a competitor:
 > the same products**
 
 We should be able to put a merchant in front of that exact scenario and show it not
-happening. Today we cannot, because the editor does not scroll.
+happening. Today the editor has no way to say it.
 
 ---
 
@@ -255,49 +239,45 @@ acknowledgement. Markets are two flat fields with no catalogue model behind them
 
 Every item below became a GitHub issue under **Epic 15**.
 
-### P0 — the app is unusable in production
-1. **The embedded app does not scroll.** Fix, then add a check that fails when a page
-   taller than the frame cannot be reached. Verify on a store *with data*.
-
 ### P1 — the create flow, which is where a trial is won or lost
-2. **Two-pane editor**: form left, live preview right, always visible, no button to press.
-3. **Preview rows get thumbnails and an after-price**, not a bullet list of text.
-4. **One `STOREFRONT EXAMPLE`** — one product, before → after, storefront rendering,
+1. **Two-pane editor**: form left, live preview right, always visible, no button to press.
+2. **Preview rows get thumbnails and an after-price**, not a bullet list of text.
+3. **One `STOREFRONT EXAMPLE`** — one product, before → after, storefront rendering,
    beside the rule.
-5. **CSV becomes a rule option**, not a separate door; the scope step disappears when it
+4. **CSV becomes a rule option**, not a separate door; the scope step disappears when it
    is chosen.
-6. **A confirmation step**: plain-English summary, variant count, duration estimate, who
+5. **A confirmation step**: plain-English summary, variant count, duration estimate, who
    gets emailed, and an acknowledgement only where the choice is dangerous.
-7. **Name and rule come first**, scope second — the form should open with the decision, not
+6. **Name and rule come first**, scope second — the form should open with the decision, not
    the filter.
 
 ### P2 — make the differentiators visible
-8. **Show the baseline in the editor**: every preview row reads baseline → new, and says
+7. **Show the baseline in the editor**: every preview row reads baseline → new, and says
    which campaigns are already in play on those variants.
-9. **An overlap panel**: "3 of these variants are already priced by *Autumn Sale*. This
+8. **An overlap panel**: "3 of these variants are already priced by *Autumn Sale*. This
    campaign has priority 2, so it wins." Nobody else can render that sentence.
-10. **Revert explained where it is used**, not in help: "Reverting recomputes without this
+9. **Revert explained where it is used**, not in help: "Reverting recomputes without this
     campaign — it does not restore a saved number."
 
 ### P3 — the landing page and the list
-11. **Quick create on Home**: one percentage, one button.
-12. **A metric strip on Home** — active · scheduled · needs a decision · reverted — in
+10. **Quick create on Home**: one percentage, one button.
+11. **A metric strip on Home** — active · scheduled · needs a decision · reverted — in
     place of the `Mirror audited` activity feed, which is system jargon.
-13. **The campaigns index renders the rule and the scope** as sentences.
-14. **`Duplicate` on a campaign**, and `Note`, and archive-not-delete.
+12. **The campaigns index renders the rule and the scope** as sentences.
+13. **`Duplicate` on a campaign**, and `Note`, and archive-not-delete.
 
 ### P4 — craft, cheap and visible
-15. Timezone beside the schedule, settable, with a plain-English echo.
-16. Prefilled campaign name with a character counter.
-17. Rounding helper text that shows the arithmetic on an example number.
-18. `Exclude products` beside the scope filter.
-19. A usage/plan meter on Home.
-20. Per-page help videos or a "what this does" example on the rule select.
+14. Timezone beside the schedule, settable, with a plain-English echo.
+15. Prefilled campaign name with a character counter.
+16. Rounding helper text that shows the arithmetic on an example number.
+17. `Exclude products` beside the scope filter.
+18. A usage/plan meter on Home.
+19. Per-page help videos or a "what this does" example on the rule select.
 
 ### P5 — reach
-21. Localisation. Sami ships eighteen languages and is free; that is a distribution
+20. Localisation. Sami ships eighteen languages and is free; that is a distribution
     argument, not a feature.
-22. In-app support: a contact form that captures the run id, at minimum.
+21. In-app support: a contact form that captures the run id, at minimum.
 
 ---
 
