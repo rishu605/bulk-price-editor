@@ -52,8 +52,19 @@ describe("the defaults are a value, not a literal in two files", () => {
     // of them, because the counts are exact — in front of first paint that is a minute
     // of blank page on a catalogue of any size (#468), and blank has nowhere to put a
     // spinner.
-    expect(EDITOR).toContain("submitPreview()");
     expect(EDITOR).toContain("previewFetcher.state");
+    expect(EDITOR).toMatch(/useEffect\(\(\) => \{[\s\S]*?previewFetcher\.submit/);
+  });
+
+  it("builds that first request rather than reading a form that is not ready", () => {
+    // Serialising the fields at mount described a scope that matched nothing where an
+    // empty filter matches everything (#470). Only later requests read the form.
+    expect(EDITOR).toContain("firstPreviewParams(");
+    expect(EDITOR).toMatch(/useEffect\(\(\) => \{[\s\S]*?new URLSearchParams\(firstPreview\)/);
+    expect(
+      EDITOR,
+      "the mount request is reading the form again, which is where #470 came from",
+    ).not.toMatch(/useEffect\(\(\) => \{[\s\S]*?submitPreview\(\)[\s\S]*?\}, \[\]\)/);
   });
 });
 

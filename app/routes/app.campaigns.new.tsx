@@ -30,6 +30,7 @@ import { DraftPreview } from "../components/DraftPreview";
 import { RuleValueField } from "../components/RuleValueField";
 import { FieldGrid, FullRow } from "../components/FieldGrid";
 import { HelpNote } from "../components/HelpNote";
+import { firstPreviewParams } from "../lib/campaigns/first-preview";
 import { numberSections } from "../lib/ui/sections";
 import { SPACE } from "../lib/ui/spacing";
 import type { DraftPreview as Preview } from "../services/campaigns/draft-preview.server";
@@ -129,6 +130,10 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
     },
     planName: billing.plan.name,
     storeRounding: settings.rounding,
+    // What the untouched form describes, built here where it can be built reliably.
+    // See the note on the mount effect: reading the form for the *first* request gets a
+    // scope that matches nothing (#470).
+    firstPreview: firstPreviewParams(settings.rounding, url.searchParams).toString(),
     roundingOptions: Object.entries(ROUNDING_LABELS).map(([value, label]) => ({ value, label })),
     facets: available,
     segments,
@@ -154,6 +159,7 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
  * other cannot silently stop being filterable.
  */
 export const SCOPE_FIELDS = ["collection", "tag", "vendor", "title", "segment"] as const;
+
 
 /** Builds an AST from the simple scope form: all provided conditions ANDed. */
 
@@ -248,6 +254,7 @@ export default function NewCampaign() {
     gates,
     planName,
     defaultName,
+    firstPreview,
   } = useLoaderData<typeof loader>();
 
   // The live price preview. Debounced, because it plans the whole scope on every call
@@ -255,6 +262,7 @@ export default function NewCampaign() {
   const previewFetcher = useFetcher<Preview>();
   const formRef = useRef<HTMLFormElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const askedForPreview = useRef(false);
 
   const submitPreview = useCallback(() => {
     const form = formRef.current;
@@ -274,15 +282,30 @@ export default function NewCampaign() {
   // request against a page that is gone.
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
-  // Once, on mount, undebounced. The loader used to do this so the panel arrived
-  // populated, which put a minute of blank page in front of first paint on a catalogue
-  // of any size (#468). Asking from here is the same work with the page already drawn
-  // around it, so there is somewhere to say it is being worked out.
+  // Once, on mount, undebounced, from a payload the loader built rather than from the
+  // form.
   //
-  // Empty dependencies deliberately: this is "when the page appears", not "whenever the
-  // submit function changes identity". Every later request comes from `onChange`.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { submitPreview(); }, []);
+  // The loader used to price this itself, which put a minute of blank page in front of
+  // first paint (#468). Asking from here is the same work with the page already drawn
+  // around it — but reading `new FormData(form)` at mount describes something other than
+  // what is on screen: an empty filter came back matching nothing (#470). The fields are
+  // custom elements, and this is not a thing to bet a preview on. Every later request
+  // reads the form, by which point it is trustworthy.
+  //
+  // A ref rather than an empty dependency array, so the dependencies can be honest. The
+  // fetcher changes identity as it moves through its states, so listing it and firing
+  // every time would loop; an empty array would mean lying about that in a comment. This
+  // says what is meant — ask once — and survives StrictMode's double mount into the
+  // bargain.
+  useEffect(() => {
+    if (askedForPreview.current) return;
+    askedForPreview.current = true;
+
+    previewFetcher.submit(new URLSearchParams(firstPreview), {
+      method: "post",
+      action: "/app/preview-draft",
+    });
+  }, [firstPreview, previewFetcher]);
 
 
   // Numbered from what is actually rendered. Both sections apply today; #445 makes the
