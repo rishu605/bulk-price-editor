@@ -33,13 +33,20 @@ had a product bigger than one page until this one existed.
 | Catalogue, first page | 26 ms | 26 ms |
 | Catalogue, last page (offset 101,100) | 292 ms | 360 ms |
 | Catalogue, text search | 19 ms | 21 ms |
-| Reconciliation, first page | 7 ms | 9 ms |
-| Reconciliation, deep page | 5 ms | 6 ms |
+| Reconciliation, first page | 61 ms | 61 ms |
+| Reconciliation, deep page | 59 ms | 62 ms |
 
 Text search was 74 ms until #510 replaced two unusable `lower()` btrees with trigram GIN
-indexes. The two reconciliation rows are **stale**: both now measure ~1,000 ms against the
-same store, which grew 21 campaign runs and 125,579 ledger rows after these were taken.
-Tracked separately — see [`queries.md`](queries.md).
+indexes.
+
+The reconciliation rows read 7 ms and 5 ms until #513. They were taken against a store
+with an empty ledger; at 125,070 verified rows both had become **~1,000 ms**, because the
+drift query sorted the whole ledger and spilled to disk. An index in the `DISTINCT ON`
+order removed the sort. See [`queries.md`](queries.md).
+
+**These two are the reason to re-measure rather than trust the table.** They degraded with
+*use*, not with catalogue size, so nothing about a bigger seed would have found it — and a
+stale perf number is the one somebody quotes.
 
 ### Offset scaling
 

@@ -163,15 +163,55 @@ reason. It reads the index list out of `schema.prisma` rather than restating it,
 field list is a `Record<ConditionField, …>` so a new condition fails typecheck until it is
 classified.
 
-## Unrelated, found while measuring: reconciliation is 140× its recorded baseline
+## Reconciliation: a sort that spilled to disk (#513)
 
-`docs/perf/README.md` records reconciliation at 7 ms first page and 5 ms deep page. It now
-measures **~1,000 ms** for both.
+Found while measuring #510, and not caused by it — confirmed by restoring the old indexes
+and re-measuring. `docs/perf/README.md` recorded 7 ms first page and 5 ms deep page; both
+had become **~1,000 ms**.
 
-Not caused by #510 — confirmed by dropping the trigram indexes, restoring the `lower()`
-ones and re-measuring, which gives ~1,000 ms as well. The store has since grown 21 campaign
-runs and 125,579 ledger rows where the original baseline was taken against a store with
-none. Filed separately.
+`driftedCells` picks the newest verified write per cell with `DISTINCT ON (variantGid,
+priceListGid) … ORDER BY …, verifiedAt DESC`. With no index in that order:
+
+```
+Sort (actual time=880.447..983.412 rows=125070)
+  Sort Method: external merge  Disk: 9072kB
+Execution Time: 1017.951 ms
+```
+
+983 ms of the 1,018 ms was one sort spilling out of the default 4 MB `work_mem` — for a
+query returning **zero rows**. `variant_changes_drift_lookup`, partial on `VERIFIED` and
+ordered to match, removes the sort entirely:
+
+```
+Index Scan using variant_changes_drift_lookup (actual time=0.017..30.704 rows=125070)
+Execution Time: 71.776 ms
+```
+
+| | Before | After |
+|---|---|---|
+| Reconciliation, first page (p50) | 1,006 ms | **61 ms** |
+| Reconciliation, deep page (p50) | 1,006 ms | **59 ms** |
+
+**This degraded with use, not with catalogue size.** One ledger row per variant × surface
+× run, retained indefinitely because unlimited history is a deliberate free-tier feature;
+#183 puts an active store at ~7.8M rows a year, and this was at 125K. No larger seed would
+have found it — only a store that had *run campaigns*.
+
+Two things worth carrying:
+
+**`counts()` was silently capped.** It was `driftedCells(shopId).length`, and that helper
+ends in `LIMIT 5000` — so a store with 8,000 drifted prices was told it had 5,000. The cap
+is right for the cells list, which feeds a `WHERE … IN`; it was only ever wrong as an
+answer to "how many". Both questions now compose the same predicate fragment, so they
+cannot disagree about what "drifted" means.
+
+**An intermittent 1 s outlier during this measurement was autovacuum**, not the query —
+`pg_stat_user_tables` showed autovacuum and autoanalyze running on all three tables inside
+the measurement window. Twelve consecutive calls afterwards ran 55–73 ms with no statement
+over 200 ms. Worth checking before attributing a spike to the change under test.
+
+`offBaselineCells` is left alone at 185 ms. It is already a merge join over two index
+scans; comparing every surface entry to its baseline *is* the work.
 
 ## What this does not cover
 
