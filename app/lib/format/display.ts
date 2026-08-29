@@ -56,6 +56,32 @@ export function formatWhen(value: Date | string, timeZone: string): string {
   }
 }
 
+/**
+ * The clock, in a named zone.
+ *
+ * For the one sentence that has to say *whose* midnight a merchant is scheduling against.
+ * NA writes "the current time is 03:50" under its date pickers, and it earns its place:
+ * a sale set to start at midnight in the wrong zone is a support ticket and a refund, and
+ * a merchant reading a zone name they half-recognise cannot tell whether it is theirs. A
+ * clock they can compare against the one on their wall can be checked in a second.
+ *
+ * Computed on the server and passed down, never rendered from a browser clock: the value
+ * would differ between the server render and the hydration and React would replace it,
+ * which is the same trap `formatAgo` carries a paragraph about.
+ */
+export function formatClock(value: Date | string, timeZone: string): string {
+  try {
+    return new Date(value).toLocaleString(LOCALE, {
+      timeZone,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+  } catch {
+    return "";
+  }
+}
+
 /** A date without the time, same rules. */
 export function formatDay(value: Date | string, timeZone: string): string {
   try {

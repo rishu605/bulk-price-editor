@@ -90,6 +90,11 @@ function describeCondition(condition: { field: string; value: unknown }): string
       return `In ${value}`;
     case "tag":
       return `Tagged ${value}`;
+    case "excludeTag":
+      // Said as an exception rather than as another condition, because that is what it
+      // is: "In Outerwear · except tagged no-sale" is a sentence a merchant can check
+      // against what they meant.
+      return `except tagged ${value}`;
     case "vendor":
       return `By ${value}`;
     case "title":

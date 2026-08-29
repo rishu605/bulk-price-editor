@@ -18,7 +18,16 @@ import type { AdjustmentRule, CompareAtPolicy } from "../pricing/types";
 import type { FilterAst } from "../../services/segments.server";
 
 /** Scope fields the editor offers, minus `segment`, which resolves to a whole AST. */
-export const SCOPE_CONDITION_FIELDS = ["collection", "tag", "vendor", "title"] as const;
+export const SCOPE_CONDITION_FIELDS = [
+  "collection",
+  "tag",
+  // The exception, and it has to be here rather than only in the create action: the
+  // preview reads this list, and a scope a merchant can set but not see previewed is
+  // worse than one they cannot set — rule 4 says preview and execution share one path.
+  "excludeTag",
+  "vendor",
+  "title",
+] as const;
 
 /** Reads a value from either a form or a query string, so one parser serves both. */
 export type FieldReader = (name: string) => string | null;

@@ -92,11 +92,22 @@ describe("the rule is what a merchant meets first", () => {
     // Empty and required is a blocker in front of a decision. RUBIX leaves it empty and
     // it is the first thing on their page; NA prefills a timestamp and adds a line
     // saying customers will not see it, which is the question a merchant actually has.
-    expect(EDITOR).toContain("value={defaultName}");
-    expect(EDITOR).toMatch(/Customers never see it/);
+    // The field itself moved into `CampaignNameField` when it grew a counter, so the
+    // two halves are checked where they now live: the route still computes the name on
+    // the server, and the field still seeds itself from it and still answers the
+    // question a merchant actually has.
+    expect(EDITOR).toContain("<CampaignNameField defaultName={defaultName} />");
     expect(EDITOR, "a name built during render is a hydration mismatch").toContain(
       "defaultName: `",
     );
+
+    const field = sourceOf("app/components/campaign/CampaignNameField.tsx");
+    expect(field).toContain("value={defaultName}");
+    expect(field).toMatch(/customers never see it/i);
+    // The counter: "how much can I write" is the other question the first field on the
+    // page raises, and a static maximum tells somebody already over it nothing.
+    expect(field).toContain("maxLength");
+    expect(field).toContain("${length}/${NAME_LIMIT}");
   });
 
   it("previews the rule beside it, in the aside, rather than under it", () => {

@@ -14,6 +14,22 @@ import { formatMinorUnits } from "../lib/money/format";
 export type ConditionField =
   | "collection"
   | "tag"
+  /**
+   * Everything the rest of the scope matches, *except* this tag.
+   *
+   * Sami has `Exclude products` as its own card beside "Apply to products", and neither
+   * of the other two has anything — which is the difference between "everything on sale"
+   * and "everything on sale except the four things we are not discounting". Every
+   * merchant has the second list and until now had to express it by narrowing the first
+   * one until it happened to leave them out.
+   *
+   * A condition rather than a separate field on the campaign, so preview, planning,
+   * enrolment and the run path all handle it without knowing exclusions exist — the same
+   * argument `variantGid` makes below. It also means an excluded variant is simply not in
+   * this campaign's scope, so a lower-priority campaign covering it still wins, which is
+   * what a merchant means by "leave this one out of the sale".
+   */
+  | "excludeTag"
   | "vendor"
   | "productType"
   | "status"
@@ -62,6 +78,10 @@ function conditionToWhere(condition: Condition): Prisma.VariantIndexWhereInput |
       return text ? { collections: { has: text } } : null;
     case "tag":
       return text ? { tags: { has: text } } : null;
+    case "excludeTag":
+      // `NOT` rather than a filter applied afterwards, so the exclusion is part of the
+      // query the GIN index on `tags` serves rather than a second pass over the result.
+      return text ? { NOT: { tags: { has: text } } } : null;
     case "vendor":
       return text ? { vendor: { equals: text, mode: "insensitive" } } : null;
     case "productType":

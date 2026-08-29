@@ -29,6 +29,8 @@ import { nextMoments } from "../lib/scheduling/upcoming";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
 import { SPACE } from "../lib/ui/spacing";
+import { planUsage } from "../services/plan-usage.server";
+import { usageLine } from "../lib/billing/usage-line";
 
 export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -37,7 +39,7 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
   // Counted in parallel and as aggregates, never by loading rows. This is the landing
   // page and it has a sub-second budget; a card that costs a table scan is a card that
   // makes the whole app feel slow.
-  const [health, campaigns, live, upcoming, driftOpen, lastRun, recent, scheduled] =
+  const [health, campaigns, live, upcoming, driftOpen, lastRun, recent, scheduled, usage] =
     await Promise.all([
     baselineHealth(shop.id),
     prisma.campaign.count({ where: { shopId: shop.id } }),
@@ -82,6 +84,9 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
       take: 8,
       select: { id: true, name: true, status: true, startAt: true, endAt: true },
     }),
+    // What the plan covers. One indexed count and the shop's tier — see `plan-usage`
+    // for why it is the catalogue size and not the largest campaign's scope.
+    planUsage(shop.id),
   ]);
 
   // Runs that need somebody: the number a merchant should act on, distinct from how
@@ -104,6 +109,9 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
     now: new Date().toISOString(),
     timeZone: shop.timezone,
     shopDomain: shop.domain,
+    // A sentence rather than the raw numbers: the reassuring-versus-threatening call is
+    // one decision and it belongs in one place. See `usage-line.ts`.
+    usage: usageLine(usage),
     syncedAt: shop.initialSyncCompletedAt?.toISOString() ?? null,
     health: {
       ...health,
@@ -270,6 +278,7 @@ export default function Dashboard() {
   const {
     now,
     shopDomain,
+    usage,
     syncedAt,
     health,
     campaigns,
@@ -617,6 +626,24 @@ export default function Dashboard() {
           <s-stack gap={SPACE.tight}>
             <s-text color="subdued">Last synced</s-text>
             <s-text>{syncedAt ? formatAgo(syncedAt, now, timeZone) : "Not yet synced"}</s-text>
+          </s-stack>
+
+          {/* The plan, and what it covers, before it ever refuses anything.
+              
+              The gate is enforced in the run path, so until this existed the only place a
+              merchant could discover the limit was a campaign refusing to start — the
+              worst moment, and the one where it reads as a fault rather than as a plan.
+              It sits in the store card because it is a fact about this shop, which is the
+              only thing this column is for. */}
+          <s-stack gap={SPACE.tight}>
+            <s-text color="subdued">Plan</s-text>
+            <s-text type={usage.attention ? "strong" : undefined}>{usage.headline}</s-text>
+            <s-text color="subdued">{usage.detail}</s-text>
+            <ActionRow>
+              <s-button variant="tertiary" href="/app/settings/plan">
+                See plans
+              </s-button>
+            </ActionRow>
           </s-stack>
 
           {/* The action belongs with the fact it acts on. It used to sit in the catalogue

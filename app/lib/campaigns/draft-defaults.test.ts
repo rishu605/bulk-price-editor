@@ -70,12 +70,30 @@ describe("no loader prices a draft before the page paints", () => {
     expect(ROUTES.length).toBeGreaterThan(15);
   });
 
+  /**
+   * Routes that may price a draft in a loader, and why.
+   *
+   * #468 is the rule: the editor primed its panel server-side and the page took over a
+   * minute to paint, blank, on a real catalogue. The rule is about work in front of a
+   * *first paint that has something else to show*.
+   *
+   * The full preview is the exception that proves it. The priced rows are not a panel
+   * beside a form — they are the entire page, there is nothing to paint first, and a
+   * merchant who followed "see all 3,669 rows" is waiting for exactly this. Doing it from
+   * the client would mean a page that renders empty and then fills, which is the same
+   * blank screen #468 was about, arrived at from the other direction.
+   */
+  const MAY_PRICE_IN_A_LOADER: Record<string, string> = {
+    "app.preview-draft.tsx": "the resource route the editor posts to; it has no page",
+    "app.campaigns.preview.tsx": "the priced rows are the whole page, not a panel beside one",
+  };
+
   it("leaves previewDraft to the resource route the client posts to", () => {
     // Read from the routes directory rather than a list: the temptation to prime the
     // panel server-side will come back, and it will come back on a store small enough
     // for the author not to notice.
     const offenders = ROUTES.filter(
-      ({ name, source }) => name !== "app.preview-draft.tsx" && source.includes("previewDraft("),
+      ({ name, source }) => !(name in MAY_PRICE_IN_A_LOADER) && source.includes("previewDraft("),
     ).map(({ name }) => name);
 
     expect(
