@@ -1,5 +1,6 @@
 import { formatAgo, formatCount, formatDay } from "../lib/format/display";
 import { quickCampaignName, readQuickPercent } from "../lib/campaigns/quick-campaign";
+import { merchantFacing } from "../lib/audit/housekeeping";
 import { createCampaign } from "../services/campaigns/index.server";
 import { readSettings } from "../services/settings.server";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
@@ -56,10 +57,14 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
         campaign: { select: { id: true, name: true } },
       },
     }),
+    // More than the five shown, because housekeeping is filtered out afterwards and a
+    // quiet shop's last five rows are all scheduler upkeep. Filtering in SQL would mean
+    // encoding the namespace list in a query as well as in `housekeeping.ts`, which is
+    // two places for one decision.
     prisma.auditLogEntry.findMany({
       where: { shopId: shop.id },
       orderBy: { createdAt: "desc" },
-      take: 5,
+      take: 40,
       select: { id: true, actor: true, action: true, createdAt: true },
     }),
     // Campaigns with a start or an end still ahead of them. Which of the two is next
@@ -144,7 +149,10 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
       })),
       new Date().toISOString(),
     ),
-    recent: recent.map((entry) => ({
+    // What the merchant did or decided. The scheduler's own upkeep stays in the full
+    // log, which `/app/activity` shows unfiltered — see `housekeeping.ts` for why the
+    // filter is a deny-list rather than an allow-list.
+    recent: merchantFacing(recent, 5).map((entry) => ({
       id: entry.id,
       actor: entry.actor,
       action: entry.action,
@@ -421,15 +429,24 @@ export default function Dashboard() {
           action rather than with four zeroes. */}
       {sections.live ? (
         <s-section heading="What is live right now">
+          {/* Each figure is a question, so each tile is the answer's front door. The
+              status values are the campaigns index's own filter vocabulary — `attention`
+              spans PARTIAL and HELD there, which is exactly what "Need attention"
+              counts — so the number a merchant clicks and the list they land on are the
+              same query rather than two that happen to agree today. */}
           <CountsRow
             items={[
-              { label: "Campaigns running", value: live },
-              { label: "Scheduled", value: upcoming },
-              { label: "Need attention", value: needsAttention },
+              { label: "Campaigns running", value: live, href: "/app/campaigns?status=ACTIVE" },
+              { label: "Scheduled", value: upcoming, href: "/app/campaigns?status=SCHEDULED" },
+              {
+                label: "Need attention",
+                value: needsAttention,
+                href: "/app/campaigns?status=attention",
+              },
               // Two words. "Prices changed outside the app" wrapped to three lines in
               // this column and "Changed outside Anchor" to two, either of which makes
               // its tile taller than the three beside it.
-              { label: "Changed elsewhere", value: driftOpen },
+              { label: "Changed elsewhere", value: driftOpen, href: "/app/prices/drift" },
             ]}
           />
 
