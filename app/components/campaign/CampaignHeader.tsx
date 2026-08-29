@@ -31,12 +31,14 @@
  */
 
 import { ActionRow } from "../ActionRow";
+import { ApplyConfirmation, APPLY_MODAL_ID } from "./ApplyConfirmation";
 import { SPACE } from "../../lib/ui/spacing";
 import type { CampaignDetailProps } from "./props";
 
 export function CampaignHeader({
   rollback,
   practice,
+  preview,
   scheduleText,
   lifecycle,
   fetcher,
@@ -44,6 +46,7 @@ export function CampaignHeader({
   canApply,
 }: CampaignDetailProps) {
   return (
+    <>
     <s-grid
       // The status takes the space, the actions take what they need. Centred, so the
       // badge and the buttons sit on one line whatever the schedule sentence wraps to.
@@ -59,17 +62,29 @@ export function CampaignHeader({
       <ActionRow>
         {/* Not rendered at all for a practice campaign — see above. */}
         {practice ? null : (
-          <fetcher.Form method="post">
-            <input type="hidden" name="intent" value="apply" />
+          <>
+            {/* Opens the confirmation rather than submitting.
+                 *
+                 * The button used to post straight from here, which made this the one
+                 * place in the app where a price change happened with nothing in between.
+                 * Our two-step shape — draft, then apply — was already safer than any of
+                 * the three competitors, two of which have no confirmation at all; what
+                 * was missing was the sentence saying what is about to happen.
+                 *
+                 * Still disabled when the campaign cannot be applied: opening a modal to
+                 * be told no is worse than a button that says so. */}
             <s-button
-              type="submit"
+              type="button"
               variant={canApply ? "primary" : "secondary"}
               loading={busy || undefined}
               disabled={!canApply || undefined}
+              commandFor={APPLY_MODAL_ID}
+              command="--show"
             >
               Apply to storefront
             </s-button>
-          </fetcher.Form>
+
+          </>
         )}
 
         {lifecycle.nextAction?.intent === "resume" ? (
@@ -105,5 +120,24 @@ export function CampaignHeader({
         )}
       </ActionRow>
     </s-grid>
+
+      {/* Outside the row, because a modal is not an action. Inside `ActionRow` it
+          was a third child of a row of buttons, and it put its own primary button in
+          the middle of the header's — which the "at most one black button" rule
+          reads, correctly, as two. */}
+      {practice ? null : (
+      <ApplyConfirmation
+        preview={preview}
+        scheduleText={scheduleText}
+      >
+        <fetcher.Form method="post" slot="primary-action">
+          <input type="hidden" name="intent" value="apply" />
+          <s-button type="submit" variant="primary" loading={busy || undefined}>
+            Apply now
+          </s-button>
+        </fetcher.Form>
+      </ApplyConfirmation>
+      )}
+    </>
   );
 }

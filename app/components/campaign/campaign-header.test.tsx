@@ -31,9 +31,25 @@ import type { CampaignDetailProps } from "./props";
  * `describeState` rather than a hand-written lifecycle: a fixture that invents its own
  * shape stops catching the day the real one grows a field.
  */
+/** A campaign the confirmation can describe: small, base-only, nothing clamped. */
+const preview = (over: Record<string, unknown> = {}) => ({
+  campaignId: "c1",
+  name: "Autumn sale",
+  status: "DRAFT",
+  counts: { planned: 40, noop: 2, skipped: 1, clamped: 0 },
+  rows: [],
+  writePath: "sync",
+  writePathReason: "under the threshold",
+  markets: [],
+  margin: null,
+  blastRadius: false,
+  ...over,
+});
+
 const props = (over: Partial<CampaignDetailProps> = {}) =>
   ({
     lifecycle: describeState("DRAFT"),
+    preview: preview(),
     scheduleText: "Starts 1 Sep 2026, 09:00",
     practice: false,
     canApply: true,
@@ -71,7 +87,21 @@ describe("status and the next action are one row, not two cards", () => {
 });
 
 describe("at most one action is black", () => {
-  const primaries = (html: string) => (html.match(/variant="primary"/g) ?? []).length;
+  /**
+   * Black buttons **on the header row**, which is what the rule is about.
+   *
+   * The confirmation modal's own primary action does not count: a modal is closed until
+   * it is opened, and when it is open it is the only thing on screen. The rule exists
+   * because two black buttons side by side — one of them disabled — is the loudest
+   * possible way to offer something that cannot be done, and a button in a closed
+   * overlay is not side by side with anything.
+   *
+   * So the modal is cut off the end before counting, rather than the rule being relaxed.
+   */
+  const primaries = (html: string) => {
+    const row = html.split("<s-modal")[0];
+    return (row.match(/variant="primary"/g) ?? []).length;
+  };
 
   it("offers Apply as the primary on a draft that can be applied", () => {
     const html = render(<CampaignHeader {...props()} />);
@@ -217,5 +247,106 @@ describe("no card is drawn inside another card", () => {
       offenders,
       "an s-section is a card; a card inside a card inside the page is three borders deep, and spacing.ts says a named block that does not deserve a card gets a bare s-heading",
     ).toEqual([]);
+  });
+});
+
+/**
+ * The confirmation between the button and the write.
+ *
+ * Two of the three competitors have no confirmation at all — RUBIX has no submit button
+ * in its form, and Sami changes every price in a catalogue on one click of Save. Our
+ * draft-then-apply shape was already safer than both; what was missing was the sentence
+ * saying what is about to happen.
+ *
+ * The assertions that matter are about *restraint*: a confirmation that always asks the
+ * same thing is one nobody reads, so lines that do not apply must be absent rather than
+ * empty, and the typed confirmation must appear only when it is earned.
+ */
+describe("what the apply button does now", () => {
+  it("opens the confirmation rather than posting", () => {
+    const html = render(<CampaignHeader {...props()} />);
+    // The header row only. `commandFor` also appears on the modal's own Cancel button,
+    // so searching the whole document passes even when the apply button opens nothing.
+    const row = html.split("<s-modal")[0];
+
+    expect(row).toContain('commandFor="apply-confirmation"');
+    expect(row).toContain("Apply to storefront");
+    // Revert legitimately posts from the row; apply must not.
+    expect(row, "the apply button posts directly again").not.toContain('value="apply"');
+    expect(html).toContain("<s-modal");
+  });
+
+  it("still refuses when the campaign cannot be applied", () => {
+    // Opening a modal to be told no is worse than a button that says so.
+    const html = render(<CampaignHeader {...props({ canApply: false })} />);
+
+    expect(html).toContain("disabled");
+  });
+
+  it("offers nothing at all on a practice campaign", () => {
+    const html = render(<CampaignHeader {...props({ practice: true })} />);
+
+    expect(html).not.toContain("Apply to storefront");
+    expect(html, "a practice campaign has no apply to confirm").not.toContain("<s-modal");
+  });
+});
+
+describe("the confirmation says what is about to happen", () => {
+  it("counts the prices it would write against the scope", () => {
+    const html = render(<CampaignHeader {...props()} />);
+
+    expect(html).toContain("40");
+    expect(html).toContain("43 variants in scope");
+  });
+
+  it("names the markets when there are any", () => {
+    const html = render(
+      <CampaignHeader
+        {...props({ preview: preview({ markets: [{ name: "Europe" }, { name: "Japan" }] }) })}
+      />,
+    );
+
+    expect(html).toContain("Europe, Japan");
+  });
+
+  it("says nothing about markets on a base-only campaign", () => {
+    // Absent, not "Markets: none" — a row to read and dismiss on every single apply.
+    expect(render(<CampaignHeader {...props()} />)).not.toContain("Also priced in");
+  });
+
+  it("calls out rows raised to a guardrail floor, which the rule did not ask for", () => {
+    const html = render(
+      <CampaignHeader {...props({ preview: preview({ counts: { planned: 40, noop: 0, skipped: 0, clamped: 3 } }) })} />,
+    );
+
+    expect(html).toContain("Raised to a floor");
+  });
+
+  it("does not mention clamping when nothing clamps", () => {
+    expect(render(<CampaignHeader {...props()} />)).not.toContain("Raised to a floor");
+  });
+
+  it("makes the baseline claim where the decision is being made", () => {
+    const html = render(<CampaignHeader {...props()} />);
+
+    expect(html).toContain("computed from its baseline");
+    expect(html).toContain("recomputes without this campaign");
+  });
+});
+
+describe("the typed confirmation appears only when it is earned", () => {
+  it("asks for it over the blast-radius threshold", () => {
+    const html = render(
+      <CampaignHeader {...props({ preview: preview({ blastRadius: true, counts: { planned: 5000, noop: 0, skipped: 0, clamped: 0 } }) })} />,
+    );
+
+    expect(html).toContain("Type apply to confirm");
+    expect(html).toContain('name="confirmation"');
+  });
+
+  it("does not ask on an ordinary campaign", () => {
+    // A-3.11 asks for this over a thousand variants. Asking every time is how a
+    // confirmation becomes a reflex.
+    expect(render(<CampaignHeader {...props()} />)).not.toContain('name="confirmation"');
   });
 });
