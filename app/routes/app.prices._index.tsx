@@ -139,21 +139,19 @@ export default function Catalog() {
                   <s-table-row key={row.variantGid}>
                     <s-table-cell>{row.title}</s-table-cell>
                     <s-table-cell>{row.sku ?? <Blank />}</s-table-cell>
-                    {/* Strong only when it differs from the baseline.
+                    {/* Not emphasised on the rows that moved, though it was worth trying.
                     
-                        This is the column the page exists for: everything else is
-                        reference. On a healthy catalogue every live price equals its
-                        baseline, so weighting all of them weights nothing — the eye needs
-                        to land on the handful that moved. */}
-                    <s-table-cell>
-                      {row.price === null ? (
-                        <Blank />
-                      ) : row.atBaseline ? (
-                        row.price
-                      ) : (
-                        <s-text type="strong">{row.price}</s-text>
-                      )}
-                    </s-table-cell>
+                        `<s-text type="strong">` inside an `s-table-cell` renders at
+                        exactly the weight of the cell beside it — checked on the deployed
+                        page at 4x zoom, where the drifted 538.04 and the untouched 750.03
+                        below it are indistinguishable. Polaris gives a table one type
+                        weight and means it, and nothing in this app had tried to argue
+                        with that before.
+                    
+                        Which is fine: the state column is the signal, and it is now the
+                        only coloured thing on the row. A price that had to be bold to be
+                        found would mean the state column was not doing its job. */}
+                    <s-table-cell>{row.price ?? <Blank />}</s-table-cell>
                     <s-table-cell>{row.baseline ?? <Blank />}</s-table-cell>
                     <s-table-cell>{row.compareAt ?? <Blank />}</s-table-cell>
                     <s-table-cell>{row.cost ?? <Blank />}</s-table-cell>
