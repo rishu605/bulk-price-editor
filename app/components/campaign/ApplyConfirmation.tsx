@@ -35,10 +35,15 @@ export const APPLY_MODAL_ID = "apply-confirmation" as const;
 
 export function ApplyConfirmation({
   preview,
+  rule,
+  scope,
   scheduleText,
   children,
 }: {
   preview: CampaignPreview;
+  /** From `describeCampaign`, the same call the campaigns index makes. */
+  rule: string;
+  scope: string;
   /** The schedule sentence the header shows, restated here where the decision is made. */
   scheduleText?: string | null;
   /**
@@ -59,6 +64,13 @@ export function ApplyConfirmation({
             run; lines that do not apply are absent rather than empty, because a row
             reading "Markets: none" is a thing to read and dismiss on every apply. */}
         <s-stack gap={SPACE.item}>
+          {/* The same two sentences the campaigns index shows, through the same
+              formatter. A merchant who read "20% off · In Outerwear" in the list should
+              meet those words again at the moment they commit, not a second description
+              of one campaign. */}
+          <Fact label="Rule">{rule}</Fact>
+          <Fact label="Applies to">{scope}</Fact>
+
           <Fact label="Prices to write">
             {formatCount(counts.planned)} of{" "}
             {formatCount(counts.planned + counts.noop + counts.skipped)} variants in scope

@@ -40,6 +40,8 @@ export function CampaignHeader({
   rollback,
   practice,
   preview,
+  rule,
+  scope,
   scheduleText,
   lifecycle,
   fetcher,
@@ -157,6 +159,8 @@ export function CampaignHeader({
       {practice ? null : (
       <ApplyConfirmation
         preview={preview}
+        rule={rule}
+        scope={scope}
         scheduleText={scheduleText}
       >
         <fetcher.Form method="post" slot="primary-action">

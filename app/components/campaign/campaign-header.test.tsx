@@ -22,6 +22,7 @@ import { describe, expect, it } from "vitest";
 import { CampaignHeader } from "./CampaignHeader";
 import { CampaignOverviewTab } from "./CampaignOverviewTab";
 import { describeState } from "../../lib/lifecycle/transitions";
+import { describeCampaign } from "../../lib/campaigns/describe";
 import { formatWhen } from "../../lib/format/display";
 import type { CampaignDetailProps } from "./props";
 
@@ -61,6 +62,12 @@ const props = (over: Partial<CampaignDetailProps> = {}) =>
     autoEnroll: false,
     enrollPendingAt: null,
     fetcher: { Form: "form", state: "idle" },
+    // Through the real formatter, so this fixture cannot describe a campaign in words
+    // the campaigns index would never produce.
+    ...describeCampaign({
+      rule: { kind: "percent-change", percent: -20 },
+      ast: { groups: [{ conditions: [{ field: "collection", value: "Outerwear" }] }] },
+    }),
     keepers: null,
     keepersPending: false,
     ...over,
@@ -435,5 +442,16 @@ describe("the revert confirmation says what recomputing means", () => {
     const html = render(<CampaignHeader {...withRollback()} keepersPending />);
 
     expect(html).toContain("Working out what the prices would become");
+  });
+});
+
+describe("the confirmation and the index describe a campaign the same way", () => {
+  it("shows the rule and the scope, in the index's own words", () => {
+    // Not "the same words as the index" by coincidence: both call `describeCampaign`,
+    // and `campaign-describe-shared.test.ts` refuses a second formatter.
+    const html = render(<CampaignHeader {...props()} />);
+
+    expect(html).toContain("20% off");
+    expect(html).toContain("In Outerwear");
   });
 });

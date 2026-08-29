@@ -38,6 +38,38 @@ export type ApprovalState =
   | { required: true; state: "declined"; declinedBy: string; declinedAt: Date; note: string | null };
 
 /**
+ * The approval as one flat shape a page can render.
+ *
+ * `ApprovalState` is a discriminated union, which is right for the run path — it makes
+ * "approved but no approver" unrepresentable. It is wrong for a loader payload: a route
+ * narrowing it inline grows a ladder of nested ternaries repeating the same two guards
+ * on every branch, which is what this replaced. Who signed off is a fact about an
+ * approval, and it belongs beside the thing that knows how approvals work.
+ */
+export function approvalSummary(approval: ApprovalState): {
+  required: boolean;
+  state: "none" | "pending" | "approved" | "declined";
+  who: string | null;
+  note: string | null;
+} {
+  if (!approval.required) return { required: false, state: "none", who: null, note: null };
+
+  return {
+    required: true,
+    state: approval.state,
+    who:
+      approval.state === "approved"
+        ? approval.approvedBy
+        : approval.state === "declined"
+          ? approval.declinedBy
+          : approval.state === "pending"
+            ? approval.requestedBy
+            : null,
+    note: approval.state === "declined" ? approval.note : null,
+  };
+}
+
+/**
  * Whether this campaign needs a second person, and whether it has one.
  *
  * The variant count is recomputed rather than read from the request, because a campaign
