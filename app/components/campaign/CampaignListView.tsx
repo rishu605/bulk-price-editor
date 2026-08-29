@@ -192,7 +192,21 @@ export function CampaignListView({
                 {list.campaigns.map((campaign) => (
                   <s-table-row key={campaign.id}>
                     <s-table-cell>
-                      {campaign.name}
+                      {/* The name is the way in, which is what freed the action column.
+                          It used to carry a second "Open" button beside Duplicate, and
+                          the last of seven columns in a `table-layout: fixed` table is
+                          not wide enough for two — so they wrapped onto two lines and
+                          every row in the table was twice as tall as it needed to be.
+                          A row's identity opening the row is also the convention the
+                          admin sets everywhere else.
+
+                          Tertiary, not `s-link`: `ActionRow`'s vocabulary reserves blue
+                          for a word inside a sentence, and names a row-leading title as
+                          exactly what tertiary is for. It keeps an anchor's behaviour,
+                          so middle-click still opens a tab. */}
+                      <s-button variant="tertiary" href={`/app/campaigns/${campaign.id}`}>
+                        {campaign.name}
+                      </s-button>
                       {/* Only in the archive view, where every row has it, and on a
                           campaign that turns up in a search from the active list —
                           which is the case that would otherwise be confusing, because
@@ -229,9 +243,6 @@ export function CampaignListView({
                             Duplicate
                           </s-button>
                         </fetcher.Form>
-                        <s-button variant="tertiary" href={`/app/campaigns/${campaign.id}`}>
-                          Open
-                        </s-button>
                       </ActionRow>
                     </s-table-cell>
                   </s-table-row>

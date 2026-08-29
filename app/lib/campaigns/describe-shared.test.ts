@@ -80,7 +80,7 @@ describe("describeCampaign", () => {
         ast: { groups: [{ conditions: [{ field: "tag", value: "sale" }] }] },
         segmentName: "Winter clearance",
       }),
-    ).toEqual({ rule: "20% off", scope: "Winter clearance" });
+    ).toEqual({ rule: "20%\u00a0off", scope: "Winter clearance" });
   });
 
   it("still answers when a campaign has neither", () => {

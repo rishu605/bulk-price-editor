@@ -456,7 +456,7 @@ describe("the confirmation and the index describe a campaign the same way", () =
     // and `campaign-describe-shared.test.ts` refuses a second formatter.
     const html = render(<CampaignHeader {...props()} />);
 
-    expect(html).toContain("20% off");
+    expect(html).toContain("20%\u00a0off");
     expect(html).toContain("In Outerwear");
   });
 });
