@@ -25,11 +25,16 @@ const APP = join(process.cwd(), "app");
  * a button there renders nothing.
  *
  * A link *inside a sentence* is the other legitimate use, where colour is the only thing
- * marking a word mid-paragraph as clickable. There are none today. Adding one means
- * adding the file here, which is the point: it should be a decision somebody made, not a
- * habit that returned.
+ * marking a word mid-paragraph as clickable. Adding one means adding the file here, which
+ * is the point: it should be a decision somebody made, not a habit that returned.
+ *
+ * `OverlapPanel` is the first, and it is the case the paragraph above describes. It reads
+ * "**Autumn sale** keeps 1,240 of them — it outranks this campaign", and the campaign's
+ * name is the subject of that sentence. A button in the middle of it would break the
+ * sentence into three pieces to make one word clickable, and the sentence is the whole
+ * point: it is the statement about overlap that no competitor can make.
  */
-const MAY_USE_LINKS = ["routes/app.tsx"];
+const MAY_USE_LINKS = ["routes/app.tsx", "components/OverlapPanel.tsx"];
 
 function sources(dir: string): Array<{ path: string; text: string }> {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
