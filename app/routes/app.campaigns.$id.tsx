@@ -22,6 +22,7 @@ import { campaignResult } from "../services/campaigns/result.server";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { reportError } from "../services/error-report.server";
 import { withGuard } from "../lib/errors/guard.server";
+import { blastRadiusRefusal } from "../services/campaigns/blast-radius.server";
 import { actorFor } from "../lib/audit/actor";
 import { isPractice } from "../services/campaigns/model.server";
 import {
@@ -33,7 +34,7 @@ import {
 import { transitionHistory } from "../services/campaigns/lifecycle.server";
 import { approvalFor, decideApproval, requestApproval, SelfApprovalError } from "../services/approvals.server";
 import { PageShell } from "../components/PageShell";
-import { CampaignTabs, currentTab, type CampaignTab } from "../components/campaign/CampaignTabs";
+import { CampaignTabs, currentTab, tabsFor } from "../components/campaign/CampaignTabs";
 import { CampaignHeader } from "../components/campaign/CampaignHeader";
 import { CampaignOverviewTab } from "../components/campaign/CampaignOverviewTab";
 import { CampaignPreviewTab } from "../components/campaign/CampaignPreviewTab";
@@ -171,6 +172,14 @@ export const action = withGuard("/app/campaigns/$id", async ({ request, params }
   }
   const reverting = intent === "revert";
 
+  // A-3.11: over the blast-radius threshold a merchant types the word first, and the
+  // check is here rather than only in the modal. See `blastRadiusRefusal`.
+  const refusal =
+    intent === "apply" || intent === "resume"
+      ? await blastRadiusRefusal(shop.id, String(params.id), String(form.get("confirmation") ?? ""))
+      : null;
+  if (refusal) return { ok: false, message: refusal, details: [] };
+
   try {
     // Reverting one variant out of a running campaign, rather than ending the whole
     // thing. The exclusion is durable, so tonight's scheduled run leaves it alone too.
@@ -288,22 +297,7 @@ export default function CampaignDetail() {
   // undermines the promise the merchant was given when they chose practice.
   const canApply = !practice && !preview.blocked && canTransition(state, "APPLYING");
 
-  // Tabs a campaign has nothing for are not offered. A DRAFT campaign has no runs, and
-  // a Runs tab opening onto an empty state reads as something having gone missing.
-  const tabs: CampaignTab[] = [
-    { id: "overview", label: "Overview", available: true },
-    { id: "preview", label: "Preview", available: true },
-    { id: "runs", label: "Runs", available: runs.length > 0, badge: runs.length },
-    {
-      id: "revert",
-      label: "Revert",
-      available: Boolean(rollback && rollback.counts.total > 0),
-      // Drifted rows are the reason to open this tab rather than press the button, so
-      // the count belongs on the label.
-      badge: rollback?.counts.drifted || undefined,
-    },
-    { id: "ledger", label: "Ledger", available: ledger.length > 0, badge: ledger.length },
-  ];
+  const tabs = tabsFor({ runs, rollback, ledger });
   const [params] = useSearchParams();
   const tab = currentTab(tabs, params.get("tab"));
 

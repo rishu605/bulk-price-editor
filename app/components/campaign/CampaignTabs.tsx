@@ -60,3 +60,36 @@ export function currentTab(tabs: CampaignTab[], requested: string | null): strin
   if (requested && available.some((tab) => tab.id === requested)) return requested;
   return available[0]?.id ?? "overview";
 }
+
+/**
+ * Which tabs this campaign has anything to put in.
+ *
+ * Beside `CampaignTabs` rather than in the route, because it is the same decision the
+ * component renders and the route had no other reason to hold it. A DRAFT campaign has no
+ * runs, and a Runs tab opening onto an empty state reads as something having gone missing
+ * rather than as something that has not happened yet.
+ */
+export function tabsFor({
+  runs,
+  rollback,
+  ledger,
+}: {
+  runs: unknown[];
+  rollback: { counts: { total: number; drifted: number } } | null;
+  ledger: unknown[];
+}): CampaignTab[] {
+  return [
+    { id: "overview", label: "Overview", available: true },
+    { id: "preview", label: "Preview", available: true },
+    { id: "runs", label: "Runs", available: runs.length > 0, badge: runs.length },
+    {
+      id: "revert",
+      label: "Revert",
+      available: Boolean(rollback && rollback.counts.total > 0),
+      // Drifted rows are the reason to open this tab rather than press the button, so
+      // the count belongs on the label.
+      badge: rollback?.counts.drifted || undefined,
+    },
+    { id: "ledger", label: "Ledger", available: ledger.length > 0, badge: ledger.length },
+  ];
+}
