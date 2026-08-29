@@ -40,6 +40,7 @@ const preview = (over: Partial<Preview> = {}): Preview => ({
   skipped: 0,
   withoutBaseline: 0,
   rows: [row()],
+  overlaps: [],
   blocked: null,
   ...over,
 });

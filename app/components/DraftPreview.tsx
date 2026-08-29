@@ -1,6 +1,7 @@
 import { formatCount } from "../lib/format/display";
 import { EmptyState } from "./AsyncState";
 import { exampleRowFrom, StorefrontExample } from "./StorefrontExample";
+import { OverlapPanel } from "./OverlapPanel";
 import { SPACE } from "../lib/ui/spacing";
 import type { DraftPreview as Preview } from "../services/campaigns/draft-preview.server";
 
@@ -85,6 +86,11 @@ export function DraftPreview({
           who has typed a percentage wants to know what it looks like, and only then how
           many products it reaches. */}
       {example ? <StorefrontExample row={example} surface={surface} /> : null}
+
+      {/* Above the counts, because it changes what they mean: "3,669 of 3,669 would
+          change" reads differently once a merchant knows 1,240 of them belong to
+          something else. */}
+      <OverlapPanel overlaps={preview.overlaps} />
 
       <s-paragraph>
         <s-text>
