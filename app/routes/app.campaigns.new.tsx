@@ -16,10 +16,9 @@ import { describeAdjustment } from "../lib/markets/describe";
 import {
   profileNameFor,
   readRoundingPolicy,
-  ROUNDING_LABELS,
-  type RoundingProfileName,
+  roundingLabel,
 } from "../lib/money/rounding-policy";
-import { roundingExampleLine } from "../lib/money/rounding-example";
+import { roundingChoices } from "../lib/money/rounding-example";
 import { ActionRow } from "../components/ActionRow";
 import { CampaignNameField } from "../components/campaign/CampaignNameField";
 import { RouteBoundary } from "../components/RouteBoundary";
@@ -185,11 +184,7 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
     // Sami and RUBIX both do this and it is the difference between a merchant guessing
     // what "Nearest 10" means and knowing — see `rounding-example.ts`, and #489 for what
     // the examples turned out to reveal about two of the labels.
-    roundingOptions: Object.entries(ROUNDING_LABELS).map(([value, label]) => ({
-      value,
-      label,
-      example: roundingExampleLine(value as RoundingProfileName, currency),
-    })),
+    roundingOptions: roundingChoices(currency),
     facets: available,
     segments,
     usingSegment: segment ? { id: segment.id, name: segment.name, kind: segment.kind } : null,
@@ -641,7 +636,7 @@ export default function NewCampaign() {
                         defaultSelected={!storeRounding.byCurrency[code]}
                       >
                         Same as this campaign&rsquo;s rounding (
-                        {ROUNDING_LABELS[profileNameFor(storeRounding, code)].toLowerCase()})
+                        {roundingLabel(profileNameFor(storeRounding, code), code).toLowerCase()})
                       </s-option>
                       {roundingOptions.map((option) => (
                         <s-option

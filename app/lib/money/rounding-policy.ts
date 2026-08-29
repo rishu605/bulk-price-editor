@@ -16,7 +16,7 @@
  * campaigns readable, comparable and migratable in a way a serialised object does not.
  */
 
-import { isZeroDecimal } from "./currency";
+import { exponentOf, isZeroDecimal } from "./currency";
 import {
   NO_ROUNDING,
   charm95,
@@ -37,15 +37,59 @@ export const ROUNDING_PROFILES = {
 
 export type RoundingProfileName = keyof typeof ROUNDING_PROFILES;
 
-/** What each profile is called in the interface. */
-export const ROUNDING_LABELS: Record<RoundingProfileName, string> = {
+/**
+ * What each profile is called in the interface.
+ *
+ * Currency-independent, and two of them used to lie because of it. A step is in **minor
+ * units** — `nearest10` is `{ step: 10 }` — so "Nearest 10" on a $2,347.62 price produced
+ * $2,347.60 and not the $2,350 a merchant reading the label would expect (#489). In yen,
+ * where the minor unit *is* the yen, the same label was exactly right.
+ *
+ * So the label is a function of the currency now, and this record holds only the names
+ * that do not depend on one. Changing what the profiles *do* would re-price every campaign
+ * already using them; changing what they are called moves nothing.
+ */
+const FIXED_LABELS = {
   none: "Leave prices exactly as calculated",
   charm99: "Prices ending .99",
   charm95: "Prices ending .95",
   whole: "Whole amounts, no cents",
-  nearest10: "Nearest 10",
-  nearest100: "Nearest 100",
-};
+} as const;
+
+/**
+ * The step profiles, said in the currency's own major units.
+ *
+ * 10 minor units is "0.10" in dollars and "10" in yen, and both are the truth. Printing
+ * the number rather than a word — "Nearest 0.10", not "Nearest ten cents" — keeps it
+ * readable in currencies whose sub-unit has no English name a merchant would recognise.
+ */
+function stepLabel(step: number, currency: string): string {
+  const exp = exponentOf(currency);
+  const major = step / 10 ** exp;
+  return `Nearest ${major.toFixed(exp)}`;
+}
+
+export function roundingLabel(name: RoundingProfileName, currency: string): string {
+  if (name === "nearest10") return stepLabel(10, currency);
+  if (name === "nearest100") return stepLabel(100, currency);
+  return FIXED_LABELS[name];
+}
+
+/**
+ * Every profile, with the label it has in this currency.
+ *
+ * Kept for the surfaces that show all of them at once. `roundingChoices` in
+ * `rounding-example.ts` is what a *picker* should use — it also drops the ones that mean
+ * nothing here, or that mean the same as another.
+ */
+export function roundingLabels(currency: string): Record<RoundingProfileName, string> {
+  return Object.fromEntries(
+    (Object.keys(ROUNDING_PROFILES) as RoundingProfileName[]).map((name) => [
+      name,
+      roundingLabel(name, currency),
+    ]),
+  ) as Record<RoundingProfileName, string>;
+}
 
 export function isRoundingProfileName(value: unknown): value is RoundingProfileName {
   return typeof value === "string" && value in ROUNDING_PROFILES;
