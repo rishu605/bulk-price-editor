@@ -37,7 +37,7 @@ describe("parsePreferences", () => {
 describe("wants", () => {
   const prefs = { ...DEFAULT_PREFERENCES, email: "ops@shop.com" };
   const run = (kind: "run-completed" | "run-partial" | "run-failed" | "revert-completed") =>
-    ({ kind, campaignName: "Summer", counts: { verified: 1, skipped: 0, clamped: 0, failed: 0, unverified: 0 } }) as const;
+    ({ kind, campaignId: "c1", campaignName: "Summer", counts: { verified: 1, skipped: 0, clamped: 0, failed: 0, unverified: 0 } }) as const;
 
   it("routes partial and failed through the same preference", () => {
     // They are the same question to a merchant: something needs me.
@@ -53,7 +53,7 @@ describe("wants", () => {
   it("honours the revert and drift preferences separately", () => {
     expect(wants({ ...prefs, onRevert: false }, run("revert-completed"))).toBe(false);
     expect(
-      wants({ ...prefs, onDrift: false }, { kind: "drift-hold", campaignName: "S", driftedCount: 2 }),
+      wants({ ...prefs, onDrift: false }, { kind: "drift-hold", campaignId: "c1", campaignName: "S", driftedCount: 2 }),
     ).toBe(false);
   });
 });

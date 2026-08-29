@@ -70,6 +70,7 @@ const props = (over: Partial<CampaignDetailProps> = {}) =>
       rule: { kind: "percent-change", percent: -20 },
       ast: { groups: [{ conditions: [{ field: "collection", value: "Outerwear" }] }] },
     }),
+    notifyEmail: "ops@shop.com",
     keepers: null,
     keepersPending: false,
     ...over,
@@ -455,5 +456,22 @@ describe("the confirmation and the index describe a campaign the same way", () =
 
     expect(html).toContain("20% off");
     expect(html).toContain("In Outerwear");
+  });
+});
+
+describe("the confirmation says who hears about the outcome", () => {
+  it("names the address a run report goes to", () => {
+    // The moment a merchant decides whether they have to sit and watch. NA's modal says
+    // this; ours said nothing until there was an address to name.
+    expect(render(<CampaignHeader {...props()} />)).toContain("ops@shop.com");
+  });
+
+  it("says plainly when nobody will be told", () => {
+    // The branch that matters more. Silence reads as "we will let you know", and the
+    // merchant finds out about a partial run from a customer.
+    const html = render(<CampaignHeader {...props({ notifyEmail: null })} />);
+
+    expect(html).toContain("Nobody is emailed");
+    expect(html).toContain("Settings");
   });
 });

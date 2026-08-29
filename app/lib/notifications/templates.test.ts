@@ -28,7 +28,7 @@ const counts = (over: Partial<RunCounts> = {}): RunCounts => ({
 describe("compose", () => {
   it("leads with the outcome, not the campaign name, in the subject", () => {
     // A merchant scanning an inbox needs the verdict before the label.
-    const email = compose({ kind: "run-completed", campaignName: "Summer", counts: counts() });
+    const email = compose({ kind: "run-completed", campaignId: "c1", campaignName: "Summer", counts: counts() });
     expect(email.subject).toContain("finished");
     expect(email.subject).toContain("12 variants updated");
   });
@@ -36,6 +36,7 @@ describe("compose", () => {
   it("says a partial run is partial, and how to finish it", () => {
     const email = compose({
       kind: "run-partial",
+      campaignId: "c1",
       campaignName: "Summer",
       counts: counts({ verified: 8, failed: 4 }),
       reasons: ["Shopify rate-limited this write. It will be retried automatically."],
@@ -49,7 +50,7 @@ describe("compose", () => {
 
   it("omits zero counts rather than listing them", () => {
     // "0 failed, 0 skipped, 0 clamped" is noise that hides the number that matters.
-    const email = compose({ kind: "run-completed", campaignName: "Summer", counts: counts() });
+    const email = compose({ kind: "run-completed", campaignId: "c1", campaignName: "Summer", counts: counts() });
     expect(email.text).not.toContain("Failed: 0");
     expect(email.text).not.toContain("Skipped: 0");
   });
@@ -59,6 +60,7 @@ describe("compose", () => {
     // to snap back to full will read a correct revert as a bug without this.
     const email = compose({
       kind: "revert-completed",
+      campaignId: "c1",
       campaignName: "Summer",
       counts: counts(),
     });
@@ -67,7 +69,7 @@ describe("compose", () => {
   });
 
   it("tells a drift email that the edits were deliberate and untouched", () => {
-    const email = compose({ kind: "drift-hold", campaignName: "Summer", driftedCount: 3 });
+    const email = compose({ kind: "drift-hold", campaignId: "c1", campaignName: "Summer", driftedCount: 3 });
     expect(email.subject).toContain("changed outside the app");
     expect(email.text).toContain("has not overwritten them");
   });
@@ -107,6 +109,7 @@ describe("no price values in any email body", () => {
         (generated, kind) => {
           const email = compose({
             kind: kind as "run-completed",
+            campaignId: "c1",
             campaignName: "Summer sale",
             counts: generated,
           });
@@ -124,6 +127,7 @@ describe("no price values in any email body", () => {
     // money-shaped string can legitimately appear.
     const email = compose({
       kind: "run-completed",
+      campaignId: "c1",
       campaignName: "$5 off everything",
       counts: counts(),
     });
