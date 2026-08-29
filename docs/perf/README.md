@@ -102,3 +102,9 @@ Webhook lag under load, likewise. Twenty sequential edits on an idle store is th
 case; the number that would matter during an incident is lag while a bulk import is
 draining the same queue. `webhook.lag_ms` is emitted every tick now, so the panel will
 answer that once there is traffic to look at.
+
+## Query plans
+
+The numbers above are wall clock. [`queries.md`](queries.md) is the layer under them —
+what the filter engine and the planner ask Postgres, and which of those questions it can
+answer from an index. Run with `npm run measure:queries`.
