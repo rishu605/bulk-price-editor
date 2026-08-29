@@ -39,9 +39,22 @@ describe("the state column", () => {
 });
 
 describe("the live price", () => {
-  it("is emphasised only when it differs from the baseline", () => {
-    // The column the page exists for. Weighting every live price weights none of them.
-    expect(CATALOGUE).toMatch(/row\.atBaseline \? \(\s*row\.price\s*\) : \(\s*<s-text type="strong">/);
+  it("does not try to out-weight the table it is in", () => {
+    // `<s-text type="strong">` inside an `s-table-cell` renders at exactly the weight of
+    // the cell beside it. Verified on the deployed page at 4x zoom: a drifted 538.04 and
+    // an untouched 750.03 were indistinguishable. Polaris gives a table one type weight
+    // and means it.
+    //
+    // Pinned because the idea is a natural one to have twice — emphasising the row that
+    // moved is the obvious thing to reach for, and the code for it looks like it works.
+    const cells = [...CATALOGUE.matchAll(/<s-table-cell>([\s\S]*?)<\/s-table-cell>/g)];
+
+    expect(cells.length).toBeGreaterThan(4);
+    for (const [, body] of cells) {
+      expect(body, "a strong price in a table cell renders no differently").not.toContain(
+        'type="strong"',
+      );
+    }
   });
 });
 
