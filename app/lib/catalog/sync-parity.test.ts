@@ -25,6 +25,8 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { sourceOf } from "../testing/source";
+
 const paginated = readFileSync(
   join(process.cwd(), "app", "services", "catalog-sync.server.ts"),
   "utf8",
@@ -110,7 +112,7 @@ describe("the bulk path writes everything the paginated path does", () => {
     expect(paginated).toContain("featuredImage { url }");
     expect(paginated).toContain("image { url }");
     expect(
-      readFileSync(join(process.cwd(), "app", "lib", "catalog", "bulk-jsonl.ts"), "utf8"),
+      sourceOf(process.cwd(), "app", "lib", "catalog", "bulk-jsonl.ts"),
     ).toContain("featuredImage { url }");
   });
 });

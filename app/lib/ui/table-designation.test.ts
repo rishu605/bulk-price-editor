@@ -31,10 +31,12 @@
  * been decided, and does not stand in the way of deciding about something else.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
+
+import { sourceOf } from "../testing/source";
 
 const APP = join(process.cwd(), "app");
 
@@ -69,7 +71,7 @@ interface Table {
  */
 function tables(): Table[] {
   return tsxFiles(APP).flatMap((path) => {
-    const source = readFileSync(path, "utf8");
+    const source = sourceOf(path);
     const file = path.replace(`${APP}/`, "");
 
     return [...source.matchAll(/<s-table-header-row[^>]*>([\s\S]*?)<\/s-table-header-row>/g)].map(

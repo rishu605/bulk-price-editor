@@ -14,23 +14,20 @@
  * improves the help centre's sentence this fails instead of quietly disagreeing.
  */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
+import { sourceOf } from "../testing/source";
 
-/** Source without its own commentary, which discusses the very words being grepped. */
-const code = (source: string) =>
-  source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+const read = (path: string) => sourceOf(path);
 
-const EDITOR = code(read("app/routes/app.campaigns.new.tsx"));
-const PREVIEW = code(read("app/components/DraftPreview.tsx"));
-const EXAMPLE = code(read("app/components/StorefrontExample.tsx"));
-const OVERLAP = code(read("app/components/OverlapPanel.tsx"));
-const REVERT_MODAL = code(read("app/components/campaign/RevertConfirmation.tsx"));
-const REVERT_TAB = code(read("app/components/campaign/CampaignRevertTab.tsx"));
+
+const EDITOR = read("app/routes/app.campaigns.new.tsx");
+const PREVIEW = read("app/components/DraftPreview.tsx");
+const EXAMPLE = read("app/components/StorefrontExample.tsx");
+const OVERLAP = read("app/components/OverlapPanel.tsx");
+const REVERT_MODAL = read("app/components/campaign/RevertConfirmation.tsx");
+const REVERT_TAB = read("app/components/campaign/CampaignRevertTab.tsx");
 const CONCEPT = read("docs/help/concepts/baselines.md");
 const REVERT = read("docs/help/concepts/revert.md");
 

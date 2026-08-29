@@ -10,13 +10,15 @@
  * services differ only where they are supposed to.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { sourceOf } from "../testing/source";
+
 const ROOT = process.cwd();
-const runbook = readFileSync(join(ROOT, "docs/deploying-to-railway.md"), "utf8");
+const runbook = sourceOf(ROOT, "docs/deploying-to-railway.md");
 
 /** Every `process.env.X` the app or its scripts read. */
 function environmentKeys(): Set<string> {
@@ -32,7 +34,7 @@ function environmentKeys(): Set<string> {
       if (!/\.(ts|tsx)$/.test(entry.name)) continue;
       if (/\.test\.tsx?$/.test(entry.name)) continue;
 
-      const source = readFileSync(join(ROOT, path), "utf8");
+      const source = sourceOf(ROOT, path);
       for (const [, key] of source.matchAll(/process\.env\.([A-Z0-9_]+)/g)) keys.add(key);
     }
   };
@@ -54,8 +56,8 @@ describe("the worker's Railway config", () => {
    * Nothing in that error names the healthcheck as the wrong setting for this service
    * rather than a broken app, which is why it is worth a test rather than a paragraph.
    */
-  const web = JSON.parse(readFileSync(join(ROOT, "railway.json"), "utf8"));
-  const worker = JSON.parse(readFileSync(join(ROOT, "railway.worker.json"), "utf8"));
+  const web = JSON.parse(sourceOf(ROOT, "railway.json"));
+  const worker = JSON.parse(sourceOf(ROOT, "railway.worker.json"));
 
   it("gives the web service a healthcheck", () => {
     expect(web.deploy?.healthcheckPath, "the web service must be health-checked").toBe(
@@ -102,7 +104,7 @@ describe("the webhooks the manifest subscribes to", () => {
    * Shopify addresses all three of `customers/data_request`, `customers/redact` and
    * `shop/redact` at one uri.
    */
-  const manifest = readFileSync(join(ROOT, "shopify.app.toml"), "utf8");
+  const manifest = sourceOf(ROOT, "shopify.app.toml");
 
   const declared = [...manifest.matchAll(/^\s*uri\s*=\s*"([^"]+)"/gm)].map(([, uri]) => uri);
 
@@ -147,18 +149,18 @@ describe("the Railway runbook", () => {
     // Three places state the scope set and all three are load-bearing: the manifest is
     // what Shopify grants, `SCOPES` is what the app asks the session layer for, and a
     // mismatch shows up as an authorisation failure with no obvious cause.
-    const toml = readFileSync(join(ROOT, "shopify.app.toml"), "utf8");
+    const toml = sourceOf(ROOT, "shopify.app.toml");
     const declared = /scopes\s*=\s*"([^"]*)"/.exec(toml)?.[1];
 
     expect(declared).toBeTruthy();
     expect(runbook, "the runbook's SCOPES row disagrees with the manifest").toContain(declared!);
 
-    const example = readFileSync(join(ROOT, ".env.example"), "utf8");
+    const example = sourceOf(ROOT, ".env.example");
     expect(example, ".env.example disagrees with the manifest").toContain(`SCOPES=${declared}`);
   });
 
   it("points the healthcheck at a route that exists", () => {
-    const config = JSON.parse(readFileSync(join(ROOT, "railway.json"), "utf8"));
+    const config = JSON.parse(sourceOf(ROOT, "railway.json"));
     const path = config.deploy?.healthcheckPath;
 
     expect(path).toBe("/healthz");
@@ -171,7 +173,7 @@ describe("the Railway runbook", () => {
     // Only the web service migrates. Two services racing `prisma migrate deploy` is a lock
     // fight at best and a half-applied schema at worst, so the worker's command must not
     // reach it.
-    const scripts = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).scripts;
+    const scripts = JSON.parse(sourceOf(ROOT, "package.json")).scripts;
 
     expect(scripts["docker-start"]).toContain("setup");
     expect(scripts.worker).not.toContain("setup");
@@ -186,7 +188,7 @@ describe("the Railway runbook", () => {
     //
     // `generate` produces code and belongs to the build. `migrate` changes a database and
     // belongs to one service at deploy time. The test below still holds the second rule.
-    const dockerfile = readFileSync(join(ROOT, "Dockerfile"), "utf8");
+    const dockerfile = sourceOf(ROOT, "Dockerfile");
 
     expect(
       dockerfile,
@@ -203,7 +205,7 @@ describe("the Railway runbook", () => {
     // The worker starts through `tsx`. As a dev dependency it would build cleanly under
     // `npm ci --omit=dev` and then fail to start — in the deployed environment, which is
     // the worst place to discover a missing package.
-    const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
+    const pkg = JSON.parse(sourceOf(ROOT, "package.json"));
     const binary = pkg.scripts.worker.split(" ")[0];
 
     expect(pkg.dependencies).toHaveProperty(binary);

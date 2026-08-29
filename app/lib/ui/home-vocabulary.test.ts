@@ -10,16 +10,14 @@
  * how it renders — and because the route cannot be rendered here without a data router.
  */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const HOME = readFileSync(join(process.cwd(), "app/routes/app._index.tsx"), "utf8")
-  .replace(/\/\*[\s\S]*?\*\//g, "")
-  .replace(/^\s*\/\/.*$/gm, "");
+import { sourceOf } from "../testing/source";
 
-const ACTIVITY = readFileSync(join(process.cwd(), "app/routes/app.activity.tsx"), "utf8");
+const HOME = sourceOf("app/routes/app._index.tsx");
+
+const ACTIVITY = sourceOf(process.cwd(), "app/routes/app.activity.tsx");
 
 describe("the dashboard leaves the app's own upkeep to the log", () => {
   it("filters the feed through the one place that decides", () => {
@@ -57,7 +55,7 @@ describe("every figure on the dashboard is a front door", () => {
   it("uses the campaigns index's own filter vocabulary, not a second one", () => {
     // `attention` spans PARTIAL and HELD in `list.server.ts`, which is exactly what the
     // "Need attention" tile counts. Two queries that merely agree today would drift.
-    const LIST = readFileSync(join(process.cwd(), "app/services/campaigns/list.server.ts"), "utf8");
+    const LIST = sourceOf(process.cwd(), "app/services/campaigns/list.server.ts");
 
     expect(LIST).toContain('"attention"');
     expect(HOME).toContain("status=attention");

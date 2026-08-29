@@ -9,23 +9,14 @@
  * `?view=week` would otherwise read as "not calendar" and silently show the list.
  */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const route = readFileSync(
-  join(process.cwd(), "app", "routes", "app.campaigns._index.tsx"),
-  "utf8",
-);
-const calendar = readFileSync(
-  join(process.cwd(), "app", "components", "campaign", "CampaignCalendar.tsx"),
-  "utf8",
-);
-const stub = readFileSync(
-  join(process.cwd(), "app", "routes", "app.campaigns.calendar.tsx"),
-  "utf8",
-);
+import { sourceOf } from "../../lib/testing/source";
+
+const route = sourceOf(process.cwd(), "app", "routes", "app.campaigns._index.tsx");
+const calendar = sourceOf(process.cwd(), "app", "components", "campaign", "CampaignCalendar.tsx");
+const stub = sourceOf(process.cwd(), "app", "routes", "app.campaigns.calendar.tsx");
 
 describe("one parameter, one meaning", () => {
   it("uses view for list-or-calendar", () => {

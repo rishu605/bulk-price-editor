@@ -22,10 +22,12 @@
  * whether a prop name exists, and the types will.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
+
+import { sourceOf } from "../testing/source";
 
 const POLARIS_TYPES = join(
   process.cwd(),
@@ -38,7 +40,7 @@ const POLARIS_TYPES = join(
 
 /** Every property name Polaris declares anywhere in its type surface. */
 function polarisProps(): Set<string> {
-  const source = readFileSync(POLARIS_TYPES, "utf8");
+  const source = sourceOf(POLARIS_TYPES);
   const names = new Set<string>();
   for (const match of source.matchAll(/^\s*([a-zA-Z][a-zA-Z0-9]*)\??:/gm)) names.add(match[1]);
   return names;
@@ -69,7 +71,7 @@ function propsUsed(): Array<{ file: string; element: string; prop: string }> {
   const app = join(process.cwd(), "app");
 
   for (const path of tsxFiles(app)) {
-    const source = readFileSync(path, "utf8");
+    const source = sourceOf(path);
     for (const tag of source.matchAll(/<(s-[a-z-]+)((?:\s+[^<>]*?)?)\/?>/g)) {
       const [, element, attrs] = tag;
       if (!attrs) continue;

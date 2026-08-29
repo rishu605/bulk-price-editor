@@ -14,10 +14,12 @@
  * "this matters less", which is not information a reader loses without colour.
  */
 
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
+
+import { sourceOf } from "../testing/source";
 
 const ROOT = process.cwd();
 
@@ -69,16 +71,16 @@ function tonedElements(source: string): Array<{ tag: string; tone: string; body:
 
 describe("every tone is accompanied by words", () => {
   it("finds tones to check", () => {
-    const total = files.reduce((sum, file) => sum + tonedElements(readFileSync(file, "utf8")).length, 0);
+    const total = files.reduce((sum, file) => sum + tonedElements(sourceOf(file)).length, 0);
 
     // Without this the assertion below passes on an empty set and proves nothing.
     expect(total).toBeGreaterThan(20);
   });
 
-  it.each(files.filter((file) => tonedElements(readFileSync(file, "utf8")).length > 0))(
+  it.each(files.filter((file) => tonedElements(sourceOf(file)).length > 0))(
     "%s",
     (file) => {
-      for (const element of tonedElements(readFileSync(file, "utf8"))) {
+      for (const element of tonedElements(sourceOf(file))) {
         // Literal words, or an interpolation — which is content, even though this cannot
         // read it. What fails here is an element with neither: colour and nothing else.
         const hasContent = /[A-Za-z]{3,}/.test(element.body) || /\{[^}]+\}/.test(element.body);
@@ -98,7 +100,7 @@ describe("the result banner says which outcome it is, not just which colour", ()
     // The specific banner this rule exists for: a partial run is `critical`, a clean one
     // `success`, and a merchant who cannot tell those apart by colour has to be able to
     // read the difference.
-    const source = readFileSync(join(ROOT, "app/components/RunResultSection.tsx"), "utf8");
+    const source = sourceOf("app/components/RunResultSection.tsx");
 
     expect(source).toContain("result.summary");
     // And the summary itself is built from words — `describeRun` is tested separately for

@@ -6,10 +6,10 @@
  * so the fallback has to actually run the work rather than drop it.
  */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
+
+import { sourceOf } from "../lib/testing/source";
 
 import { inlineRuntime, runtimeFor } from "./queue-runtime.server";
 import type { JobRef, QueueName } from "./queues";
@@ -94,7 +94,7 @@ describe("both ends of a job's life are traced", () => {
    * record of when it was asked for. The interesting number in a backlog is the gap
    * between the two, and a counter cannot express a gap.
    */
-  const source = readFileSync(join(process.cwd(), "app/worker/queue-runtime.server.ts"), "utf8");
+  const source = sourceOf(process.cwd(), "app/worker/queue-runtime.server.ts");
 
   it("spans the enqueue as well as the run", () => {
     expect(source, "the enqueue is not spanned").toMatch(/span\(\s*`enqueue \$\{name\}`/);

@@ -17,14 +17,12 @@
  * field, so a currency gets chosen by something that is not the shop.
  */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const EDITOR = readFileSync(join(process.cwd(), "app/routes/app.campaigns.new.tsx"), "utf8")
-  .replace(/\/\*[\s\S]*?\*\//g, "")
-  .replace(/^\s*\/\/.*$/gm, "");
+import { sourceOf } from "../testing/source";
+
+const EDITOR = sourceOf("app/routes/app.campaigns.new.tsx");
 
 describe("nothing labels an amount from the sorted list", () => {
   it("passes the shop's own currency to the amount field", () => {

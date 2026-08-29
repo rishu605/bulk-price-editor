@@ -16,6 +16,8 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { sourceOf } from "../testing/source";
+
 const ROOT = process.cwd();
 
 /** Every `metric("name", …)` call in the app. */
@@ -31,7 +33,7 @@ function emitted(): Set<string> {
       }
       if (!/\.(ts|tsx)$/.test(entry.name) || /\.test\.tsx?$/.test(entry.name)) continue;
 
-      const source = readFileSync(join(ROOT, path), "utf8");
+      const source = sourceOf(path);
       for (const [, name] of source.matchAll(/\bmetric\(\s*"([a-z0-9_.]+)"/g)) names.add(name);
     }
   };
@@ -42,7 +44,7 @@ function emitted(): Set<string> {
 
 /** The registry in `otel.server.ts`, which decides each metric's instrument type. */
 function declared(): Set<string> {
-  const source = readFileSync(join(ROOT, "app/lib/observability/otel.server.ts"), "utf8");
+  const source = sourceOf("app/lib/observability/otel.server.ts");
   const table = source.slice(source.indexOf("{"), source.indexOf("};") + 1);
   return new Set([...table.matchAll(/"([a-z0-9_]+\.[a-z0-9_]+)":\s*"(counter|gauge|histogram)"/g)].map(
     ([, name]) => name,

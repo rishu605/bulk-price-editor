@@ -11,10 +11,12 @@
  * form elements and never forwards it to the custom element.
  */
 
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
+
+import { sourceOf } from "../testing/source";
 
 const ROOT = process.cwd();
 
@@ -46,27 +48,11 @@ function owningTag(source: string, at: number): string {
   return /^<\s*([A-Za-z][\w.-]*)/.exec(source.slice(open, at))?.[1] ?? "";
 }
 
-/**
- * Whole-line `//` comments removed before matching.
- *
- * The seventh time a source-level check in this repo has been fooled by its own subject
- * appearing in prose, and the first where the offending comment was the one explaining
- * *why the field does not use the banned attribute*. A rule that fires on the note
- * documenting compliance with it teaches people to stop writing the note. Only lines that
- * are nothing but a comment go, so a `//` inside an href is left alone. #462 is open to
- * extract this — it now exists in four files.
- */
-const scannable = (source: string) =>
-  source
-    .split("\n")
-    .filter((line) => !line.trimStart().startsWith("//"))
-    .join("\n");
-
 describe("defaultValue and defaultChecked never reach a Polaris element", () => {
   // React intercepts both on form elements and never forwards them to the custom element,
   // so the field renders empty. It compiles, and it is in the TypeScript types.
   it.each(FILES)("%s", (file) => {
-    const source = scannable(readFileSync(join(ROOT, file), "utf8"));
+    const source = sourceOf(file);
 
     for (const match of source.matchAll(/\b(defaultValue|defaultChecked)\b/g)) {
       const tag = owningTag(source, match.index!);
@@ -83,7 +69,7 @@ describe("s-button is never given name or value", () => {
   // It has neither, so a form with two submit buttons cannot tell them apart. The app's
   // pattern is a hidden input the buttons set before submitting.
   it.each(FILES)("%s", (file) => {
-    const source = readFileSync(join(ROOT, file), "utf8");
+    const source = sourceOf(file);
 
     for (const match of source.matchAll(/<s-button\b([^>]*)>/g)) {
       const attributes = match[1];
@@ -114,7 +100,7 @@ describe("s-button is never given name or value", () => {
  * catches the link.
  */
 describe("every app nav item is a path inside the app", () => {
-  const layout = readFileSync(join(ROOT, "app/routes/app.tsx"), "utf8");
+  const layout = sourceOf("app/routes/app.tsx");
 
   const hrefs = (() => {
     const nav = /<s-app-nav>([\s\S]*?)<\/s-app-nav>/.exec(layout);
@@ -165,7 +151,7 @@ describe("no native form on an embedded surface", () => {
   });
 
   it.each(embedded)("%s", (file) => {
-    const source = readFileSync(join(ROOT, file), "utf8");
+    const source = sourceOf(file);
     // Lowercase only: React Router's <Form> is the correct thing and is capitalised.
     expect(
       /<form[\s>]/.test(source),
@@ -204,7 +190,7 @@ describe("no component pulls a server module into the browser bundle", () => {
 
   const files = componentFiles("app/components").map((path) => ({
     path,
-    source: readFileSync(join(ROOT, path), "utf8"),
+    source: sourceOf(path),
   }));
 
   it("finds the components, so it cannot pass by checking nothing", () => {

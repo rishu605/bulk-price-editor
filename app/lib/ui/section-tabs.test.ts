@@ -16,10 +16,12 @@
  * the way this is checking for.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
+
+import { sourceOf } from "../testing/source";
 
 const ROUTES = join(process.cwd(), "app", "routes");
 
@@ -34,7 +36,7 @@ function sections() {
 
   return files
     .filter((file) => /^app\.[a-z-]+\.tsx$/.test(file))
-    .map((file) => ({ file, source: readFileSync(join(ROUTES, file), "utf8") }))
+    .map((file) => ({ file, source: sourceOf(ROUTES, file) }))
     .filter(({ source }) => source.includes("<SectionTabs"))
     .map(({ file, source }) => ({
       file,

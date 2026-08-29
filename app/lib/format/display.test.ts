@@ -11,10 +11,12 @@
  * mistimes a sale.
  */
 
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
+
+import { sourceOf } from "../testing/source";
 
 import { formatAgo, formatCount, formatDay, formatWhen } from "./display";
 
@@ -87,7 +89,7 @@ describe("nothing formats against the ambient environment", () => {
 
   it("never calls toLocale* without naming a locale", () => {
     for (const file of files) {
-      const source = readFileSync(file, "utf8");
+      const source = sourceOf(file);
 
       for (const match of source.matchAll(/\.toLocale[A-Za-z]*\(\s*\)/g)) {
         expect.fail(
@@ -100,7 +102,7 @@ describe("nothing formats against the ambient environment", () => {
 
   it("never formats a date without a timezone", () => {
     for (const file of files) {
-      const source = readFileSync(file, "utf8");
+      const source = sourceOf(file);
 
       // A locale but no `timeZone` still renders in the server's zone.
       for (const match of source.matchAll(/\.toLocale(?:Date|Time)?String\("[^"]*"\s*\)/g)) {
@@ -130,7 +132,7 @@ describe("counts a merchant reads are grouped, wherever they appear", () => {
   ];
 
   it.each(merchantFacing)("%s formats its counts", (file) => {
-    const source = readFileSync(join(process.cwd(), file), "utf8");
+    const source = sourceOf(process.cwd(), file);
 
     expect(source, `${file} shows counts without grouping them`).toContain("formatCount");
   });

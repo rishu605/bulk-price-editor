@@ -12,12 +12,14 @@
  * it is a property of the whole app, so it is checked over the source of every file.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { renderToStaticMarkup } from "react-dom/server";
 import { StaticRouter } from "react-router";
 import { describe, expect, it } from "vitest";
+
+import { sourceOf } from "../../lib/testing/source";
 
 import { CampaignHeader } from "./CampaignHeader";
 import { CampaignOverviewTab } from "./CampaignOverviewTab";
@@ -239,7 +241,7 @@ function tsxFiles(dir: string): string[] {
 
 describe("no card is drawn inside another card", () => {
   const offenders = tsxFiles(APP).flatMap((path) => {
-    const source = readFileSync(path, "utf8");
+    const source = sourceOf(path);
     let depth = 0;
     let deepest = 0;
 

@@ -15,21 +15,19 @@
  *
  * It lives under `lib/ui/` and not beside the route it is about, which is not a filing
  * preference. React Router's flat-routes reads *every* file in `app/routes/`, so a test
- * there becomes a route module and gets bundled for the browser — where `node:fs` does not
- * exist, and the build fails with "readFileSync is not exported by
+ * there becomes a route module and gets bundled for the browser — where `node:fs`, which
+ * `sourceOf` reads through, does not exist. The build fails with "not exported by
  * __vite-browser-external". Vitest is happy either way; only `npm run build` says so.
  */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-
 import { describe, expect, it } from "vitest";
+
+import { sourceOf } from "../testing/source";
 
 import { describeAction } from "../audit/action";
 
-const ROOT = process.cwd();
-const ROUTE = readFileSync(join(ROOT, "app/routes/app.activity.tsx"), "utf8");
-const TABLE = readFileSync(join(ROOT, "app/components/ActivityTable.tsx"), "utf8");
+const ROUTE = sourceOf("app/routes/app.activity.tsx");
+const TABLE = sourceOf("app/components/ActivityTable.tsx");
 
 describe("the filter and the column it filters use one vocabulary", () => {
   it("renders both through describeAction", () => {

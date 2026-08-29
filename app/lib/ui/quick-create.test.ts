@@ -11,14 +11,12 @@
  * action does, not how either looks.
  */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const HOME = readFileSync(join(process.cwd(), "app/routes/app._index.tsx"), "utf8")
-  .replace(/\/\*[\s\S]*?\*\//g, "")
-  .replace(/^\s*\/\/.*$/gm, "");
+import { sourceOf } from "../testing/source";
+
+const HOME = sourceOf("app/routes/app._index.tsx");
 
 const at = (needle: string) => HOME.indexOf(needle);
 

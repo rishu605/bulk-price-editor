@@ -16,20 +16,19 @@
  *   are all of them" to a merchant checking their prices.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
+
+import { sourceOf } from "../testing/source";
 
 import { ROWS_PER_VIEW, rowsThatFit, CELL_BUDGET } from "./table-budget";
 import { rowsToShow } from "../../components/RollbackReportTable";
 
 const ROOT = process.cwd();
-const read = (...parts: string[]) => readFileSync(join(ROOT, ...parts), "utf8");
+const read = (...parts: string[]) => sourceOf(ROOT, ...parts);
 
-/** Source without its own commentary, so a file explaining a number is not read as setting one. */
-const code = (source: string) =>
-  source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
 function sources(dir: string): string[] {
   return readdirSync(join(ROOT, dir), { withFileTypes: true }).flatMap((entry) => {
@@ -39,7 +38,7 @@ function sources(dir: string): string[] {
   });
 }
 
-const FILES = sources("app").map((path) => ({ path, source: code(read(path)) }));
+const FILES = sources("app").map((path) => ({ path, source: read(path) }));
 
 describe("one number decides how many rows a view holds", () => {
   it("is small enough to be a view rather than a document", () => {

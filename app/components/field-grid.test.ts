@@ -11,20 +11,16 @@
  * reverts: the comma trap, and a checkbox left in a column.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const grid = readFileSync(join(process.cwd(), "app", "components", "FieldGrid.tsx"), "utf8");
-const settings = readFileSync(
-  join(process.cwd(), "app", "routes", "app.settings._index.tsx"),
-  "utf8",
-);
-const editor = readFileSync(
-  join(process.cwd(), "app", "routes", "app.campaigns.new.tsx"),
-  "utf8",
-);
+import { sourceOf } from "../lib/testing/source";
+
+const grid = sourceOf(process.cwd(), "app", "components", "FieldGrid.tsx");
+const settings = sourceOf(process.cwd(), "app", "routes", "app.settings._index.tsx");
+const editor = sourceOf(process.cwd(), "app", "routes", "app.campaigns.new.tsx");
 
 describe("the field grid", () => {
   it("carries exactly one comma, so the value parses", () => {
@@ -125,7 +121,7 @@ describe("no settings tab leaves a control unbounded", () => {
   });
 
   it.each(TABS)("%s", (name, path) => {
-    const source = readFileSync(path, "utf8");
+    const source = sourceOf(path);
 
     /** How many of these are open at this point in the file. */
     const depth = (tag: string, upTo: number) => {

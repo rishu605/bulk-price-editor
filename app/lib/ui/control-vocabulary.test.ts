@@ -20,14 +20,16 @@
  * `{resolution}` was, and what a label written on purpose never is.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { rawSource, sourceOf } from "../testing/source";
+
 const APP = join(process.cwd(), "app");
-const DRIFT = readFileSync(join(APP, "routes/app.prices.drift.tsx"), "utf8");
-const HELP = readFileSync(join(process.cwd(), "docs/help/concepts/drift.md"), "utf8");
+const DRIFT = sourceOf(APP, "routes/app.prices.drift.tsx");
+const HELP = rawSource("docs/help/concepts/drift.md");
 
 /** The three labels, extracted from the table the page renders them from. */
 function resolutions(): { value: string; label: string; tone: string }[] {
@@ -117,7 +119,7 @@ describe("no button is labelled with a raw value", () => {
   const isLabel = (name: string) => /label$/i.test(name);
 
   const offenders = tsxFiles(APP).flatMap((path) => {
-    const source = readFileSync(path, "utf8");
+    const source = sourceOf(path);
     return [...source.matchAll(RAW_LABEL)]
       .filter((match) => !isLabel(match[1]))
       .map((match) => `${path.replace(`${APP}/`, "")}: {${match[1]}}`);

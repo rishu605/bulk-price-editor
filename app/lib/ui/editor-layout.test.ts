@@ -18,10 +18,10 @@
  *   between the rule and the thing the merchant came to set.
  */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
+
+import { sourceOf } from "../testing/source";
 
 /**
  * The editor's source with its comments removed.
@@ -32,9 +32,7 @@ import { describe, expect, it } from "vitest";
  * repo has now hit five times. The same two lines appear in `table-size.test.ts` and
  * `imports.test.ts`; extracting them is #462.
  */
-const EDITOR = readFileSync(join(process.cwd(), "app/routes/app.campaigns.new.tsx"), "utf8")
-  .replace(/\/\*[\s\S]*?\*\//g, "")
-  .replace(/^\s*\/\/.*$/gm, "");
+const EDITOR = sourceOf("app/routes/app.campaigns.new.tsx");
 
 /** Where a name first appears in the file, or -1. Source order is render order here. */
 const at = (needle: string) => EDITOR.indexOf(needle);

@@ -14,18 +14,15 @@
  * So: the values live in one object, and this refuses a literal of them anywhere else.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { sourceOf } from "../testing/source";
+
 import { DRAFT_DEFAULTS, draftDefaultParams } from "./draft-defaults";
 
-/** Source with comments removed — they discuss the very literals being grepped for. */
-const sourceOf = (path: string) =>
-  readFileSync(join(process.cwd(), path), "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^\s*\/\/.*$/gm, "");
 
 const EDITOR = sourceOf("app/routes/app.campaigns.new.tsx");
 

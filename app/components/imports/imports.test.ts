@@ -21,17 +21,14 @@
  * screenshot would show.
  */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const ROOT = process.cwd();
-const read = (...parts: string[]) => readFileSync(join(ROOT, ...parts), "utf8");
+import { sourceOf } from "../../lib/testing/source";
 
-/** Source with its own commentary removed, so a file explaining its history is not read as doing it. */
-const code = (source: string) =>
-  source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+const ROOT = process.cwd();
+const read = (...parts: string[]) => sourceOf(ROOT, ...parts);
+
 
 const PRICE_IMPORT = read("app/routes/app.campaigns.import.tsx");
 const BASELINES = read("app/routes/app.prices.baselines._index.tsx");
@@ -44,7 +41,7 @@ const DROP_ZONE = read("app/components/imports/CsvDropZone.tsx");
 
 describe("the nav is five items, and none of them is a verb", () => {
   it("no longer offers Imports", () => {
-    expect(code(NAV)).not.toContain("/app/imports");
+    expect(NAV).not.toContain("/app/imports");
   });
 
   /**
@@ -60,7 +57,7 @@ describe("the nav is five items, and none of them is a verb", () => {
    * a failure rather than an omission, which is the property that was missing.
    */
   it("keeps the five nouns", () => {
-    const items = [...code(NAV).matchAll(/<s-link href="(\/app[^"]*)"/g)].map((m) => m[1]);
+    const items = [...NAV.matchAll(/<s-link href="(\/app[^"]*)"/g)].map((m) => m[1]);
     expect(items).toEqual([
       "/app",
       "/app/campaigns",
@@ -71,7 +68,7 @@ describe("the nav is five items, and none of them is a verb", () => {
   });
 
   it("has no nav item the assertion above cannot see", () => {
-    const links = [...code(NAV).matchAll(/<s-link\s/g)].length;
+    const links = [...NAV.matchAll(/<s-link\s/g)].length;
 
     expect(links, "an s-link whose href is not a literal path is invisible above").toBe(5);
   });
@@ -81,7 +78,7 @@ describe("the nav is five items, and none of them is a verb", () => {
     // under Imports, meaning "look at them" in one place and "replace them" in the other.
     const prices = read("app/routes/app.prices.tsx");
     for (const noun of ["Baselines", "Costs"]) {
-      const tabs = [...code(prices).matchAll(/label: "([^"]+)"/g)].map((m) => m[1]);
+      const tabs = [...prices.matchAll(/label: "([^"]+)"/g)].map((m) => m[1]);
       expect(tabs.filter((label) => label === noun)).toHaveLength(1);
     }
   });
@@ -159,8 +156,8 @@ describe("the safety properties travelled with the flows", () => {
       ["baseline import", BASELINES],
       ["cost import", COSTS],
     ] as const) {
-      expect(code(source), `${name} decides commit-or-check for itself`).toContain("isCommit(");
-      expect(code(source), `${name} spells out its own comparison`).not.toMatch(
+      expect(source, `${name} decides commit-or-check for itself`).toContain("isCommit(");
+      expect(source, `${name} spells out its own comparison`).not.toMatch(
         /String\(form\.get\("intent"\)\) !== "commit"/,
       );
     }
@@ -189,7 +186,7 @@ describe("the safety properties travelled with the flows", () => {
     // Its own doc comment argued for that, and `planRecapture` counts a scope of up to
     // half a million variants — not something to run on every visit to a page a merchant
     // opens to look one price up.
-    expect(code(BASELINES)).not.toContain("planRecapture");
+    expect(BASELINES).not.toContain("planRecapture");
   });
 });
 
@@ -266,7 +263,7 @@ describe("the three imports are one import", () => {
 });
 
 describe("making a segment is one decision", () => {
-  const segments = code(read("app/routes/app.settings.segments.tsx"));
+  const segments = read("app/routes/app.settings.segments.tsx");
 
   it("offers one create form, not two competing cards", () => {
     expect(segments).not.toContain("New segment from a filter");

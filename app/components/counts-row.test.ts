@@ -11,10 +11,12 @@
  * side-by-side comparison shows one of them is the old one.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
+
+import { sourceOf } from "../lib/testing/source";
 
 const APP = join(process.cwd(), "app");
 
@@ -23,7 +25,7 @@ function sources(dir: string): Array<{ path: string; text: string }> {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) return sources(path);
     if (!entry.name.endsWith(".tsx") || entry.name.endsWith(".test.tsx")) return [];
-    return [{ path: path.replace(`${APP}/`, ""), text: readFileSync(path, "utf8") }];
+    return [{ path: path.replace(`${APP}/`, ""), text: sourceOf(path) }];
   });
 }
 
@@ -45,7 +47,7 @@ describe("the counts row", () => {
   it("is actually used by the dashboard", () => {
     // Guards the other direction: deleting the duplicate without adopting the component
     // would leave the first screen with no counts at all and still pass the check above.
-    const dashboard = readFileSync(join(APP, "routes", "app._index.tsx"), "utf8");
+    const dashboard = sourceOf(APP, "routes", "app._index.tsx");
     expect(dashboard).toContain("<CountsRow");
   });
 });
