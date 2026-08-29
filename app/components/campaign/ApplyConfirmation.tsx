@@ -37,6 +37,7 @@ export function ApplyConfirmation({
   preview,
   rule,
   scope,
+  notifyEmail,
   scheduleText,
   children,
 }: {
@@ -44,6 +45,13 @@ export function ApplyConfirmation({
   /** From `describeCampaign`, the same call the campaigns index makes. */
   rule: string;
   scope: string;
+  /**
+   * Where the outcome will be emailed, or null if notifications are off.
+   *
+   * From the shop's notification preferences, not from anything about this campaign —
+   * the address is one per shop, and the run report goes to whoever is listed there.
+   */
+  notifyEmail: string | null;
   /** The schedule sentence the header shows, restated here where the decision is made. */
   scheduleText?: string | null;
   /**
@@ -107,10 +115,14 @@ export function ApplyConfirmation({
             {describeRunDuration(writePath === "bulk" ? "bulk" : "sync", counts.planned)}
           </Fact>
 
-          {/* NA's modal says who gets emailed when the job completes. We have no
-              per-shop notification address to name — the alerting in
-              `lib/observability` is operator-facing, not merchant-facing — so this says
-              nothing rather than promising a message that will not arrive. #475. */}
+          {/* NA's modal says who gets emailed when the job completes, and this is the
+              moment a merchant decides whether to sit and watch. Both branches are worth
+              rendering: naming the address is a promise kept, and saying plainly that
+              nobody will be told is the thing they need *before* closing the tab on a
+              run over a hundred thousand variants — not after. */}
+          <Fact label="When it finishes">
+            {notifyEmail ? `We will email ${notifyEmail}` : "Nobody is emailed — set an address in Settings"}
+          </Fact>
         </s-stack>
 
         {/* The one thing this app can say that none of the three competitors can. It is

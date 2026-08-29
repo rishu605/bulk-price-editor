@@ -43,6 +43,7 @@ export function CampaignHeader({
   rule,
   scope,
   archived,
+  notifyEmail,
   scheduleText,
   lifecycle,
   fetcher,
@@ -194,6 +195,7 @@ export function CampaignHeader({
         preview={preview}
         rule={rule}
         scope={scope}
+        notifyEmail={notifyEmail}
         scheduleText={scheduleText}
       >
         <fetcher.Form method="post" slot="primary-action">

@@ -505,6 +505,7 @@ async function executeCampaignRun(
   // provider is allowed to change what happened to their prices, so this never throws
   // and never blocks the outcome being returned.
   void notify(shopId, {
+    campaignId,
     kind: options.revert
       ? "revert-completed"
       : result.clean

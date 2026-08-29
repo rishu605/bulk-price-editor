@@ -33,16 +33,27 @@ export interface RunCounts {
 
 export interface RunNotification {
   kind: Exclude<NotificationKind, "weekly-digest" | "drift-hold">;
+  /**
+   * Which campaign, so the email can link to it.
+   *
+   * Required, and that is the point. `campaignUrl` was optional, no caller ever set it,
+   * and the `link()` helper below silently rendered nothing — so every one of these
+   * emails ended with a promise to open a campaign and no way to. An optional field is a
+   * contract only a reader notices is broken; a required one is a compiler error at every
+   * call site.
+   */
+  campaignId: string;
   campaignName: string;
   counts: RunCounts;
   /** Merchant-facing reasons, already through the error taxonomy. Never raw errors. */
   reasons?: string[];
-  /** Deep link back into the app, where the specifics live. */
+  /** Deep link back into the app, filled in by `notify` — see `campaign-link.ts`. */
   campaignUrl?: string;
 }
 
 export interface DriftNotification {
   kind: "drift-hold";
+  campaignId: string;
   campaignName: string;
   driftedCount: number;
   campaignUrl?: string;

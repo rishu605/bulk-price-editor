@@ -338,5 +338,5 @@ async function notifyDrift(shopId: string, campaignId: string, campaignName: str
     },
   });
 
-  void notify(shopId, { kind: "drift-hold", campaignName, driftedCount: pending });
+  void notify(shopId, { kind: "drift-hold", campaignId, campaignName, driftedCount: pending });
 }

@@ -20,6 +20,7 @@
 import prisma from "../db.server";
 import { logger } from "../lib/logging/logger";
 import { compose, type Notification } from "../lib/notifications/templates";
+import { campaignUrl, driftUrl } from "../lib/notifications/campaign-link";
 
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
 
@@ -134,7 +135,7 @@ export async function notify(
     if (!preferences.email) return { sent: false, reason: "no-recipient" };
     if (!wants(preferences, notification)) return { sent: false, reason: "muted" };
 
-    const email = compose(notification);
+    const email = compose(await withLink(shopId, notification));
 
     const response = await fetch(RESEND_ENDPOINT, {
       method: "POST",
@@ -171,4 +172,32 @@ export async function notify(
     });
     return { sent: false, reason: "failed" };
   }
+}
+
+/**
+ * The deep link, added here rather than at the call sites.
+ *
+ * Three places send notifications and each one already knows the campaign, so passing the
+ * URL along would have worked — right up until the fourth. This is the shape of bug this
+ * repo keeps finding: two halves of a contract, and only a third party ever checks they
+ * agree. Building the link where the shop is already being read means a caller cannot
+ * forget it, and a new kind of notification gets one for free.
+ *
+ * A shop that has somehow lost its domain, or an install with no API key, produces no
+ * link and one line fewer in the email. See `campaign-link.ts` for why a guess is worse.
+ */
+async function withLink(shopId: string, notification: Notification): Promise<Notification> {
+  if (notification.kind === "weekly-digest") return notification;
+
+  const shop = await prisma.shop.findUnique({ where: { id: shopId }, select: { domain: true } });
+  if (!shop) return notification;
+
+  // eslint-disable-next-line no-undef
+  const apiKey = process.env.SHOPIFY_API_KEY;
+  const url =
+    notification.kind === "drift-hold"
+      ? driftUrl(shop.domain, apiKey)
+      : campaignUrl(shop.domain, notification.campaignId, apiKey);
+
+  return { ...notification, campaignUrl: url };
 }
