@@ -2,6 +2,7 @@ import { NoMatches } from "./AsyncState";
 import { Blank } from "./Blank";
 import type { ReconciliationRow } from "../services/reconciliation.server";
 import { stateLabel } from "../lib/reporting/reconciliation-csv";
+import { RowState } from "./RowState";
 
 /**
  * Every price, next to the reason it is that price.
@@ -74,9 +75,13 @@ export function ReconciliationTable({
               )}
             </s-table-cell>
             <s-table-cell>
-              <s-badge tone={row.drifted ? "critical" : row.offBaseline ? "info" : "success"}>
-                {stateLabel(row)}
-              </s-badge>
+              {/* A store that reconciles is every row matching, and this table exists to
+                  be scanned for the ones that do not. */}
+              <RowState
+                label={stateLabel(row)}
+                tone={row.drifted ? "critical" : row.offBaseline ? "info" : "success"}
+                ordinary={!row.drifted && !row.offBaseline}
+              />
             </s-table-cell>
           </s-table-row>
         ))}
