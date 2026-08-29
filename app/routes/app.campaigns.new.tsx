@@ -106,8 +106,12 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
   // The client asks for it instead, once, on mount. Same work, off the critical path,
   // with somewhere to say it is working.
 
-  // Every currency this campaign could price in. Only these are offered: a list of all
-  // 180 world currencies would bury the two or three that matter.
+  // Every currency this campaign could price in, for the per-currency rounding selects.
+  //
+  // Sorted, and therefore **not** a source of "the" currency: the first entry is whichever
+  // code sorts first across the shop and its price lists. `baseCurrency` below is the one
+  // the rule is actually built in, and anything labelling an amount has to use that
+  // (#473).
   const currencies = [
     ...new Set([currency, ...priceLists.map((list) => list.currency)].filter(Boolean)),
   ].sort();
@@ -129,6 +133,9 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
       b2b: canUseSurface(billing.plan, "b2b"),
     },
     planName: billing.plan.name,
+    // The currency `ruleFrom` builds the amount in, in both the action and the resource
+    // route. Everything that labels or formats an amount reads this, never `currencies[0]`.
+    baseCurrency: currency,
     storeRounding: settings.rounding,
     // What the untouched form describes, built here where it can be built reliably.
     // See the note on the mount effect: reading the form for the *first* request gets a
@@ -255,6 +262,7 @@ export default function NewCampaign() {
     planName,
     defaultName,
     firstPreview,
+    baseCurrency,
   } = useLoaderData<typeof loader>();
 
   // The live price preview. Debounced, because it plans the whole scope on every call
@@ -395,7 +403,7 @@ export default function NewCampaign() {
                   adjustment and its amount — as a fragment, so as bare grid children they
                   land side by side, which is the pair a merchant reads as one decision.
                   Inside a `FullRow` they would both go in one cell and stack. */}
-              <RuleValueField currency={currencies[0] ?? "USD"} />
+              <RuleValueField currency={baseCurrency} />
 
               <s-select name="compareAt" label="Compare-at price">
                 <s-option value="set-to-baseline" defaultSelected>
@@ -707,7 +715,7 @@ export default function NewCampaign() {
           // Named only when there is something to distinguish it from. `previewDraft`
           // prices the base surface; on a shop with catalogues the merchant is reading a
           // card headed "on your storefront" and has more than one.
-          surface={priceLists.length > 0 ? `base price · ${currencies[0]}` : undefined}
+          surface={priceLists.length > 0 ? `base price · ${baseCurrency}` : undefined}
         />
       </s-section>
 
