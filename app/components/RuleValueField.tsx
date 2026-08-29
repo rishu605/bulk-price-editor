@@ -55,11 +55,26 @@ export function RuleValueField({
         label="How should prices change?"
         onChange={(event) => onKindChange(String(event.currentTarget.value))}
       >
-        <s-option value={DRAFT_DEFAULTS.ruleKind} defaultSelected>
+        {/* Selected from `kind`, not hardcoded onto the first option.
+        
+            Four old import URLs open this page with `?ruleKind=from-file`, and with the
+            default pinned here the page did the right thing — no scope, the file section
+            below — while this select went on reading "Percent change from baseline". A
+            control that disagrees with the page it controls is worse than either state:
+            the merchant cannot tell which one is lying. Only visible by opening the
+            page. */}
+        <s-option
+          value={DRAFT_DEFAULTS.ruleKind}
+          defaultSelected={kind === DRAFT_DEFAULTS.ruleKind}
+        >
           Percent change from baseline
         </s-option>
-        <s-option value="fixed-change">Fixed change from baseline</s-option>
-        <s-option value="set-exact">Set an exact price</s-option>
+        <s-option value="fixed-change" defaultSelected={kind === "fixed-change"}>
+          Fixed change from baseline
+        </s-option>
+        <s-option value="set-exact" defaultSelected={kind === "set-exact"}>
+          Set an exact price
+        </s-option>
         {/* A file is a way prices change, not a different door.
             
             #416 dissolved the Imports nav item on the rule that a nav item is a noun; the
@@ -67,7 +82,9 @@ export function RuleValueField({
             one size smaller — two merchants wanting the same object, sent through two
             doors. A spreadsheet is an answer to "how should prices change", so it is an
             option here. */}
-        <s-option value={FROM_FILE}>From a spreadsheet</s-option>
+        <s-option value={FROM_FILE} defaultSelected={kind === FROM_FILE}>
+          From a spreadsheet
+        </s-option>
       </s-select>
 
       {kind === FROM_FILE ? null : money ? (

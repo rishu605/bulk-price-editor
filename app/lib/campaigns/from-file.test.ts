@@ -24,7 +24,7 @@ const RESOURCE = sourceOf("app/routes/app.price-import.tsx");
 
 describe("the choice", () => {
   it("offers a file among the ways prices change", () => {
-    expect(FIELD).toContain(`<s-option value={FROM_FILE}>`);
+    expect(FIELD).toContain("<s-option value={FROM_FILE}");
     expect(FIELD).toContain("How should prices change?");
   });
 
@@ -47,6 +47,24 @@ describe("choosing it", () => {
     // the import's own flow does not read.
     expect(EDITOR).toContain("{fromFile ? null : (");
     expect(EDITOR).toContain("{!fromFile && priceLists.length > 0 ?");
+  });
+
+  it("shows the option it is actually on", () => {
+    // The default used to be pinned to the first option, so a link carrying
+    // `?ruleKind=from-file` produced a page with no scope and a file section whose select
+    // still read "Percent change from baseline". A control that disagrees with the page
+    // it controls is worse than either state — the merchant cannot tell which is lying.
+    expect(FIELD).toContain("defaultSelected={kind === FROM_FILE}");
+    expect(FIELD, "the first option must not be selected regardless of the kind").not.toMatch(
+      /<s-option[^>]*value=\{DRAFT_DEFAULTS\.ruleKind\} defaultSelected>/,
+    );
+  });
+
+  it("hides the rule preview, which would be pricing a rule that is not there", () => {
+    // The panel prices the draft's arithmetic. With a file chosen there is none, so it
+    // renders whatever the controls said before the merchant switched — "3,669 of 3,669
+    // variants would change price" beside a form that will do nothing of the kind.
+    expect(EDITOR).toContain('{fromFile ? null : (\n      <s-section slot="aside"');
   });
 
   it("shows the file, the history and a template", () => {
