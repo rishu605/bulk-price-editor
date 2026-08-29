@@ -171,6 +171,12 @@ model VariantIndex {
   /// because a btree on an array column cannot serve containment.
   @@index([tags], type: Gin)
   @@index([collections], type: Gin)
+  /// Trigram GIN, because `astToWhere` matches these two with `mode: "insensitive"`
+  /// and Prisma compiles that to `ILIKE '%text%'`. No btree serves ILIKE -- including
+  /// one on `lower(title)`, which is what these replace. See #510.
+  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin, map: "variant_index_title_trgm")
+  @@index([sku(ops: raw("gin_trgm_ops"))], type: Gin, map: "variant_index_sku_trgm")
+  @@index([barcode(ops: raw("gin_trgm_ops"))], type: Gin, map: "variant_index_barcode_trgm")
   @@map("variant_index")
 }
 

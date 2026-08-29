@@ -249,7 +249,11 @@ async function main(): Promise<void> {
       () => previewMatches(shop.id, ast({ field: "productType", value: "Boots" })),
     ],
     ["scope: title contains", () => previewMatches(shop.id, ast({ field: "title", value: "Alpine" }))],
-    ["scope: sku contains", () => previewMatches(shop.id, ast({ field: "sku", value: "AB-1" }))],
+    ["scope: sku contains", () => previewMatches(shop.id, ast({ field: "sku", value: "APF-927" }))],
+    [
+      "scope: barcode contains",
+      () => previewMatches(shop.id, ast({ field: "barcode", value: "555000" })),
+    ],
     ["scope: price floor", () => previewMatches(shop.id, ast({ field: "priceMin", value: 2000 }))],
 
     // The picker's option lists, which three route loaders await before first paint.

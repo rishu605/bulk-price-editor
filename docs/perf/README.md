@@ -32,9 +32,14 @@ had a product bigger than one page until this one existed.
 |---|---|---|
 | Catalogue, first page | 26 ms | 26 ms |
 | Catalogue, last page (offset 101,100) | 292 ms | 360 ms |
-| Catalogue, text search | 74 ms | 75 ms |
+| Catalogue, text search | 19 ms | 21 ms |
 | Reconciliation, first page | 7 ms | 9 ms |
 | Reconciliation, deep page | 5 ms | 6 ms |
+
+Text search was 74 ms until #510 replaced two unusable `lower()` btrees with trigram GIN
+indexes. The two reconciliation rows are **stale**: both now measure ~1,000 ms against the
+same store, which grew 21 campaign runs and 125,579 ledger rows after these were taken.
+Tracked separately — see [`queries.md`](queries.md).
 
 ### Offset scaling
 
