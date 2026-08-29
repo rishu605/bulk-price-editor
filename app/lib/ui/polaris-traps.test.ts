@@ -46,11 +46,27 @@ function owningTag(source: string, at: number): string {
   return /^<\s*([A-Za-z][\w.-]*)/.exec(source.slice(open, at))?.[1] ?? "";
 }
 
+/**
+ * Whole-line `//` comments removed before matching.
+ *
+ * The seventh time a source-level check in this repo has been fooled by its own subject
+ * appearing in prose, and the first where the offending comment was the one explaining
+ * *why the field does not use the banned attribute*. A rule that fires on the note
+ * documenting compliance with it teaches people to stop writing the note. Only lines that
+ * are nothing but a comment go, so a `//` inside an href is left alone. #462 is open to
+ * extract this — it now exists in four files.
+ */
+const scannable = (source: string) =>
+  source
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("//"))
+    .join("\n");
+
 describe("defaultValue and defaultChecked never reach a Polaris element", () => {
   // React intercepts both on form elements and never forwards them to the custom element,
   // so the field renders empty. It compiles, and it is in the TypeScript types.
   it.each(FILES)("%s", (file) => {
-    const source = readFileSync(join(ROOT, file), "utf8");
+    const source = scannable(readFileSync(join(ROOT, file), "utf8"));
 
     for (const match of source.matchAll(/\b(defaultValue|defaultChecked)\b/g)) {
       const tag = owningTag(source, match.index!);

@@ -9,17 +9,20 @@ import { formatWhen } from "../../lib/format/display";
 import { describeActor } from "../../lib/audit/actor";
 import { ALL_STATES, describeState } from "../../lib/lifecycle/transitions";
 import { humanise } from "../../lib/format/label";
+import { CampaignNote } from "./CampaignNote";
 import type { CampaignDetailProps } from "./props";
 
-export function CampaignOverviewTab({
-  scheduleText,
-  warnings,
-  autoEnroll,
-  enrollPendingAt,
-  lifecycle,
-  history,
-  timeZone,
-}: CampaignDetailProps) {
+export function CampaignOverviewTab(props: CampaignDetailProps) {
+  const {
+    scheduleText,
+    warnings,
+    autoEnroll,
+    enrollPendingAt,
+    lifecycle,
+    history,
+    timeZone,
+  } = props;
+
   return (
     <>
       <s-section heading="Status">
@@ -30,6 +33,9 @@ export function CampaignOverviewTab({
           <s-text>{lifecycle.explanation}</s-text>
         </s-paragraph>
       </s-section>
+
+      {/* Above the history, because the note is why the history happened. */}
+      <CampaignNote {...props} />
 
       {history.length > 0 ? (
         // Its own section rather than a run of paragraphs under a bare `s-paragraph`

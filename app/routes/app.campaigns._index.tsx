@@ -1,5 +1,5 @@
-import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useSearchParams } from "react-router";
+import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { redirect, useFetcher, useLoaderData, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
@@ -13,6 +13,7 @@ import { CampaignCalendar } from "../components/campaign/CampaignCalendar";
 import { CampaignListView } from "../components/campaign/CampaignListView";
 import { HelpNote } from "../components/HelpNote";
 import { filtersFrom, listCampaigns } from "../services/campaigns/list.server";
+import { duplicateCampaign } from "../services/campaigns/housekeeping.server";
 import { calendarFor, todayIn } from "../services/calendar.server";
 import { addDays } from "../lib/scheduling/calendar";
 
@@ -58,6 +59,30 @@ export const loader = withGuard("/app/campaigns", async ({ request }: LoaderFunc
   } as const;
 });
 
+/**
+ * Duplicating from the row.
+ *
+ * The redirect is the feature, not a detail of it: a merchant duplicates a campaign in
+ * order to change something about it, so landing them back on the list — with a new row
+ * they now have to find and open — would be most of the work and none of the point.
+ *
+ * The web process may not write prices, and this does not: a duplicate is a draft, and a
+ * draft has written nothing to a storefront.
+ */
+export const action = withGuard("/app/campaigns", async ({ request }: ActionFunctionArgs) => {
+  const { session } = await authenticate.admin(request);
+  const shop = await ensureShop(session.shop);
+  const form = await request.formData();
+
+  if (String(form.get("intent")) !== "duplicate") {
+    return { ok: false, message: "That action is not available from the campaigns list." };
+  }
+
+  const copy = await duplicateCampaign(shop.id, String(form.get("campaignId")), session.shop);
+
+  return redirect(`/app/campaigns/${copy.id}?duplicated=1`);
+});
+
 /** The same day-of-month in an adjacent month, clamped to a day that exists. */
 function monthStep(date: string, months: number): string {
   const [year, month] = date.split("-").map(Number);
@@ -77,6 +102,8 @@ function monthName(date: string): string {
 export default function Campaigns() {
   const { view, filters, list, calendar } = useLoaderData<typeof loader>();
   const [params] = useSearchParams();
+  // For the row-level Duplicate. See the note on `CampaignListView`'s `fetcher` prop.
+  const fetcher = useFetcher();
 
   const linkTo = (next: Record<string, string>) => {
     const q = new URLSearchParams(params);
@@ -160,7 +187,7 @@ export default function Campaigns() {
       {view === "calendar" && calendar ? (
         <CampaignCalendar {...calendar} />
       ) : (
-        <CampaignListView list={list} filters={filters} linkTo={linkTo} />
+        <CampaignListView list={list} filters={filters} linkTo={linkTo} fetcher={fetcher} />
       )}
 
       <HelpNote label="How campaigns resolve">

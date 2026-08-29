@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useFetcher, useLoaderData, useSearchParams } from "react-router";
+import { redirect, useFetcher, useLoaderData, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
@@ -13,12 +13,11 @@ import {
   revertVariant,
   rollbackReport,
   runCampaign,
-  runLedger,
 } from "../services/campaigns/index.server";
 import { describeSchedule, parseSchedule, scheduleWarnings } from "../lib/scheduling/window";
 import { RunHistoryTable } from "../components/RunHistoryTable";
 import { RunResultSection } from "../components/RunResultSection";
-import { campaignResult } from "../services/campaigns/result.server";
+import { runEvidence } from "../services/campaigns/run-evidence.server";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { reportError } from "../services/error-report.server";
 import { withGuard } from "../lib/errors/guard.server";
@@ -34,6 +33,7 @@ import {
   type CampaignState,
 } from "../lib/lifecycle/transitions";
 import { transitionHistory } from "../services/campaigns/lifecycle.server";
+import { housekeepingAction } from "../services/campaigns/housekeeping.server";
 import { approvalFor, approvalSummary, decideApproval, requestApproval, SelfApprovalError } from "../services/approvals.server";
 import { PageShell } from "../components/PageShell";
 import { CampaignTabs, currentTab, tabsFor } from "../components/campaign/CampaignTabs";
@@ -64,6 +64,8 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
         enrollPendingAt: true,
         status: true,
         ruleRows: true,
+        note: true,
+        archivedAt: true,
         segments: { select: { name: true }, take: 1 },
       },
     }),
@@ -84,20 +86,8 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
   // the people who most need the answer.
   const requested = new URL(request.url).searchParams.get("run");
   const selectedRunId = requested ?? runs[0]?.id ?? null;
-  const ledger = selectedRunId ? await runLedger(shop.id, selectedRunId) : [];
-
-  // How many rows that run wrote in total, so the table can say what it is not showing.
-  // The ledger is capped — `s-table` blanks the page past a few hundred cells — and a
-  // capped table that says nothing reads as the whole record, on the one screen whose
-  // entire job is being the record.
-  const ledgerTotal = selectedRunId
-    ? await prisma.variantChange.count({ where: { shopId: shop.id, runId: selectedRunId } })
-    : 0;
-
-  // What that run actually did, as opposed to what the preview said it would. The ledger
-  // is the evidence; the preview is the intention, and a partial run is exactly where the
-  // two stop agreeing.
-  const result = selectedRunId ? await campaignResult(shop.id, selectedRunId) : null;
+  // What that run actually did, as opposed to what the preview said it would.
+  const { ledger, ledgerTotal, result } = await runEvidence(shop.id, selectedRunId);
 
   // Only for a campaign that has actually written something and could still be
   // reverted. It costs a full plan, and on a draft it would be a report about
@@ -122,6 +112,8 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     // The same two sentences the index shows, through the same formatter, so a merchant
     // reading "20% off · In Outerwear" in the list meets those words again here.
     ...describeCampaign({ rule: ruleOf(record), ast: astOf(record), segmentName: record.segments[0]?.name }),
+    note: record.note,
+    archived: record.archivedAt !== null,
     autoEnroll: record.autoEnroll,
     enrollPendingAt: record.enrollPendingAt !== null,
     state,
@@ -140,6 +132,13 @@ export const action = withGuard("/app/campaigns/$id", async ({ request, params }
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "");
   const campaignId = String(params.id);
+
+  // Copy it, note it, file it away. None of the three touches a price, so they are
+  // answered before any of the machinery that does — see `housekeepingAction`.
+  const housekeeping = await housekeepingAction(shop.id, campaignId, actor, form);
+  if (housekeeping) {
+    return housekeeping.redirectTo ? redirect(housekeeping.redirectTo) : housekeeping;
+  }
 
   if (intent === "request-approval") {
     await requestApproval(shop.id, campaignId, actor);

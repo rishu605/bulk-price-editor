@@ -42,6 +42,7 @@ export function CampaignHeader({
   preview,
   rule,
   scope,
+  archived,
   scheduleText,
   lifecycle,
   fetcher,
@@ -61,6 +62,10 @@ export function CampaignHeader({
     >
       <s-stack direction="inline" gap={SPACE.item} alignItems="center">
         <s-badge tone={lifecycle.tone}>{lifecycle.label}</s-badge>
+        {/* Beside the lifecycle badge and not instead of it. An archived campaign that
+            is still ACTIVE still has prices live on the storefront, and a page that
+            replaced one badge with the other would be hiding the half that matters. */}
+        {archived ? <s-badge tone="neutral">Archived</s-badge> : null}
         {scheduleText ? <s-text color="subdued">{scheduleText}</s-text> : null}
       </s-stack>
 
@@ -130,6 +135,34 @@ export function CampaignHeader({
             Revert
           </s-button>
         )}
+
+        {/* Copy it and file it away. Both tertiary, and last: they are about the campaign
+            as a record rather than about the prices, so they must not compete with the
+            one button that writes to a storefront.
+
+            Duplicate is not recurrence, which this app already has. Recurrence re-arms
+            *this* campaign for its next occurrence and keeps one history; duplicate is
+            how next month's different sale gets built out of last month's sale that
+            worked. NA offers `Copy to new job` in place of recurrence; Sami offers both,
+            and both is right.
+
+            There is no delete anywhere, and that is deliberate rather than missing: the
+            ledger hangs off this campaign's runs, so deleting the row would erase the
+            record of every price we ever wrote for it. Archive keeps all of it and takes
+            the campaign out of the list. `delete-guard.test.ts` holds the line. */}
+        <fetcher.Form method="post">
+          <input type="hidden" name="intent" value="duplicate" />
+          <s-button type="submit" variant="tertiary" icon="duplicate" loading={busy || undefined}>
+            Duplicate
+          </s-button>
+        </fetcher.Form>
+
+        <fetcher.Form method="post">
+          <input type="hidden" name="intent" value={archived ? "unarchive" : "archive"} />
+          <s-button type="submit" variant="tertiary" icon="archive" loading={busy || undefined}>
+            {archived ? "Restore" : "Archive"}
+          </s-button>
+        </fetcher.Form>
       </ActionRow>
     </s-grid>
 

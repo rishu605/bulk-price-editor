@@ -83,8 +83,12 @@ describe("the campaigns index picks the right one of the two", () => {
       <StaticRouter location="/app/campaigns">
         <CampaignListView
           list={list([])}
-          filters={{ ...filters, page: 1 }}
+          filters={{ ...filters, archived: false, page: 1 }}
           linkTo={(next) => `?${new URLSearchParams(next)}`}
+          // A plain element in place of the router's Form, the same stand-in the campaign
+          // header's tests use: this renders to static markup, and a real fetcher needs a
+          // data router the assertions here have no use for.
+          fetcher={{ Form: "form" } as never}
         />
       </StaticRouter>,
     );
@@ -152,10 +156,13 @@ describe("no page answers 'where are my rows' with a loose paragraph", () => {
    * early return a table component takes before it renders a header row.
    */
   const BRANCHES = [
-    // `(?:\w+\s*\?\s*\(\s*)*` steps over the inner ternary that picks between the two
-    // states. Without it a page that got this *right* — filtered one way, empty the other
-    // — is the one the check cannot see.
-    /(\w+)(?:\.length)? === 0\s*\?\s*\(\s*(?:\w+\s*\?\s*\(\s*)*(<[A-Za-z][\w.-]*)/g,
+    // `(?:[\w.]+\s*\?\s*\(\s*)*` steps over the inner ternaries that pick between the
+    // states. Without it a page that got this *right* — one state when a filter emptied
+    // it, another when there was never anything — is the one the check cannot see. The
+    // dot is in the class because the condition is as likely to be `filters.archived` as
+    // a bare name, and a check that stops seeing a branch the moment its condition lives
+    // on an object is a check that rewards the wrong refactor.
+    /(\w+)(?:\.length)? === 0\s*\?\s*\(\s*(?:[\w.]+\s*\?\s*\(\s*)*(<[A-Za-z][\w.-]*)/g,
     /(\w+)(?:\.length)? === 0\)\s*\{\s*return\s*\(\s*(<[A-Za-z][\w.-]*)/g,
   ];
 

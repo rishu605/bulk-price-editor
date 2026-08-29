@@ -1,3 +1,5 @@
+import type { useFetcher } from "react-router";
+
 import { humanise } from "../../lib/format/label";
 import { ActionRow } from "../ActionRow";
 import { EmptyState, NoMatches } from "../AsyncState";
@@ -55,10 +57,20 @@ export function CampaignListView({
   list,
   filters,
   linkTo,
+  fetcher,
 }: {
   list: List;
   filters: CampaignFilters;
   linkTo: (next: Record<string, string>) => string;
+  /**
+   * The route's fetcher, for the one control here that writes.
+   *
+   * Handed down rather than reached for, the same way the campaign page's sections take
+   * theirs. A component that calls `useFetcher` itself cannot be rendered outside a data
+   * router, which is how every one of these is tested — and the hook would tie a
+   * presentational component to the route that happens to own it today.
+   */
+  fetcher: Pick<ReturnType<typeof useFetcher>, "Form">;
 }) {
   const filtered = Boolean(filters.q || filters.status);
 
@@ -105,12 +117,32 @@ export function CampaignListView({
           </s-grid>
         </FilterForm>
 
+        {/* Not a seventh status tab. Archiving is a filing decision and the tabs are the
+            lifecycle; folding them together would mean giving up the status filter to
+            look in the archive, and "archived" would have to claim to be a state a
+            campaign can be in. A merchant looking for an archived campaign is usually
+            looking for a finished one, so both controls have to work at once. */}
+        <ActionRow>
+          <s-button
+            variant="tertiary"
+            icon="archive"
+            href={linkTo({ archived: filters.archived ? "" : "1" })}
+          >
+            {filters.archived ? "Show active campaigns" : "Show archived"}
+          </s-button>
+        </ActionRow>
+
         {list.campaigns.length === 0 ? (
-          filtered ? (
+          filters.archived ? (
+            <EmptyState
+              title="Nothing archived"
+              description="Archiving takes a campaign out of this list and leaves everything else alone — its runs, its ledger and any prices it has live. Nothing here is ever deleted."
+            />
+          ) : filtered ? (
             <NoMatches
               noun="campaigns"
               description="Nothing here matches the status and search you have set. Clearing them shows every campaign in the shop."
-              clearHref={linkTo({ q: "", status: "" })}
+              clearHref={linkTo({ q: "", status: "", archived: "" })}
             />
           ) : (
             <EmptyState
@@ -158,7 +190,14 @@ export function CampaignListView({
               <s-table-body>
                 {list.campaigns.map((campaign) => (
                   <s-table-row key={campaign.id}>
-                    <s-table-cell>{campaign.name}</s-table-cell>
+                    <s-table-cell>
+                      {campaign.name}
+                      {/* Only in the archive view, where every row has it, and on a
+                          campaign that turns up in a search from the active list —
+                          which is the case that would otherwise be confusing, because
+                          the row looks live and is not in the list. */}
+                      {campaign.archived ? <s-badge tone="neutral">Archived</s-badge> : null}
+                    </s-table-cell>
                     <s-table-cell>
                       <s-badge tone={campaign.lifecycle.tone}>
                         {campaign.lifecycle.label}
@@ -177,9 +216,22 @@ export function CampaignListView({
                         : "—"}
                     </s-table-cell>
                     <s-table-cell>
-                      <s-button variant="tertiary" href={`/app/campaigns/${campaign.id}`}>
-                        Open
-                      </s-button>
+                      <ActionRow>
+                        {/* Duplicate is not recurrence, which we already have. It is how
+                            next month's different sale gets built out of last month's
+                            sale that worked, and the row is where a merchant is when
+                            they recognise the one that worked. */}
+                        <fetcher.Form method="post">
+                          <input type="hidden" name="intent" value="duplicate" />
+                          <input type="hidden" name="campaignId" value={campaign.id} />
+                          <s-button type="submit" variant="tertiary" icon="duplicate">
+                            Duplicate
+                          </s-button>
+                        </fetcher.Form>
+                        <s-button variant="tertiary" href={`/app/campaigns/${campaign.id}`}>
+                          Open
+                        </s-button>
+                      </ActionRow>
                     </s-table-cell>
                   </s-table-row>
                 ))}

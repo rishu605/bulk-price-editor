@@ -36,6 +36,8 @@ const campaign = (over: Partial<Props["list"]["campaigns"][number]> = {}) => ({
   // writes its own sentence stops catching the day the real one changes.
   rule: describeRule({ kind: "percent-change", percent: -20 }),
   scope: describeScope({ groups: [{ conditions: [{ field: "tag", value: "sale" }] }] }),
+  note: null,
+  archived: false,
   createdAt: "2026-08-01T00:00:00.000Z",
   lastRun: null,
   ...over,
@@ -55,8 +57,12 @@ const render = (over: Partial<Props> = {}) =>
     <StaticRouter location="/app/campaigns">
       <CampaignListView
         list={over.list ?? list()}
-        filters={over.filters ?? { q: "", status: "", page: 1 }}
+        filters={over.filters ?? { q: "", status: "", archived: false, page: 1 }}
         linkTo={(next) => `?${new URLSearchParams(next)}`}
+        // A plain element in place of the router's Form, the same stand-in the campaign
+        // header's tests use: this renders to static markup, and a real fetcher needs a
+        // data router the assertions here have no use for.
+        fetcher={{ Form: "form" } as never}
       />
     </StaticRouter>,
   );
@@ -116,7 +122,7 @@ describe("when there is nothing to list", () => {
     // control to do it.
     const html = render({
       list: list({ campaigns: [], total: 0 }),
-      filters: { q: "nothing", status: "DRAFT", page: 1 },
+      filters: { q: "nothing", status: "DRAFT", archived: false, page: 1 },
     });
 
     expect(html).toContain("No campaigns match those filters");

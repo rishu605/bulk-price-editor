@@ -18,8 +18,19 @@ import { filtersFrom, PAGE_SIZE } from "./list.server";
 const from = (query: string) => filtersFrom(new URLSearchParams(query));
 
 describe("reading the filters", () => {
-  it("defaults to the first page, no search, no status", () => {
-    expect(from("")).toEqual({ q: "", status: "", page: 1 });
+  it("defaults to the first page, no search, no status, and the campaigns still in use", () => {
+    // Archived defaults to false rather than being absent, so the default list is the
+    // unarchived one. A missing parameter meaning "show everything" would put filed-away
+    // campaigns back in front of a merchant who filed them.
+    expect(from("")).toEqual({ q: "", status: "", archived: false, page: 1 });
+  });
+
+  it("opens the archive only when asked", () => {
+    expect(from("archived=1").archived).toBe(true);
+    // Anything else is the active list. "archived=0" is what an unchecked control posts,
+    // and reading it as truthy would open the archive on a link meant to close it.
+    expect(from("archived=0").archived).toBe(false);
+    expect(from("archived=true").archived).toBe(false);
   });
 
   it("trims a search someone typed and mostly deleted", () => {
