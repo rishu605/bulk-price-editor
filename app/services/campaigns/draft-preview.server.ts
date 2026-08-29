@@ -25,6 +25,7 @@ import { loadCandidates, variantDisplayFor } from "./candidates.server";
 import { importIdsOf, toResolvable } from "./model.server";
 import { guardrailsFor, readSettings } from "../settings.server";
 import { skipReasonForRow } from "../../lib/planning/reasons";
+import { liveIfDrifted } from "../../lib/pricing/drift-note";
 import { resolvePolicy } from "../../lib/money/rounding-policy";
 import type { FilterAst } from "../segments.server";
 import type {
@@ -50,10 +51,28 @@ export interface DraftPreviewRow {
   title: string;
   /** Null is ordinary — a product without a photo is normal, not a failure. */
   imageUrl: string | null;
+  /**
+   * The price this campaign's arithmetic starts from.
+   *
+   * Not the live price, and the distinction is the product. Every competitor computes a
+   * relative change against whatever is on the storefront right now, which is why
+   * RUBIX's own FAQ has to explain that a 30% sale followed by a 50% sale leaves the
+   * product at 35% of its original price for ever. `before` is the baseline, so the
+   * preview shows what the run will actually do.
+   */
   before: string | null;
   after: string | null;
   beforeCompareAt: string | null;
   afterCompareAt: string | null;
+  /**
+   * What the storefront says today, when that is not the baseline.
+   *
+   * Null when they agree, which is the ordinary case and needs no column. When they
+   * disagree the variant is either mid-campaign or has drifted, and a merchant reading
+   * "was 40.00, becomes 32.00" beside a storefront showing 28.00 needs to be told which
+   * number the app is working from — not left to discover it after the run.
+   */
+  live: string | null;
   /** True when the price does not move — already at the campaign price. */
   unchanged: boolean;
   /** Why this row will not be written, if it will not be. */
@@ -175,6 +194,14 @@ export async function previewDraft(
   const shown = [...changing, ...alreadyCorrect, ...skipped].slice(0, limit);
   const display = await variantDisplayFor(shopId, shown.map((row) => row.ref.variantGid));
 
+  // The baseline lives on the candidate, not on the planned row — the planner carries
+  // `beforePrice`, which is the *live* price. Both are wanted here: the campaign's
+  // arithmetic starts from the baseline, and a merchant whose storefront disagrees with
+  // it needs to be told rather than left to find out after the run.
+  const baselines = new Map(
+    candidates.map((candidate) => [candidate.ref.variantGid, candidate.baseline.price]),
+  );
+
   const fmt = (value?: Money | null) => (value ? format(value) : null);
 
   return {
@@ -184,17 +211,22 @@ export async function previewDraft(
     skipped: skipped.length,
     withoutBaseline: matched - candidates.length,
     blocked: null,
-    rows: shown.map((row) => ({
+    rows: shown.map((row) => {
+      const baseline = baselines.get(row.ref.variantGid) ?? null;
+
+      return {
       variantGid: row.ref.variantGid,
       title: display.get(row.ref.variantGid)?.title ?? row.ref.variantGid,
       imageUrl: display.get(row.ref.variantGid)?.imageUrl ?? null,
-      before: fmt(row.beforePrice),
+      before: fmt(baseline),
+      live: fmt(liveIfDrifted(baseline, row.beforePrice)),
       after: fmt(row.intendedPrice),
       beforeCompareAt: fmt(row.beforeCompareAt),
       afterCompareAt: fmt(row.intendedCompareAt),
       unchanged: isNoop(row),
       skippedReason: row.status === "skipped" ? skipReasonForRow(row.reason) : null,
-    })),
+      };
+    }),
   };
 }
 
