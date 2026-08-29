@@ -66,8 +66,10 @@ describe("one number decides how many rows a view holds", () => {
    * not put rows on a screen, and it has to be made deliberately.
    */
   const NOT_A_TABLE: Record<string, string> = {
-    "app/routes/app._index.tsx: take: 5":
-      "the dashboard's activity summary, which links to the full log",
+    "app/routes/app._index.tsx: take: 40":
+      "the dashboard's activity summary, which links to the full log — it reads more " +
+      "than the five it shows because the scheduler's own upkeep is filtered out " +
+      "afterwards, and a quiet shop's last five entries are all upkeep",
     "app/routes/app._index.tsx: take: 8":
       "the dashboard's upcoming campaigns, which links to the calendar",
     "app/services/activity.server.ts: take: 50": "distinct actors, for the Who dropdown",
