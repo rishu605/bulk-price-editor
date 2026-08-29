@@ -52,9 +52,12 @@ The distinction matters because the obvious response to a scan count is to add i
 until it reaches zero, which buys write amplification on the sync path in exchange for
 plans Postgres will decline to use.
 
-### Finding 1 — four filter conditions cannot use an index, and two indexes cannot be used
+### Finding 1 — five filter conditions cannot use an index, and two indexes cannot be used
 
-`vendor`, `productType`, `title` and `sku` all compile to `ILIKE`. `variant_index` carries
+**Fixed in #510.** The before/after is recorded under "After #510" below.
+
+
+`vendor`, `productType`, `title`, `sku` and `barcode` all compile to `ILIKE`. `variant_index` carries
 `variant_index_title_lower` (14 MB) and `variant_index_sku_lower` (7.3 MB), both btrees on
 `lower(col)`, and Postgres cannot serve `ILIKE` from either. Both report **zero scans**
 since creation, and no raw SQL in `app/` uses `lower(` — so this is structural, not a
@@ -74,10 +77,12 @@ rows gets 42× and a filter that matches 11% of the catalogue gets nothing worth
 The trigram indexes are also *smaller* than the dead ones they replace — 6.5 MB for
 `title` against 14 MB, 2.5 MB for `sku` against 7.3 MB.
 
-Tracked as its own ticket. `vendor` and `productType` are deliberately left scanning:
-low-cardinality equality over a large fraction of the table is a scan whatever index
-exists, and two more GIN indexes maintained on every one of 102K sync upserts is a poor
-trade for 9%.
+`barcode` had no index at all — not even an unusable one — and is the most selective
+column of the five: 81,649 distinct values across 102,132 variants.
+
+`vendor` and `productType` are deliberately left scanning. Low-cardinality equality over a
+large fraction of the table is a heap read whatever index exists, and two more GIN indexes
+maintained on every one of ~102K sync upserts is a poor trade for 9%.
 
 ### Finding 2 — `facets()` reads the whole catalogue to fill four dropdowns
 
@@ -122,6 +127,51 @@ the *scope* and each scan costs the size of the *table*, so total work is O(scop
 At 102K variants that product is small enough that the scan wins. It is not obvious that
 it still wins at ten times the ledger, and this catalogue cannot answer that. Recorded
 rather than guessed at.
+
+## After #510 — trigram indexes for the ILIKE conditions
+
+`pg_trgm` enabled; `gin_trgm_ops` GIN indexes on `title`, `sku` and `barcode`; the two
+`lower()` btrees dropped. Same store, same method.
+
+| Path | Before | After |
+|---|---|---|
+| scope: title contains | 54 ms, 2 scans | **10 ms, 0 scans** |
+| scope: sku contains | 29 ms, 2 scans | **2 ms, 0 scans** |
+| scope: barcode contains | (unmeasured, 2 scans) | **2 ms, 0 scans** |
+| scope: vendor | 31 ms, 2 scans | 34 ms, 2 scans — accepted |
+| scope: product type | 35 ms, 2 scans | 35 ms, 2 scans — accepted |
+
+The statement count fell from 63 of 70 reading a whole table to **59 of 72** — 72 because
+`barcode` is now measured too. Nothing else in the report moved.
+
+The merchant-visible one is the catalogue search box, which `measure:admin` times. Run
+twice in each index state on the same warm database:
+
+| | `lower()` btrees | Trigram GIN |
+|---|---|---|
+| Catalogue, text search (p50) | 55 ms, 49 ms | **20 ms, 19 ms** |
+| Catalogue, first page (p50) | 29 ms | 29 ms |
+
+Index bytes on `variant_index`: 21.3 MB removed (`title_lower` 14 MB, `sku_lower` 7.3 MB),
+11.4 MB added (`title_trgm` 6.5 MB, `sku_trgm` 2.5 MB, `barcode_trgm` 2.4 MB). Net
+−9.9 MB, and one fewer index maintained per row on the sync path despite covering one
+more column.
+
+`app/services/segments-index-coverage.test.ts` now fails the build if a condition is
+matched with `mode: "insensitive"` on a column with no trigram index and no recorded
+reason. It reads the index list out of `schema.prisma` rather than restating it, and its
+field list is a `Record<ConditionField, …>` so a new condition fails typecheck until it is
+classified.
+
+## Unrelated, found while measuring: reconciliation is 140× its recorded baseline
+
+`docs/perf/README.md` records reconciliation at 7 ms first page and 5 ms deep page. It now
+measures **~1,000 ms** for both.
+
+Not caused by #510 — confirmed by dropping the trigram indexes, restoring the `lower()`
+ones and re-measuring, which gives ~1,000 ms as well. The store has since grown 21 campaign
+runs and 125,579 ledger rows where the original baseline was taken against a store with
+none. Filed separately.
 
 ## What this does not cover
 
