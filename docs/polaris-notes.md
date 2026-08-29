@@ -274,3 +274,57 @@ a layout symptom surfaces somewhere other than the change that caused it — as 
 that is legitimate at some width and therefore reads as a design rather than a bug. Three
 deploys were spent on causes that turned out to be wrong; all three were narrowed by
 looking at one more page, never by reasoning harder.
+
+## A table cell's alignment reaches its text by inheritance, so nesting defeats it
+
+`format="currency"` and `format="numeric"` on an `s-table-header` are the app's only
+control over a money column, and it is worth knowing exactly what they do. From
+`polaris.js`, which is the only account of it that exists:
+
+```css
+.table-cell { display: table-cell; padding: .5rem .75rem;
+              min-block-size: 2rem; vertical-align: middle }
+.format-currency, .format-numeric { font-feature-settings: "tnum";
+              font-variant-numeric: tabular-nums; text-align: end }
+```
+
+Two things follow, and the second one cost a release.
+
+**Nothing in this app needs to set `tabular-nums` on a table cell.** The format already
+does, and a column of prices is where it matters most.
+
+**The alignment is `text-align` on the cell, so it reaches a number by inheritance.** Put
+a flex container in the cell — an `s-stack`, which is what you reach for the moment a cell
+holds a price *and* something qualifying it — and the number stops taking the column's
+alignment and starts taking the stack's, which defaults to the inline start. The column
+then renders with every row that has a compare-at sitting a few pixels left of every row
+that does not, which reads as a rendering fault rather than as anything anyone chose.
+
+`alignItems="end"` on the stack restores it. `MoneyCell` is the one place that knows this;
+`money-cell.test.ts` refuses a build without it, because the prop looks decorative and its
+absence is invisible in a diff.
+
+### The related trap: prose in the same text run as a number
+
+`text-align: end` aligns the *whole* cell's content. A qualifier concatenated onto the
+number — `` ` (was ${row.afterCompareAt})` ``, `" (current)"`, `"/month"` — is part of that
+run, so each row's number starts wherever its own suffix leaves room:
+
+```
+     Baseline        Would become
+        10.02     8.02 (was 10.02)
+        41.34        33.07 (was
+                         41.34)
+ 1799.32 (was       1439.46 (was
+    2598.79)           1799.32)
+```
+
+The wrapping is the obvious half. The expensive half is that no two prices in the column
+begin at the same place, so the decimal alignment the format was asked for is destroyed on
+exactly the rows that have something to say — and the whole reason to right-align money is
+that alignment. A money cell's first line holds a number and nothing else; everything else
+goes underneath it.
+
+Found in five tables at once (the editor's preview panel, the full-preview route, each
+market column of the review step, the baseline history, and the plans table). Pinned by
+`app/lib/ui/money-cell.test.ts`.

@@ -1,4 +1,5 @@
 import { humanise } from "../lib/format/label";
+import { MoneyCell } from "./MoneyCell";
 import { EmptyState } from "./AsyncState";
 import { ShowingSome } from "./Pagination";
 import type { MarketPreview, PreviewRow } from "../services/campaigns/index.server";
@@ -61,14 +62,31 @@ export function PreviewTable({
         {rows.map((row) => (
           <s-table-row key={row.variantGid}>
             <s-table-cell>{row.title}</s-table-cell>
-            <s-table-cell>{row.before ?? "\u2014"}</s-table-cell>
-            <s-table-cell>{row.after ?? "\u2014"}</s-table-cell>
-            <s-table-cell>{row.compareAt ?? "\u2014"}</s-table-cell>
-            {markets.map((market) => (
-              <s-table-cell key={market.priceListGid}>
-                {describeCell(row, market.priceListGid)}
-              </s-table-cell>
-            ))}
+            <s-table-cell>
+              <MoneyCell amount={row.before} />
+            </s-table-cell>
+            <s-table-cell>
+              <MoneyCell amount={row.after} />
+            </s-table-cell>
+            <s-table-cell>
+              <MoneyCell amount={row.compareAt} />
+            </s-table-cell>
+            {markets.map((market) => {
+              const cell = describeCell(row, market.priceListGid);
+              return (
+                <s-table-cell key={market.priceListGid}>
+                  {cell.kind === "price" ? (
+                    <MoneyCell amount={cell.amount} compareAt={cell.compareAt} />
+                  ) : (
+                    // Not a number, so not a `MoneyCell`. "Not sold here" and a skip
+                    // reason are phrases, and the column stays right-aligned under them
+                    // for the reason the header comment gives: one phrase must not cost
+                    // every price in the column its decimal alignment.
+                    <s-text color="subdued">{cell.text}</s-text>
+                  )}
+                </s-table-cell>
+              );
+            })}
             <s-table-cell>
               <s-badge tone={toneFor(PREVIEW_TONE, row.status)}>
                 {humanise(row.status)}
@@ -92,20 +110,36 @@ export function PreviewTable({
 }
 
 /**
- * One variant's price on one market.
+ * One variant's price on one market: either a price, or a phrase saying why there isn't
+ * one.
+ *
+ * Returns the two apart rather than as one string. It used to build
+ * `` `${price} was ${cell.compareAt}` ``, which put a number and a word in the same text
+ * run of a right-aligned column \u2014 so a market cell wrapped at "was" and no two prices in
+ * the column started at the same place. `MoneyCell` carries the full account; the shape
+ * of this function is the half of the fix that lives here, because a caller cannot
+ * right-align a number it has already glued a word to.
  *
  * "Not sold here" rather than a dash for a variant the market has no price for. A dash
  * reads as "no change", and the difference matters: one means the campaign leaves the
  * price alone, the other means there is no price there to leave alone.
  */
-function describeCell(row: PreviewRow, priceListGid: string): string {
+type MarketCell =
+  | { kind: "price"; amount: string | null; compareAt: string | null }
+  | { kind: "text"; text: string };
+
+function describeCell(row: PreviewRow, priceListGid: string): MarketCell {
   const cell = row.surfaces?.[priceListGid];
-  if (!cell) return "Not sold here";
+  if (!cell) return { kind: "text", text: "Not sold here" };
 
   if (cell.status !== "pending") {
-    return cell.reason ? `${humanise(cell.status)} \u00b7 ${cell.reason}` : humanise(cell.status);
+    return {
+      kind: "text",
+      text: cell.reason
+        ? `${humanise(cell.status)} \u00b7 ${cell.reason}`
+        : humanise(cell.status),
+    };
   }
 
-  const price = cell.after ?? "\u2014";
-  return cell.compareAt ? `${price} was ${cell.compareAt}` : price;
+  return { kind: "price", amount: cell.after ?? null, compareAt: cell.compareAt ?? null };
 }

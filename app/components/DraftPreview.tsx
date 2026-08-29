@@ -1,5 +1,5 @@
 import { formatCount } from "../lib/format/display";
-import { Blank } from "./Blank";
+import { MoneyCell } from "./MoneyCell";
 import { ActionRow } from "./ActionRow";
 import { EmptyState } from "./AsyncState";
 import { exampleRowFrom, StorefrontExample } from "./StorefrontExample";
@@ -204,17 +204,17 @@ export function DraftPreview({
                   </s-stack>
                 </s-table-cell>
                 <s-table-cell>
-                  {row.before ?? <Blank />}
-                  {row.beforeCompareAt ? ` (was ${row.beforeCompareAt})` : ""}
-                  {/* Only when the storefront disagrees with the baseline, which means
-                      the variant is mid-campaign or has drifted. Silence is the ordinary
-                      case; a merchant reading "40.00 becomes 32.00" beside a storefront
-                      showing 28.00 needs to be told which number we are working from. */}
-                  {row.live ? (
-                    <s-paragraph>
-                      <s-text tone="caution">live {row.live}</s-text>
-                    </s-paragraph>
-                  ) : null}
+                  <MoneyCell
+                    amount={row.before}
+                    compareAt={row.beforeCompareAt}
+                    /* Only when the storefront disagrees with the baseline, which means
+                       the variant is mid-campaign or has drifted. Silence is the ordinary
+                       case; a merchant reading "40.00 becomes 32.00" beside a storefront
+                       showing 28.00 needs to be told which number we are working from. */
+                    note={
+                      row.live ? <s-text tone="caution">live {row.live}</s-text> : undefined
+                    }
+                  />
                 </s-table-cell>
                 <s-table-cell>
                   {row.skippedReason ? (
@@ -222,10 +222,7 @@ export function DraftPreview({
                   ) : row.unchanged ? (
                     <s-text color="subdued">no change</s-text>
                   ) : (
-                    <s-text>
-                      {row.after ?? <Blank />}
-                      {row.afterCompareAt ? ` (was ${row.afterCompareAt})` : ""}
-                    </s-text>
+                    <MoneyCell amount={row.after} compareAt={row.afterCompareAt} />
                   )}
                 </s-table-cell>
               </s-table-row>
