@@ -24,8 +24,17 @@ export function DraftPreview({
   preview,
   pending = false,
   surface,
+  fullPreviewHref,
 }: {
   preview: Preview | null;
+  /**
+   * Where "see all rows" goes, with this draft serialised into it.
+   *
+   * Built by the editor rather than here, because it is the editor that holds the form
+   * this panel is describing — and a component that reached into the DOM for a form it
+   * does not own would be one that only works on the one page it was written for.
+   */
+  fullPreviewHref?: string;
   /** A request is in flight. See the note on the first branch below. */
   pending?: boolean;
   /**
@@ -225,12 +234,23 @@ export function DraftPreview({
       ) : null}
 
       {preview.changing + preview.alreadyCorrect + preview.skipped > preview.rows.length ? (
-        <s-paragraph>
+        <s-stack gap={SPACE.tight}>
           <s-text color="subdued">
             Showing the first {formatCount(preview.rows.length)}. Every row is priced the
             same way.
           </s-text>
-        </s-paragraph>
+          {/* The escape hatch. "Showing the first 25" is a promise a merchant has to take
+              on trust, on the one screen whose whole job is not asking them to — and the
+              panel cannot be the list, because it lives beside the form. NA has the same
+              button under its inline preview. */}
+          {fullPreviewHref ? (
+            <ActionRow>
+              <s-button variant="tertiary" href={fullPreviewHref}>
+                See all {formatCount(preview.changing + preview.alreadyCorrect + preview.skipped)} rows
+              </s-button>
+            </ActionRow>
+          ) : null}
+        </s-stack>
       ) : null}
     </s-stack>
   );

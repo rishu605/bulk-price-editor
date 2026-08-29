@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { Form, redirect, useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -9,21 +9,30 @@ import { facets } from "../services/segments.server";
 import { createCampaign } from "../services/campaigns/index.server";
 import { joinDateAndTime, localInputToUtc, type Schedule } from "../lib/scheduling/window";
 import { presetStartFor } from "../lib/scheduling/calendar";
-import { formatDay } from "../lib/format/display";
+import { formatClock, formatDay } from "../lib/format/display";
 import { describeAdjustment } from "../lib/markets/describe";
 import {
   profileNameFor,
   readRoundingPolicy,
   ROUNDING_LABELS,
+  type RoundingProfileName,
 } from "../lib/money/rounding-policy";
+import { roundingExampleLine } from "../lib/money/rounding-example";
 import { ActionRow } from "../components/ActionRow";
+import { CampaignNameField } from "../components/campaign/CampaignNameField";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { readSettings, shopCurrency } from "../services/settings.server";
 import { billingFrom } from "../services/billing.server";
 import { canUseSurface } from "../lib/billing/plans";
 import prisma from "../db.server";
-import { astFrom, compareAtFrom, readerFor, ruleFrom } from "../lib/campaigns/draft-form";
+import {
+  astFrom,
+  compareAtFrom,
+  readerFor,
+  ruleFrom,
+  SCOPE_CONDITION_FIELDS,
+} from "../lib/campaigns/draft-form";
 import { PageSections, PageShell } from "../components/PageShell";
 import { UnsavedChanges } from "../components/UnsavedChanges";
 import { DraftPreview } from "../components/DraftPreview";
@@ -123,6 +132,10 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
     // which is the hydration mismatch `formatAgo` carries a paragraph about avoiding.
     defaultName: `${practice ? "Practice" : "Sale"} · ${formatDay(new Date(), shop.timezone)}`,
     timeZone: shop.timezone,
+    // The clock in that zone, so a merchant can check it against the one on their wall
+    // rather than trying to remember what "Asia/Calcutta" means for them. Computed here
+    // rather than in the browser — see `formatClock`.
+    timeZoneNow: formatClock(new Date(), shop.timezone),
     priceLists,
     currencies,
     // Gated surfaces are listed with an upgrade prompt rather than hidden. Hiding a
@@ -141,7 +154,15 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
     // See the note on the mount effect: reading the form for the *first* request gets a
     // scope that matches nothing (#470).
     firstPreview: firstPreviewParams(settings.rounding, url.searchParams).toString(),
-    roundingOptions: Object.entries(ROUNDING_LABELS).map(([value, label]) => ({ value, label })),
+    // Each option carries a worked example on a real number, in the shop's own currency.
+    // Sami and RUBIX both do this and it is the difference between a merchant guessing
+    // what "Nearest 10" means and knowing — see `rounding-example.ts`, and #489 for what
+    // the examples turned out to reveal about two of the labels.
+    roundingOptions: Object.entries(ROUNDING_LABELS).map(([value, label]) => ({
+      value,
+      label,
+      example: roundingExampleLine(value as RoundingProfileName, currency),
+    })),
     facets: available,
     segments,
     usingSegment: segment ? { id: segment.id, name: segment.name, kind: segment.kind } : null,
@@ -152,6 +173,7 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
     selected: {
       collection: url.searchParams.get("collection") ?? "",
       tag: url.searchParams.get("tag") ?? "",
+      excludeTag: url.searchParams.get("excludeTag") ?? "",
       vendor: url.searchParams.get("vendor") ?? "",
       title: url.searchParams.get("title") ?? "",
       segment: segmentId,
@@ -165,7 +187,7 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
  * Named once and shared with the form, so a field added to one and forgotten in the
  * other cannot silently stop being filterable.
  */
-export const SCOPE_FIELDS = ["collection", "tag", "vendor", "title", "segment"] as const;
+export const SCOPE_FIELDS = [...SCOPE_CONDITION_FIELDS, "segment"] as const;
 
 
 /** Builds an AST from the simple scope form: all provided conditions ANDed. */
@@ -176,7 +198,10 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
 
   const form = await request.formData();
   const params = new URLSearchParams();
-  for (const field of ["collection", "tag", "vendor", "title"]) {
+  // The same list the preview reads, not a copy of it. A field in one and not the other
+  // is a scope a merchant sets, sees previewed, and does not get — or the reverse, which
+  // is worse. Rule 4: preview and execution share one code path.
+  for (const field of SCOPE_CONDITION_FIELDS) {
     const value = form.get(field);
     if (typeof value === "string" && value.trim()) params.set(field, value.trim());
   }
@@ -253,6 +278,7 @@ export default function NewCampaign() {
     practice,
     guided,
     timeZone,
+    timeZoneNow,
     priceLists,
     currencies,
     storeRounding,
@@ -272,13 +298,29 @@ export default function NewCampaign() {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const askedForPreview = useRef(false);
 
+  /**
+   * Where "see all rows" points, kept in step with the panel it sits under.
+   *
+   * Rebuilt whenever a preview comes back rather than on every keystroke: the panel is
+   * already debounced, and a link that changed faster than the numbers beside it would
+   * send a merchant to a different campaign than the one they were reading about.
+   */
+  const [fullPreviewHref, setFullPreviewHref] = useState<string | undefined>(undefined);
+
   const submitPreview = useCallback(() => {
     const form = formRef.current;
     if (!form) return;
-    previewFetcher.submit(new FormData(form), {
+
+    const fields = new FormData(form);
+    previewFetcher.submit(fields, {
       method: "post",
       action: "/app/preview-draft",
     });
+
+    // The same fields, as a link. Built from the same FormData the preview was asked
+    // with, so the full list is by construction the campaign the panel is describing —
+    // reading the form a second time could catch a keystroke in between.
+    setFullPreviewHref(`/app/campaigns/preview?${queryFrom(fields)}`);
   }, [previewFetcher]);
 
   const requestPreview = useCallback(() => {
@@ -313,6 +355,7 @@ export default function NewCampaign() {
       method: "post",
       action: "/app/preview-draft",
     });
+    setFullPreviewHref(`/app/campaigns/preview?${firstPreview}`);
   }, [firstPreview, previewFetcher]);
 
 
@@ -390,13 +433,7 @@ export default function NewCampaign() {
                   and a title above the settings that describe it is the shape every form
                   of this kind takes. */}
               <FullRow>
-                <s-text-field
-                  name="name"
-                  label="Campaign name"
-                  value={defaultName}
-                  details="For you and your team. Customers never see it — use the storefront tags below if you want your theme to badge the sale."
-                  required
-                />
+                <CampaignNameField defaultName={defaultName} />
               </FullRow>
 
               {/* Not wrapped in a `FullRow`, deliberately. This renders *two* fields — the
@@ -424,7 +461,11 @@ export default function NewCampaign() {
                     value={option.value}
                     defaultSelected={option.value === storeRounding.default}
                   >
-                    {option.label}
+                    {/* The example is in the option and not under the select, so all six
+                        explain themselves while the merchant is comparing them. A single
+                        line describing whichever is currently chosen answers the question
+                        after the decision has been made. */}
+                    {`${option.label} · ${option.example}`}
                   </s-option>
                 ))}
               </s-select>
@@ -542,8 +583,10 @@ export default function NewCampaign() {
             <s-heading>Schedule (optional)</s-heading>
             <s-paragraph>
               <s-text>
-                Times are in your store&rsquo;s zone, {timeZone}. Leave the start
-                blank to run the campaign only when you apply it by hand.
+                Times are in your store&rsquo;s zone, {timeZone}, where it is currently{" "}
+                {timeZoneNow}. That comes from your Shopify store settings, so it matches
+                your orders. Leave the start blank to run the campaign only when you apply
+                it by hand.
               </s-text>
             </s-paragraph>
 
@@ -708,6 +751,37 @@ export default function NewCampaign() {
             ))}
           </s-select>
           <s-text-field name="title" label="Title contains" value={selected.title} />
+
+          {/* The exception, beside the conditions rather than in its own card.
+              
+              Sami gives "Exclude products" a card of its own next to "Apply to products";
+              here it belongs in the same grid, because it is read as part of one sentence
+              — "In Outerwear, tagged sale, except tagged no-sale" — and a second card
+              would make the exception look like a second decision.
+
+              A tag rather than a variant picker: a merchant who keeps a list of things
+              never to discount already keeps it as a tag, and a picker would be a list
+              that goes stale the moment they add a product. */}
+          <FullRow>
+            <s-select
+              name="excludeTag"
+              label="Except anything tagged"
+              details="Leaves these out of this campaign. They stay eligible for your other campaigns."
+            >
+              <s-option value="" defaultSelected={!selected.excludeTag}>
+                Nothing excluded
+              </s-option>
+              {available.tags.map((tag) => (
+                <s-option
+                  key={tag}
+                  value={tag}
+                  defaultSelected={selected.excludeTag === tag}
+                >
+                  {tag}
+                </s-option>
+              ))}
+            </s-select>
+          </FullRow>
         </FieldGrid>
       </s-section>
 
@@ -733,6 +807,10 @@ export default function NewCampaign() {
           // prices the base surface; on a shop with catalogues the merchant is reading a
           // card headed "on your storefront" and has more than one.
           surface={priceLists.length > 0 ? `base price · ${baseCurrency}` : undefined}
+          // The draft, serialised. The campaign does not exist yet — that is what makes
+          // it a draft — so there is no id to link by, and the URL is what lets the full
+          // preview be reloaded, bookmarked, or opened in a second tab beside this form.
+          fullPreviewHref={fullPreviewHref}
         />
       </s-section>
 
@@ -757,3 +835,19 @@ export function ErrorBoundary() {
 export const headers: HeadersFunction = (headersArgs) => {
   return boundary.headers(headersArgs);
 };
+
+/**
+ * A form's fields as a query string, dropping what a preview has no use for.
+ *
+ * A file input serialises as a `File`, which stringifies to the useless `[object File]`,
+ * and the campaign name would put whatever the merchant typed into a URL for no reason.
+ * Everything the preview actually reads is a short scalar.
+ */
+function queryFrom(fields: FormData): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of fields.entries()) {
+    if (typeof value !== "string" || key === "name") continue;
+    if (value !== "") params.append(key, value);
+  }
+  return params.toString();
+}
