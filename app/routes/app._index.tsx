@@ -570,7 +570,22 @@ export default function Dashboard() {
           <CountsRow
             items={[
               { label: "Variants", value: health.variants },
-              { label: "With a baseline", value: health.withBaseline },
+              /* "Baselines captured", not "With a baseline".
+              
+                 These are three different axes, but the middle and right tiles were
+                 named closely enough to read as two halves of one: "With a baseline
+                 3,669" beside "Not at baseline 1" invites the arithmetic, and the
+                 arithmetic does not work — 3,669 + 1 is not 3,669. They are not
+                 complements. One counts variants that *have* a reference price; the
+                 other counts variants whose storefront has moved away from theirs.
+              
+                 It is self-correcting at full coverage, because a merchant can see the
+                 first two numbers match. At 95% coverage it is not, and that is exactly
+                 the shop that needs to read it right. Naming the capture removes the
+                 reading; "Not at baseline" stays, because it is what the catalogue's
+                 badge and the help note already call this and one thing should not have
+                 two names. */
+              { label: "Baselines captured", value: health.withBaseline },
               { label: "Not at baseline", value: health.drifted },
             ]}
           />
