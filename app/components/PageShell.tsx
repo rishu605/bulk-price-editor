@@ -149,12 +149,42 @@ export function PageSections({ children }: { children: ReactNode }) {
   return <s-stack gap={SPACE.page}>{children}</s-stack>;
 }
 
+/**
+ * How wide the second column is.
+ *
+ * `"base"` is the 22rem strip the column was built for: a store card, an activity feed,
+ * a set of actions — things whose content is a few short lines and whose job is to sit
+ * out of the way.
+ *
+ * `"wide"` exists for one thing, and it should stay that way: the campaign editor's live
+ * preview, which is a table of prices. A price table at 22rem wraps every row onto three
+ * lines, and a preview a merchant has to decode is not a preview. Half the page is the
+ * proportion Sami uses for the same panel and it is the right one — the form is a dozen
+ * short controls and the preview is the answer the merchant came for.
+ */
+export type AsideWidth = "base" | "wide";
+
+/**
+ * No value in here may contain a comma. The note on `gridTemplateColumns` below is not
+ * decoration: Polaris splits a responsive value on the comma to separate "when the query
+ * matches" from "otherwise", so the obvious `minmax(0, 1fr)` takes its own comma as that
+ * separator, the whole value stops parsing, and the aside silently stacks underneath —
+ * looking exactly like a layout choice. `PageShell.test.tsx` refuses one.
+ */
+const ASIDE_TRACK: Record<AsideWidth, string> = {
+  base: "22rem",
+  wide: "1fr",
+};
+
 export function PageShell({
   heading,
   backTo,
+  asideWidth = "base",
   children,
 }: {
   heading: string;
+  /** See `AsideWidth`. Defaults to the narrow strip every other page wants. */
+  asideWidth?: AsideWidth;
   /**
    * Where this page came from, for pages the nav menu cannot reach.
    *
@@ -231,7 +261,7 @@ export function PageShell({
           // takes its own comma as that separator and the whole value stops parsing --
           // which silently falls back to `none` and stacks the aside underneath, looking
           // exactly like a layout choice rather than a broken string.
-          gridTemplateColumns="@container (inline-size <= 900px) 1fr, 1fr 22rem"
+          gridTemplateColumns={`@container (inline-size <= 900px) 1fr, 1fr ${ASIDE_TRACK[asideWidth]}`}
           // Without this the aside column stretches to the height of the main content, so
           // a one-line sidebar next to a long table becomes a very tall empty card.
           alignItems="start"

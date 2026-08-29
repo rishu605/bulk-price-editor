@@ -1,5 +1,7 @@
 import { useState } from "react";
 
+import { DRAFT_DEFAULTS } from "../lib/campaigns/draft-defaults";
+
 /**
  * The rule's amount, which is a percentage or a price depending on the rule.
  *
@@ -25,7 +27,7 @@ export function RuleValueField({
   name?: string;
   selectName?: string;
 }) {
-  const [kind, setKind] = useState("percent-change");
+  const [kind, setKind] = useState<string>(DRAFT_DEFAULTS.ruleKind);
   const money = kind === "fixed-change" || kind === "set-exact";
 
   return (
@@ -35,7 +37,7 @@ export function RuleValueField({
         label="Adjustment"
         onChange={(event) => setKind(String(event.currentTarget.value))}
       >
-        <s-option value="percent-change" defaultSelected>
+        <s-option value={DRAFT_DEFAULTS.ruleKind} defaultSelected>
           Percent change from baseline
         </s-option>
         <s-option value="fixed-change">Fixed change from baseline</s-option>
@@ -46,19 +48,19 @@ export function RuleValueField({
         <s-money-field
           name={name}
           label={kind === "set-exact" ? `Price (${currency})` : `Amount (${currency})`}
-          value={kind === "set-exact" ? "" : "-10"}
+          value={kind === "set-exact" ? "" : DRAFT_DEFAULTS.fixedValue}
           details={
             kind === "set-exact"
               ? "Every variant in scope gets this exact price."
-              : `Negative reduces. -10 takes ${currency} 10 off the baseline.`
+              : `Negative reduces. ${DRAFT_DEFAULTS.fixedValue} takes ${currency} ${DRAFT_DEFAULTS.fixedValue.replace('-', '')} off the baseline.`
           }
         />
       ) : (
         <s-number-field
           name={name}
           label="Percentage"
-          value="-20"
-          details="Negative discounts. -20 means 20% off the baseline."
+          value={DRAFT_DEFAULTS.percentValue}
+          details={`Negative discounts. ${DRAFT_DEFAULTS.percentValue} means ${DRAFT_DEFAULTS.percentValue.replace("-", "")}% off the baseline.`}
         />
       )}
     </>

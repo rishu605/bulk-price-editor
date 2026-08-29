@@ -23,7 +23,18 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const EDITOR = readFileSync(join(process.cwd(), "app/routes/app.campaigns.new.tsx"), "utf8");
+/**
+ * The editor's source with its comments removed.
+ *
+ * Every assertion here is a grep, and the comments in that file talk about the very
+ * things being grepped for — the removed "Update match count" button is named in the
+ * comment explaining why it went. A grep that reads its own explanation is the trap this
+ * repo has now hit five times. The same two lines appear in `table-size.test.ts` and
+ * `imports.test.ts`; extracting them is #462.
+ */
+const EDITOR = readFileSync(join(process.cwd(), "app/routes/app.campaigns.new.tsx"), "utf8")
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .replace(/^\s*\/\/.*$/gm, "");
 
 /** Where a name first appears in the file, or -1. Source order is render order here. */
 const at = (needle: string) => EDITOR.indexOf(needle);
@@ -59,9 +70,16 @@ describe("step 2 lays its fields out in columns", () => {
 });
 
 describe("the rule is what a merchant meets first", () => {
-  it("previews the rule directly under the rule", () => {
-    expect(at("<RuleValueField")).toBeLessThan(at("What this would do"));
-    expect(at("What this would do")).toBeLessThan(at("Markets and catalogues"));
+  it("previews the rule beside it, in the aside, rather than under it", () => {
+    // It was directly under the rule, which on a form this long meant off screen while
+    // the rule was being typed. The column is where it goes; what has to stay true is
+    // that there is exactly one of it and it is not back inside the form.
+    expect(EDITOR).toContain('<s-section slot="aside" heading="What this would do">');
+    expect((EDITOR.match(/<DraftPreview/g) ?? []).length).toBe(1);
+    expect(
+      at("<DraftPreview"),
+      "the preview is inside the form again, which is where it was off screen",
+    ).toBeGreaterThan(at("</Form>"));
   });
 
   it("puts the four rarely-touched settings after the schedule, not before it", () => {
@@ -78,9 +96,30 @@ describe("the rule is what a merchant meets first", () => {
     expect(EDITOR).toMatch(/Skip them\s*\n?\s*unless you have a reason/);
   });
 
-  it("still submits after everything, exactly once", () => {
-    expect((EDITOR.match(/type="submit"/g) ?? []).length).toBe(2); // scope's, and the create
+  it("submits once, after everything", () => {
+    // Two, once: the scope had its own GET form with an "Update match count" button, so
+    // reading the count meant a navigation that reset every field in the rule form. One
+    // form has one submit, and a second appearing here means the scope has been split
+    // back out.
+    expect((EDITOR.match(/type="submit"/g) ?? []).length).toBe(1);
+    expect(EDITOR).not.toContain("Update match count");
     expect(at("Create and preview")).toBeGreaterThan(at("Advanced (optional)"));
+  });
+
+  it("scopes and prices from one form, so a filter change reprices", () => {
+    // The fetcher posts `new FormData(form)`. With the scope outside that form a filter
+    // change could not move the preview, and the scope had to be mirrored in as six
+    // hidden inputs that a new field could silently miss.
+    expect((EDITOR.match(/<Form /g) ?? []).length).toBe(1);
+    expect(
+      EDITOR,
+      "a hidden mirror of a scope field means there are two forms again",
+    ).not.toMatch(/<input type="hidden" name="(collection|tag|vendor|title|segment)"/);
+
+    for (const field of ['name="segment"', 'name="collection"', 'name="tag"', 'name="vendor"', 'name="title"']) {
+      expect(at(field), `${field} is outside the form that prices it`).toBeGreaterThan(at("<Form "));
+      expect(at(field), `${field} is outside the form that submits it`).toBeLessThan(at("</Form>"));
+    }
   });
 });
 

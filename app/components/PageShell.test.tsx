@@ -385,3 +385,41 @@ describe("pages that can lose typed work", () => {
     expect(missing, "these can discard a filled-in form on any navigation").toEqual([]);
   });
 });
+
+describe("how wide the second column is", () => {
+  // `<=` arrives HTML-escaped from `renderToStaticMarkup`, which is correct output and
+  // noise here — the assertions are about the track list, not about entity encoding.
+  const columnsOf = (html: string) =>
+    (/gridtemplatecolumns="([^"]*)"/i.exec(html)?.[1] ?? "").replaceAll("&lt;", "<");
+
+  const page = (asideWidth?: "base" | "wide") =>
+    render(
+      <PageShell heading="Campaign" {...(asideWidth ? { asideWidth } : {})}>
+        <s-section heading="Rule">main content</s-section>
+        <s-section slot="aside" heading="Preview">rows</s-section>
+      </PageShell>,
+    );
+
+  it("defaults to the narrow strip every other page wants", () => {
+    expect(columnsOf(page())).toBe("@container (inline-size <= 900px) 1fr, 1fr 22rem");
+  });
+
+  it("gives the campaign editor's price table half the page", () => {
+    // A preview of prices at 22rem wraps every row onto three lines, and a preview a
+    // merchant has to decode is not a preview.
+    expect(columnsOf(page("wide"))).toBe("@container (inline-size <= 900px) 1fr, 1fr 1fr");
+  });
+
+  it("never puts a second comma in the value", () => {
+    // Polaris splits a responsive grid value on the comma to separate "when the query
+    // matches" from "otherwise". The obvious `minmax(0, 1fr)` brings its own comma, the
+    // whole value stops parsing, and the aside silently stacks underneath — which looks
+    // exactly like a layout choice rather than a broken string.
+    for (const width of ["base", "wide"] as const) {
+      expect(
+        columnsOf(page(width)).split(",").length - 1,
+        `the ${width} column value has a comma inside a track, so it will not parse`,
+      ).toBe(1);
+    }
+  });
+});
