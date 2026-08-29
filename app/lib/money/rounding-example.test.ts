@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { roundingExample, roundingExampleLine } from "./rounding-example";
-import { ROUNDING_LABELS, type RoundingProfileName } from "./rounding-policy";
+import { ROUNDING_PROFILES, type RoundingProfileName } from "./rounding-policy";
 
-const NAMES = Object.keys(ROUNDING_LABELS) as RoundingProfileName[];
+const NAMES = Object.keys(ROUNDING_PROFILES) as RoundingProfileName[];
 
 describe("a worked example for every option", () => {
   it.each(NAMES)("%s says something", (name) => {
@@ -16,20 +16,20 @@ describe("a worked example for every option", () => {
     // The reason the sample price is awkward: on a tidy number several profiles agree,
     // and a merchant comparing them learns nothing.
     //
-    // "Whole amounts" and "Nearest 100" are excluded because they are the same function
-    // reached by two names — charm-ending-0 and step-100-minor-units both land on the
-    // whole major unit. Asserting they differ would be asserting a bug. See #489.
+    // "Nearest 100" is excluded because on a two-decimal currency it is the same
+    // function as "Whole amounts" — charm-ending-0 and step-100-minor-units both land on
+    // the whole major unit. `roundingChoices` stops offering it here for that reason;
+    // asserting the two differ would be asserting a bug.
     const compared = NAMES.filter((name) => name !== "none" && name !== "nearest100");
     const answers = compared.map((name) => roundingExample(name, "USD").after);
 
     expect(new Set(answers).size).toBe(answers.length);
   });
 
-  it("rounds in minor units, which is not what two of the labels say", () => {
-    // Pinned deliberately, because it is surprising and because #489 is open to change
-    // it. "Nearest 10" is ten cents, not ten dollars; a merchant reading the label alone
-    // would expect $2,350. The worked example is what makes this visible at the moment
-    // of choosing, which is the whole reason this file exists.
+  it("rounds in minor units, which is what the labels now say", () => {
+    // Pinned deliberately, because it is surprising: "Nearest 10" is ten cents, not ten
+    // dollars. The label says "Nearest 0.10" for exactly this reason (#489), and the
+    // worked example says it again on a real number.
     expect(roundingExample("nearest10", "USD").after).toBe("$2,347.60");
     expect(roundingExample("nearest100", "USD").after).toBe("$2,348.00");
   });

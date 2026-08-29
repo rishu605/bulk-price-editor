@@ -26,7 +26,7 @@
 import { isZeroDecimal } from "./currency";
 import { formatMoneyForDisplay, money } from "./money";
 import { applyRounding } from "./rounding";
-import { ROUNDING_PROFILES, type RoundingProfileName } from "./rounding-policy";
+import { ROUNDING_PROFILES, roundingLabel, type RoundingProfileName } from "./rounding-policy";
 
 /**
  * A price awkward enough to show the difference.
@@ -95,16 +95,53 @@ export function roundingExampleLine(name: RoundingProfileName, currency: string)
 }
 
 /**
- * A note on what "Nearest 10" turns out to mean.
+ * A note on what "Nearest 10" turns out to mean, and what was done about it.
  *
  * Ten *minor units*, not ten pounds: `nearest10` is `{ step: 10 }` and a step is in minor
  * units by definition, so on a $2,347.62 price it produces $2,347.60 rather than the
- * $2,350 the label implies. `nearest100` is a whole dollar, which is also why it agrees
- * with "Whole amounts" at every price — the two are the same function reached by two
- * names.
+ * $2,350 the old label implied. `nearest100` is a whole dollar, which is also why it
+ * agreed with "Whole amounts" at every price.
  *
- * That is a mislabelling with real consequences, and fixing it is a change to what a
- * merchant's prices become, so it is not being done quietly here as part of a help-text
- * ticket. What this example does is make the actual behaviour visible at the moment of
- * choosing, which is the narrower thing that was missing. See #489.
+ * Fixed as a labelling change (#489), not an arithmetic one: `roundingLabel` says
+ * "Nearest 0.10" in dollars and "Nearest 10" in yen, both of which are true, and
+ * `roundingChoices` stops offering two names for one function. Changing the *steps* to
+ * match the old words was the other option and it would re-price every campaign already
+ * using them on its next run, which is not something a help-text ticket gets to do.
  */
+
+/**
+ * The options a picker should offer in this currency, and what each does to a price.
+ *
+ * Not every profile means something everywhere, and one of the acceptance criteria on
+ * #489 was that no two options may be the same thing under different names. Both fall out
+ * of the same question — does this profile do anything here that another does not:
+ *
+ *   - A charm ending is a fact about the sub-unit, so `.99` and `.95` are unexpressible in
+ *     a currency that has none.
+ *   - "Whole amounts, no cents" is a no-op where amounts are already whole.
+ *   - And on a two-decimal currency, "whole" and the 100-minor-unit step land on exactly
+ *     the same number for every input. They are one function reached by two names, and
+ *     offering both is asking a merchant to choose between identical things. The charm
+ *     profile keeps the slot: "Whole amounts, no cents" says what it does, where
+ *     "Nearest 1.00" needs the merchant to work it out.
+ *
+ * A dropped option is dropped from the *picker*, not from the app. A campaign already
+ * storing `nearest100` keeps it, keeps pricing exactly as it did, and reads back with a
+ * true label — which is what makes this a labelling change rather than a pricing one.
+ */
+export function roundingChoices(
+  currency: string,
+): { value: RoundingProfileName; label: string; example: string }[] {
+  const zeroDecimal = isZeroDecimal(currency);
+
+  const offered = (Object.keys(ROUNDING_PROFILES) as RoundingProfileName[]).filter((name) => {
+    if (zeroDecimal) return name !== "charm99" && name !== "charm95" && name !== "whole";
+    return name !== "nearest100";
+  });
+
+  return offered.map((name) => ({
+    value: name,
+    label: roundingLabel(name, currency),
+    example: roundingExampleLine(name, currency),
+  }));
+}

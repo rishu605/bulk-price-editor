@@ -14,8 +14,9 @@ import { withGuard } from "../lib/errors/guard.server";
 import {
   profileNameFor,
   readRoundingPolicy,
-  ROUNDING_LABELS,
+  roundingLabel,
 } from "../lib/money/rounding-policy";
+import { roundingChoices } from "../lib/money/rounding-example";
 import { PageSections, PageShell } from "../components/PageShell";
 import { SettingsSaveBar } from "../components/SettingsSaveBar";
 import { Field, FieldGrid, FullRow } from "../components/FieldGrid";
@@ -51,7 +52,9 @@ export const loader = withGuard("/app/settings", async ({ request }: LoaderFunct
     settings,
     currency,
     currencies,
-    roundingOptions: Object.entries(ROUNDING_LABELS).map(([value, label]) => ({ value, label })),
+    // Currency-aware: a step is in minor units, so "Nearest 10" means ten cents on a USD
+    // store and ten yen on a JPY one, and the option list itself differs (#489).
+    roundingOptions: roundingChoices(currency),
     withCost,
     variants,
     notifications,
@@ -282,7 +285,7 @@ export default function Settings() {
                           value="inherit"
                           defaultSelected={!settings.rounding.byCurrency[code]}
                         >
-                          Use the setting above ({ROUNDING_LABELS[effective].toLowerCase()})
+                          Use the setting above ({roundingLabel(effective, code).toLowerCase()})
                         </s-option>
                         {roundingOptions.map((option) => (
                           <s-option
