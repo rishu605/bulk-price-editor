@@ -1,4 +1,5 @@
 import { formatCount } from "../lib/format/display";
+import { EmptyState } from "./AsyncState";
 import { SPACE } from "../lib/ui/spacing";
 import type { DraftPreview as Preview } from "../services/campaigns/draft-preview.server";
 
@@ -39,9 +40,16 @@ export function DraftPreview({ preview }: { preview: Preview | null }) {
 
   if (preview.matched === 0) {
     return (
-      <s-paragraph>
-        <s-text color="subdued">Nothing matches this scope yet.</s-text>
-      </s-paragraph>
+      // `EmptyState` rather than `NoMatches`, deliberately. `NoMatches` cannot be
+      // called without saying where Clear filters goes, and after #442 the scope is
+      // form state rather than a query string: there is no URL that clears it, and a
+      // link that navigated would discard the rule the merchant has just typed. The
+      // way out is the selects a few inches to the left, so the sentence points at
+      // them instead of a button pointing at nothing.
+      <EmptyState
+        title="Nothing matches this scope"
+        description="No variant matches every condition. Loosen one, or leave them all blank to target the whole catalogue."
+      />
     );
   }
 
@@ -83,7 +91,15 @@ export function DraftPreview({ preview }: { preview: Preview | null }) {
         <s-table>
           <s-table-header-row>
             <s-table-header listSlot="primary">Variant</s-table-header>
-            <s-table-header listSlot="inline" format="currency">Now</s-table-header>
+            {/* "Baseline", not "Now".
+
+                The two are different numbers and the difference is the product. Every
+                competitor computes a relative change against whatever the storefront
+                says right now, which is why RUBIX's own FAQ has to explain that a 30%
+                sale followed by a 50% sale leaves a product at 35% of its original price
+                for ever. Calling this column "Now" would describe their arithmetic
+                rather than ours. */}
+            <s-table-header listSlot="inline" format="currency">Baseline</s-table-header>
             {/* Inline, both of them: collapsed, the row reads "Cotton tee - $24.00
                 $19.20", which is the whole question this panel answers. Labelled pairs
                 would put the two halves of a before-and-after on separate lines. */}
@@ -107,6 +123,15 @@ export function DraftPreview({ preview }: { preview: Preview | null }) {
                 <s-table-cell>
                   {row.before ?? "—"}
                   {row.beforeCompareAt ? ` (was ${row.beforeCompareAt})` : ""}
+                  {/* Only when the storefront disagrees with the baseline, which means
+                      the variant is mid-campaign or has drifted. Silence is the ordinary
+                      case; a merchant reading "40.00 becomes 32.00" beside a storefront
+                      showing 28.00 needs to be told which number we are working from. */}
+                  {row.live ? (
+                    <s-paragraph>
+                      <s-text tone="caution">live {row.live}</s-text>
+                    </s-paragraph>
+                  ) : null}
                 </s-table-cell>
                 <s-table-cell>
                   {row.skippedReason ? (
