@@ -956,7 +956,14 @@ export default function NewCampaign() {
           It is `resolve()`, not an estimate of it: the same planner, the same baselines,
           the draft resolved alongside the shop's other ACTIVE campaigns. The loader
           primes it so the panel arrives populated, and the fetcher replaces it from the
-          first keystroke onward. */}
+          first keystroke onward.
+
+          Not on the spreadsheet path. The panel prices the *rule* — and with a file
+          chosen there is no rule, so what it renders is the arithmetic of whatever the
+          controls said before the merchant switched: "3,669 of 3,669 variants would
+          change price" beside a form that will do nothing of the kind. The import has its
+          own report, and it is about the actual file. Found by opening the page. */}
+      {fromFile ? null : (
       <s-section slot="aside" heading="What this would do">
         <DraftPreview
           preview={previewFetcher.data ?? null}
@@ -971,6 +978,7 @@ export default function NewCampaign() {
           fullPreviewHref={fullPreviewHref}
         />
       </s-section>
+      )}
 
       <HelpNote label="Nothing is written yet">
         <s-paragraph>
