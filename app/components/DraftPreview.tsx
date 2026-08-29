@@ -17,11 +17,25 @@ import type { DraftPreview as Preview } from "../services/campaigns/draft-previe
  * written — a preview that showed only the happy rows would be the estimate it claims
  * not to be.
  */
-export function DraftPreview({ preview }: { preview: Preview | null }) {
+export function DraftPreview({
+  preview,
+  pending = false,
+}: {
+  preview: Preview | null;
+  /** A request is in flight. See the note on the first branch below. */
+  pending?: boolean;
+}) {
   if (!preview) {
     return (
       <s-paragraph>
-        <s-text color="subdued">Set a rule to see what it would do.</s-text>
+        <s-text color="subdued">
+          {/* "Set a rule" is wrong while one is being priced — and on first load a rule
+              is already set, so it would be wrong immediately. The panel used to be
+              primed by the loader, which is what made that sentence unreachable; asking
+              from the client instead (#468) makes this the first thing a merchant reads,
+              for about a second. */}
+          {pending ? "Working out what this would do…" : "Set a rule to see what it would do."}
+        </s-text>
       </s-paragraph>
     );
   }
@@ -60,6 +74,12 @@ export function DraftPreview({ preview }: { preview: Preview | null }) {
           <strong>{formatCount(preview.changing)}</strong> of {formatCount(preview.matched)}{" "}
           variants would change price.
         </s-text>
+        {/* The previous answer stays while a new one is computed, marked as stale rather
+            than replaced by a placeholder. Blanking the panel on every keystroke would
+            make the numbers flicker and give a merchant nothing to compare against. */}
+        {pending ? (
+          <s-text color="subdued"> · updating…</s-text>
+        ) : null}
       </s-paragraph>
 
       {/* Every row that will not move, and why. A merchant who expected 400 and sees 380

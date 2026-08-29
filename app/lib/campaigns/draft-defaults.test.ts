@@ -14,7 +14,7 @@
  * So: the values live in one object, and this refuses a literal of them anywhere else.
  */
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -28,6 +28,10 @@ const sourceOf = (path: string) =>
     .replace(/^\s*\/\/.*$/gm, "");
 
 const EDITOR = sourceOf("app/routes/app.campaigns.new.tsx");
+
+const ROUTES = readdirSync(join(process.cwd(), "app", "routes"))
+  .filter((name) => name.endsWith(".tsx") && !name.includes(".test."))
+  .map((name) => ({ name, source: sourceOf(join("app", "routes", name)) }));
 const RULE_FIELD = sourceOf("app/components/RuleValueField.tsx");
 
 describe("the defaults are a value, not a literal in two files", () => {
@@ -43,17 +47,33 @@ describe("the defaults are a value, not a literal in two files", () => {
     }
   });
 
-  it("primes the loader's preview from the same object", () => {
-    expect(EDITOR).toContain("draftDefaultParams()");
-    expect(EDITOR).toContain("previewDraft(");
+  it("asks for the preview from the client, once, on mount", () => {
+    // Not from the loader. `previewDraft` loads every candidate in scope and plans all
+    // of them, because the counts are exact — in front of first paint that is a minute
+    // of blank page on a catalogue of any size (#468), and blank has nowhere to put a
+    // spinner.
+    expect(EDITOR).toContain("submitPreview()");
+    expect(EDITOR).toContain("previewFetcher.state");
+  });
+});
+
+describe("no loader prices a draft before the page paints", () => {
+  it("finds routes to check, so this cannot pass by checking nothing", () => {
+    expect(ROUTES.length).toBeGreaterThan(15);
   });
 
-  it("seeds the shop's own rounding rather than letting it fall back to none", () => {
-    // `readRoundingPolicy` returns "none" when the field is absent, and the select
-    // renders the store setting as its chosen option. Seeding nothing means a preview
-    // that rounds differently from the form beside it.
-    expect(EDITOR).toContain('seeded.set("rounding.default", settings.rounding.default)');
-    expect(EDITOR).toMatch(/rounding\.\$\{code\}/);
+  it("leaves previewDraft to the resource route the client posts to", () => {
+    // Read from the routes directory rather than a list: the temptation to prime the
+    // panel server-side will come back, and it will come back on a store small enough
+    // for the author not to notice.
+    const offenders = ROUTES.filter(
+      ({ name, source }) => name !== "app.preview-draft.tsx" && source.includes("previewDraft("),
+    ).map(({ name }) => name);
+
+    expect(
+      offenders,
+      "a loader that prices the whole scope puts that work in front of first paint",
+    ).toEqual([]);
   });
 });
 

@@ -44,8 +44,8 @@ const preview = (over: Partial<Preview> = {}): Preview => ({
   ...over,
 });
 
-const render = (value: Preview | null) =>
-  renderToStaticMarkup(<DraftPreview preview={value} />);
+const render = (value: Preview | null, pending = false) =>
+  renderToStaticMarkup(<DraftPreview preview={value} pending={pending} />);
 
 describe("the before column is the baseline", () => {
   it("heads the column with the number the arithmetic starts from", () => {
@@ -98,6 +98,25 @@ describe("when the storefront disagrees with the baseline", () => {
 describe("the states that are not a table", () => {
   it("asks for a rule before there is one", () => {
     expect(render(null)).toContain("Set a rule");
+  });
+
+  it("says it is working rather than asking for a rule that is already set", () => {
+    // The first thing a merchant reads, for about a second: the panel is asked for on
+    // mount, and the form already has a rule in it. "Set a rule" would be wrong on
+    // arrival and wrong again on every scope change.
+    const html = render(null, true);
+
+    expect(html).toContain("Working out");
+    expect(html).not.toContain("Set a rule");
+  });
+
+  it("keeps the last answer on screen while a new one is computed", () => {
+    // Blanking on every keystroke makes the numbers flicker and leaves nothing to
+    // compare the new answer against.
+    const html = render(preview(), true);
+
+    expect(html).toContain("$32.00");
+    expect(html).toContain("updating");
   });
 
   it("names the scope as the thing that matched nothing", () => {
