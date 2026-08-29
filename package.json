@@ -28,7 +28,8 @@
     "scope:probe": "tsx scripts/scope-probe.ts",
     "measure:admin": "tsx scripts/measure-admin.ts",
     "measure:import": "tsx scripts/measure-import.ts",
-    "drill:mirror": "tsx scripts/drill-mirror.ts"
+    "drill:mirror": "tsx scripts/drill-mirror.ts",
+    "measure:queries": "tsx scripts/measure-queries.ts"
   },
   "type": "module",
   "engines": {
