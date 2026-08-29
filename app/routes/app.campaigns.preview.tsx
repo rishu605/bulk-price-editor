@@ -24,6 +24,7 @@
 
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { Blank } from "../components/Blank";
+import { MoneyCell } from "../components/MoneyCell";
 import { useLoaderData, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
@@ -125,13 +126,25 @@ export default function FullPreview() {
                 {rows.map((row) => (
                   <s-table-row key={row.variantGid}>
                     <s-table-cell>{row.title}</s-table-cell>
-                    <s-table-cell>{row.before ?? <Blank />}</s-table-cell>
-                    <s-table-cell>{row.after ?? <Blank />}</s-table-cell>
+                    {/* The same pair the editor's panel shows, rendered the same way.
+                        This page is where its "See all N rows" button goes, and it used
+                        to drop both compare-ats — so a merchant who followed that button
+                        to check a sale arrived at a table with the strike-through
+                        missing, and the fuller view said less than the summary it came
+                        from. */}
+                    <s-table-cell>
+                      <MoneyCell amount={row.before} compareAt={row.beforeCompareAt} />
+                    </s-table-cell>
+                    <s-table-cell>
+                      <MoneyCell amount={row.after} compareAt={row.afterCompareAt} />
+                    </s-table-cell>
                     {/* Only when it disagrees with the baseline, which is when it means
                         something. `live` is null in the ordinary case. */}
-                    <s-table-cell>{row.live ?? <Blank />}</s-table-cell>
                     <s-table-cell>
-                      {row.skippedReason ?? (row.unchanged ? "Already at this price" : "")}
+                      <MoneyCell amount={row.live} />
+                    </s-table-cell>
+                    <s-table-cell>
+                      {row.skippedReason ?? (row.unchanged ? "Already at this price" : <Blank />)}
                     </s-table-cell>
                   </s-table-row>
                 ))}

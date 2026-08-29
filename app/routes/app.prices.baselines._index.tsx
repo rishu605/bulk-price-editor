@@ -17,6 +17,7 @@
 
 import { humanise } from "../lib/format/label";
 import { Blank } from "../components/Blank";
+import { MoneyCell } from "../components/MoneyCell";
 import { formatCount, formatWhen } from "../lib/format/display";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useFetcher, useLoaderData, useSearchParams } from "react-router";
@@ -272,9 +273,17 @@ export default function Baselines() {
               {history.map((entry) => (
                 <s-table-row key={entry.capturedAt}>
                   <s-table-cell>{formatWhen(entry.capturedAt, timeZone)}</s-table-cell>
+                  {/* "(current)" used to be appended to the price itself, which put a
+                      word in the same text run as a number in a right-aligned column —
+                      so the one row that had it started several characters left of every
+                      other row's price, in a table whose whole purpose is comparing this
+                      variant's prices down the column. It is a note about the row, so it
+                      goes under the number like every other note. */}
                   <s-table-cell>
-                    {entry.price}
-                    {entry.current ? " (current)" : ""}
+                    <MoneyCell
+                      amount={entry.price}
+                      note={entry.current ? <s-text color="subdued">current</s-text> : undefined}
+                    />
                   </s-table-cell>
                   <s-table-cell>{entry.compareAt ?? <Blank />}</s-table-cell>
                   <s-table-cell>{humanise(entry.source)}</s-table-cell>

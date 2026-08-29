@@ -57,7 +57,12 @@ export const loader = withGuard("/app/settings/plan", async ({ request }: Loader
       return {
         id,
         name: plan.name,
-        price: plan.priceMinor === 0 ? "Free" : `${formatMinorUnits(BigInt(plan.priceMinor), "USD")}/month`,
+        // The amount alone. "/month" used to be glued on here, which put a unit in the
+        // same text run as a number in a right-aligned column: "14.90/month" and
+        // "Free" then aligned on the "h" of month rather than on the decimal, so the
+        // one column a merchant compares down did not line up. The unit is a fact
+        // about the column, so it is said once, in the header.
+        price: plan.priceMinor === 0 ? "Free" : formatMinorUnits(BigInt(plan.priceMinor), "USD"),
         variantLimit: plan.variantLimit,
         markets: plan.markets,
         b2b: plan.b2b,
@@ -125,7 +130,7 @@ export default function PlanPage() {
         <s-table>
           <s-table-header-row>
             <s-table-header listSlot="primary">Plan</s-table-header>
-            <s-table-header listSlot="secondary" format="currency">Price</s-table-header>
+            <s-table-header listSlot="secondary" format="currency">Price a month</s-table-header>
             {/* Numeric, and it holds "Unlimited" on the top plan. A ceiling and the
                 absence of one belong in the same column, right-aligned together: the
                 comparison a merchant is making down this column is how far each plan
