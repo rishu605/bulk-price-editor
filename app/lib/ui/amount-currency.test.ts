@@ -26,7 +26,9 @@ const EDITOR = sourceOf("app/routes/app.campaigns.new.tsx");
 
 describe("nothing labels an amount from the sorted list", () => {
   it("passes the shop's own currency to the amount field", () => {
-    expect(EDITOR).toContain("<RuleValueField currency={baseCurrency} />");
+    // Across lines: the component took two more props when a spreadsheet became one of
+    // the ways prices change, so it is no longer written on one.
+    expect(EDITOR).toMatch(/<RuleValueField[\s\S]{0,120}currency=\{baseCurrency\}/);
   });
 
   it("never indexes the sorted currency list", () => {

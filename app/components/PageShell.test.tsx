@@ -354,7 +354,9 @@ describe("pages that can lose typed work", () => {
     // the pages that list the thing they write. The guard travelled with each of them —
     // which is the point of listing the routes here rather than the section they used to
     // share.
-    "app.campaigns.import.tsx",
+    // The price import's form is in the campaign editor now (#445); the old URL is a
+    // redirect with nothing to type into.
+    "app.campaigns.new.tsx",
     "app.prices.baselines._index.tsx",
     "app.prices.costs.tsx",
   ];

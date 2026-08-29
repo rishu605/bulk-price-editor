@@ -54,6 +54,8 @@ export function ImportForm({
   commitLabel,
   ready,
   intent = INTENT,
+  action,
+  template,
   children,
 }: {
   heading: string;
@@ -84,6 +86,23 @@ export function ImportForm({
    * two things. The route reads it back with `isCommit(value, intent.commit)`.
    */
   intent?: { check: string; commit: string };
+  /**
+   * Where to post, when that is not the route this form is rendered on.
+   *
+   * The campaign editor offers a spreadsheet as one of the ways prices change, and the
+   * whole point of doing it that way is that the import's action, parsing, dry run and
+   * error reporting are untouched — so the form still posts to `/app/campaigns/import`
+   * from wherever it is shown.
+   */
+  action?: string;
+  /**
+   * A starter file, offered beside the drop zone.
+   *
+   * All three competitors give one, and it is the difference between "paste a CSV" and
+   * a merchant guessing at column names. Omitted where a source has no template yet
+   * rather than linking to one that does not exist.
+   */
+  template?: { href: string; label: string };
   /** Extra fields this source needs, above the file. */
   children?: ReactNode;
 }) {
@@ -103,7 +122,7 @@ export function ImportForm({
 
       {description}
 
-      <fetcher.Form method="post" ref={form}>
+      <fetcher.Form method="post" action={action} ref={form}>
         {/* `s-button` takes no name or value, so the intent rides in a hidden field the
             buttons set before submitting. One form rather than two, because both actions
             read the same rows and duplicating the textarea would let them drift apart —
@@ -112,6 +131,20 @@ export function ImportForm({
         <s-stack gap={SPACE.section}>
           {children}
           <CsvDropZone target="csv" />
+
+          {/* Beside the drop zone, not in the prose above it. Somebody who has got as far
+              as looking for where to put a file is the person who needs the column names,
+              and a link three paragraphs up has already been scrolled past. */}
+          {template ? (
+            <ActionRow>
+              {/* `download=""`, not `download`. The Polaris button types the attribute
+                  as a string — the filename to save as — and a bare boolean does not
+                  typecheck; empty means "use the name the server sends". */}
+              <s-button variant="tertiary" icon="download" href={template.href} download="">
+                {template.label}
+              </s-button>
+            </ActionRow>
+          ) : null}
 
           <s-text-area
             name="csv"

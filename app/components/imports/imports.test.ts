@@ -30,7 +30,21 @@ const ROOT = process.cwd();
 const read = (...parts: string[]) => sourceOf(ROOT, ...parts);
 
 
-const PRICE_IMPORT = read("app/routes/app.campaigns.import.tsx");
+/**
+ * The price import is now three files, and it is worth naming why.
+ *
+ * #445 made a spreadsheet one of the ways prices change rather than a door of its own, so
+ * the *entrance* is the campaign editor. The POST it makes moved to a resource route —
+ * the editor's own action creates a campaign from a rule, and a second submit target on
+ * one route is a misrouted request away from creating the wrong thing. The old URL still
+ * resolves, as a redirect.
+ *
+ * Every capability below is still checked; only the file it lives in changed.
+ */
+const PRICE_IMPORT = read("app/routes/app.price-import.tsx");
+const EDITOR = read("app/routes/app.campaigns.new.tsx");
+const IMPORT_REDIRECT = read("app/routes/app.campaigns.import.tsx");
+const HISTORY = read("app/components/imports/PriceImportHistory.tsx");
 const BASELINES = read("app/routes/app.prices.baselines._index.tsx");
 const COSTS = read("app/routes/app.prices.costs.tsx");
 const RECAPTURE = read("app/routes/app.prices.baselines.recapture.tsx");
@@ -96,9 +110,11 @@ describe("every capability the Imports section had still exists", () => {
 
   it("still lists the price files a shop has imported", () => {
     // `price_imports` was written since the feature shipped and read by nothing until
-    // #351. Losing the page again in a restructure would put it back the way it was.
-    expect(PRICE_IMPORT).toContain("prisma.priceImport.findMany");
-    expect(PRICE_IMPORT).toContain("Price files you have imported");
+    // #351. Losing it again in a restructure would put it back the way it was — so the
+    // table moved with the entrance rather than being dropped along the way.
+    expect(EDITOR).toContain("prisma.priceImport.findMany");
+    expect(HISTORY).toContain("Price files you have imported");
+    expect(EDITOR).toContain("<PriceImportHistory");
   });
 
   it("imports baselines, on the page that lists baselines", () => {
@@ -121,9 +137,19 @@ describe("every capability the Imports section had still exists", () => {
 });
 
 describe("every one of them is reachable without typing a URL", () => {
-  it("the price import is offered on the campaigns index", () => {
-    expect(CAMPAIGNS).toContain('href="/app/campaigns/import"');
-    expect(CAMPAIGNS).toContain("From a spreadsheet");
+  it("the price import is a way prices change, not a second door", () => {
+    // The index had two buttons and a merchant had to know which of their two intentions
+    // the app had filed their case under before they could start. There is one now, and
+    // the file is an option inside it.
+    expect(CAMPAIGNS).not.toContain('href="/app/campaigns/import"');
+    expect(EDITOR).toContain("<ImportForm");
+    expect(EDITOR).toContain("FROM_FILE");
+  });
+
+  it("keeps the URL it used to have, pointing at the editor", () => {
+    // Linked from runbooks and whatever a merchant bookmarked.
+    expect(IMPORT_REDIRECT).toContain("LEGACY_ROUTES");
+    expect(IMPORT_REDIRECT).not.toContain("<ImportForm");
   });
 
   it("the baseline and cost imports are on the tabs that own those nouns", () => {
@@ -199,7 +225,9 @@ describe("dropping a file", () => {
   });
 
   it.each([
-    ["prices", PRICE_IMPORT],
+    // Prices is read from the editor and not from the resource route: #445 split the
+    // *entrance* from the POST, and it is the entrance that has to offer a drop zone.
+    ["prices", EDITOR],
     ["baselines", BASELINES],
     ["costs", COSTS],
   ])("%s accepts a file as well as pasted text", (_name, source) => {
@@ -233,7 +261,7 @@ describe("the three imports are one import", () => {
   });
 
   it.each([
-    ["prices", PRICE_IMPORT],
+    ["prices", EDITOR],
     ["baselines", BASELINES],
     ["costs", COSTS],
   ])("%s carries no copy of the form", (_name, source) => {
@@ -245,7 +273,7 @@ describe("the three imports are one import", () => {
   });
 
   it.each([
-    ["prices", PRICE_IMPORT],
+    ["prices", EDITOR],
     ["baselines", BASELINES],
     ["costs", COSTS],
   ])("%s reports its counts as figures rather than a sentence", (_name, source) => {

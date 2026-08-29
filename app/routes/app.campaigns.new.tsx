@@ -9,7 +9,9 @@ import { facets } from "../services/segments.server";
 import { createCampaign } from "../services/campaigns/index.server";
 import { joinDateAndTime, localInputToUtc, type Schedule } from "../lib/scheduling/window";
 import { presetStartFor } from "../lib/scheduling/calendar";
-import { formatClock, formatDay } from "../lib/format/display";
+import { formatClock, formatCount, formatDay, formatWhen } from "../lib/format/display";
+import { PriceImportHistory } from "../components/imports/PriceImportHistory";
+import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { describeAdjustment } from "../lib/markets/describe";
 import {
   profileNameFor,
@@ -36,7 +38,14 @@ import {
 import { PageSections, PageShell } from "../components/PageShell";
 import { UnsavedChanges } from "../components/UnsavedChanges";
 import { DraftPreview } from "../components/DraftPreview";
-import { RuleValueField } from "../components/RuleValueField";
+import { FROM_FILE, RuleValueField } from "../components/RuleValueField";
+import { DRAFT_DEFAULTS } from "../lib/campaigns/draft-defaults";
+import {
+  ImportForm,
+  ImportReport,
+  type ImportProblem,
+} from "../components/imports/ImportForm";
+import type { PriceImportResult } from "../services/price-import.server";
 import { FieldGrid, FullRow } from "../components/FieldGrid";
 import { HelpNote } from "../components/HelpNote";
 import { firstPreviewParams } from "../lib/campaigns/first-preview";
@@ -63,7 +72,7 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
       })
     : null;
 
-  const [available, segments, priceLists, settings, currency, shopRecord] =
+  const [available, segments, priceLists, settings, currency, shopRecord, priceImports] =
     await Promise.all([
     facets(shop.id),
     prisma.segment.findMany({
@@ -96,6 +105,24 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
         subscriptionStatus: true,
         trialEndsAt: true,
         developerStore: true,
+      },
+    }),
+    // The files this shop has already imported, for the spreadsheet option. One indexed
+    // read alongside six others — cheap enough not to be worth loading conditionally,
+    // and loading it on demand would mean a table that appears a beat after the option
+    // that reveals it.
+    prisma.priceImport.findMany({
+      where: { shopId: shop.id },
+      orderBy: { createdAt: "desc" },
+      take: ROWS_PER_VIEW,
+      select: {
+        id: true,
+        name: true,
+        currency: true,
+        rowsRead: true,
+        rowsMatched: true,
+        createdBy: true,
+        createdAt: true,
       },
     }),
   ]);
@@ -170,6 +197,17 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
     guided,
     // Set when the merchant arrived by clicking a day on the calendar.
     presetStart: presetStartFor(url.searchParams.get("startAt")),
+    // Which way prices change, when a link says so. Four old import URLs redirect here
+    // with `ruleKind=from-file`, and a merchant following one of them should land on the
+    // file, not on a percentage.
+    initialRuleKind:
+      url.searchParams.get("ruleKind") === FROM_FILE ? FROM_FILE : DRAFT_DEFAULTS.ruleKind,
+    priceImports: priceImports.map((row) => ({
+      ...row,
+      // `formatWhen`, not a second call to toLocaleString: the locale is centralised
+      // there, and a page that picks its own drifts from every other page's dates.
+      createdAt: formatWhen(row.createdAt, shop.timezone),
+    })),
     selected: {
       collection: url.searchParams.get("collection") ?? "",
       tag: url.searchParams.get("tag") ?? "",
@@ -279,6 +317,8 @@ export default function NewCampaign() {
     guided,
     timeZone,
     timeZoneNow,
+    initialRuleKind,
+    priceImports,
     priceLists,
     currencies,
     storeRounding,
@@ -306,6 +346,23 @@ export default function NewCampaign() {
    * send a merchant to a different campaign than the one they were reading about.
    */
   const [fullPreviewHref, setFullPreviewHref] = useState<string | undefined>(undefined);
+
+  /**
+   * Which way prices change, held here because two sections depend on the answer.
+   *
+   * A file carries every price it sets, so there is no scope to choose and no amount to
+   * enter — and leaving those on screen inert would be worse than a second page, which is
+   * what this replaced. #445.
+   */
+  const [ruleKind, setRuleKind] = useState<string>(initialRuleKind);
+  const fromFile = ruleKind === FROM_FILE;
+
+  // Its own fetcher, posting to the import route. Sharing the editor's would mean one
+  // `state` for two very different submissions, so a dry run in flight would put the
+  // create button into a loading state it never leaves.
+  const importFetcher = useFetcher<{ result?: PriceImportResult }>();
+  const importResult = importFetcher.data?.result;
+  const importProblems = problemsFrom(importResult);
 
   const submitPreview = useCallback(() => {
     const form = formRef.current;
@@ -440,8 +497,18 @@ export default function NewCampaign() {
                   adjustment and its amount — as a fragment, so as bare grid children they
                   land side by side, which is the pair a merchant reads as one decision.
                   Inside a `FullRow` they would both go in one cell and stack. */}
-              <RuleValueField currency={baseCurrency} />
+              <RuleValueField
+                currency={baseCurrency}
+                kind={ruleKind}
+                onKindChange={setRuleKind}
+              />
 
+              {/* Everything below is about arithmetic on a baseline, and a file has
+                  none — it names a price per variant. Rendered inert they would be four
+                  controls a merchant sets and the import ignores, which is exactly the
+                  confusion having two pages caused. */}
+              {fromFile ? null : (
+                <>
               <s-select name="compareAt" label="Compare-at price">
                 <s-option value="set-to-baseline" defaultSelected>
                   Set to baseline (shows a strike-through)
@@ -469,6 +536,8 @@ export default function NewCampaign() {
                   </s-option>
                 ))}
               </s-select>
+                </>
+              )}
             </FieldGrid>
 
             {/* What "from the baseline" means, next to the field that says it.
@@ -479,14 +548,25 @@ export default function NewCampaign() {
                 sentence is the consequence, which is the part that sells it: every
                 competitor computes from the live price, which is why RUBIX's own FAQ has
                 to explain that running two sales leaves a product wrong for ever. */}
-            <s-paragraph>
-              <s-text color="subdued">
-                Changes are computed from each variant&rsquo;s <s-text type="strong">baseline</s-text> —
-                the price it would be if no campaign were running — never from what the
-                storefront shows today. So running this campaign twice gives the same
-                result as running it once.
-              </s-text>
-            </s-paragraph>
+            {fromFile ? (
+              <s-paragraph>
+                <s-text color="subdued">
+                  A spreadsheet sets each price directly, so there is no baseline
+                  arithmetic and no scope to choose — the file names the variants. It
+                  still becomes a campaign, which is what gives it a preview, your
+                  guardrails and a one-click revert.
+                </s-text>
+              </s-paragraph>
+            ) : (
+              <s-paragraph>
+                <s-text color="subdued">
+                  Changes are computed from each variant&rsquo;s{" "}
+                  <s-text type="strong">baseline</s-text> — the price it would be if no
+                  campaign were running — never from what the storefront shows today. So
+                  running this campaign twice gives the same result as running it once.
+                </s-text>
+              </s-paragraph>
+            )}
 
             {/* What this rule does to prices, from the same resolver the run uses --
                 not an estimate of it. Sits with the rule rather than at the bottom of
@@ -494,7 +574,7 @@ export default function NewCampaign() {
                 the merchant is still deciding. With the rarely-touched settings moved to
                 the end, it now lands directly under the rule it is previewing. */}
 
-            {priceLists.length > 0 ? (
+            {!fromFile && priceLists.length > 0 ? (
               <>
                 <s-divider />
 
@@ -578,6 +658,14 @@ export default function NewCampaign() {
               </>
             ) : null}
 
+            {/* Everything from here to the submit belongs to the rule path.
+                
+                A file import creates its campaign through its own two-phase flow — dry
+                run, then commit — so a schedule, a priority and a tag kit set here would
+                be silently discarded. The import block below has the submit for that
+                path. */}
+            {fromFile ? null : (
+              <>
             <s-divider />
 
             <s-heading>Schedule (optional)</s-heading>
@@ -680,8 +768,15 @@ export default function NewCampaign() {
                 {practice ? "Preview it — nothing will be written" : "Create and preview"}
               </s-button>
             </ActionRow>
+              </>
+            )}
           </s-stack>
       </s-section>
+      {/* Not rendered at all, rather than rendered and ignored. A file names its own
+          variants — a frozen list of exactly the rows it matched — so a scope here would
+          be a control a merchant fills in and the import discards, which is the confusion
+          the second page caused in the first place. */}
+      {fromFile ? null : (
       <s-section heading={headings.scope}>
         <s-paragraph>
           Which variants the rule above applies to. Leave everything blank to target the
@@ -784,9 +879,72 @@ export default function NewCampaign() {
           </FullRow>
         </FieldGrid>
       </s-section>
+      )}
 
         </PageSections>
       </Form>
+
+      {/* Outside the form, and that is not a detail.
+          
+          A form cannot contain a form, and the import has one of its own — its two-phase
+          dry-run-then-commit is the guard that makes writing prices from a file safe, and
+          it posts to `/app/campaigns/import`, whose action, parsing and error reporting
+          are untouched by any of this. Rendering it here rather than reimplementing it is
+          the whole point: one door for the merchant, one code path for the prices. */}
+      {fromFile ? (
+        <ImportForm
+          heading="The file"
+          fetcher={importFetcher}
+          action="/app/price-import"
+          busy={importFetcher.state !== "idle"}
+          ready={importResult?.ready ?? null}
+          commitLabel={(ready) => `Create a campaign from ${formatCount(ready)} rows`}
+          template={{ href: "/app/campaigns/template.csv", label: "Get a template" }}
+          placeholder={`Variant SKU,Variant Price\nCH-1,129.00\nCH-2,149.00`}
+          description={
+            <s-paragraph>
+              <s-text>
+                One row per variant: a SKU, barcode or variant ID, then the price. Prices
+                are read in {baseCurrency} and must be plain numbers. A Matrixify export
+                works as it is. Checking the file changes nothing — you see what would
+                happen first.
+              </s-text>
+            </s-paragraph>
+          }
+        >
+          {/* The campaign's name, again, because this form posts on its own and the one
+              in the section above goes with the form it belongs to. */}
+          <s-text-field name="name" label="Call this" value={defaultName} />
+        </ImportForm>
+      ) : null}
+
+      {fromFile ? (
+        <>
+          <PriceImportHistory imports={priceImports} timeZone={timeZone} />
+
+          {/* Moved here with the table it qualifies. Said out loud rather than papered
+              over: the gap is real, and a merchant who imports a baseline file and then
+              looks for it in a list is owed the reason it is not there. */}
+          <HelpNote label="Only price files are listed">
+            <s-paragraph>
+              Baseline and cost imports do not record a file yet. Their results are shown
+              when you run them, on the pages they belong to.
+            </s-paragraph>
+          </HelpNote>
+        </>
+      ) : null}
+
+      {importResult ? (
+        <ImportReport
+          heading={importResult.dryRun ? "What would happen" : "What happened"}
+          counts={[
+            { label: "Rows read", value: importResult.total },
+            { label: "Ready", value: importResult.ready },
+            { label: "Need attention", value: importProblems.length },
+          ]}
+          problems={importProblems}
+        />
+      ) : null}
 
       {/* Beside the rule, not below it.
 
@@ -850,4 +1008,21 @@ function queryFrom(fields: FormData): string {
     if (value !== "") params.append(key, value);
   }
   return params.toString();
+}
+
+/**
+ * Every row the import could not use, in the order they appear in the file.
+ *
+ * Sorted by line rather than grouped by kind, because a merchant fixing a spreadsheet
+ * works down it — and the four categories are already named on each row.
+ */
+function problemsFrom(result: PriceImportResult | undefined): ImportProblem[] {
+  if (!result) return [];
+
+  return [
+    ...result.invalid.map((problem) => ({ ...problem, kind: "Will not parse" })),
+    ...result.unmatched.map((problem) => ({ ...problem, kind: "No match" })),
+    ...result.ambiguous.map((problem) => ({ ...problem, kind: "Matches several" })),
+    ...result.duplicates.map((problem) => ({ ...problem, kind: "Listed twice" })),
+  ].sort((a, b) => a.line - b.line);
 }
