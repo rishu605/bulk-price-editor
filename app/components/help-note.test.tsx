@@ -158,11 +158,15 @@ describe("the prose each page used to keep in a column", () => {
 
 describe("what stays in the aside", () => {
   /**
-   * The rule the column follows now: a sidebar carries facts about *this shop*, on the
-   * one page whose job is showing several of them at once. Everything else lost its
-   * column — prose became a note, and two cards that were facts filed away from their
-   * subject moved next to it (cost coverage to the cost-floor settings, failures by code
-   * to the failures they count).
+   * The rule the column follows: a sidebar carries **facts about this shop**. Everything
+   * else lost its column — prose became a note, and two cards that were facts filed away
+   * from their subject moved next to it (cost coverage to the cost-floor settings,
+   * failures by code to the failures they count).
+   *
+   * The campaign editor's preview is the second page to earn one, and it earns it on the
+   * same rule rather than by exception: it is this shop's own variants, priced by the
+   * rule being typed, recomputed on every keystroke. It is not an explanation of how the
+   * app works — it is the answer.
    *
    * Checked rather than written down, because the next explanatory sidebar will be added
    * by someone who has not read `PageShell`.
@@ -170,18 +174,21 @@ describe("what stays in the aside", () => {
   const FACTS = [
     ["app._index.tsx", "Store"],
     ["app._index.tsx", "Recent activity"],
+    ["app.campaigns.new.tsx", "What this would do"],
   ] as const;
 
   it.each(FACTS)("%s keeps its %s card beside the content", (name, heading) => {
     expect(route(name)).toContain(`<s-section slot="aside" heading="${heading}">`);
   });
 
-  it("is the dashboard and nowhere else", () => {
+  it("is those two pages and nowhere else", () => {
     const routes = ALL_ROUTES.filter((name) => route(name).includes('slot="aside"'));
 
-    expect(routes, "a second page with a sidebar is a rule that has started drifting").toEqual(
-      ["app._index.tsx"],
-    );
+    expect(
+      routes,
+      "a third page with a sidebar is a rule that has started drifting — the column is " +
+        "for facts about this shop, and there are two pages whose job is showing them",
+    ).toEqual(["app._index.tsx", "app.campaigns.new.tsx"]);
   });
 
   it("moved the two facts that were filed away from their subject", () => {

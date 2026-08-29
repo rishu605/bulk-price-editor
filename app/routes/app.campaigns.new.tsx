@@ -5,7 +5,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
-import { facets, previewMatches } from "../services/segments.server";
+import { facets } from "../services/segments.server";
 import { createCampaign } from "../services/campaigns/index.server";
 import { joinDateAndTime, localInputToUtc, type Schedule } from "../lib/scheduling/window";
 import { presetStartFor } from "../lib/scheduling/calendar";
@@ -16,16 +16,17 @@ import {
   ROUNDING_LABELS,
 } from "../lib/money/rounding-policy";
 import { ActionRow } from "../components/ActionRow";
-import { FilterForm } from "../components/FilterForm";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { readSettings, shopCurrency } from "../services/settings.server";
 import { billingFrom } from "../services/billing.server";
 import { canUseSurface } from "../lib/billing/plans";
 import prisma from "../db.server";
-import { segmentToAst } from "../services/segments.server";
 import { astFrom, compareAtFrom, readerFor, ruleFrom } from "../lib/campaigns/draft-form";
-import { PageShell } from "../components/PageShell";
+import { draftDefaultParams } from "../lib/campaigns/draft-defaults";
+import { draftCampaignFrom } from "../services/campaigns/draft-input.server";
+import { previewDraft } from "../services/campaigns/draft-preview.server";
+import { PageSections, PageShell } from "../components/PageShell";
 import { UnsavedChanges } from "../components/UnsavedChanges";
 import { DraftPreview } from "../components/DraftPreview";
 import { RuleValueField } from "../components/RuleValueField";
@@ -53,18 +54,9 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
       })
     : null;
 
-  const ast = segment
-    ? segmentToAst({
-        kind: segment.kind as "DYNAMIC" | "FROZEN",
-        filterAst: segment.filterAst,
-        frozenVariantGids: segment.frozenVariantGids,
-      })
-    : astFrom(readerFor(url.searchParams));
-
-  const [available, preview, segments, priceLists, settings, currency, shopRecord] =
+  const [available, segments, priceLists, settings, currency, shopRecord] =
     await Promise.all([
     facets(shop.id),
-    previewMatches(shop.id, ast),
     prisma.segment.findMany({
       where: { shopId: shop.id },
       select: { id: true, name: true, kind: true },
@@ -100,6 +92,26 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
   ]);
 
   const billing = billingFrom(shopRecord);
+
+  // The preview the merchant would get if they changed nothing, computed here so the
+  // panel arrives populated rather than saying "set a rule" next to a rule that is
+  // already set. The scope comes from the URL — a merchant who arrived from a segment or
+  // from the calendar has already made that choice — and the rule from the same defaults
+  // the fields render, so this and the first keystroke agree.
+  const seeded = draftDefaultParams();
+  // Rounding is the shop's, not a default of its own: the select renders the store
+  // setting as its chosen option, so a preview built without it would round differently
+  // from the form sitting next to it. `readRoundingPolicy` falls back to "none" when the
+  // field is absent, which is precisely the disagreement to avoid.
+  seeded.set("rounding.default", settings.rounding.default);
+  for (const [code, profile] of Object.entries(settings.rounding.byCurrency)) {
+    seeded.set(`rounding.${code}`, profile);
+  }
+  for (const [key, value] of url.searchParams) if (value) seeded.set(key, value);
+  const preview = await previewDraft(
+    shop.id,
+    await draftCampaignFrom(shop.id, seeded, currency),
+  );
 
   // Every currency this campaign could price in. Only these are offered: a list of all
   // 180 world currencies would bury the two or three that matter.
@@ -269,6 +281,7 @@ export default function NewCampaign() {
     <PageShell
       heading={practice ? "Practice campaign" : guided ? "Your first campaign" : "New campaign"}
       backTo={{ href: "/app/campaigns", label: "Campaigns" }}
+      asideWidth="wide"
     >
       {/* Before anything else on the page, because it is the answer to a click that has
           already happened. Nothing here is persisted until the campaign is created, so
@@ -294,14 +307,33 @@ export default function NewCampaign() {
         </s-banner>
       ) : null}
 
+      {/* One form, not two.
+
+          The scope used to be its own GET form with an "Update match count" submit, so
+          reading the count meant a navigation — which reset every uncontrolled field in
+          the rule form below it. Two forms also meant the scope had to be mirrored into
+          the create form as six hidden inputs, and a field added to one and forgotten in
+          the other would silently stop scoping the campaign.
+
+          One form removes both. It is also what makes the preview live: the fetcher
+          already posts `new FormData(form)`, so with the scope inside that form a change
+          to a filter reprices exactly as a change to the rule does. */}
+      <Form method="post" ref={formRef} onChange={requestPreview}>
+        <input type="hidden" name="practice" value={practice ? "1" : ""} />
+
+        {/* `s-page` spaces its direct children, and these are no longer direct children
+            — they are inside a form. `PageSections` is the page rhythm, available for
+            exactly this case. Without it two cards touch and read as one card with a
+            line through it. */}
+        <PageSections>
       <s-section heading="1 · Scope">
         <s-paragraph>
           Leave everything blank to target the whole catalogue. Conditions combine
           with AND.
         </s-paragraph>
-        <FilterForm fields={SCOPE_FIELDS}>
-          <FieldGrid>
-            <FullRow>
+
+        <FieldGrid>
+          <FullRow>
             <s-select name="segment" label="Saved segment">
               <s-option value="" defaultSelected={!selected.segment}>
                 Build a filter below instead
@@ -316,9 +348,10 @@ export default function NewCampaign() {
                 </s-option>
               ))}
             </s-select>
-            </FullRow>
+          </FullRow>
 
-            {usingSegment ? (
+          {usingSegment ? (
+            <FullRow>
               <s-banner tone="info">
                 <s-paragraph>
                   Targeting the segment <s-text>{usingSegment.name}</s-text>. The filter
@@ -328,74 +361,44 @@ export default function NewCampaign() {
                     : "Its product list is pinned, so this campaign hits exactly those products and nothing added later."}
                 </s-paragraph>
               </s-banner>
-            ) : null}
+            </FullRow>
+          ) : null}
 
-            <s-select name="collection" label="Collection">
-              <s-option value="" defaultSelected={!selected.collection}>
-                Any collection
+          <s-select name="collection" label="Collection">
+            <s-option value="" defaultSelected={!selected.collection}>
+              Any collection
+            </s-option>
+            {available.collections.map((c) => (
+              <s-option key={c} value={c} defaultSelected={selected.collection === c}>
+                {c}
               </s-option>
-              {available.collections.map((c) => (
-                <s-option key={c} value={c} defaultSelected={selected.collection === c}>
-                  {c}
-                </s-option>
-              ))}
-            </s-select>
-            <s-select name="vendor" label="Vendor">
-              <s-option value="" defaultSelected={!selected.vendor}>
-                Any vendor
-              </s-option>
-              {available.vendors.map((v) => (
-                <s-option key={v} value={v} defaultSelected={selected.vendor === v}>
-                  {v}
-                </s-option>
-              ))}
-            </s-select>
-            <s-select name="tag" label="Tag">
-              <s-option value="" defaultSelected={!selected.tag}>
-                Any tag
-              </s-option>
-              {available.tags.map((t) => (
-                <s-option key={t} value={t} defaultSelected={selected.tag === t}>
-                  {t}
-                </s-option>
-              ))}
-            </s-select>
-            <s-text-field name="title" label="Title contains" value={selected.title} />
-          </FieldGrid>
-
-          {/* Was an inline stack around exactly one button. A stack with one child lays
-              nothing out; ActionRow is what a row of actions is, and this is a row of
-              one. */}
-          <ActionRow>
-            <s-button type="submit">Update match count</s-button>
-          </ActionRow>
-        </FilterForm>
-
-        <s-paragraph>
-          <strong>{preview.count}</strong> variants match.
-        </s-paragraph>
-        {preview.sample.length > 0 ? (
-          <s-unordered-list>
-            {preview.sample.slice(0, 5).map((v) => (
-              <s-list-item key={v.variantGid}>
-                {v.title} {v.price ? `· ${v.price}` : ""}
-              </s-list-item>
             ))}
-          </s-unordered-list>
-        ) : null}
+          </s-select>
+          <s-select name="vendor" label="Vendor">
+            <s-option value="" defaultSelected={!selected.vendor}>
+              Any vendor
+            </s-option>
+            {available.vendors.map((v) => (
+              <s-option key={v} value={v} defaultSelected={selected.vendor === v}>
+                {v}
+              </s-option>
+            ))}
+          </s-select>
+          <s-select name="tag" label="Tag">
+            <s-option value="" defaultSelected={!selected.tag}>
+              Any tag
+            </s-option>
+            {available.tags.map((t) => (
+              <s-option key={t} value={t} defaultSelected={selected.tag === t}>
+                {t}
+              </s-option>
+            ))}
+          </s-select>
+          <s-text-field name="title" label="Title contains" value={selected.title} />
+        </FieldGrid>
       </s-section>
 
       <s-section heading="2 · Rule">
-        <Form method="post" ref={formRef} onChange={requestPreview}>
-          {/* The scope form and the create form are separate elements, so the chosen
-              segment has to travel with the submission that actually creates. */}
-          <input type="hidden" name="segment" value={selected.segment} />
-          <input type="hidden" name="practice" value={practice ? "1" : ""} />
-          <input type="hidden" name="collection" value={selected.collection} />
-          <input type="hidden" name="tag" value={selected.tag} />
-          <input type="hidden" name="vendor" value={selected.vendor} />
-          <input type="hidden" name="title" value={selected.title} />
-
           <s-stack gap={SPACE.section}>
             {/* The rule, and nothing else, first.
 
@@ -450,9 +453,6 @@ export default function NewCampaign() {
                 the page, because it exists to answer "did I mean -20% or x0.20?" while
                 the merchant is still deciding. With the rarely-touched settings moved to
                 the end, it now lands directly under the rule it is previewing. */}
-            <s-divider />
-            <s-heading>What this would do</s-heading>
-            <DraftPreview preview={previewFetcher.data ?? null} />
 
             {priceLists.length > 0 ? (
               <>
@@ -639,7 +639,23 @@ export default function NewCampaign() {
               </s-button>
             </ActionRow>
           </s-stack>
-        </Form>
+      </s-section>
+        </PageSections>
+      </Form>
+
+      {/* Beside the rule, not below it.
+
+          This is the panel a merchant came to read, and it lived at the foot of the rule
+          section behind a `What this would do` heading — so on a form of this length it
+          was reliably off screen while the rule was being typed. Competitors that compute
+          a far weaker preview than this one all put it next to the control.
+
+          It is `resolve()`, not an estimate of it: the same planner, the same baselines,
+          the draft resolved alongside the shop's other ACTIVE campaigns. The loader
+          primes it so the panel arrives populated, and the fetcher replaces it from the
+          first keystroke onward. */}
+      <s-section slot="aside" heading="What this would do">
+        <DraftPreview preview={previewFetcher.data ?? preview} />
       </s-section>
 
       <HelpNote label="Nothing is written yet">
