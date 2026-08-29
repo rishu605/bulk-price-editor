@@ -67,8 +67,27 @@ describe("a shop that finished the checklist and deleted its campaigns", () => {
     expect(sections.emptyState).toBe(true);
   });
 
-  it("gets a black Create campaign, because nothing else is pointing anywhere", () => {
-    expect(sections.createIsPrimary).toBe(true);
+  it("is offered quick create, because there is a catalogue to price", () => {
+    expect(sections.quickCreate).toBe(true);
+  });
+
+  it("does not get a black Create campaign, because quick create is the black one", () => {
+    // Quick create *is* creating a campaign, for the case that covers most of them. With
+    // both on the page it is the one worth pointing at, and two black buttons point at
+    // nothing — which is the same rule that kept Create quiet while the checklist was up.
+    expect(sections.createIsPrimary).toBe(false);
+  });
+});
+
+describe("quick create needs something to price and nothing else asking for attention", () => {
+  it("is not offered before the first sync", () => {
+    expect(shop({ neverSynced: true, onboardingComplete: true }).quickCreate).toBe(false);
+  });
+
+  it("is not offered while the checklist is still telling the merchant what to do", () => {
+    // A merchant three steps into being led somewhere does not need a fourth thing to do
+    // offered beside it.
+    expect(shop({ onboardingComplete: false }).quickCreate).toBe(false);
   });
 });
 

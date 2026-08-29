@@ -40,10 +40,21 @@ export interface HomeSections {
   /**
    * Whether "Create campaign" is the black button.
    *
-   * Only once the checklist has gone. While it is up, its own next step is what the page
-   * is pointing at, and two black buttons point at nothing.
+   * Only once the checklist has gone — while it is up, its own next step is what the page
+   * is pointing at, and two black buttons point at nothing — and only when quick create
+   * is not offered. Quick create *is* creating a campaign, for the case that covers most
+   * of them, so when both are on the page it is the one worth pointing at and the full
+   * editor becomes the alternative.
    */
   createIsPrimary: boolean;
+  /**
+   * The one-field card: a percentage, a button, a draft campaign.
+   *
+   * Needs a synced catalogue, because there is nothing to price without one, and needs
+   * the checklist gone: a merchant three steps into being told what to do next does not
+   * need a fourth thing to do offered beside it.
+   */
+  quickCreate: boolean;
   /** The catalogue card, which has nothing to count before a sync. */
   catalogue: boolean;
 }
@@ -53,10 +64,13 @@ export function homeSections(facts: HomeFacts): HomeSections {
   // counters that all read zero.
   const live = facts.campaigns > 0 || facts.hasRun;
 
+  const quickCreate = !facts.neverSynced && facts.onboardingComplete;
+
   return {
     live,
     emptyState: !facts.neverSynced && !live && facts.onboardingComplete,
-    createIsPrimary: facts.onboardingComplete,
+    createIsPrimary: facts.onboardingComplete && !quickCreate,
     catalogue: !facts.neverSynced,
+    quickCreate,
   };
 }
