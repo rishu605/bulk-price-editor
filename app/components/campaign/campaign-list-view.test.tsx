@@ -89,15 +89,17 @@ describe("the table survives being collapsed into a list", () => {
 
   it("keeps the status, the rule and the way in on the row itself", () => {
     // All three `inline`, so a collapsed row reads as one line — "Autumn sale · Active ·
-    // 20% off · Open" — and answers what state this is in, what it does, and how to open
-    // it without unfolding into a block. The scope is `labeled` because it is longer and
-    // reads better stacked under its own word than run on after the rule.
+    // 20% off" — and answers what state this is in and what it does without unfolding
+    // into a block. The way in is the name itself, in the primary slot, rather than a
+    // second button in the action column; see the note on that cell. The scope is
+    // `labeled` because it is longer and reads better stacked under its own word than
+    // run on after the rule.
     expect(html.split('listSlot="inline"').length - 1).toBe(3);
   });
 
   it("says what each campaign does and what to", () => {
     // The gap this table had: everything *about* a campaign and nothing about what it is.
-    expect(html).toContain("20% off");
+    expect(html).toContain("20%\u00a0off");
     expect(html).toContain("Tagged sale");
   });
 
