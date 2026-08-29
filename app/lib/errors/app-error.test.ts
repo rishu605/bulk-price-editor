@@ -131,3 +131,41 @@ describe("error ids", () => {
     expect(ids.size).toBeGreaterThan(4_990);
   });
 });
+
+describe("the database being busy is not the merchant's fault", () => {
+  // `P20` is Prisma's prefix for the query engine, not for "your input was invalid", and
+  // the catch-all that read it that way misfiled every transient code the engine emits.
+  // The consequences compounded: a 400 instead of a 503, `retryable` false so the worker
+  // gave up on something that would have succeeded on the next attempt, and a merchant
+  // whose apply hit a saturated pool told that "some of the values on this form need
+  // fixing before it can be saved".
+  it.each([
+    ["P2024", "timed out fetching a new connection from the connection pool"],
+    ["P2034", "transaction failed due to a write conflict or a deadlock"],
+  ])("classifies %s as the database being unavailable, and retryable", (code, message) => {
+    const error = toAppError(Object.assign(new Error(message), { code }));
+
+    expect(error.code).toBe("DB_UNAVAILABLE");
+    expect(error.retryable).toBe(true);
+    expect(error.status).toBe(503);
+  });
+
+  it("still treats a genuine constraint violation as validation", () => {
+    // The fix must not swing the other way: P2002 is the data being wrong, and a 503 on
+    // a duplicate would have the worker retry something that can never succeed.
+    const error = toAppError(Object.assign(new Error("Unique constraint failed"), { code: "P2002" }));
+
+    expect(error.code).toBe("VALIDATION");
+    expect(error.retryable).toBe(false);
+  });
+
+  it("says the database may be under load, not only that it is down", () => {
+    // "not responding" alone reads as an outage. Pool exhaustion is the opposite —
+    // everything is up and busy — and a message that names only one of the two sends
+    // whoever is on call looking for the wrong thing.
+    const error = toAppError(Object.assign(new Error("pool timeout"), { code: "P2024" }));
+
+    expect(error.userMessage).toContain("heavy load");
+    expect(error.userMessage).toContain("Nothing was changed in your store");
+  });
+});

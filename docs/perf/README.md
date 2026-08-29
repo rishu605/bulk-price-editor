@@ -103,14 +103,65 @@ that corrupted twenty rows out of 102,132 and sampled twenty found nothing — w
 like a broken audit and was a broken drill. It corrupts a *fraction* instead, chosen well
 over the alert threshold so the alert must fire rather than might.
 
+## Concurrency, and the pool size (#516)
+
+```shell
+npx tsx scripts/measure-concurrency.ts --shop anchor-perf
+```
+
+Every other number on this page is one statement at a time against an idle database. This
+is the one that is not.
+
+**Twenty merchants paging the catalogue at once**, no campaigns — the traffic that sizes
+the web process's pool:
+
+| `connection_limit` | Pages in 6s | p50 | p95 |
+|---|---|---|---|
+| 1 | 200 | 691 ms | 964 ms |
+| 2 | 220 | 571 ms | 588 ms |
+| **10** | **290** | **347 ms** | **775 ms** |
+| 21 (the old default) | 316 | 301 ms | 683 ms |
+| 40 | 318 | 290 ms | 709 ms |
+
+**Four campaigns planning the whole catalogue, one merchant browsing:**
+
+| `connection_limit` | admin p50 | admin p95 |
+|---|---|---|
+| 1 | 123 ms | 519 ms |
+| 2 | 88 ms | 243 ms |
+| 10 | 103 ms | 265 ms |
+| 40 | 102 ms | 300 ms |
+
+Idle floor: p50 25 ms, p95 44 ms. **A merchant paging the catalogue while campaigns plan
+against the same tables waits about 5× longer than one on an idle store**, and no pool size
+changes that much — past two connections the curve is flat. Zero pool timeouts at any size.
+
+At sixteen concurrent whole-catalogue plans, admin p95 reaches 1–3 s and a *bigger* pool is
+worse (pool 1: 1,048 ms; pool 10: 2,985 ms) — the pool acts as admission control, and
+removing it just lets more heavy queries contend. Sixteen is well past anything the app
+permits: the scheduler walks due campaigns in a `for` loop with an `await` in it, inside a
+worker holding a cluster lock, so a worker plans one at a time.
+
+**`connection_limit` is now 10, set explicitly** (`app/lib/db/pool.ts`, override with
+`DATABASE_POOL_SIZE`). It was previously Prisma's `num_physical_cpus * 2 + 1`, read from
+whatever container the process landed on — verified as 21 here against `pg_stat_activity`,
+and it was 21 twice, once for web and once for the worker, with nothing accounting for
+their sum against `max_connections`. Ten buys 91% of the throughput available at 40 for a
+quarter of the connections.
+
+Verified end to end rather than assumed — peak client backends observed while 40 concurrent
+reads were in flight:
+
+| `DATABASE_POOL_SIZE` | Backends |
+|---|---|
+| before this change | 21 |
+| unset (default 10) | 10 |
+| 3 | 3 |
+| 25 | 25 |
+
 ## What these numbers do not cover
 
-Concurrency. Every measurement here is one request at a time against an otherwise idle
-store, so they are a floor rather than a forecast. A merchant paging the catalogue while a
-100K campaign runs is a different question, and the honest answer is that it has not been
-measured.
-
-Webhook lag under load, likewise. Twenty sequential edits on an idle store is the best
+Webhook lag under load. Twenty sequential edits on an idle store is the best
 case; the number that would matter during an incident is lag while a bulk import is
 draining the same queue. `webhook.lag_ms` is emitted every tick now, so the panel will
 answer that once there is traffic to look at.

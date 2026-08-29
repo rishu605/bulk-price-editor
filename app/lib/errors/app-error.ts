@@ -112,10 +112,19 @@ const USER_MESSAGE: Record<ErrorCode, string> = {
   NOT_FOUND: "That campaign or record no longer exists. It may have been deleted.",
   VALIDATION: "Some of the values on this form need fixing before it can be saved.",
   DB_UNAVAILABLE:
-    "The app's own database is not responding. Nothing was changed in your store. Try again shortly.",
+    "The app's own database is not responding — it may be briefly down or under heavy load. Nothing was changed in your store. Try again shortly.",
   UNKNOWN:
     "Something went wrong on our side. Nothing was changed in your store unless a run reported otherwise.",
 };
+
+/**
+ * P20xx codes that describe the database being busy rather than the data being wrong.
+ *
+ * A named set rather than another `startsWith`, because that is what put them in the
+ * wrong bucket: `P20` is Prisma's prefix for "query engine", not for "your input was
+ * invalid", and treating the prefix as the latter misfiles anything transient it emits.
+ */
+const TRANSIENT_PRISMA_CODES: ReadonlySet<string> = new Set(["P2024", "P2034"]);
 
 function classify(error: unknown, message: string): ErrorCode {
   const prismaCode = (error as { code?: unknown })?.code;
@@ -123,6 +132,18 @@ function classify(error: unknown, message: string): ErrorCode {
   if (typeof prismaCode === "string") {
     // Prisma's own codes are far more reliable than its messages.
     if (prismaCode === "P2025") return "NOT_FOUND";
+
+    // Two P20xx codes that are not about the data at all, checked before the catch-all
+    // below claims them. Both are the database saying "not now", both clear on their
+    // own, and both were being reported as VALIDATION -- a 400, marked *not retryable*,
+    // telling a merchant that "some of the values on this form need fixing" when the
+    // real cause was load. The worker reads `retryable` to decide whether to try again,
+    // so the misclassification also turned a transient blip into a failed run.
+    //
+    //   P2024  timed out waiting for a connection from the pool
+    //   P2034  transaction rolled back by a write conflict or deadlock
+    if (TRANSIENT_PRISMA_CODES.has(prismaCode)) return "DB_UNAVAILABLE";
+
     if (prismaCode === "P2002" || prismaCode.startsWith("P20")) return "VALIDATION";
     if (prismaCode.startsWith("P1")) return "DB_UNAVAILABLE";
     if (prismaCode === "ECONNREFUSED" || prismaCode === "ENOTFOUND") {
