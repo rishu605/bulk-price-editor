@@ -110,8 +110,14 @@ describe("the rule is what a merchant meets first", () => {
     expect(field).toMatch(/customers never see it/i);
     // The counter: "how much can I write" is the other question the first field on the
     // page raises, and a static maximum tells somebody already over it nothing.
-    expect(field).toContain("maxLength");
-    expect(field).toContain("${length}/${NAME_LIMIT}");
+    //
+    // `maxLength` and nothing else. Polaris renders the count itself, and a second one in
+    // the help text put the same number on screen twice — which only opening the page
+    // showed, because the markup serialises fine either way.
+    expect(field).toContain("maxLength={NAME_LIMIT}");
+    expect(field, "Polaris already counts; a second counter renders the number twice").not.toMatch(
+      /\$\{[^}]*length[^}]*\}\/\$\{NAME_LIMIT\}/,
+    );
   });
 
   it("previews the rule beside it, in the aside, rather than under it", () => {
