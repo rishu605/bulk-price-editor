@@ -23,6 +23,7 @@
  */
 
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { Blank } from "../components/Blank";
 import { useLoaderData, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
@@ -124,11 +125,11 @@ export default function FullPreview() {
                 {rows.map((row) => (
                   <s-table-row key={row.variantGid}>
                     <s-table-cell>{row.title}</s-table-cell>
-                    <s-table-cell>{row.before ?? "—"}</s-table-cell>
-                    <s-table-cell>{row.after ?? "—"}</s-table-cell>
+                    <s-table-cell>{row.before ?? <Blank />}</s-table-cell>
+                    <s-table-cell>{row.after ?? <Blank />}</s-table-cell>
                     {/* Only when it disagrees with the baseline, which is when it means
                         something. `live` is null in the ordinary case. */}
-                    <s-table-cell>{row.live ?? "—"}</s-table-cell>
+                    <s-table-cell>{row.live ?? <Blank />}</s-table-cell>
                     <s-table-cell>
                       {row.skippedReason ?? (row.unchanged ? "Already at this price" : "")}
                     </s-table-cell>

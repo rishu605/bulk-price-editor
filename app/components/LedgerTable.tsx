@@ -1,4 +1,5 @@
 import { humanise } from "../lib/format/label";
+import { Blank } from "./Blank";
 import { ShowingSome } from "./Pagination";
 import type { ReactNode } from "react";
 
@@ -49,12 +50,12 @@ export function LedgerTable({
         {rows.map((row) => (
           <s-table-row key={row.variantGid}>
             <s-table-cell>{row.title}</s-table-cell>
-            <s-table-cell>{row.before ?? "—"}</s-table-cell>
-            <s-table-cell>{row.intended ?? "—"}</s-table-cell>
+            <s-table-cell>{row.before ?? <Blank />}</s-table-cell>
+            <s-table-cell>{row.intended ?? <Blank />}</s-table-cell>
             <s-table-cell>
               <s-badge tone={toneFor(LEDGER_TONE, row.status)}>{humanise(row.status)}</s-badge>
             </s-table-cell>
-            <s-table-cell>{row.failureReason ?? "—"}</s-table-cell>
+            <s-table-cell>{row.failureReason ?? <Blank />}</s-table-cell>
             {renderAction ? <s-table-cell>{renderAction(row)}</s-table-cell> : null}
           </s-table-row>
         ))}

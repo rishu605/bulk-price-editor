@@ -1,4 +1,5 @@
 import { formatCount } from "../lib/format/display";
+import { Blank } from "./Blank";
 import { ActionRow } from "./ActionRow";
 import { EmptyState } from "./AsyncState";
 import { exampleRowFrom, StorefrontExample } from "./StorefrontExample";
@@ -203,7 +204,7 @@ export function DraftPreview({
                   </s-stack>
                 </s-table-cell>
                 <s-table-cell>
-                  {row.before ?? "—"}
+                  {row.before ?? <Blank />}
                   {row.beforeCompareAt ? ` (was ${row.beforeCompareAt})` : ""}
                   {/* Only when the storefront disagrees with the baseline, which means
                       the variant is mid-campaign or has drifted. Silence is the ordinary
@@ -222,7 +223,7 @@ export function DraftPreview({
                     <s-text color="subdued">no change</s-text>
                   ) : (
                     <s-text>
-                      {row.after ?? "—"}
+                      {row.after ?? <Blank />}
                       {row.afterCompareAt ? ` (was ${row.afterCompareAt})` : ""}
                     </s-text>
                   )}

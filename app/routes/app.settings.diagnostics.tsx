@@ -8,6 +8,7 @@
  */
 
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { Blank } from "../components/Blank";
 import { Form, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
@@ -143,7 +144,7 @@ export default function Debug() {
             </s-paragraph>
             <s-paragraph>
               <s-text>
-                {match.createdAt} · {match.method ?? "—"} {match.route ?? "—"}
+                {match.createdAt} · {match.method ?? <Blank />} {match.route ?? <Blank />}
               </s-text>
             </s-paragraph>
 
@@ -208,7 +209,7 @@ export default function Debug() {
                         {row.code}
                       </s-badge>
                     </s-table-cell>
-                    <s-table-cell>{row.route ?? "—"}</s-table-cell>
+                    <s-table-cell>{row.route ?? <Blank />}</s-table-cell>
                   </s-table-row>
                 ))}
               </s-table-body>

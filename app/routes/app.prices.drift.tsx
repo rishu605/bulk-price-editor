@@ -1,4 +1,5 @@
 import type { ComponentProps } from "react";
+import { Blank } from "../components/Blank";
 import { useRef } from "react";
 import type {
   ActionFunctionArgs,
@@ -208,13 +209,13 @@ function DriftDecision({
   return (
     <s-table-row>
       <s-table-cell>{event.title}</s-table-cell>
-      <s-table-cell>{event.expected ?? "—"}</s-table-cell>
+      <s-table-cell>{event.expected ?? <Blank />}</s-table-cell>
       {/* Was a warning badge wrapped round the price. A badge is a status and a price is
           a value, so the column could not align with the one beside it and the number a
           merchant came here to compare rendered as a label. Every row on this page is
           drift; the page says so once, at the top, rather than once per row. */}
-      <s-table-cell>{event.observed ?? "—"}</s-table-cell>
-      <s-table-cell>{event.campaignName ?? "—"}</s-table-cell>
+      <s-table-cell>{event.observed ?? <Blank />}</s-table-cell>
+      <s-table-cell>{event.campaignName ?? <Blank />}</s-table-cell>
       <s-table-cell>
         <fetcher.Form method="post" ref={form}>
           <input type="hidden" name="eventId" value={event.id} />

@@ -16,6 +16,7 @@
  */
 
 import { humanise } from "../lib/format/label";
+import { Blank } from "../components/Blank";
 import { formatCount, formatWhen } from "../lib/format/display";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useFetcher, useLoaderData, useSearchParams } from "react-router";
@@ -275,10 +276,10 @@ export default function Baselines() {
                     {entry.price}
                     {entry.current ? " (current)" : ""}
                   </s-table-cell>
-                  <s-table-cell>{entry.compareAt ?? "—"}</s-table-cell>
+                  <s-table-cell>{entry.compareAt ?? <Blank />}</s-table-cell>
                   <s-table-cell>{humanise(entry.source)}</s-table-cell>
                   <s-table-cell>
-                    {entry.supersededAt ? formatWhen(entry.supersededAt, timeZone) : "—"}
+                    {entry.supersededAt ? formatWhen(entry.supersededAt, timeZone) : <Blank />}
                   </s-table-cell>
                 </s-table-row>
               ))}

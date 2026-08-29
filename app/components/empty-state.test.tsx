@@ -177,7 +177,14 @@ describe("no page answers 'where are my rows' with a loose paragraph", () => {
    */
   const NOT_DATA = ["aside"];
 
-  const ALLOWED = ["<EmptyState", "<NoMatches", "<>"];
+  /**
+   * `<Blank />` is a cell with nothing in it, not a page with no rows.
+   *
+   * "This segment is used by no campaigns" is a true statement about one row that
+   * exists — answering it with a centred heading and a call to action would be a page
+   * announcing its own emptiness inside a table cell.
+   */
+  const ALLOWED = ["<EmptyState", "<NoMatches", "<>", "<Blank"];
 
   /** Rendered outside the embedded admin, with their own CSS and no Polaris. */
   const OUTSIDE_THE_ADMIN = ["routes/help.$", "routes/_index"];
