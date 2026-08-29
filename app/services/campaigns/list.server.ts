@@ -8,6 +8,8 @@
  */
 
 import prisma from "../../db.server";
+import { describeCampaign } from "../../lib/campaigns/describe";
+import { astOf, ruleOf } from "./model.server";
 import { ROWS_PER_VIEW } from "../../lib/ui/table-budget";
 import {
   describeState,
@@ -60,7 +62,13 @@ export async function listCampaigns(shopId: string, filters: CampaignFilters) {
       orderBy: { createdAt: "desc" },
       skip: (filters.page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
-      include: { runs: { orderBy: { createdAt: "desc" }, take: 1 } },
+      include: {
+        runs: { orderBy: { createdAt: "desc" }, take: 1 },
+        // Named so the row can say what the campaign applies to. A segment replaces the
+        // inline filter rather than narrowing it, so where there is one it *is* the
+        // scope — see `describeScope`.
+        segments: { select: { name: true }, take: 1 },
+      },
     }),
     prisma.campaign.count({ where }),
     // Counted across the whole shop, not the filtered page. A merchant who has filtered
@@ -78,6 +86,10 @@ export async function listCampaigns(shopId: string, filters: CampaignFilters) {
       lifecycle: describeState(state),
       attention: needsAttention(state),
       priority: c.priority,
+      // What it does and what to, as sentences, through the one formatter every surface
+      // uses. The index used to say everything *about* a campaign and nothing about what
+      // it is.
+      ...describeCampaign({ rule: ruleOf(c), ast: astOf(c), segmentName: c.segments[0]?.name }),
       createdAt: c.createdAt.toISOString(),
       lastRun: c.runs[0]
         ? {

@@ -19,6 +19,7 @@ import { describe, expect, it } from "vitest";
 
 import { CampaignListView } from "./CampaignListView";
 import { describeState } from "../../lib/lifecycle/transitions";
+import { describeRule, describeScope } from "../../lib/campaigns/describe";
 
 type Props = Parameters<typeof CampaignListView>[0];
 
@@ -31,6 +32,10 @@ const campaign = (over: Partial<Props["list"]["campaigns"][number]> = {}) => ({
   lifecycle: describeState("ACTIVE"),
   attention: false,
   priority: 900,
+  // Through the real formatter, for the same reason `lifecycle` is: a fixture that
+  // writes its own sentence stops catching the day the real one changes.
+  rule: describeRule({ kind: "percent-change", percent: -20 }),
+  scope: describeScope({ groups: [{ conditions: [{ field: "tag", value: "sale" }] }] }),
   createdAt: "2026-08-01T00:00:00.000Z",
   lastRun: null,
   ...over,
@@ -69,17 +74,25 @@ describe("the table survives being collapsed into a list", () => {
 
   it("designates every other column too, so none falls back to a default", () => {
     const headers = [...html.matchAll(/<s-table-header(\s[^>]*)?>/g)];
-    expect(headers.length, "five columns, the last one the action").toBe(5);
+    expect(headers.length, "seven columns, the last one the action").toBe(7);
 
     for (const [tag] of headers) {
       expect(tag, `${tag} has no list designation`).toContain("listSlot=");
     }
   });
 
-  it("keeps the status and the way in on the row itself", () => {
-    // Both `inline`, so a collapsed row still answers "what state is this in" and "how do
-    // I open it" without unfolding into a block.
-    expect(html.split('listSlot="inline"').length - 1).toBe(2);
+  it("keeps the status, the rule and the way in on the row itself", () => {
+    // All three `inline`, so a collapsed row reads as one line — "Autumn sale · Active ·
+    // 20% off · Open" — and answers what state this is in, what it does, and how to open
+    // it without unfolding into a block. The scope is `labeled` because it is longer and
+    // reads better stacked under its own word than run on after the rule.
+    expect(html.split('listSlot="inline"').length - 1).toBe(3);
+  });
+
+  it("says what each campaign does and what to", () => {
+    // The gap this table had: everything *about* a campaign and nothing about what it is.
+    expect(html).toContain("20% off");
+    expect(html).toContain("Tagged sale");
   });
 
   it("treats the priority as a number", () => {

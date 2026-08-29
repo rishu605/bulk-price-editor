@@ -136,6 +136,18 @@ export function CampaignListView({
               <s-table-header-row>
                 <s-table-header listSlot="primary">Campaign</s-table-header>
                 <s-table-header listSlot="inline">Status</s-table-header>
+                {/* What it does, and what to. The list said everything *about* a campaign
+                    — name, status, priority, last run — and nothing about what it is.
+                    Sami renders exactly these two columns; NA writes the row as a
+                    sentence. Either way the index answers "what is this" without opening
+                    anything.
+                    
+                    `inline` for the rule, because collapsed it belongs on the same line
+                    as the name — "Autumn sale · 20% off" is the row. The scope is
+                    `labeled`: it is longer, and a scope stacked under its own label reads
+                    better than one run on after the rule. */}
+                <s-table-header listSlot="inline">Rule</s-table-header>
+                <s-table-header listSlot="labeled">Applies to</s-table-header>
                 {/* Right-aligned in the grid, because it is a number. */}
                 <s-table-header listSlot="labeled" format="numeric">
                   Priority
@@ -152,6 +164,8 @@ export function CampaignListView({
                         {campaign.lifecycle.label}
                       </s-badge>
                     </s-table-cell>
+                    <s-table-cell>{campaign.rule}</s-table-cell>
+                    <s-table-cell>{campaign.scope}</s-table-cell>
                     <s-table-cell>{campaign.priority}</s-table-cell>
                     <s-table-cell>
                       {campaign.lastRun

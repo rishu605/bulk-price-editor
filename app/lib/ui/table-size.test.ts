@@ -78,6 +78,9 @@ describe("one number decides how many rows a view holds", () => {
     "app/services/baseline-browser.server.ts: take: 50":
       "the vendor and source dropdowns, and one variant's own baseline history — the " +
       "forensic view, where truncating is the opposite of what it is for",
+    "app/routes/app.campaigns.$id.tsx: take: 1":
+      "the campaign's segment, whose name is the whole \"applies to\" sentence — a " +
+      "campaign has at most one, and the take is the join, not a row limit",
     "app/services/campaigns/list.server.ts: take: 1":
       "each campaign's newest run, joined onto the row it belongs to",
     "app/services/campaigns/rollback-report.server.ts: take: 20":

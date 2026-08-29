@@ -15,7 +15,7 @@ import {
   resolvePolicy,
   type RoundingPolicy,
 } from "../../lib/money/rounding-policy";
-import type {
+import type { AdjustmentRule,
   CompareAtPolicy,
   GuardrailViolationPolicy,
   Guardrails,
@@ -98,6 +98,21 @@ export async function createCampaign(shopId: string, input: CampaignInput) {
  */
 export function roundingFor(raw: unknown): RoundingPolicy {
   return resolvePolicy(parseRoundingPolicy(raw));
+}
+
+/**
+ * A campaign's rule, for anything that wants to describe rather than resolve it.
+ *
+ * `ruleRows` is a list because several rules can match a variant with the last winning
+ * (E16), and nothing in the app creates more than one today. This reads the first, which
+ * is the whole rule for every campaign that exists — and returns null rather than
+ * pretending, so a multi-row campaign is described as having no single rule instead of
+ * being described by an arbitrary one of them.
+ */
+export function ruleOf(campaign: Pick<Campaign, "ruleRows">): AdjustmentRule | null {
+  const rows = (campaign.ruleRows ?? []) as unknown as Array<{ rule?: AdjustmentRule }>;
+  if (rows.length !== 1) return null;
+  return rows[0]?.rule ?? null;
 }
 
 /** The filter that defines a campaign's scope, or an empty AST matching everything. */

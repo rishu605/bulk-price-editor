@@ -23,6 +23,8 @@ import { RouteBoundary } from "../components/RouteBoundary";
 import { reportError } from "../services/error-report.server";
 import { withGuard } from "../lib/errors/guard.server";
 import { blastRadiusRefusal } from "../services/campaigns/blast-radius.server";
+import { describeCampaign } from "../lib/campaigns/describe";
+import { astOf, ruleOf } from "../services/campaigns/model.server";
 import { actorFor } from "../lib/audit/actor";
 import { isPractice } from "../services/campaigns/model.server";
 import {
@@ -32,7 +34,7 @@ import {
   type CampaignState,
 } from "../lib/lifecycle/transitions";
 import { transitionHistory } from "../services/campaigns/lifecycle.server";
-import { approvalFor, decideApproval, requestApproval, SelfApprovalError } from "../services/approvals.server";
+import { approvalFor, approvalSummary, decideApproval, requestApproval, SelfApprovalError } from "../services/approvals.server";
 import { PageShell } from "../components/PageShell";
 import { CampaignTabs, currentTab, tabsFor } from "../components/campaign/CampaignTabs";
 import { useKeepers } from "../components/campaign/useKeepers";
@@ -61,6 +63,8 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
         autoEnroll: true,
         enrollPendingAt: true,
         status: true,
+        ruleRows: true,
+        segments: { select: { name: true }, take: 1 },
       },
     }),
   ]);
@@ -115,24 +119,15 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     scheduleText,
     timeZone: shop.timezone,
     warnings,
+    // The same two sentences the index shows, through the same formatter, so a merchant
+    // reading "20% off · In Outerwear" in the list meets those words again here.
+    ...describeCampaign({ rule: ruleOf(record), ast: astOf(record), segmentName: record.segments[0]?.name }),
     autoEnroll: record.autoEnroll,
     enrollPendingAt: record.enrollPendingAt !== null,
     state,
     practice,
     lifecycle,
-    approval: {
-      required: approval.required,
-      state: approval.required ? approval.state : "none",
-      who:
-        approval.required && approval.state === "approved"
-          ? approval.approvedBy
-          : approval.required && approval.state === "declined"
-            ? approval.declinedBy
-            : approval.required && approval.state === "pending"
-              ? approval.requestedBy
-              : null,
-      note: approval.required && approval.state === "declined" ? approval.note : null,
-    },
+    approval: approvalSummary(approval),
     needsAttention: needsAttention(state),
     history,
   };
