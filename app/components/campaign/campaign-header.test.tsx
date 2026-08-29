@@ -71,6 +71,8 @@ const props = (over: Partial<CampaignDetailProps> = {}) =>
       ast: { groups: [{ conditions: [{ field: "collection", value: "Outerwear" }] }] },
     }),
     notifyEmail: "ops@shop.com",
+    campaignId: "c1",
+    needsAttention: false,
     keepers: null,
     keepersPending: false,
     ...over,
@@ -473,5 +475,21 @@ describe("the confirmation says who hears about the outcome", () => {
 
     expect(html).toContain("Nobody is emailed");
     expect(html).toContain("Settings");
+  });
+});
+
+describe("support from where the problem is", () => {
+  it("offers it on a campaign that needs a decision, carrying the campaign", () => {
+    // Held and Partial are the two states this product is about, and the two whose
+    // questions are hardest to ask without an id to quote.
+    const html = render(<CampaignHeader {...props({ needsAttention: true })} />);
+
+    expect(html).toContain("Contact support");
+    expect(html).toContain("campaign=c1");
+  });
+
+  it("stays out of the way when nothing is wrong", () => {
+    // On a draft it would be a support button beside a form nobody has submitted.
+    expect(render(<CampaignHeader {...props()} />)).not.toContain("Contact support");
   });
 });

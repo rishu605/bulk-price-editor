@@ -113,6 +113,7 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     // The same two sentences the index shows, through the same formatter, so a merchant
     // reading "20% off · In Outerwear" in the list meets those words again here.
     ...describeCampaign({ rule: ruleOf(record), ast: astOf(record), segmentName: record.segments[0]?.name }),
+    campaignId,
     note: record.note,
     archived: record.archivedAt !== null,
     // Where the run report goes, so the confirmation can say so at the moment a merchant

@@ -70,13 +70,23 @@ export function ErrorScreen({
 
           <s-paragraph>
             <s-text>
-              Quote this reference if you contact support — it links straight to the
-              full technical detail.
+              This reference links straight to the full technical detail. Contacting
+              support from here carries it for you.
             </s-text>
           </s-paragraph>
           <s-paragraph>
             <s-text><strong>{errorId}</strong> · {code}</s-text>
           </s-paragraph>
+
+          {/* The whole point of #457: support one click from the problem, not one
+              navigation away from it. Somebody on this screen has already spent their
+              patience, and asking them to find the help section and retype an id is how
+              a support request becomes an uninstall. */}
+          <ActionRow>
+            <s-button variant="tertiary" icon="chat" href={supportHref(errorId)}>
+              Contact support about this
+            </s-button>
+          </ActionRow>
         </s-stack>
 
         {stack ? (
@@ -90,4 +100,20 @@ export function ErrorScreen({
       </s-section>
     </PageShell>
   );
+}
+
+/**
+ * The support route, carrying the error and the page it happened on.
+ *
+ * The path comes from the browser rather than from a prop: this screen is rendered by the
+ * one boundary every route uses, so it does not know which route it replaced. Server-side
+ * there is no location at all, and the link is still worth having without it — the error
+ * id is the part support needs.
+ */
+function supportHref(errorId: string): string {
+  const params = new URLSearchParams({ error: errorId });
+  if (typeof window !== "undefined" && window.location?.pathname) {
+    params.set("from", window.location.pathname);
+  }
+  return `/app/support?${params}`;
 }

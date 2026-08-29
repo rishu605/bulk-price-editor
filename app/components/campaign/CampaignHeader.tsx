@@ -44,6 +44,8 @@ export function CampaignHeader({
   scope,
   archived,
   notifyEmail,
+  campaignId,
+  needsAttention,
   scheduleText,
   lifecycle,
   fetcher,
@@ -158,6 +160,16 @@ export function CampaignHeader({
           </s-button>
         </fetcher.Form>
 
+        {/* Only where the campaign is in a state a merchant might need help with. On a
+            draft it would be a support button next to a form nobody has submitted yet;
+            on Held or Partial it is beside the two states this product is *about*, and
+            the ones whose questions are hardest to ask without a run id. */}
+        {needsAttention ? (
+          <s-button variant="tertiary" icon="chat" href={supportHref(campaignId)}>
+            Contact support
+          </s-button>
+        ) : null}
+
         <fetcher.Form method="post">
           <input type="hidden" name="intent" value={archived ? "unarchive" : "archive"} />
           <s-button type="submit" variant="tertiary" icon="archive" loading={busy || undefined}>
@@ -208,4 +220,16 @@ export function CampaignHeader({
       )}
     </>
   );
+}
+
+/**
+ * The support route, carrying the campaign.
+ *
+ * The run id is deliberately not in here. The campaign page already shows which run is
+ * selected, and a link built from whichever run happened to be on screen would attach the
+ * wrong one as often as the right one — support can ask, and a wrong id is worse than a
+ * missing one.
+ */
+function supportHref(campaignId: string): string {
+  return `/app/support?${new URLSearchParams({ campaign: campaignId, from: `/app/campaigns/${campaignId}` })}`;
 }

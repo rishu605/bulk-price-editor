@@ -69,6 +69,25 @@ export default function HelpIndex() {
         </s-stack>
       </s-section>
 
+      {/* Above the reading list, not below it. Somebody who opened Help already has a
+          question; making them scan every article before finding out a person will
+          answer is the arrangement that makes support feel unreachable. Secondary,
+          because most questions really are answered by the pages below. */}
+      <s-section heading="Still stuck">
+        <s-stack gap={SPACE.item}>
+          <s-paragraph>
+            Write to us and we reply to every message. Your shop, plan and the page you
+            came from are attached, so you do not have to describe your setup — and you
+            can see exactly what is being sent before you send it.
+          </s-paragraph>
+          <ActionRow>
+            <s-button variant="secondary" icon="chat" href="/app/support?from=/app/help">
+              Contact support
+            </s-button>
+          </ActionRow>
+        </s-stack>
+      </s-section>
+
       {nav.sections.map((section) => (
         <s-section key={section.id} heading={section.title}>
           <s-stack gap={SPACE.section}>
