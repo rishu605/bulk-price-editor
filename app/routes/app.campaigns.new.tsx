@@ -5,6 +5,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
+import { facetDetails } from "../lib/segments/facets";
 import { facets } from "../services/segments.server";
 import { createCampaign } from "../services/campaigns/index.server";
 import { joinDateAndTime, localInputToUtc, type Schedule } from "../lib/scheduling/window";
@@ -810,7 +811,11 @@ export default function NewCampaign() {
             </FullRow>
           ) : null}
 
-          <s-select name="collection" label="Collection">
+          <s-select
+            name="collection"
+            label="Collection"
+            details={facetDetails(available.totals.collections, "collections")}
+          >
             <s-option value="" defaultSelected={!selected.collection}>
               Any collection
             </s-option>
@@ -820,7 +825,11 @@ export default function NewCampaign() {
               </s-option>
             ))}
           </s-select>
-          <s-select name="vendor" label="Vendor">
+          <s-select
+            name="vendor"
+            label="Vendor"
+            details={facetDetails(available.totals.vendors, "vendors")}
+          >
             <s-option value="" defaultSelected={!selected.vendor}>
               Any vendor
             </s-option>
@@ -830,7 +839,7 @@ export default function NewCampaign() {
               </s-option>
             ))}
           </s-select>
-          <s-select name="tag" label="Tag">
+          <s-select name="tag" label="Tag" details={facetDetails(available.totals.tags, "tags")}>
             <s-option value="" defaultSelected={!selected.tag}>
               Any tag
             </s-option>
@@ -856,7 +865,12 @@ export default function NewCampaign() {
             <s-select
               name="excludeTag"
               label="Except anything tagged"
-              details="Leaves these out of this campaign. They stay eligible for your other campaigns."
+              details={[
+                "Leaves these out of this campaign. They stay eligible for your other campaigns.",
+                facetDetails(available.totals.tags, "tags"),
+              ]
+                .filter(Boolean)
+                .join(" ")}
             >
               <s-option value="" defaultSelected={!selected.excludeTag}>
                 Nothing excluded

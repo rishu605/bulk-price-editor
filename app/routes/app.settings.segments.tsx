@@ -22,6 +22,7 @@ import {
   listSegments,
   matchCsv,
 } from "../services/segments-crud.server";
+import { facetDetails, type Facets } from "../lib/segments/facets";
 import { facets } from "../services/segments.server";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
@@ -279,7 +280,7 @@ function NewSegment({
   fetcher,
   busy,
 }: {
-  available: { collections: string[]; tags: string[]; vendors: string[] };
+  available: Facets;
   fetcher: ReturnType<typeof useFetcher<ActionData>>;
   busy: boolean;
 }) {
@@ -341,7 +342,11 @@ function NewSegment({
 
             {how === "filter" ? (
               <>
-                <s-select name="collection" label="Collection">
+                <s-select
+                  name="collection"
+                  label="Collection"
+                  details={facetDetails(available.totals.collections, "collections")}
+                >
                   <s-option value="" defaultSelected>
                     Any collection
                   </s-option>
@@ -352,7 +357,11 @@ function NewSegment({
                   ))}
                 </s-select>
 
-                <s-select name="tag" label="Tag">
+                <s-select
+                  name="tag"
+                  label="Tag"
+                  details={facetDetails(available.totals.tags, "tags")}
+                >
                   <s-option value="" defaultSelected>
                     Any tag
                   </s-option>
@@ -363,7 +372,11 @@ function NewSegment({
                   ))}
                 </s-select>
 
-                <s-select name="vendor" label="Vendor">
+                <s-select
+                  name="vendor"
+                  label="Vendor"
+                  details={facetDetails(available.totals.vendors, "vendors")}
+                >
                   <s-option value="" defaultSelected>
                     Any vendor
                   </s-option>

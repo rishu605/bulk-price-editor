@@ -10,6 +10,7 @@
 import type { Prisma } from "@prisma/client";
 import prisma from "../db.server";
 import { formatMinorUnits } from "../lib/money/format";
+import { MAX_FACET_VALUES, type Facets } from "../lib/segments/facets";
 
 export type ConditionField =
   | "collection"
@@ -182,37 +183,81 @@ export async function resolveVariantGids(shopId: string, ast: FilterAst): Promis
   return rows.map((r) => r.variantGid);
 }
 
-/** Distinct values available for the picker, so the UI offers real options. */
-export async function facets(shopId: string): Promise<{
-  vendors: string[];
-  productTypes: string[];
-  tags: string[];
-  collections: string[];
-}> {
-  const rows = await prisma.variantIndex.findMany({
-    where: { shopId, deletedAt: null },
-    select: { vendor: true, productType: true, tags: true, collections: true },
-  });
+/**
+ * The distinct values behind the scope picker's dropdowns.
+ *
+ * Distinct in the database, not in the app. This used to select `vendor`, `productType`,
+ * `tags` and `collections` for every non-deleted variant and build four `Set`s from them:
+ * 102,132 rows transferred and materialised to produce 53 values, on three route loaders,
+ * for 330ms of every campaign editor's first paint. Only ~44ms of that was Postgres.
+ *
+ * The four run concurrently because they are four scans that share nothing; a `UNION`
+ * over one scan reads better and plans as four anyway.
+ *
+ * **Sorted here rather than in SQL, deliberately.** `ORDER BY` uses the database's
+ * collation, which differs between a Homebrew Postgres and Railway's — so the list would
+ * be ordered one way locally and another in production. That is the shape of #278, where
+ * `toLocaleString` rendered dates in the *server's* locale. It is not cosmetic either:
+ * with a cap applied, a different order is a different hundred values. Sorting a few
+ * thousand short strings in JS costs nothing and is the same everywhere.
+ */
+export async function facets(shopId: string): Promise<Facets> {
+  const [vendors, productTypes, tags, collections] = await Promise.all([
+    distinctScalar(shopId, "vendor"),
+    distinctScalar(shopId, "productType"),
+    distinctArray(shopId, "tags"),
+    distinctArray(shopId, "collections"),
+  ]);
 
-  const vendors = new Set<string>();
-  const productTypes = new Set<string>();
-  const tags = new Set<string>();
-  const collections = new Set<string>();
-
-  for (const row of rows) {
-    if (row.vendor) vendors.add(row.vendor);
-    if (row.productType) productTypes.add(row.productType);
-    for (const tag of row.tags) tags.add(tag);
-    for (const collection of row.collections) collections.add(collection);
-  }
-
-  const sorted = (set: Set<string>) => [...set].sort().slice(0, 100);
   return {
-    vendors: sorted(vendors),
-    productTypes: sorted(productTypes),
-    tags: sorted(tags),
-    collections: sorted(collections),
+    vendors: vendors.slice(0, MAX_FACET_VALUES),
+    productTypes: productTypes.slice(0, MAX_FACET_VALUES),
+    tags: tags.slice(0, MAX_FACET_VALUES),
+    collections: collections.slice(0, MAX_FACET_VALUES),
+    totals: {
+      vendors: vendors.length,
+      productTypes: productTypes.length,
+      tags: tags.length,
+      collections: collections.length,
+    },
   };
+}
+
+/**
+ * Every distinct non-empty value of one scalar column.
+ *
+ * `GROUP BY` rather than Prisma's `distinct`, which the client has historically applied
+ * in memory for some connectors — the exact thing this function exists to stop doing.
+ *
+ * The column name is interpolated because it cannot be a bind parameter, so it is taken
+ * from a union of two literals rather than from anything a caller composes.
+ */
+async function distinctScalar(shopId: string, column: "vendor" | "productType"): Promise<string[]> {
+  const rows = await prisma.$queryRawUnsafe<Array<{ value: string }>>(
+    `SELECT "${column}" AS value
+       FROM "variant_index"
+      WHERE "shopId" = $1 AND "deletedAt" IS NULL
+        AND "${column}" IS NOT NULL AND "${column}" <> ''
+      GROUP BY "${column}"`,
+    shopId,
+  );
+
+  return rows.map((row) => row.value).sort();
+}
+
+/** The same for an array column, which needs `unnest` before it can be made distinct. */
+async function distinctArray(shopId: string, column: "tags" | "collections"): Promise<string[]> {
+  const rows = await prisma.$queryRawUnsafe<Array<{ value: string }>>(
+    `SELECT DISTINCT unnest("${column}") AS value
+       FROM "variant_index"
+      WHERE "shopId" = $1 AND "deletedAt" IS NULL`,
+    shopId,
+  );
+
+  return rows
+    .map((row) => row.value)
+    .filter(Boolean)
+    .sort();
 }
 
 // ------------------------------------------------------------------ segments

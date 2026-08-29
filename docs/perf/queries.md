@@ -86,16 +86,33 @@ maintained on every one of ~102K sync upserts is a poor trade for 9%.
 
 ### Finding 2 — `facets()` reads the whole catalogue to fill four dropdowns
 
+**Fixed in #511.**
+
 330 ms, one statement, every non-deleted row, four columns including two arrays — to
-produce 16 vendors, 15 product types, 18 tags and 10 collections, each then
+produce 10 vendors, 8 product types, 18 tags and 10 collections, each then
 `.slice(0, 100)`. Three route loaders await it: the campaign editor, the costs page and
 the segments page.
 
-Only ~44 ms of that is Postgres. The rest is transferring and materialising 102,132 rows
-to build four `Set`s. `SELECT DISTINCT` does the same work in the database in 37 ms and
-returns 53 rows.
+Only ~44 ms of that was Postgres. The rest was transferring and materialising 102,132 rows
+to build four `Set`s.
 
-Tracked as its own ticket.
+Now four concurrent `GROUP BY` / `DISTINCT unnest` queries: **330 ms → 30 ms**, and 53 rows
+crossing the wire instead of 102,132. Still four sequential scans — a distinct over the
+whole catalogue has to read it — but that is the work, not overhead.
+
+Two things fell out of it:
+
+**The cap now admits to itself.** The list was always capped at 100 and never said so, and
+a merchant with 412 tags could not tell "not in the first hundred alphabetically" from
+"the app does not know this tag". Each picker's `details` now reads *"Showing 100 of 412
+tags. Narrow the scope another way to reach the rest."*
+
+**The sort stays in JavaScript, deliberately.** `ORDER BY` uses the database's collation,
+and Homebrew's Postgres and Railway's do not agree — a Homebrew `ORDER BY` put
+`accessories` between `Wax` and `Snowboard` where JS codepoint order puts every capital
+first. That is the shape of #278, where `toLocaleString` rendered in the *server's* locale.
+It is not cosmetic under a cap either: a different order is a different hundred values.
+Verified byte-identical to the old output on all four shops in the local database.
 
 ### Finding 3 — planning issues one full scan of `baselines` per chunk, and that is currently correct
 
