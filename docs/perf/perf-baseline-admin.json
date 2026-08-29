@@ -1,0 +1,32 @@
+{
+  "recordedAt": "2026-08-29T20:47:36.941Z",
+  "shop": "anchor-perf.myshopify.com",
+  "variants": 102132,
+  "timings": [
+    {
+      "label": "catalogue, first page",
+      "p50": 27,
+      "max": 35
+    },
+    {
+      "label": "catalogue, last page",
+      "p50": 296,
+      "max": 332
+    },
+    {
+      "label": "catalogue, text search",
+      "p50": 18,
+      "max": 19
+    },
+    {
+      "label": "reconciliation, first page",
+      "p50": 59,
+      "max": 70
+    },
+    {
+      "label": "reconciliation, deep page",
+      "p50": 53,
+      "max": 60
+    }
+  ]
+}

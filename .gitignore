@@ -37,3 +37,10 @@ chaos/artefacts/
 # are what typechecking reads.
 app/types/admin-*.schema.json
 perf-baseline-*.json
+
+# Except the admin baseline, which is a record rather than a run artefact. The others are
+# written to the repo root by a one-off measurement; this one is what `measure:admin`
+# compares against on every run and what `readme-parity.test.ts` checks the published table
+# against. A record that is not in version control is not a record, and a guard that reads
+# a file CI does not have is a guard that can never fail.
+!docs/perf/perf-baseline-admin.json

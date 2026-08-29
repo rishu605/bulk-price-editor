@@ -30,14 +30,21 @@ had a product bigger than one page until this one existed.
 
 | Query | p50 | max |
 |---|---|---|
-| Catalogue, first page | 26 ms | 26 ms |
-| Catalogue, last page (offset 101,100) | 292 ms | 360 ms |
-| Catalogue, text search | 19 ms | 21 ms |
-| Reconciliation, first page | 61 ms | 61 ms |
-| Reconciliation, deep page | 59 ms | 62 ms |
+| Catalogue, first page | 27 ms | 35 ms |
+| Catalogue, last page (offset 101,100) | 296 ms | 332 ms |
+| Catalogue, text search | 18 ms | 19 ms |
+| Reconciliation, first page | 59 ms | 70 ms |
+| Reconciliation, deep page | 53 ms | 60 ms |
+
+Recorded in [`perf-baseline-admin.json`](perf-baseline-admin.json), which
+`npm run measure:admin` compares against on every run — the table above and that file are
+checked against each other by `app/lib/perf/readme-parity.test.ts`, so neither can go stale
+while the other is right. Accept new numbers deliberately with `--record`.
 
 Text search was 74 ms until #510 replaced two unusable `lower()` btrees with trigram GIN
-indexes.
+indexes — **while the planner's statistics are current**. On stale statistics the same query
+seq-scans at ~50 ms; `ANALYZE variant_index` restores it. See [`queries.md`](queries.md),
+which records how that nearly got written up as the index not working.
 
 The reconciliation rows read 7 ms and 5 ms until #513. They were taken against a store
 with an empty ledger; at 125,070 verified rows both had become **~1,000 ms**, because the

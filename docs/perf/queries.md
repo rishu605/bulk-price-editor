@@ -161,13 +161,41 @@ rather than guessed at.
 The statement count fell from 63 of 70 reading a whole table to **59 of 72** — 72 because
 `barcode` is now measured too. Nothing else in the report moved.
 
-The merchant-visible one is the catalogue search box, which `measure:admin` times. Run
-twice in each index state on the same warm database:
+The merchant-visible one is the catalogue search box, which `measure:admin` times:
 
 | | `lower()` btrees | Trigram GIN |
 |---|---|---|
-| Catalogue, text search (p50) | 55 ms, 49 ms | **20 ms, 19 ms** |
+| Catalogue, text search (p50) | 49, 51, 52 ms | **18, 19, 18, 18 ms** |
 | Catalogue, first page (p50) | 29 ms | 29 ms |
+
+### The caveat that nearly became a wrong correction
+
+Between those two measurements this query was observed at **48–70 ms with the trigram
+indexes in place**, seq-scanning. It looked like the index did not help, and the obvious
+reading — "the 19 ms was a warm cache right after `CREATE INDEX`" — was wrong.
+
+`ANALYZE variant_index` restored it. The plan, on identical data:
+
+```
+stale statistics:  Parallel Seq Scan on variant_index    42 ms
+after ANALYZE:     Bitmap Heap Scan → BitmapOr           35 ms
+                     Bitmap Index Scan on variant_index_title_trgm
+                     Bitmap Index Scan on variant_index_sku_trgm
+```
+
+`"jacket"` matches 14,624 of 105,869 rows — 14%, and a two-column `OR` at that selectivity
+with `ORDER BY title LIMIT 50` sits close to the point where the planner's choice flips. The
+chaos suite and the restore drills had churned the table enough to move the estimate onto
+the wrong side of it.
+
+**So the index's benefit is conditional on the statistics being current**, and that is an
+operational fact rather than a footnote: after a large catalogue import, search can be ~3×
+slower until autovacuum analyses the table. Worth knowing before somebody debugs it as a
+regression.
+
+**And the method matters more than the number.** Two wall-clock measurements taken in good
+faith supported opposite conclusions. The plan did not: it says which index is used and why,
+and it is the same answer whatever is in cache. Take the plan first.
 
 Index bytes on `variant_index`: 21.3 MB removed (`title_lower` 14 MB, `sku_lower` 7.3 MB),
 11.4 MB added (`title_trgm` 6.5 MB, `sku_trgm` 2.5 MB, `barcode_trgm` 2.4 MB). Net
