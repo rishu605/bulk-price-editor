@@ -70,6 +70,37 @@ describe("step 2 lays its fields out in columns", () => {
 });
 
 describe("the rule is what a merchant meets first", () => {
+  it("opens on the rule and asks for the scope after it", () => {
+    // A merchant arrives having decided "20% off boots". The form used to open on boots.
+    // Every competitor asks for the change first — NA and RUBIX by name-then-method,
+    // Sami by picking the field to edit — because it is the decision that was already
+    // made before the page loaded.
+    expect(at('headings.rule')).toBeLessThan(at('headings.scope'));
+    expect(at('name="name"'), "the campaign's name is below the scope again").toBeLessThan(
+      at('name="collection"'),
+    );
+    expect(at("<RuleValueField")).toBeLessThan(at('name="collection"'));
+  });
+
+  it("numbers the headings from what it renders, rather than writing them out", () => {
+    // #445 makes the scope conditional — a campaign priced from a file has no scope to
+    // choose — and a form that jumps from "1 · Rule" to "3 · Schedule" reads as a step
+    // gone missing.
+    expect(EDITOR).toContain("numberSections(");
+    expect(EDITOR).not.toMatch(/heading="\d+ · /);
+  });
+
+  it("prefills the name and says who sees it", () => {
+    // Empty and required is a blocker in front of a decision. RUBIX leaves it empty and
+    // it is the first thing on their page; NA prefills a timestamp and adds a line
+    // saying customers will not see it, which is the question a merchant actually has.
+    expect(EDITOR).toContain("value={defaultName}");
+    expect(EDITOR).toMatch(/Customers never see it/);
+    expect(EDITOR, "a name built during render is a hydration mismatch").toContain(
+      "defaultName: `",
+    );
+  });
+
   it("previews the rule beside it, in the aside, rather than under it", () => {
     // It was directly under the rule, which on a form this long meant off screen while
     // the rule was being typed. The column is where it goes; what has to stay true is

@@ -9,6 +9,7 @@ import { facets } from "../services/segments.server";
 import { createCampaign } from "../services/campaigns/index.server";
 import { joinDateAndTime, localInputToUtc, type Schedule } from "../lib/scheduling/window";
 import { presetStartFor } from "../lib/scheduling/calendar";
+import { formatDay } from "../lib/format/display";
 import { describeAdjustment } from "../lib/markets/describe";
 import {
   profileNameFor,
@@ -32,6 +33,7 @@ import { DraftPreview } from "../components/DraftPreview";
 import { RuleValueField } from "../components/RuleValueField";
 import { FieldGrid, FullRow } from "../components/FieldGrid";
 import { HelpNote } from "../components/HelpNote";
+import { numberSections } from "../lib/ui/sections";
 import { SPACE } from "../lib/ui/spacing";
 import type { DraftPreview as Preview } from "../services/campaigns/draft-preview.server";
 
@@ -120,6 +122,11 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
   ].sort();
 
   return {
+    // Prefilled, so naming a campaign is never the thing standing between a merchant and
+    // a rule. Built here rather than in the component: a name containing today's date
+    // computed during render is two different strings on the server and in the browser,
+    // which is the hydration mismatch `formatAgo` carries a paragraph about avoiding.
+    defaultName: `${practice ? "Practice" : "Sale"} · ${formatDay(new Date(), shop.timezone)}`,
     timeZone: shop.timezone,
     priceLists,
     currencies,
@@ -252,6 +259,7 @@ export default function NewCampaign() {
     presetStart,
     gates,
     planName,
+    defaultName,
   } = useLoaderData<typeof loader>();
 
   // The live price preview. Debounced, because it plans the whole scope on every call
@@ -277,6 +285,14 @@ export default function NewCampaign() {
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
 
+  // Numbered from what is actually rendered. Both sections apply today; #445 makes the
+  // scope conditional, because a campaign priced from a file has no scope to choose, and
+  // a form that jumps from "1 · Rule" to "3 · Schedule" reads as a step gone missing.
+  const headings = numberSections([
+    { key: "rule", title: "Rule" },
+    { key: "scope", title: "Scope" },
+  ]);
+
   return (
     <PageShell
       heading={practice ? "Practice campaign" : guided ? "Your first campaign" : "New campaign"}
@@ -300,9 +316,10 @@ export default function NewCampaign() {
       {guided ? (
         <s-banner tone="info">
           <s-paragraph>
-            Start small. Narrow the scope below to a handful of products — five is
-            plenty — so your first run is quick and easy to check. You will see every
-            price that would change before anything is applied.
+            Start small. Set your rule, then narrow the scope to a handful of
+            products — five is plenty — so your first run is quick and easy to check.
+            The panel beside it shows every price that would change, before anything is
+            applied.
           </s-paragraph>
         </s-banner>
       ) : null}
@@ -326,79 +343,7 @@ export default function NewCampaign() {
             exactly this case. Without it two cards touch and read as one card with a
             line through it. */}
         <PageSections>
-      <s-section heading="1 · Scope">
-        <s-paragraph>
-          Leave everything blank to target the whole catalogue. Conditions combine
-          with AND.
-        </s-paragraph>
-
-        <FieldGrid>
-          <FullRow>
-            <s-select name="segment" label="Saved segment">
-              <s-option value="" defaultSelected={!selected.segment}>
-                Build a filter below instead
-              </s-option>
-              {segments.map((segment) => (
-                <s-option
-                  key={segment.id}
-                  value={segment.id}
-                  defaultSelected={selected.segment === segment.id}
-                >
-                  {segment.name} ({segment.kind === "DYNAMIC" ? "dynamic" : "frozen"})
-                </s-option>
-              ))}
-            </s-select>
-          </FullRow>
-
-          {usingSegment ? (
-            <FullRow>
-              <s-banner tone="info">
-                <s-paragraph>
-                  Targeting the segment <s-text>{usingSegment.name}</s-text>. The filter
-                  below is ignored.{" "}
-                  {usingSegment.kind === "DYNAMIC"
-                    ? "It re-checks its filter on every run, so products added later join this campaign."
-                    : "Its product list is pinned, so this campaign hits exactly those products and nothing added later."}
-                </s-paragraph>
-              </s-banner>
-            </FullRow>
-          ) : null}
-
-          <s-select name="collection" label="Collection">
-            <s-option value="" defaultSelected={!selected.collection}>
-              Any collection
-            </s-option>
-            {available.collections.map((c) => (
-              <s-option key={c} value={c} defaultSelected={selected.collection === c}>
-                {c}
-              </s-option>
-            ))}
-          </s-select>
-          <s-select name="vendor" label="Vendor">
-            <s-option value="" defaultSelected={!selected.vendor}>
-              Any vendor
-            </s-option>
-            {available.vendors.map((v) => (
-              <s-option key={v} value={v} defaultSelected={selected.vendor === v}>
-                {v}
-              </s-option>
-            ))}
-          </s-select>
-          <s-select name="tag" label="Tag">
-            <s-option value="" defaultSelected={!selected.tag}>
-              Any tag
-            </s-option>
-            {available.tags.map((t) => (
-              <s-option key={t} value={t} defaultSelected={selected.tag === t}>
-                {t}
-              </s-option>
-            ))}
-          </s-select>
-          <s-text-field name="title" label="Title contains" value={selected.title} />
-        </FieldGrid>
-      </s-section>
-
-      <s-section heading="2 · Rule">
+      <s-section heading={headings.rule}>
           <s-stack gap={SPACE.section}>
             {/* The rule, and nothing else, first.
 
@@ -414,7 +359,13 @@ export default function NewCampaign() {
                   and a title above the settings that describe it is the shape every form
                   of this kind takes. */}
               <FullRow>
-                <s-text-field name="name" label="Campaign name" value="Sale" required />
+                <s-text-field
+                  name="name"
+                  label="Campaign name"
+                  value={defaultName}
+                  details="For you and your team. Customers never see it — use the storefront tags below if you want your theme to badge the sale."
+                  required
+                />
               </FullRow>
 
               {/* Not wrapped in a `FullRow`, deliberately. This renders *two* fields — the
@@ -640,6 +591,78 @@ export default function NewCampaign() {
             </ActionRow>
           </s-stack>
       </s-section>
+      <s-section heading={headings.scope}>
+        <s-paragraph>
+          Which variants the rule above applies to. Leave everything blank to target the
+          whole catalogue; conditions combine with AND.
+        </s-paragraph>
+
+        <FieldGrid>
+          <FullRow>
+            <s-select name="segment" label="Saved segment">
+              <s-option value="" defaultSelected={!selected.segment}>
+                Build a filter below instead
+              </s-option>
+              {segments.map((segment) => (
+                <s-option
+                  key={segment.id}
+                  value={segment.id}
+                  defaultSelected={selected.segment === segment.id}
+                >
+                  {segment.name} ({segment.kind === "DYNAMIC" ? "dynamic" : "frozen"})
+                </s-option>
+              ))}
+            </s-select>
+          </FullRow>
+
+          {usingSegment ? (
+            <FullRow>
+              <s-banner tone="info">
+                <s-paragraph>
+                  Targeting the segment <s-text>{usingSegment.name}</s-text>. The filter
+                  below is ignored.{" "}
+                  {usingSegment.kind === "DYNAMIC"
+                    ? "It re-checks its filter on every run, so products added later join this campaign."
+                    : "Its product list is pinned, so this campaign hits exactly those products and nothing added later."}
+                </s-paragraph>
+              </s-banner>
+            </FullRow>
+          ) : null}
+
+          <s-select name="collection" label="Collection">
+            <s-option value="" defaultSelected={!selected.collection}>
+              Any collection
+            </s-option>
+            {available.collections.map((c) => (
+              <s-option key={c} value={c} defaultSelected={selected.collection === c}>
+                {c}
+              </s-option>
+            ))}
+          </s-select>
+          <s-select name="vendor" label="Vendor">
+            <s-option value="" defaultSelected={!selected.vendor}>
+              Any vendor
+            </s-option>
+            {available.vendors.map((v) => (
+              <s-option key={v} value={v} defaultSelected={selected.vendor === v}>
+                {v}
+              </s-option>
+            ))}
+          </s-select>
+          <s-select name="tag" label="Tag">
+            <s-option value="" defaultSelected={!selected.tag}>
+              Any tag
+            </s-option>
+            {available.tags.map((t) => (
+              <s-option key={t} value={t} defaultSelected={selected.tag === t}>
+                {t}
+              </s-option>
+            ))}
+          </s-select>
+          <s-text-field name="title" label="Title contains" value={selected.title} />
+        </FieldGrid>
+      </s-section>
+
         </PageSections>
       </Form>
 
