@@ -112,6 +112,7 @@ not after.
 | `HELP_BASE_URL` | Help links point at this deploy's own `/help`. Set it only to move the docs onto hosting that survives an outage of this app — `failures/app-unavailable` is otherwise served by the app it describes. |
 | `SCHEDULER_TICK_MS` | Defaults to 30s. |
 | `RUN_STALE_AFTER_MS` | Defaults to 5min — how long before the reaper treats a silent run as abandoned and makes it resumable. Raise it only if a legitimate run can go that long without a heartbeat. |
+| `DATABASE_POOL_SIZE` | Defaults to 10 database connections **per process**, so web plus worker is 20. Measured in `docs/perf/README.md`: ten buys 91% of the throughput available at 40 for a quarter of the connections. Raise it only against a known `max_connections`, remembering that every service and every replica draws from the same budget, as does the `migrate deploy` each container runs at boot. A `connection_limit` already present in `DATABASE_URL` wins over this. |
 
 ---
 
