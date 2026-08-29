@@ -58,7 +58,12 @@ function promised(): Set<string> {
     [...runbook.matchAll(/`([a-z0-9_]+\.[a-z0-9_]+)`/g)]
       .map(([, name]) => name)
       // Table and column names also arrive in backticks and are not metrics.
-      .filter((name) => !/^(scheduler_heartbeat|variant_changes|error_events|webhook_events)\./.test(name)),
+      .filter((name) => !/^(scheduler_heartbeat|variant_changes|error_events|webhook_events)\./.test(name))
+      // Neither are filenames. A runbook that names the module deciding a severity is
+      // being helpful, and `alerts.ts` matching "word.word" would otherwise be read as a
+      // metric nothing emits. A source-file suffix cannot be a metric name here: metrics
+      // are `domain.measure`, and no domain is called "ts".
+      .filter((name) => !/\.(ts|tsx|md|json|sql|yml|yaml|toml)$/.test(name)),
   );
 }
 
