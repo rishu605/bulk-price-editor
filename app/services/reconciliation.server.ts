@@ -23,6 +23,8 @@
  * is the difference between a feature and a timeout.
  */
 
+import { Prisma } from "@prisma/client";
+
 import prisma from "../db.server";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { formatMinorUnits } from "../lib/money/format";
@@ -249,19 +251,24 @@ export async function reconcile(
 }
 
 /**
- * Cells where the live price disagrees with what we last verified writing.
+ * The cells where the live price disagrees with what we last verified writing.
  *
  * This is drift in the strict sense: somebody changed the price behind us. A cell no
- * campaign has ever written cannot drift, because nothing was promised about it — hence
+ * campaign has ever written cannot drift, because nothing was promised about it -- hence
  * the join rather than a left join.
  *
  * `DISTINCT ON` picks the newest verified write per cell, which is the one that explains
  * the price now. Postgres-specific and deliberately so: the alternative is a correlated
- * subquery per row.
+ * subquery per row. `variant_changes_drift_lookup` exists to serve that ordering; without
+ * it Postgres sorts the shop's whole verified ledger and spills to disk.
+ *
+ * A fragment rather than a whole query, because two callers ask about the same set and
+ * must not be able to disagree about what it contains -- one lists the cells to filter a
+ * page by, the other counts them for the badge. Definitions that get restated are how a
+ * page ends up saying "3 drifted" above a table showing four.
  */
-async function driftedCells(shopId: string) {
-  return prisma.$queryRaw<Array<{ variantGid: string; priceListGid: string }>>`
-    SELECT e."variantGid", e."priceListGid"
+export function driftedFrom(shopId: string): Prisma.Sql {
+  return Prisma.sql`
     FROM "price_surface_entries" e
     JOIN (
       SELECT DISTINCT ON (c."variantGid", c."priceListGid")
@@ -274,14 +281,12 @@ async function driftedCells(shopId: string) {
       AND e."livePrice" IS NOT NULL
       AND w."intendedPrice" IS NOT NULL
       AND e."livePrice" <> w."intendedPrice"
-    LIMIT 5000
   `;
 }
 
-/** Cells whose live price differs from their baseline — what a sale looks like. */
-async function offBaselineCells(shopId: string) {
-  return prisma.$queryRaw<Array<{ variantGid: string; priceListGid: string }>>`
-    SELECT e."variantGid", e."priceListGid"
+/** The same for cells whose live price differs from their baseline -- what a sale looks like. */
+export function offBaselineFrom(shopId: string): Prisma.Sql {
+  return Prisma.sql`
     FROM "price_surface_entries" e
     JOIN "baselines" b
       ON b."variantGid" = e."variantGid"
@@ -291,9 +296,47 @@ async function offBaselineCells(shopId: string) {
     WHERE e."shopId" = ${shopId}
       AND e."livePrice" IS NOT NULL
       AND e."livePrice" <> b."basePrice"
-    LIMIT 5000
   `;
 }
+
+/**
+ * How many cells a `WHERE ... IN` may name.
+ *
+ * A bound on the filter, not on the truth. The count below deliberately does not use it.
+ */
+export const MAX_FILTER_CELLS = 5_000;
+
+/** The statement listing matching cells, bounded so it can be named in a `WHERE ... IN`. */
+export function cellsQuery(where: Prisma.Sql): Prisma.Sql {
+  return Prisma.sql`SELECT e."variantGid", e."priceListGid" ${where} LIMIT ${MAX_FILTER_CELLS}`;
+}
+
+async function cells(where: Prisma.Sql) {
+  return prisma.$queryRaw<Array<{ variantGid: string; priceListGid: string }>>(cellsQuery(where));
+}
+
+/**
+ * How many cells match, counted in the database.
+ *
+ * Not `cells(...).length`. That is what it used to be, and because `cells` is capped a
+ * store with 8,000 drifted prices was told it had **5,000** -- a specific, plausible,
+ * wrong number with nothing about it that reads as a ceiling. The cap belongs on the
+ * filter, where naming 5,000 variants in a `WHERE ... IN` is a deliberate bound; on the
+ * badge it silently replaced the answer.
+ *
+ * It also stops shipping up to 10,000 rows to Node so their length can be taken.
+ */
+export function countQuery(where: Prisma.Sql): Prisma.Sql {
+  return Prisma.sql`SELECT COUNT(*)::bigint AS count ${where}`;
+}
+
+async function countCells(where: Prisma.Sql): Promise<number> {
+  const [row] = await prisma.$queryRaw<Array<{ count: bigint }>>(countQuery(where));
+  return Number(row?.count ?? 0);
+}
+
+const driftedCells = (shopId: string) => cells(driftedFrom(shopId));
+const offBaselineCells = (shopId: string) => cells(offBaselineFrom(shopId));
 
 /**
  * Store-wide totals, not page totals.
@@ -303,11 +346,11 @@ async function offBaselineCells(shopId: string) {
  */
 async function counts(shopId: string) {
   const [drifted, offBaseline] = await Promise.all([
-    driftedCells(shopId),
-    offBaselineCells(shopId),
+    countCells(driftedFrom(shopId)),
+    countCells(offBaselineFrom(shopId)),
   ]);
 
-  return { drifted: drifted.length, offBaseline: offBaseline.length };
+  return { drifted, offBaseline };
 }
 
 const key = (variantGid: string, priceListGid: string) => `${variantGid}@${priceListGid}`;

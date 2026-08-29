@@ -38,6 +38,8 @@ export interface Plan {
   rowsRemovedByFilter: number;
   executionMs: number;
   sharedBlocks: number;
+  /** Kilobytes each sort had to write to disk, one entry per spilling sort. */
+  diskSortKb: number[];
 }
 
 /**
@@ -92,6 +94,14 @@ export function summarise(sql: string, root: Record<string, unknown>, executionM
         total + Number(n["Rows Removed by Filter"] ?? 0) * Number(n["Actual Loops"] ?? 1),
       0,
     ),
+    // A sort that does not fit in `work_mem` writes to disk, and the difference is not
+    // marginal: the reconciliation drift query spent 983ms of 1,018ms in one 9MB external
+    // merge, for a result of zero rows. It is invisible in a timing -- the query is
+    // simply slow -- and invisible in the plan shape, because the node is a Sort either
+    // way. Only `Sort Space Type` says which.
+    diskSortKb: nodes
+      .filter((n) => String(n["Sort Space Type"]) === "Disk")
+      .map((n) => Number(n["Sort Space Used"] ?? 0) * Number(n["Actual Loops"] ?? 1)),
     executionMs,
     sharedBlocks: nodes.reduce(
       (total, n) =>
@@ -152,9 +162,12 @@ function report(result: PathResult): void {
   );
 
   for (const plan of [...result.plans].sort((a, b) => b.executionMs - a.executionMs).slice(0, 3)) {
-    const how = plan.scannedRelations.length
-      ? `SEQ SCAN ${plan.scannedRelations.join(", ")}`
-      : "indexed";
+    const spill = plan.diskSortKb.length
+      ? `  SORT SPILLED ${plan.diskSortKb.reduce((a, b) => a + b, 0)}kB TO DISK`
+      : "";
+    const how =
+      (plan.scannedRelations.length ? `SEQ SCAN ${plan.scannedRelations.join(", ")}` : "indexed") +
+      spill;
     console.log(
       `      ${plan.executionMs.toFixed(1).padStart(7)}ms  ` +
         `${String(plan.sharedBlocks).padStart(6)} blocks  ` +
@@ -187,6 +200,7 @@ async function main(): Promise<void> {
   }
 
   const { loadCandidates } = await import("../app/services/campaigns/candidates.server");
+  const { reconcile } = await import("../app/services/reconciliation.server");
   const segments = await import("../app/services/segments.server");
   const { facets, previewMatches, resolveVariantGids } = segments;
   type FilterAst = import("../app/services/segments.server").FilterAst;
@@ -263,6 +277,12 @@ async function main(): Promise<void> {
     ["enrol: every gid in scope", () => resolveVariantGids(shop.id, byTag)],
     ["plan: candidates for a tag", () => loadCandidates(shop.id, byTag)],
     ["plan: candidates for the whole catalogue", () => loadCandidates(shop.id, everything)],
+
+    // The trust view. Its drift query grows with the ledger rather than the catalogue,
+    // which is why it degraded unnoticed while every catalogue-sized measurement stayed
+    // flat -- see #513.
+    ["reconcile: first page", () => reconcile(shop.id, shop.domain, {}, 1)],
+    ["reconcile: deep page", () => reconcile(shop.id, shop.domain, {}, 20)],
   ];
 
   // Warm the pool and the page cache once, so the first path measured is not also
@@ -285,6 +305,27 @@ async function main(): Promise<void> {
       `    ${plan.executionMs.toFixed(1).padStart(7)}ms  ` +
         `${plan.scannedRelations.join(", ").padEnd(22)} ${path}`,
     );
+  }
+
+  // Reported separately and last, because it is the finding most worth acting on and the
+  // one least visible in a timing. A spilling sort is a cliff, not a slope: it is fast
+  // until the data outgrows work_mem, and then it is not.
+  const spilling = results.flatMap((r) =>
+    r.plans.filter((p) => p.diskSortKb.length > 0).map((plan) => ({ path: r.label, plan })),
+  );
+
+  if (spilling.length === 0) {
+    console.log("\n  No sort spilled to disk.");
+  } else {
+    console.log(`\n  ${spilling.length} statements sorted to disk — raise work_mem or index the order:`);
+    for (const { path, plan } of spilling.sort(
+      (a, b) => b.plan.executionMs - a.plan.executionMs,
+    )) {
+      const kb = plan.diskSortKb.reduce((a, b) => a + b, 0);
+      console.log(
+        `    ${plan.executionMs.toFixed(1).padStart(7)}ms  ${String(kb).padStart(7)}kB  ${path}`,
+      );
+    }
   }
 
   await Promise.all([observed.$disconnect(), explainer.$disconnect()]);

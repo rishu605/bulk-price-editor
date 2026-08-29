@@ -1,0 +1,31 @@
+-- The drift query's sort, removed.
+--
+-- `driftedCells` picks the newest verified write per cell with
+-- `DISTINCT ON (variantGid, priceListGid) ... ORDER BY ..., verifiedAt DESC`. With no
+-- index in that order Postgres sorts the shop's entire verified ledger to produce it,
+-- and on anchor-perf's 125,070 rows that sort does not fit in the default 4MB work_mem:
+--
+--   Sort (actual time=880.447..983.412 rows=125070)
+--     Sort Method: external merge  Disk: 9072kB
+--   Execution Time: 1017.951 ms
+--
+-- 983ms of the 1,018ms was one sort spilling to disk, for a query returning zero rows.
+-- With this index the sort disappears -- Unique reads the index in order:
+--
+--   Index Scan using variant_changes_drift_lookup (actual time=0.017..30.704 rows=125070)
+--   Execution Time: 71.776 ms
+--
+-- This degrades with *use*, not with catalogue size: one ledger row per variant x surface
+-- x run, retained indefinitely because unlimited history is a deliberate free-tier
+-- feature. #183 puts an active store at ~7.8M rows a year. `reconcile` calls `counts()`
+-- on every page load, so every merchant paid this on every visit to the live-prices page.
+--
+-- Partial on VERIFIED for the same reason `variant_changes_unverified` is partial the
+-- other way: the drift path reads only verified rows, and an index over the whole ledger
+-- would carry history this query never looks at.
+--
+-- Expand only -- an index changes no rows, and the previous release simply does not
+-- benefit from it.
+CREATE INDEX "variant_changes_drift_lookup"
+  ON "variant_changes" ("shopId", "variantGid", "priceListGid", "verifiedAt" DESC)
+  WHERE "status" = 'VERIFIED';

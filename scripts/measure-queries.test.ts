@@ -123,6 +123,72 @@ describe("rows discarded", () => {
   });
 });
 
+describe("sorts that spill to disk", () => {
+  it("reports the kilobytes a disk sort wrote", () => {
+    // The finding that a timing alone cannot give you. A spilling sort is a cliff, not a
+    // slope — fast until the data outgrows work_mem, then not — and the plan node is a
+    // `Sort` either way. Only `Sort Space Type` distinguishes them.
+    const plan = summarise(
+      "select 1",
+      node("Unique", {
+        Plans: [
+          node("Sort", {
+            "Sort Method": "external merge",
+            "Sort Space Used": 9072,
+            "Sort Space Type": "Disk",
+          }),
+        ],
+      }),
+      1018,
+    );
+
+    expect(plan.diskSortKb).toEqual([9072]);
+  });
+
+  it("says nothing about a sort that fit in memory", () => {
+    const plan = summarise(
+      "select 1",
+      node("Sort", {
+        "Sort Method": "quicksort",
+        "Sort Space Used": 5887,
+        "Sort Space Type": "Memory",
+      }),
+      3,
+    );
+
+    expect(plan.diskSortKb).toEqual([]);
+  });
+
+  it("multiplies a spill inside a loop by its iterations", () => {
+    const plan = summarise(
+      "select 1",
+      node("Nested Loop", {
+        Plans: [
+          node("Sort", { "Sort Space Used": 100, "Sort Space Type": "Disk", "Actual Loops": 21 }),
+        ],
+      }),
+      1,
+    );
+
+    expect(plan.diskSortKb).toEqual([2100]);
+  });
+
+  it("reports each spilling sort separately", () => {
+    const plan = summarise(
+      "select 1",
+      node("Merge Join", {
+        Plans: [
+          node("Sort", { "Sort Space Used": 10, "Sort Space Type": "Disk" }),
+          node("Sort", { "Sort Space Used": 20, "Sort Space Type": "Disk" }),
+        ],
+      }),
+      1,
+    );
+
+    expect(plan.diskSortKb).toEqual([10, 20]);
+  });
+});
+
 describe("buffers", () => {
   it("adds cache hits and disk reads across the tree", () => {
     const plan = summarise(
