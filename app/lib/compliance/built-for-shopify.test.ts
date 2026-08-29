@@ -16,6 +16,8 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { sourceOf } from "../testing/source";
+
 import { API_VERSION_STRING, supportedUntil } from "../shopify/api-version";
 
 const ROOT = process.cwd();
@@ -89,7 +91,7 @@ describe("design — Polaris and App Bridge", () => {
       const file = routes.find((candidate) => candidate.includes(route));
       expect(file, `${route} is excluded but does not exist`).toBeDefined();
 
-      const source = readFileSync(file!, "utf8");
+      const source = sourceOf(file!);
       expect(source, `${route} is excluded but authenticates as embedded admin`).not.toMatch(
         /authenticate\.admin/,
       );
@@ -103,7 +105,7 @@ describe("design — Polaris and App Bridge", () => {
     // which is both a broken app and a design-criterion failure for full page reloads.
     for (const file of ui) {
       if (file.endsWith("FilterForm.tsx")) continue;
-      const source = readFileSync(file, "utf8");
+      const source = sourceOf(file);
 
       expect(source, `${file} uses a native <form>`).not.toMatch(/<form[\s>]/);
     }
@@ -124,7 +126,7 @@ describe("design — Polaris and App Bridge", () => {
     ];
 
     for (const file of ui) {
-      const source = readFileSync(file, "utf8");
+      const source = sourceOf(file);
 
       for (const field of FIELDS) {
         // Each opening tag with everything up to its closing bracket, so a label on a
@@ -144,7 +146,7 @@ describe("design — Polaris and App Bridge", () => {
     // Hidden inputs carry intent through a form and have no Polaris equivalent. Anything
     // visible should be a Polaris component, or the app has two visual languages in it.
     for (const file of ui) {
-      const source = readFileSync(file, "utf8");
+      const source = sourceOf(file);
 
       for (const match of source.matchAll(/<input\b[^>]*>/gs)) {
         expect(
@@ -160,7 +162,7 @@ describe("integration — API, auth and webhooks", () => {
   it("pins one API version, with no environment override", () => {
     // A worker and a web process on different versions is a class of bug that only ever
     // shows up in production, and only sometimes.
-    const source = readFileSync(join(ROOT, "app/lib/shopify/api-version.ts"), "utf8");
+    const source = sourceOf("app/lib/shopify/api-version.ts");
 
     expect(source).toMatch(/export const API_VERSION\s*=\s*ApiVersion\./);
     expect(source, "the API version must not be overridable by env").not.toMatch(
@@ -197,7 +199,7 @@ describe("integration — API, auth and webhooks", () => {
 
     expect(webhooks.length).toBeGreaterThan(0);
     for (const file of webhooks) {
-      expect(readFileSync(file, "utf8"), `${file} does not authenticate`).toMatch(
+      expect(sourceOf(file), `${file} does not authenticate`).toMatch(
         /authenticate\.webhook\(/,
       );
     }
@@ -209,7 +211,7 @@ describe("integration — API, auth and webhooks", () => {
     );
 
     for (const file of embedded) {
-      const source = readFileSync(file, "utf8");
+      const source = sourceOf(file);
       if (!/export const (loader|action)/.test(source)) continue;
 
       expect(source, `${file} has a loader or action that does not authenticate`).toMatch(
@@ -275,7 +277,7 @@ describe("integration — API, auth and webhooks", () => {
         }
         if (!/\.(ts|tsx)$/.test(entry.name)) continue;
 
-        const source = readFileSync(join(ROOT, path), "utf8");
+        const source = sourceOf(path);
         // A mutation field on the root Mutation type whose name begins with `market`.
         // Deliberately not matching `marketing…` or a `markets` query.
         for (const [match] of source.matchAll(
@@ -319,7 +321,7 @@ describe("the pre-audit sheet names evidence that exists", () => {
     readdirSync(join(ROOT, "app/lib/compliance"))
       .filter((name) => name.endsWith(".test.ts"))
       .flatMap((name) => {
-        const source = readFileSync(join(ROOT, "app/lib/compliance", name), "utf8");
+        const source = sourceOf("app/lib/compliance", name);
         return [...source.matchAll(/^\s*(?:it|describe)\("([^"]+)"/gm)].map((match) => match[1]!);
       }),
   );
@@ -356,7 +358,7 @@ describe("the pre-audit sheet names evidence that exists", () => {
   });
 
   it("cites every criterion test in this file, so nothing is proved but unlisted", () => {
-    const suite = readFileSync(join(ROOT, "app/lib/compliance/built-for-shopify.test.ts"), "utf8");
+    const suite = sourceOf("app/lib/compliance/built-for-shopify.test.ts");
     const here = [...suite.matchAll(/^\s*it\("([^"]+)"/gm)].map((match) => match[1]!);
 
     const exempt = new Set([

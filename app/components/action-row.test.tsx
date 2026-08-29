@@ -8,10 +8,12 @@
  * they arrived.
  */
 
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+
+import { sourceOf } from "../lib/testing/source";
 
 import { ActionRow } from "./ActionRow";
 import { SPACE } from "../lib/ui/spacing";
@@ -41,7 +43,7 @@ function sources(dir: string): Array<{ path: string; text: string }> {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) return sources(path);
     if (!entry.name.endsWith(".tsx") || entry.name.includes(".test.")) return [];
-    return [{ path: path.replace(`${APP}/`, ""), text: readFileSync(path, "utf8") }];
+    return [{ path: path.replace(`${APP}/`, ""), text: sourceOf(path) }];
   });
 }
 

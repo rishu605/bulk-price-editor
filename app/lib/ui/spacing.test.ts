@@ -22,6 +22,8 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { sourceOf } from "../testing/source";
+
 import { PAD, SPACE, type Space } from "./spacing";
 
 const ROOT = process.cwd();
@@ -151,9 +153,7 @@ describe("nothing in the app sets a distance by hand", () => {
     // check that rejects a native form element greps for `<form`, so the word in a
     // comment trips it — and half the files here explain in prose which literal they
     // replaced and why.
-    const source = readFileSync(join(ROOT, file), "utf8")
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/^\s*\/\/.*$/gm, "");
+    const source = sourceOf(file);
 
     const literals = [
       ...source.matchAll(

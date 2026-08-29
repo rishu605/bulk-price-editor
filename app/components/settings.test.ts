@@ -10,17 +10,19 @@
  * redirects to actually exists.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
+
+import { sourceOf } from "../lib/testing/source";
 
 import { LEGACY_ROUTES } from "../lib/routing/legacy-routes";
 
 const ROUTES = join(process.cwd(), "app", "routes");
 const routeFiles = new Set(readdirSync(ROUTES).filter((f) => f.endsWith(".tsx")));
-const layout = readFileSync(join(ROUTES, "app.settings.tsx"), "utf8");
-const index = readFileSync(join(ROUTES, "app.settings._index.tsx"), "utf8");
+const layout = sourceOf(ROUTES, "app.settings.tsx");
+const index = sourceOf(ROUTES, "app.settings._index.tsx");
 
 describe("everything that moved into settings is still reachable", () => {
   it.each([

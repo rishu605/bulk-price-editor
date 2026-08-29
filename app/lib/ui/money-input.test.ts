@@ -12,10 +12,12 @@
  * covered without anyone remembering this file exists.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
+
+import { sourceOf } from "../testing/source";
 
 const ROUTES = join(process.cwd(), "app", "routes");
 const COMPONENTS = join(process.cwd(), "app", "components");
@@ -24,7 +26,7 @@ function sources(): Array<{ name: string; text: string }> {
   const read = (dir: string) =>
     readdirSync(dir, { withFileTypes: true })
       .filter((e) => e.isFile() && e.name.endsWith(".tsx"))
-      .map((e) => ({ name: e.name, text: readFileSync(join(dir, e.name), "utf8") }));
+      .map((e) => ({ name: e.name, text: sourceOf(dir, e.name) }));
 
   return [...read(ROUTES), ...read(COMPONENTS)];
 }
@@ -60,7 +62,7 @@ describe("price inputs", () => {
 });
 
 describe("the rule amount changes with the rule", () => {
-  const field = readFileSync(join(COMPONENTS, "RuleValueField.tsx"), "utf8");
+  const field = sourceOf(COMPONENTS, "RuleValueField.tsx");
 
   it("is a percentage for a percent rule and money for a fixed one", () => {
     // One input served both as a generic number field, so "-20" meant 20% off under one

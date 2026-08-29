@@ -18,16 +18,18 @@
  * page still names the thing it used to explain, wherever that prose now lives.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
+import { sourceOf } from "../lib/testing/source";
+
 import { HelpNote } from "./HelpNote";
 
 const ROUTES = join(process.cwd(), "app", "routes");
-const route = (name: string) => readFileSync(join(ROUTES, name), "utf8");
+const route = (name: string) => sourceOf(ROUTES, name);
 /** Every route module, so a new explanatory sidebar is caught wherever it is added. */
 const ALL_ROUTES = readdirSync(ROUTES).filter((f) => f.endsWith(".tsx"));
 

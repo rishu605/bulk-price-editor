@@ -10,15 +10,12 @@
  * a stack that stretches its children.
  */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const search = readFileSync(
-  join(process.cwd(), "app", "components", "prices", "VariantSearch.tsx"),
-  "utf8",
-);
+import { sourceOf } from "../../lib/testing/source";
+
+const search = sourceOf(process.cwd(), "app", "components", "prices", "VariantSearch.tsx");
 
 describe("the filter block", () => {
   it("lays its controls out in a grid, not a stretching stack", () => {

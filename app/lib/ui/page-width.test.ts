@@ -14,10 +14,12 @@
  * covered without anyone remembering this file exists.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
+
+import { sourceOf } from "../testing/source";
 
 const ROUTES_DIR = join(process.cwd(), "app", "routes");
 
@@ -25,7 +27,7 @@ const ROUTES_DIR = join(process.cwd(), "app", "routes");
 function renderingRoutes(): Array<{ name: string; source: string }> {
   return readdirSync(ROUTES_DIR)
     .filter((f) => f.endsWith(".tsx"))
-    .map((name) => ({ name, source: readFileSync(join(ROUTES_DIR, name), "utf8") }))
+    .map((name) => ({ name, source: sourceOf(ROUTES_DIR, name) }))
     .filter(({ source }) => source.includes("export default function"));
 }
 
@@ -47,7 +49,7 @@ describe("every page is full width", () => {
   });
 
   it("keeps the aside rebuild in one place", () => {
-    const shell = readFileSync(join(process.cwd(), "app", "components", "PageShell.tsx"), "utf8");
+    const shell = sourceOf(process.cwd(), "app", "components", "PageShell.tsx");
 
     expect(shell).toContain('inlineSize="large"');
     expect(

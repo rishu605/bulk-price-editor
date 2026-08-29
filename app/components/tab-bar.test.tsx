@@ -11,7 +11,7 @@
  * a second one".
  */
 
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import type { ReactNode } from "react";
@@ -19,11 +19,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { StaticRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 
+import { sourceOf } from "../lib/testing/source";
+
 import { TabBar, type Tab } from "./TabBar";
 import { PAD } from "../lib/ui/spacing";
 
 const ROOT = process.cwd();
-const bar = readFileSync(join(ROOT, "app/components/TabBar.tsx"), "utf8");
+const bar = sourceOf("app/components/TabBar.tsx");
 
 /**
  * The bar as a merchant's browser receives it.
@@ -58,7 +60,7 @@ function sources(dir: string): string[] {
 
 const files = sources("app").map((path) => ({
   path,
-  source: readFileSync(join(ROOT, path), "utf8"),
+  source: sourceOf(path),
 }));
 
 describe("every set of tabs uses the shared bar", () => {
@@ -165,10 +167,7 @@ describe("the bar itself", () => {
     // where the merchant was reading; on a real page change it is what they expect,
     // which is why this is the caller's decision and not a constant.
     expect(bar).toContain("preventScrollReset = false");
-    const campaign = readFileSync(
-      join(ROOT, "app/components/campaign/CampaignTabs.tsx"),
-      "utf8",
-    );
+    const campaign = sourceOf("app/components/campaign/CampaignTabs.tsx");
     expect(campaign).toContain("preventScrollReset");
   });
 });
@@ -206,7 +205,7 @@ describe("the rule under the row", () => {
   it("uses the two-value form only where both axes are meant", () => {
     // `PAD.control` is "small-100 base": two values means `block inline`, so the tab is
     // tighter vertically than horizontally. That one is correct and worth not breaking.
-    const spacing = readFileSync(join(ROOT, "app/lib/ui/spacing.ts"), "utf8");
+    const spacing = sourceOf("app/lib/ui/spacing.ts");
     expect(spacing).toContain('control: "small-100 base"');
   });
 });

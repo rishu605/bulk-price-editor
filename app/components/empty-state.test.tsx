@@ -14,12 +14,14 @@
  * empty branch in the app rather than on the ones somebody remembered.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { renderToStaticMarkup } from "react-dom/server";
 import { StaticRouter } from "react-router";
 import { describe, expect, it } from "vitest";
+
+import { sourceOf } from "../lib/testing/source";
 
 import { EmptyState, NoMatches } from "./AsyncState";
 import { clearedSearch } from "./FilterForm";
@@ -113,7 +115,7 @@ describe("the campaigns index picks the right one of the two", () => {
   });
 
   it("no longer carries a second EmptyState of its own", () => {
-    const source = readFileSync(join(process.cwd(), "app/components/campaign/CampaignListView.tsx"), "utf8");
+    const source = sourceOf("app/components/campaign/CampaignListView.tsx");
 
     expect(source).not.toMatch(/function EmptyState/);
   });
@@ -195,23 +197,9 @@ describe("no page answers 'where are my rows' with a loose paragraph", () => {
     (path) => ![...OUTSIDE_THE_ADMIN, ...NOT_A_PAGE].some((skip) => path.includes(skip)),
   );
 
-  /**
-   * Whole-line `//` comments removed before matching.
-   *
-   * Two of the nine branches explain themselves in a comment between the `(` and the
-   * component — which is the house style, and it hid them from the first version of this
-   * check entirely. A rule that stops seeing the code as soon as somebody documents it is
-   * worse than no rule. Only lines that are *nothing but* a comment go, so the `//` in an
-   * `https://` href is left alone.
-   */
-  const scannable = (source: string) =>
-    source
-      .split("\n")
-      .filter((line) => !line.trimStart().startsWith("//"))
-      .join("\n");
 
   const offenders = admin.flatMap((path) => {
-    const source = scannable(readFileSync(path, "utf8"));
+    const source = sourceOf(path);
     return BRANCHES.flatMap((pattern) =>
       [...source.matchAll(pattern)]
         .filter((match) => !NOT_DATA.includes(match[1]) && !ALLOWED.includes(match[2]))
@@ -221,7 +209,7 @@ describe("no page answers 'where are my rows' with a loose paragraph", () => {
 
   it("finds the empty branches to check", () => {
     const found = admin.flatMap((path) => {
-      const source = scannable(readFileSync(path, "utf8"));
+      const source = sourceOf(path);
       return BRANCHES.flatMap((pattern) =>
         [...source.matchAll(pattern)].filter((match) => !NOT_DATA.includes(match[1])),
       );

@@ -15,11 +15,13 @@
  * `inlineSize` and about where the aside content ended up.
  */
 
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+
+import { sourceOf } from "../lib/testing/source";
 
 import { HelpNote } from "./HelpNote";
 import { PageShell } from "./PageShell";
@@ -260,7 +262,7 @@ describe("every page in the app goes through the shell", () => {
       const path = join(dir, entry.name);
       if (entry.isDirectory()) return sources(path);
       if (!entry.name.endsWith(".tsx") || entry.name.includes(".test.")) return [];
-      return [{ path: path.replace(`${APP}/`, ""), text: readFileSync(path, "utf8") }];
+      return [{ path: path.replace(`${APP}/`, ""), text: sourceOf(path) }];
     });
 
   /**
@@ -290,7 +292,7 @@ describe("every page in the app goes through the shell", () => {
   it("insets the one thing that renders outside a page", () => {
     // A section's tabs come from the layout route, above the `Outlet`. They are the only
     // markup in the app that has to line up with a page without being inside one.
-    const tabs = readFileSync(join(APP, "components", "SectionTabs.tsx"), "utf8");
+    const tabs = sourceOf(APP, "components", "SectionTabs.tsx");
 
     expect(tabs).toContain("PageWidth");
   });
@@ -368,17 +370,14 @@ describe("pages that can lose typed work", () => {
   const PROVIDERS = ["<UnsavedChanges", "<ImportForm"];
 
   it("the shared import form carries the guard the routes delegate to it", () => {
-    const form = readFileSync(
-      join(process.cwd(), "app", "components", "imports", "ImportForm.tsx"),
-      "utf8",
-    );
+    const form = sourceOf("app", "components", "imports", "ImportForm.tsx");
 
     expect(form).toContain("<UnsavedChanges");
   });
 
   it("guard the ones that hold a form worth keeping", () => {
     const missing = GUARDED.filter((route) => {
-      const source = readFileSync(join(APP_ROUTES, route), "utf8");
+      const source = sourceOf(APP_ROUTES, route);
       return !PROVIDERS.some((provider) => source.includes(provider));
     });
 

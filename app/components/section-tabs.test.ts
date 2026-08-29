@@ -10,29 +10,20 @@
  * on an empty page reads as "nothing here" rather than "wrong page".
  */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { sourceOf } from "../lib/testing/source";
+
 import { isCurrent } from "./SectionTabs";
 
-const tabs = readFileSync(
-  join(process.cwd(), "app", "components", "SectionTabs.tsx"),
-  "utf8",
-);
+const tabs = sourceOf(process.cwd(), "app", "components", "SectionTabs.tsx");
 // The bar itself is shared with the campaign page and the campaigns index. What stays
 // in SectionTabs is only what is specific to sections: the query string, and what
 // "current" means when the tabs are separate routes.
-const bar = readFileSync(join(process.cwd(), "app", "components", "TabBar.tsx"), "utf8");
-const layout = readFileSync(
-  join(process.cwd(), "app", "routes", "app.prices.tsx"),
-  "utf8",
-);
-const search = readFileSync(
-  join(process.cwd(), "app", "components", "prices", "VariantSearch.tsx"),
-  "utf8",
-);
+const bar = sourceOf(process.cwd(), "app", "components", "TabBar.tsx");
+const layout = sourceOf(process.cwd(), "app", "routes", "app.prices.tsx");
+const search = sourceOf(process.cwd(), "app", "components", "prices", "VariantSearch.tsx");
 
 describe("filters survive a tab switch", () => {
   it("carries the query string onto every tab link", () => {

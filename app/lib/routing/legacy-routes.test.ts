@@ -12,10 +12,12 @@
  * keeps finding: two halves nothing validates.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
+
+import { sourceOf, withoutComments } from "../testing/source";
 
 import { LEGACY_ROUTES, routeFilesFor } from "./legacy-routes";
 
@@ -39,7 +41,7 @@ describe("every URL this app has published still resolves", () => {
 
   it.each(Object.entries(LEGACY_ROUTES))("%s redirects rather than rendering", (oldUrl) => {
     const file = redirectFileFor(oldUrl).find((f) => routeFiles.has(f))!;
-    const source = readFileSync(join(ROUTES_DIR, file), "utf8");
+    const source = sourceOf(ROUTES_DIR, file);
     expect(
       source.includes("LEGACY_ROUTES"),
       `${file} should redirect via LEGACY_ROUTES, so the destination is stated once`,
@@ -86,7 +88,7 @@ describe("nothing inside the app links through a redirect", () => {
         // belong. Keyed on referencing LEGACY_ROUTES at all rather than on a particular
         // call shape: the first version matched `redirect(LEGACY_ROUTES` literally and
         // missed a stub that built its destination with a template literal.
-        const source = readFileSync(path, "utf8");
+        const source = sourceOf(path);
         if (path.includes("legacy-routes")) continue;
         if (source.includes("LEGACY_ROUTES")) continue;
 
@@ -96,9 +98,7 @@ describe("nothing inside the app links through a redirect", () => {
         // repo has been caught grepping source that includes its own commentary; the
         // compliance check that rejects a native form element still trips on the word
         // `<form` in a sentence.
-        const code = source
-          .replace(/\/\*[\s\S]*?\*\//g, "")
-          .replace(/^\s*\/\/.*$/gm, "");
+        const code = withoutComments(source);
 
         for (const match of code.matchAll(/["'`](\/app\/[a-z0-9/$._-]*)["'`?#]/gi)) {
           found.push({ file: path, url: match[1] });

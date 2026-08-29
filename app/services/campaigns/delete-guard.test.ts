@@ -18,13 +18,9 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-/** Comments only, so prose about deleting cannot masquerade as a delete. */
-function withoutComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
-}
+import { sourceOf } from "../../lib/testing/source";
 
 /**
  * The one place a campaign may legitimately be destroyed.
@@ -58,7 +54,7 @@ describe("nothing in the app deletes a campaign", () => {
 
   it("offers no campaign delete", () => {
     const offenders = files.filter((file) =>
-      /prisma\.campaign\.delete|campaign\.deleteMany/.test(withoutComments(readFileSync(file, "utf8"))),
+      /prisma\.campaign\.delete|campaign\.deleteMany/.test(sourceOf(file)),
     );
 
     expect(
@@ -72,7 +68,7 @@ describe("nothing in the app deletes a campaign", () => {
     // hang off the run, so deleting a run is deleting the record of what it wrote.
     const offenders = files.filter((file) =>
       /prisma\.campaignRun\.delete|campaignRun\.deleteMany|prisma\.variantChange\.delete/.test(
-        withoutComments(readFileSync(file, "utf8")),
+        sourceOf(file),
       ),
     );
 
@@ -82,6 +78,6 @@ describe("nothing in the app deletes a campaign", () => {
   it("keeps the erasure path, because a redaction request has to be honoured", () => {
     // The inverse assertion. If the compliance webhook ever stops deleting the shop,
     // this file's whole argument for leaving the cascade permissive has gone with it.
-    expect(withoutComments(readFileSync(ERASURE, "utf8"))).toContain("shop.deleteMany");
+    expect(sourceOf(ERASURE)).toContain("shop.deleteMany");
   });
 });

@@ -16,6 +16,8 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { sourceOf } from "../testing/source";
+
 import { parseFlowManifest } from "./manifest";
 
 const EXTENSIONS = join(process.cwd(), "extensions");
@@ -87,7 +89,7 @@ describe("every action route reads the keys its manifest declares", () => {
   it.each(actions)("$handle", (manifest) => {
     expect(manifest.fieldKeys.length).toBeGreaterThan(0);
 
-    const source = readFileSync(join(ROUTES, `flow.actions.${manifest.handle}.tsx`), "utf8");
+    const source = sourceOf(ROUTES, `flow.actions.${manifest.handle}.tsx`);
     const read = [...source.matchAll(/properties\?\.\["([^"]+)"\]/g)].map((match) => match[1]);
 
     expect(read.length).toBeGreaterThan(0);
@@ -112,7 +114,7 @@ describe("every trigger field's declared type matches what the payload sends", (
    * asserting it here, statically, rather than hoping somebody runs a live trigger again.
    */
   const triggers = manifests().filter((manifest) => manifest.type === "flow_trigger");
-  const server = readFileSync(join(process.cwd(), "app", "services", "flow.server.ts"), "utf8");
+  const server = sourceOf("app", "services", "flow.server.ts");
   const payload = server.slice(
     server.indexOf("export interface TriggerPayload"),
     server.indexOf("export function containsPrice"),
@@ -145,7 +147,7 @@ describe("every trigger field's declared type matches what the payload sends", (
 
 describe("every trigger key exists on TriggerPayload", () => {
   const triggers = manifests().filter((manifest) => manifest.type === "flow_trigger");
-  const server = readFileSync(join(process.cwd(), "app", "services", "flow.server.ts"), "utf8");
+  const server = sourceOf("app", "services", "flow.server.ts");
   const payload = server.slice(
     server.indexOf("export interface TriggerPayload"),
     server.indexOf("export function containsPrice"),

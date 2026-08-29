@@ -17,10 +17,12 @@
  * mistake that reaches for the right word silently does nothing at all.
  */
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
+
+import { sourceOf } from "../testing/source";
 
 const APP = join(process.cwd(), "app");
 
@@ -37,7 +39,7 @@ const OUTSIDE_THE_ADMIN = ["routes/_index", "routes/help.$"];
 
 const files = tsxFiles(APP)
   .filter((path) => !OUTSIDE_THE_ADMIN.some((skip) => path.includes(skip)))
-  .map((path) => ({ path: path.replace(`${APP}/`, ""), source: readFileSync(path, "utf8") }));
+  .map((path) => ({ path: path.replace(`${APP}/`, ""), source: sourceOf(path) }));
 
 describe("emphasis is a colour, status is a tone", () => {
   it("finds files to check", () => {

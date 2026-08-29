@@ -1,13 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import { describeCampaign } from "./describe";
+import { sourceOf } from "../testing/source";
 
-/** Comments only, so prose about the formatter cannot masquerade as a call to it. */
-function withoutComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
-}
+import { describeCampaign } from "./describe";
 
 const LIST = "app/services/campaigns/list.server.ts";
 const DETAIL = "app/routes/app.campaigns.$id.tsx";
@@ -20,7 +16,7 @@ const DETAIL = "app/routes/app.campaigns.$id.tsx";
  * makes this a check of the real call and not of a mention in a comment.
  */
 function describeCall(file: string): string {
-  const source = readFileSync(file, "utf8");
+  const source = sourceOf(file);
   const call = /\.\.\.describeCampaign\(\{[^}]*\}\)/.exec(source)?.[0];
 
   expect(call, `${file} no longer builds its sentences with describeCampaign`).toBeTruthy();
@@ -66,7 +62,7 @@ describe("the campaigns index and the campaign page describe a campaign the same
       .filter((f) => !f.includes(".test.") && !f.startsWith("app/lib/campaigns/describe"));
 
     const offenders = files.filter((f) =>
-      /\bdescribe(?:Rule|Scope)\(/.test(withoutComments(readFileSync(f, "utf8"))),
+      /\bdescribe(?:Rule|Scope)\(/.test(sourceOf(f)),
     );
 
     expect(offenders, "call describeCampaign, which returns both").toEqual([]);
