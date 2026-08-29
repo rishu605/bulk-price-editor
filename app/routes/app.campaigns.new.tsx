@@ -704,6 +704,10 @@ export default function NewCampaign() {
         <DraftPreview
           preview={previewFetcher.data ?? null}
           pending={previewFetcher.state !== "idle"}
+          // Named only when there is something to distinguish it from. `previewDraft`
+          // prices the base surface; on a shop with catalogues the merchant is reading a
+          // card headed "on your storefront" and has more than one.
+          surface={priceLists.length > 0 ? `base price · ${currencies[0]}` : undefined}
         />
       </s-section>
 
