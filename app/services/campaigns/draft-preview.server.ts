@@ -223,7 +223,7 @@ export async function previewDraft(
   // the resolver's answer rather than a second opinion assembled from a query. A campaign
   // in this list is one the merchant is about to write over, or one that is about to
   // write over them — and which of the two is a fact we can state.
-  const overlaps = overlapsFrom(outcome.rows, others, draft.priority);
+  const overlaps = overlapsFrom(outcome.rows, others);
 
   const changing = ours.filter((row) => row.status !== "skipped" && !isNoop(row));
   const alreadyCorrect = ours.filter((row) => row.status !== "skipped" && isNoop(row));
@@ -282,7 +282,6 @@ export async function previewDraft(
 export function overlapsFrom(
   rows: Array<{ campaignId?: string }>,
   others: Array<{ id: string; name: string; priority: number }>,
-  draftPriority: number,
 ): DraftOverlap[] {
   const counts = new Map<string, number>();
   for (const row of rows) {
