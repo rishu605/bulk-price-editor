@@ -24,6 +24,14 @@ export interface CampaignFilters {
   q: string;
   /** A single lifecycle state, or "" for all, or "attention" for the ones needing one. */
   status: string;
+  /**
+   * Whether to show the campaigns that have been filed away.
+   *
+   * Not a value in `status`, because it is not a lifecycle state — a merchant looking for
+   * an archived campaign is usually looking for a *finished* one, and folding the two
+   * into one control would mean losing the status filter to use the archive.
+   */
+  archived: boolean;
   page: number;
 }
 
@@ -31,15 +39,26 @@ export function filtersFrom(params: URLSearchParams): CampaignFilters {
   return {
     q: (params.get("q") ?? "").trim(),
     status: (params.get("status") ?? "").trim(),
+    archived: params.get("archived") === "1",
     page: Math.max(1, Number(params.get("page") ?? 1) || 1),
   };
 }
 
 /** Turns the filters into a Prisma where clause, minus the parts SQL cannot express. */
 function whereFor(shopId: string, filters: CampaignFilters) {
+  const contains = { contains: filters.q, mode: "insensitive" as const };
+
   return {
     shopId,
-    ...(filters.q ? { name: { contains: filters.q, mode: "insensitive" as const } } : {}),
+    // Archived is the *filter*, not a second list: one view, one control, and the row
+    // still says what state the campaign is in. `null` and "not null" rather than a
+    // boolean column, so the archive can be read in the order things were filed.
+    archivedAt: filters.archived ? { not: null } : null,
+    // The note is searched alongside the name, which is the point of having one: "why did
+    // we run this" is not a question a merchant can answer by remembering what they
+    // called it. Prisma leaves a null note out of a `contains` match, so a shop with no
+    // notes searches exactly as it did before.
+    ...(filters.q ? { OR: [{ name: contains }, { note: contains }] } : {}),
     // "attention" is not a status — it is a property of several of them, so it is
     // expanded here rather than being a magic string the database has to understand.
     ...(filters.status === "attention"
@@ -74,7 +93,12 @@ export async function listCampaigns(shopId: string, filters: CampaignFilters) {
     // Counted across the whole shop, not the filtered page. A merchant who has filtered
     // to DRAFT still needs to know something else needs a decision -- hiding it because
     // of an unrelated filter is how a partial run goes unnoticed.
-    prisma.campaign.count({ where: { shopId, status: { in: ATTENTION_STATES } } }),
+    // Archived is the one exception. A campaign a merchant has deliberately filed away
+    // should not go on demanding a decision from the top of a list it is no longer in —
+    // that is a badge counting something the merchant cannot see.
+    prisma.campaign.count({
+      where: { shopId, status: { in: ATTENTION_STATES }, archivedAt: null },
+    }),
   ]);
 
   const rows = campaigns.map((c) => {
@@ -90,6 +114,8 @@ export async function listCampaigns(shopId: string, filters: CampaignFilters) {
       // uses. The index used to say everything *about* a campaign and nothing about what
       // it is.
       ...describeCampaign({ rule: ruleOf(c), ast: astOf(c), segmentName: c.segments[0]?.name }),
+      note: c.note,
+      archived: c.archivedAt !== null,
       createdAt: c.createdAt.toISOString(),
       lastRun: c.runs[0]
         ? {

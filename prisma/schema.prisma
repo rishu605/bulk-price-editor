@@ -356,6 +356,17 @@ model Campaign {
 
   excludedVariantGids String[] @default([])
 
+  /// Why this campaign exists, in the merchant's own words. Every audit asks it and
+  /// nothing else in the record answers it: the ledger says what we wrote and the
+  /// activity log says who asked, but neither says why.
+  note String?
+
+  /// Out of the list, still in the record. Orthogonal to `status` on purpose -- archiving
+  /// is a filing decision and the lifecycle is a fact about live prices, so a state for it
+  /// would make every transition table answer a question it has no business answering.
+  /// The campaign is still reachable, and its runs and ledger are untouched.
+  archivedAt DateTime?
+
   createdBy String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -370,6 +381,9 @@ model Campaign {
   @@index([shopId, status])
   @@index([shopId, startAt])
   @@index([shopId, endAt])
+  /// The index lists unarchived campaigns on every load, so the default view is the one
+  /// that gets the index.
+  @@index([shopId, archivedAt])
   @@map("campaigns")
 }
 

@@ -54,7 +54,13 @@ describe("the campaigns index and the campaign page describe a campaign the same
     // source-level check has been fooled by its own subject appearing in prose -- the
     // note in `editor-layout.test.ts` records the last one, and #462 is open to extract
     // this into something shared.
-    const files = execFileSync("git", ["ls-files", "app"], { encoding: "utf8" })
+    // Tracked and untracked-but-not-ignored: a new file is the likeliest place for a
+    // second formatter, and `git ls-files` alone cannot see one until it is committed.
+    const files = execFileSync(
+      "git",
+      ["ls-files", "--cached", "--others", "--exclude-standard", "--", "app"],
+      { encoding: "utf8" },
+    )
       .split("\n")
       .filter((f) => /\.tsx?$/.test(f))
       .filter((f) => !f.includes(".test.") && !f.startsWith("app/lib/campaigns/describe"));
