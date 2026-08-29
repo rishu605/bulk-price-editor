@@ -1,5 +1,6 @@
 import { humanise } from "../lib/format/label";
 import { MoneyCell } from "./MoneyCell";
+import { RowState } from "./RowState";
 import { EmptyState } from "./AsyncState";
 import { ShowingSome } from "./Pagination";
 import type { MarketPreview, PreviewRow } from "../services/campaigns/index.server";
@@ -88,10 +89,13 @@ export function PreviewTable({
               );
             })}
             <s-table-cell>
-              <s-badge tone={toneFor(PREVIEW_TONE, row.status)}>
-                {humanise(row.status)}
-                {row.reason ? ` \u00b7 ${row.reason}` : ""}
-              </s-badge>
+              {/* Every row a campaign will write is "pending", so it is the whole
+                  table. `clamped` and `skipped` are the rows worth finding. */}
+              <RowState
+                label={`${humanise(row.status)}${row.reason ? ` \u00b7 ${row.reason}` : ""}`}
+                tone={toneFor(PREVIEW_TONE, row.status)}
+                ordinary={row.status === "pending" && !row.reason}
+              />
             </s-table-cell>
           </s-table-row>
         ))}

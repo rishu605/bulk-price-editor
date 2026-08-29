@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 
 import type { LedgerRow } from "../services/campaigns/index.server";
 import { LEDGER_TONE, toneFor } from "./tone";
+import { RowState } from "./RowState";
 
 /**
  * Every row we wrote, with what it was and what we intended.
@@ -53,7 +54,14 @@ export function LedgerTable({
             <s-table-cell>{row.before ?? <Blank />}</s-table-cell>
             <s-table-cell>{row.intended ?? <Blank />}</s-table-cell>
             <s-table-cell>
-              <s-badge tone={toneFor(LEDGER_TONE, row.status)}>{humanise(row.status)}</s-badge>
+              {/* A clean run is every row VERIFIED, so badging it puts sixty green
+                  pills on the page and leaves the one FAILED row competing with them.
+                  See `RowState`. */}
+              <RowState
+                label={humanise(row.status)}
+                tone={toneFor(LEDGER_TONE, row.status)}
+                ordinary={row.status === "VERIFIED"}
+              />
             </s-table-cell>
             <s-table-cell>{row.failureReason ?? <Blank />}</s-table-cell>
             {renderAction ? <s-table-cell>{renderAction(row)}</s-table-cell> : null}

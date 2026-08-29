@@ -2,6 +2,7 @@ import type { RollbackRow } from "../services/campaigns/index.server";
 import { Blank } from "./Blank";
 import { ShowingSome } from "./Pagination";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
+import { RowState } from "./RowState";
 
 /**
  * What reverting would do, row by row, with the drifted ones first.
@@ -67,7 +68,13 @@ export function RollbackReportTable({ rows }: { rows: RollbackRow[] }) {
           <s-table-row key={row.variantGid}>
             <s-table-cell>{row.title}</s-table-cell>
             <s-table-cell>
-              <s-badge tone={STATE[row.kind].tone}>{STATE[row.kind].label}</s-badge>
+              {/* "Unchanged" is what most rows of a revert are, and what the merchant
+                  is not being asked to decide about. The decisions are `drifted`. */}
+              <RowState
+                label={STATE[row.kind].label}
+                tone={STATE[row.kind].tone}
+                ordinary={row.kind === "clean"}
+              />
             </s-table-cell>
             <s-table-cell>{row.applied ?? <Blank />}</s-table-cell>
             <s-table-cell>{row.live ?? <Blank />}</s-table-cell>
