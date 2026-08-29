@@ -257,6 +257,12 @@ that makes it worse, because two workers on one shop each back off from the othe
 
 ## Stuck run recovery
 
+> Every SQL statement on this page is executed against the real schema by
+> `chaos/scenarios/runbook-drill.chaos.ts`, and the detection query below is run against a
+> genuinely stranded campaign. A renamed column fails CI rather than an operator's paste at
+> 3am. Edit the queries here freely — the drill reads this file, not a copy.
+
+
 A run that will not finish is almost always one whose process died. The reaper handles
 this automatically after `RUN_STALE_AFTER_MS` (default five minutes), so **the first
 action is to wait one tick and look again.**
