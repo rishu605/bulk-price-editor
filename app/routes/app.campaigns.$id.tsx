@@ -15,6 +15,7 @@ import {
   runCampaign,
 } from "../services/campaigns/index.server";
 import { MAX_INLINE_ROWS } from "../lib/execution/inline-budget";
+import { runResponse, type RunResponse } from "../lib/campaigns/run-response";
 import { describeSchedule, parseSchedule, scheduleWarnings } from "../lib/scheduling/window";
 import { RunHistoryTable } from "../components/RunHistoryTable";
 import { RunResultSection } from "../components/RunResultSection";
@@ -217,31 +218,9 @@ export const action = withGuard("/app/campaigns/$id", async ({ request, params }
       inlineRowLimit: MAX_INLINE_ROWS,
     });
 
-    const verb = reverting ? "Reverted" : intent === "resume" ? "Resumed" : "Applied";
-
-    // Another worker already owns this occurrence, so this call wrote nothing. It is
-    // clean and it verified zero rows, which would otherwise render as "Applied 0
-    // variants, all verified" -- technically true and completely misleading about
-    // what is happening to the merchant's prices right now.
-    if (result.deferredTo) {
-      return { ok: true, message: result.messages[0], details: [] };
-    }
-
-    // Refused before anything started. Clean and zero-verified, so the message below
-    // would render it as "Applied 0 variants, all verified" -- a green tick over a
-    // campaign that never ran, and a merchant believing their prices changed.
-    if (result.refused) {
-      return { ok: false, tone: "warning" as const, message: result.refused, details: [] };
-    }
-
-    return {
-      ok: result.clean,
-      message: result.clean
-        ? `${verb} ${result.verified} variants, all verified.`
-        : `${verb} with ${result.failed} failures and ${result.unverified} unverified. ` +
-          `Nothing is hidden — resume to retry.`,
-      details: result.messages,
-    };
+    // Deferred, refused and clean all come back looking alike — see `runResponse`,
+    // where two of the three would otherwise read as "Applied 0 variants, all verified".
+    return runResponse(result, reverting ? "Reverted" : intent === "resume" ? "Resumed" : "Applied");
   } catch (error) {
     // A failed run is the highest-stakes error in the app: the merchant needs to know
     // their prices are intact, in words, plus a reference that leads us to the stack.
@@ -263,12 +242,7 @@ export const action = withGuard("/app/campaigns/$id", async ({ request, params }
   }
 });
 
-type ActionData = {
-  ok: boolean;
-  /** Not done, but nothing broke. Red would send the merchant hunting a fault. */
-  tone?: "warning";
-  message: string;
-  details: string[];
+type ActionData = RunResponse & {
   errorId?: string;
 };
 

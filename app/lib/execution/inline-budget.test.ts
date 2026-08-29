@@ -2,10 +2,12 @@
  * The guard's whole job is to be a number and a sentence, so both are tested.
  */
 
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
+
+import { sourceOf } from "../testing/source";
 
 import {
   MAX_INLINE_ROWS,
@@ -109,7 +111,7 @@ describe("every caller that runs inside a request declares its deadline", () => 
     .filter((file) => file.endsWith(".tsx") || file.endsWith(".ts"))
     .filter((file) => !file.endsWith(".test.tsx") && !file.endsWith(".test.ts"))
     .flatMap((file) => {
-      const source = readFileSync(join(process.cwd(), "app/routes", file), "utf8");
+      const source = sourceOf("app/routes", file);
       // The import line is not a call.
       return callsIn(source)
         .filter((args) => args.includes(","))
@@ -146,42 +148,11 @@ describe("every caller that runs inside a request declares its deadline", () => 
   it("leaves the worker and the scheduler unlimited", () => {
     // "Schedule it instead" is only honest advice if the scheduler has no such ceiling.
     for (const path of ["app/worker/handlers.server.ts", "app/services/scheduler.server.ts"]) {
-      const source = readFileSync(join(process.cwd(), path), "utf8");
+      const source = sourceOf(path);
       expect(
         source,
         `${path} has no request attached, so a request deadline must not apply to it`,
       ).not.toContain("inlineRowLimit");
     }
-  });
-});
-
-/**
- * A refusal that renders as a success is worse than no guard at all: the merchant is
- * told their campaign was applied, and it was not.
- *
- * `refused` was on `RunOutcome` for the plan gate and read by nobody, so every
- * refusal already rendered as "Applied 0 variants, all verified." Asserted from the
- * source because the alternative is mounting the whole route to check a ternary.
- */
-describe("a refused apply does not render as a successful one", () => {
-  const page = readFileSync(join(process.cwd(), "app/routes/app.campaigns.$id.tsx"), "utf8");
-
-  it("handles the refusal before the generic outcome message", () => {
-    // The branch, not the field. Matching the field alone survives the branch being
-    // disabled, because the field is still named inside the body it no longer reaches.
-    const refusal = page.indexOf("if (result.refused)");
-    // The template literal, not the phrase: it appears in two comments above this,
-    // and a source check that matches its own documentation proves nothing.
-    const generic = page.indexOf("${verb} ${result.verified} variants, all verified.");
-
-    expect(refusal, "the campaign page must read the refusal at all").toBeGreaterThan(-1);
-    expect(
-      refusal,
-      "a refusal reaching the generic message renders as a green tick over a run that never happened",
-    ).toBeLessThan(generic);
-  });
-
-  it("gives it its own tone rather than success or critical", () => {
-    expect(page).toContain('result.tone ?? "critical"');
   });
 });
