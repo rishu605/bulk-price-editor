@@ -1,4 +1,5 @@
 import { formatCount } from "../lib/format/display";
+import { ActionRow } from "./ActionRow";
 import { EmptyState } from "./AsyncState";
 import { exampleRowFrom, StorefrontExample } from "./StorefrontExample";
 import { OverlapPanel } from "./OverlapPanel";
@@ -128,6 +129,35 @@ export function DraftPreview({
             priced at all. Sync your catalogue to capture them.
           </s-text>
         </s-paragraph>
+      ) : null}
+
+      {/* Said once, above the table, rather than on every row that has one.
+          
+          A `live` figure means the storefront is not at the baseline, and there are two
+          reasons for that: another campaign is pricing the variant, or somebody changed
+          it outside the app. Claiming which on a row would be a guess — the resolver
+          gave this row to *this* draft, so it does not know who priced it last — and
+          `Prices → Drift` is where the app already answers the question properly.
+          
+          Absent when no row has drifted, which is the ordinary case. */}
+      {preview.rows.some((row) => row.live) ? (
+        <s-stack gap={SPACE.tight}>
+          <s-paragraph>
+            <s-text color="subdued">
+              Some of these show a <s-text type="strong">live</s-text> price that is not
+              their baseline: either another campaign is pricing them, or the storefront
+              was changed outside this app.
+            </s-text>
+          </s-paragraph>
+          {/* A tertiary button, not a link. `ActionRow`'s vocabulary reserves blue text
+              for a word *inside* a sentence where colour is doing necessary work; this
+              is a standalone way out of the card, which is what tertiary is for. */}
+          <ActionRow>
+            <s-button variant="tertiary" href="/app/prices/drift">
+              Review drifted prices
+            </s-button>
+          </ActionRow>
+        </s-stack>
       ) : null}
 
       {preview.rows.length > 0 ? (

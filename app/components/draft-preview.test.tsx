@@ -89,6 +89,25 @@ describe("when the storefront disagrees with the baseline", () => {
     expect(html).toContain("live");
   });
 
+  it("explains what a live price means, once, above the table", () => {
+    const html = render(preview({ rows: [row({ live: "$28.00" }), row()] }));
+
+    expect(html).toContain("either another campaign is pricing them");
+    expect(html).toContain("/app/prices/drift");
+  });
+
+  it("does not claim which of the two reasons it is", () => {
+    // The resolver gave this row to *this* draft, so it does not know who priced the
+    // variant last. Naming a cause per row would be a guess.
+    const html = render(preview({ rows: [row({ live: "$28.00" })] }));
+
+    expect(html).toContain("either");
+  });
+
+  it("says none of that when nothing has drifted", () => {
+    expect(render(preview())).not.toContain("/app/prices/drift");
+  });
+
   it("stays quiet when they agree", () => {
     // The ordinary case. A second identical number in every row teaches a merchant to
     // ignore the column, and then it is not read on the day it matters.

@@ -430,6 +430,23 @@ export default function NewCampaign() {
               </s-select>
             </FieldGrid>
 
+            {/* What "from the baseline" means, next to the field that says it.
+                
+                The words are the help centre's — "the price a product would be if no
+                campaign were running" — because a merchant who reads one definition here
+                and a different one in Help has been given two concepts. The second
+                sentence is the consequence, which is the part that sells it: every
+                competitor computes from the live price, which is why RUBIX's own FAQ has
+                to explain that running two sales leaves a product wrong for ever. */}
+            <s-paragraph>
+              <s-text color="subdued">
+                Changes are computed from each variant&rsquo;s <s-text type="strong">baseline</s-text> —
+                the price it would be if no campaign were running — never from what the
+                storefront shows today. So running this campaign twice gives the same
+                result as running it once.
+              </s-text>
+            </s-paragraph>
+
             {/* What this rule does to prices, from the same resolver the run uses --
                 not an estimate of it. Sits with the rule rather than at the bottom of
                 the page, because it exists to answer "did I mean -20% or x0.20?" while
