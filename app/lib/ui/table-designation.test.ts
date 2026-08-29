@@ -148,7 +148,7 @@ describe("every table is designed for the shape Polaris might collapse it into",
 const MONEY = [
   "Baseline", "Live", "Live price", "Live now", "Before", "After", "Intended", "Compare at",
   "Cost", "Price", "We applied", "Reverts to", "Campaign set", "Now shows", "Now",
-  "Would become", "Price a month",
+  "Becomes", "Price a month",
 ];
 
 const COUNTS = [

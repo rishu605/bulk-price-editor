@@ -185,8 +185,15 @@ export function DraftPreview({
             <s-table-header listSlot="inline" format="currency">Baseline</s-table-header>
             {/* Inline, both of them: collapsed, the row reads "Cotton tee - $24.00
                 $19.20", which is the whole question this panel answers. Labelled pairs
-                would put the two halves of a before-and-after on separate lines. */}
-            <s-table-header listSlot="inline" format="currency">Would become</s-table-header>
+                would put the two halves of a before-and-after on separate lines.
+
+                "Becomes", the same word the full-preview route uses for this column.
+                They are two views of one draft — this panel's "See all N rows" is what
+                opens that page — and they had two names for the column a merchant goes
+                there to check. It is also two syllables shorter, which matters here:
+                once the compare-at moved under the price the column narrowed, and
+                "Would become" started wrapping onto two lines in the header. */}
+            <s-table-header listSlot="inline" format="currency">Becomes</s-table-header>
           </s-table-header-row>
           <s-table-body>
             {preview.rows.map((row) => (
