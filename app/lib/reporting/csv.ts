@@ -12,9 +12,41 @@
  * authenticate.
  */
 
-/** Quotes a cell, doubling any internal quotes. */
+/**
+ * Cell values a spreadsheet evaluates rather than displays.
+ *
+ * Excel and Sheets treat a leading `=`, `+`, `-` or `@` as the start of a formula, and
+ * quoting does not stop it -- `"=1+1"` is still parsed as one. Tab and carriage return are
+ * here because both can carry the cursor into a neighbouring cell where the same applies.
+ */
+const FORMULA_LEAD = /^[=+\-@\t\r]/;
+
+/**
+ * A value the whole of which is an ordinary number.
+ *
+ * Anchored at both ends deliberately. `-1234` is a price delta and must stay a number a
+ * merchant can sum; `-2+3+cmd|' /C calc'!A0` starts the same way and is not a number, so
+ * it is neutralised. Matching only the leading character would fail to tell them apart.
+ */
+const PLAIN_NUMBER = /^-?\d+(\.\d+)?$/;
+
+/**
+ * Quotes a cell, doubling any internal quotes.
+ *
+ * A leading formula character is prefixed with an apostrophe, which spreadsheets read as
+ * "this is text" and do not display. These reports carry product titles, SKUs and vendor
+ * names, all of which arrive from Shopify -- which accepts them from suppliers, feeds and
+ * other apps. A merchant need not have authored a hostile title for one to reach their
+ * catalogue, and the report they open afterwards is about their own store, so nothing about
+ * the moment looks untrusted.
+ *
+ * Numbers are left alone. Prefixing every leading `-` would turn a price-delta column into
+ * text and stop a merchant summing it, which is a real cost paid on every export to
+ * neutralise a value that was never a formula.
+ */
 export function csvCell(value: string): string {
-  return `"${value.replace(/"/g, '""')}"`;
+  const safe = FORMULA_LEAD.test(value) && !PLAIN_NUMBER.test(value) ? `'${value}` : value;
+  return `"${safe.replace(/"/g, '""')}"`;
 }
 
 /**
