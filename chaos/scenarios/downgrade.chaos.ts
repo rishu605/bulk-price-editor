@@ -186,7 +186,7 @@ describe("chaos: downgrading while a campaign is live", () => {
         // "your sale failed", which reads far worse than "your plan does not cover this".
         expect(result.verified).toBe(0);
         expect(result.clean).toBe(true);
-        expect(result.refusedByPlan).toBeDefined();
+        expect(result.refused).toBeDefined();
         expect(result.messages.join(" ")).toContain("Markets");
 
         // And crucially, nothing was written or half-written.

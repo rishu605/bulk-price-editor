@@ -14,6 +14,8 @@ import {
   rollbackReport,
   runCampaign,
 } from "../services/campaigns/index.server";
+import { MAX_INLINE_ROWS } from "../lib/execution/inline-budget";
+import { runResponse, type RunResponse } from "../lib/campaigns/run-response";
 import { describeSchedule, parseSchedule, scheduleWarnings } from "../lib/scheduling/window";
 import { RunHistoryTable } from "../components/RunHistoryTable";
 import { RunResultSection } from "../components/RunResultSection";
@@ -212,26 +214,13 @@ export const action = withGuard("/app/campaigns/$id", async ({ request, params }
       // Rows the merchant ticked "leave as it is" in the rollback report. Only
       // meaningful on a revert; an apply has no drifted-row conversation to honour.
       skipVariantGids: reverting ? form.getAll("keep").map(String) : undefined,
+      // Written during this request, so it dies with it. See `inline-budget`.
+      inlineRowLimit: MAX_INLINE_ROWS,
     });
 
-    const verb = reverting ? "Reverted" : intent === "resume" ? "Resumed" : "Applied";
-
-    // Another worker already owns this occurrence, so this call wrote nothing. It is
-    // clean and it verified zero rows, which would otherwise render as "Applied 0
-    // variants, all verified" -- technically true and completely misleading about
-    // what is happening to the merchant's prices right now.
-    if (result.deferredTo) {
-      return { ok: true, message: result.messages[0], details: [] };
-    }
-
-    return {
-      ok: result.clean,
-      message: result.clean
-        ? `${verb} ${result.verified} variants, all verified.`
-        : `${verb} with ${result.failed} failures and ${result.unverified} unverified. ` +
-          `Nothing is hidden — resume to retry.`,
-      details: result.messages,
-    };
+    // Deferred, refused and clean all come back looking alike — see `runResponse`,
+    // where two of the three would otherwise read as "Applied 0 variants, all verified".
+    return runResponse(result, reverting ? "Reverted" : intent === "resume" ? "Resumed" : "Applied");
   } catch (error) {
     // A failed run is the highest-stakes error in the app: the merchant needs to know
     // their prices are intact, in words, plus a reference that leads us to the stack.
@@ -253,10 +242,7 @@ export const action = withGuard("/app/campaigns/$id", async ({ request, params }
   }
 });
 
-type ActionData = {
-  ok: boolean;
-  message: string;
-  details: string[];
+type ActionData = RunResponse & {
   errorId?: string;
 };
 
@@ -315,7 +301,7 @@ export default function CampaignDetail() {
   return (
     <PageShell heading={preview.name} backTo={{ href: "/app/campaigns", label: "Campaigns" }}>
       {result ? (
-        <s-banner tone={result.ok ? "success" : "critical"}>
+        <s-banner tone={result.ok ? "success" : (result.tone ?? "critical")}>
           <s-paragraph>{result.message}</s-paragraph>
           {result.details.map((detail) => (
             <s-paragraph key={detail}>{detail}</s-paragraph>

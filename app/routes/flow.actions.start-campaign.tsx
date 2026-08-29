@@ -16,6 +16,7 @@ import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 import { toAdminClient } from "../services/admin-client.server";
 import { runCampaign } from "../services/campaigns/index.server";
+import { MAX_INLINE_ROWS } from "../lib/execution/inline-budget";
 import { logger } from "../lib/logging/logger";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -45,13 +46,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return new Response(null, { status: 200 });
   }
 
-  const outcome = await runCampaign(shop.id, campaign.id, toAdminClient(admin), {});
+  // Same request deadline as the button, and the same reason: Flow calls this over HTTP
+  // and the run is written before the response is sent.
+  const outcome = await runCampaign(shop.id, campaign.id, toAdminClient(admin), {
+    inlineRowLimit: MAX_INLINE_ROWS,
+  });
 
   logger.info("Flow started a campaign", {
     shopId: shop.id,
     campaignId: campaign.id,
     verified: outcome.verified,
-    refused: outcome.refusedByPlan ?? null,
+    refused: outcome.refused ?? null,
   });
 
   return new Response(null, { status: 200 });
