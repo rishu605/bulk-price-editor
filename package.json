@@ -30,7 +30,8 @@
     "measure:import": "tsx scripts/measure-import.ts",
     "drill:mirror": "tsx scripts/drill-mirror.ts",
     "measure:queries": "tsx scripts/measure-queries.ts",
-    "measure:concurrency": "tsx scripts/measure-concurrency.ts"
+    "measure:concurrency": "tsx scripts/measure-concurrency.ts",
+    "drill:restore": "tsx scripts/drill-restore.ts"
   },
   "type": "module",
   "engines": {

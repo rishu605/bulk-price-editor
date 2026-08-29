@@ -347,8 +347,29 @@ What actually needs restoring, in order of how badly it hurts to lose:
 4. Run the reconciliation spot check at a large sample *before* starting the worker. If the mirror disagrees with Shopify, sync before scheduling anything — a campaign planned against a stale mirror prices the wrong products.
 5. Start the worker. Reclaim happens on the first tick.
 
-**Rehearse this, do not assume it.** The numbers above are objectives until somebody has
-timed them against a real snapshot.
+**Rehearsed.** `npm run drill:restore` performs the procedure — dump, restore into a fresh
+database, `prisma migrate deploy` — and times each phase, then checks the restore is
+*complete* rather than merely successful: row counts per critical table against the source,
+plus the extensions and indexes a row count cannot see.
+
+Measured 30 Aug 2026 against `anchor_dev` — 105,869 variants, 125,070 ledger rows, 116,000
+surface entries, a 17 MB dump:
+
+| Phase | Elapsed |
+|---|---|
+| `pg_dump` | 2.1 s |
+| `pg_restore` | 7.4 s |
+| `prisma migrate deploy` | 0.7 s |
+| **Total** | **~10 s against a 60 min RTO** |
+
+All six critical tables came back whole; `pg_trgm` and the four indexes added this week
+survived the round trip.
+
+**Two things that number is not.** It is a *floor*: local Postgres on one machine, no
+network, no Railway, and 17 MB rather than a production snapshot. And it says nothing about
+**RPO** — five minutes of maximum data loss depends on Railway's backup cadence and
+point-in-time recovery, which needs the Railway console. The drill prints `RPO NOT MEASURED`
+on every run rather than letting three PASS lines read as "the objective is met".
 
 ---
 

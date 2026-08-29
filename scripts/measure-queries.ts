@@ -331,7 +331,13 @@ async function main(): Promise<void> {
   await Promise.all([observed.$disconnect(), explainer.$disconnect()]);
 }
 
-main().catch((error: unknown) => {
-  console.error(error);
-  process.exit(1);
-});
+// Only when run as a script. Importing this module — which the test beside it does, for
+// the verdict logic — must not perform the drill: `main()` at import time races the test
+// runner, and the race it usually wins is the one where nothing happens. `drill-mirror`
+// already guards itself this way.
+if (process.argv[1]?.includes("measure-queries")) {
+  main().catch((error: unknown) => {
+    console.error(error);
+    process.exit(1);
+  });
+}
