@@ -1,6 +1,9 @@
 import { formatAgo, formatCount, formatDay } from "../lib/format/display";
+import { quickCampaignName, readQuickPercent } from "../lib/campaigns/quick-campaign";
+import { createCampaign } from "../services/campaigns/index.server";
+import { readSettings } from "../services/settings.server";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useFetcher, useLoaderData } from "react-router";
+import { redirect, useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
@@ -164,6 +167,30 @@ export const action = withGuard("/app", async ({ request }: ActionFunctionArgs) 
       resolution === "extended" || resolution === "removed" ? resolution : "ignored",
     );
     return { ok: true, message: "Thanks — that market question is settled." };
+  }
+
+  // One field, one button, one draft. See `quick-campaign.ts` for why the sign
+  // convention here is the opposite of the editor's, and why this stops at a draft.
+  if (intent === "quick-campaign") {
+    const parsed = readQuickPercent(String(form.get("percent") ?? ""));
+    if (!parsed.ok) return { ok: false, message: parsed.message };
+
+    const settings = await readSettings(shop.id);
+
+    const campaign = await createCampaign(shop.id, {
+      name: quickCampaignName(parsed.percent, formatDay(new Date(), shop.timezone)),
+      // The whole catalogue: an empty filter is every variant, which is what "everything"
+      // means and what the card says it will do.
+      ast: { groups: [] },
+      rule: { kind: "percent-change", percent: -parsed.percent },
+      // A sale that does not look like one converts worse, and it is the editor's own
+      // default — a quick campaign that behaved differently from the same campaign made
+      // the long way would be a second set of defaults to keep in step.
+      compareAtPolicy: { kind: "set-to-baseline" },
+      rounding: settings.rounding,
+    });
+
+    return redirect(`/app/campaigns/${campaign.id}`);
   }
 
   if (intent === "sync") {
@@ -428,6 +455,47 @@ export default function Dashboard() {
             <s-button variant="tertiary" href="/app/prices/drift">Drift queue</s-button>
             <s-button variant="tertiary" href="/app/activity">Activity log</s-button>
           </ActionRow>
+        </s-section>
+      ) : null}
+
+      {/* The commonest job in the category, as one number.
+      
+          "20% off everything" is what most merchants open this app to do, and it used to
+          cost them the whole editor. Sami puts this on its dashboard and it is the single
+          best idea in their app.
+      
+          Where ours differs is where it ends: theirs can write prices, and Save with
+          "start now" changes every price in a catalogue on one click. This makes a
+          **draft** and lands on it with the preview already computed. The two-step shape
+          is the safety property; trading it for parity would be trading away the reason to
+          choose us — so the card says so before the button rather than after. */}
+      {sections.quickCreate ? (
+        <s-section heading="Put everything on sale">
+          <fetcher.Form method="post">
+            <input type="hidden" name="intent" value="quick-campaign" />
+            <s-stack gap={SPACE.item}>
+              <s-number-field
+                name="percent"
+                label="% off"
+                placeholder="20"
+                details={`Applies to all ${formatCount(health.variants)} variants, priced from their baselines.`}
+              />
+              <s-paragraph>
+                <s-text color="subdued">
+                  Creates a draft. Nothing is written until you apply it, and the next
+                  screen shows every price that would change.
+                </s-text>
+              </s-paragraph>
+              <ActionRow>
+                <s-button type="submit" variant="primary" loading={busy || undefined}>
+                  Create the draft
+                </s-button>
+                <s-button variant="tertiary" href="/app/campaigns/new">
+                  Or set a scope, a schedule and more
+                </s-button>
+              </ActionRow>
+            </s-stack>
+          </fetcher.Form>
         </s-section>
       ) : null}
 
