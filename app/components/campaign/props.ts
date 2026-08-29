@@ -1,6 +1,7 @@
 import type { useFetcher } from "react-router";
 
 import type { action, loader } from "../../routes/app.campaigns.$id";
+import type { KeepersAfterRevert } from "../../services/campaigns/keepers.server";
 
 /**
  * Everything the campaign page's tab bodies read.
@@ -19,4 +20,13 @@ export type CampaignDetailProps = Awaited<ReturnType<typeof loader>> & {
   canApply: boolean;
   /** The loader renames this; the components keep the clearer name. */
   attention: boolean;
+  /**
+   * Who would keep these variants if this campaign were reverted, once asked for.
+   *
+   * Null until the answer arrives, and asked for by the route rather than by the header —
+   * see `useKeepers`, and the note there about why a component may not reach for a
+   * fetcher of its own.
+   */
+  keepers: KeepersAfterRevert | null;
+  keepersPending: boolean;
 };

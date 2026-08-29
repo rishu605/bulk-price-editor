@@ -61,6 +61,8 @@ const props = (over: Partial<CampaignDetailProps> = {}) =>
     autoEnroll: false,
     enrollPendingAt: null,
     fetcher: { Form: "form", state: "idle" },
+    keepers: null,
+    keepersPending: false,
     ...over,
   }) as unknown as CampaignDetailProps;
 
@@ -348,5 +350,90 @@ describe("the typed confirmation appears only when it is earned", () => {
     // A-3.11 asks for this over a thousand variants. Asking every time is how a
     // confirmation becomes a reflex.
     expect(render(<CampaignHeader {...props()} />)).not.toContain('name="confirmation"');
+  });
+});
+
+/**
+ * The confirmation between Revert and the write.
+ *
+ * The Revert *tab* already explains the recompute, and a merchant who opens it is not the
+ * one at risk. The header button is: it is pressed by somebody who has decided to end a
+ * sale and is not expecting a lesson, and it posted straight through — the same shape as
+ * `blastRadius`, which lived only inside the Preview tab for as long as it existed.
+ *
+ * Reverting is the one operation in this app whose behaviour differs from every
+ * competitor's. All three restore a saved price; ours recomputes. A merchant carrying the
+ * wrong model presses this expecting prices to snap back to full, and the two answers
+ * differ precisely when another campaign is still running — which is when it matters.
+ */
+const withRollback = (over: Record<string, unknown> = {}) =>
+  props({
+    rollback: {
+      campaignId: "c1",
+      campaignName: "Summer sale",
+      rows: [],
+      counts: { total: 812, clean: 812, drifted: 0, deleted: 0 },
+      straightforward: true,
+      ...over,
+    },
+  } as unknown as Partial<CampaignDetailProps>);
+
+describe("what the revert button does now", () => {
+  it("opens the confirmation rather than posting", () => {
+    const html = render(<CampaignHeader {...withRollback()} />);
+    const row = html.split("<s-modal")[0];
+
+    expect(row).toContain('commandFor="revert-confirmation"');
+    expect(row, "the revert button posts directly again").not.toContain('value="revert"');
+  });
+
+  it("still sends drifted campaigns to the tab instead of offering a one-click revert", () => {
+    // There are edits to decide about; a confirmation that skipped them would be a
+    // one-click overwrite wearing a seatbelt.
+    const html = render(
+      <CampaignHeader {...withRollback({ straightforward: false, counts: { total: 812, clean: 800, drifted: 12, deleted: 0 } })} />,
+    );
+
+    expect(html).toContain("Review 12 edited before reverting");
+    expect(html).not.toContain('commandFor="revert-confirmation"');
+  });
+});
+
+describe("the revert confirmation says what recomputing means", () => {
+  it("leads with the thing a merchant is most likely to have wrong", () => {
+    const html = render(<CampaignHeader {...withRollback()} />);
+
+    expect(html).toContain("does not put the old prices back");
+    expect(html).toContain("with this campaign removed");
+  });
+
+  it("counts what this campaign is holding", () => {
+    expect(render(<CampaignHeader {...withRollback()} />)).toContain("812");
+  });
+
+  it("names the campaigns that keep some of them", () => {
+    const html = render(
+      <CampaignHeader
+        {...withRollback()}
+        keepers={{ repriced: 812, keepers: [{ campaignId: "c_clear", name: "Clearance", variants: 40 }] }}
+      />,
+    );
+
+    expect(html).toContain("Not everything goes back to its baseline");
+    expect(html).toContain("Clearance still covers 40 variants");
+  });
+
+  it("says so plainly when nothing else covers them", () => {
+    const html = render(
+      <CampaignHeader {...withRollback()} keepers={{ repriced: 812, keepers: [] }} />,
+    );
+
+    expect(html).toContain("every one of them returns to its baseline");
+  });
+
+  it("says it is working while the answer is on its way", () => {
+    const html = render(<CampaignHeader {...withRollback()} keepersPending />);
+
+    expect(html).toContain("Working out what the prices would become");
   });
 });

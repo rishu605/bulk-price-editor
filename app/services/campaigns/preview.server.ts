@@ -143,6 +143,7 @@ export async function previewCampaign(
       compareAt: row.intendedCompareAtSet ? fmt(row.intendedCompareAt) : null,
       status: row.status,
       reason: row.reason,
+      campaignId: row.campaignId,
       ...(marketCells.size > 0
         ? { surfaces: marketCells.get(row.ref.variantGid) ?? {} }
         : {}),
