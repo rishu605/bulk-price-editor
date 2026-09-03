@@ -107,7 +107,14 @@ export default function Support() {
         </s-banner>
       ) : null}
 
-      <s-section heading="What happened">
+      {/* "Your message", not "What happened".
+
+          The card was headed "What happened" and its third field was labelled "What
+          happened" — the same three words twice, four hundred pixels apart, with an
+          email address and a subject line in between. The card holds the whole message;
+          the field holds the account of the problem. Naming the container after one of
+          its contents is how a form stops being legible as a form. */}
+      <s-section heading="Your message">
         <fetcher.Form method="post">
           {/* Each field at the width of what it holds. An email address and a subject
               line rendered the full width of the card, which is a message box's worth of
