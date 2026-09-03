@@ -417,9 +417,23 @@ export default function NewCampaign() {
   // Numbered from what is actually rendered. Both sections apply today; #445 makes the
   // scope conditional, because a campaign priced from a file has no scope to choose, and
   // a form that jumps from "1 · Rule" to "3 · Schedule" reads as a step gone missing.
+  /* Five sections in the order the questions are asked, and the numbering skips what
+     this shop cannot answer.
+
+     There were two, and they described what they held badly: "1 · Rule" was the name, the
+     rule, compare-at, rounding, the markets checkboxes, a rounding select per currency,
+     the schedule and four advanced controls, and "2 · Scope" was the ninth subject. The
+     two things a merchant has to decide were the first and the last of them.
+
+     `docs/competitors/na-bulk-price-editor.md` records the shape that works and it is
+     this one: a few numbered sections on one page, an "Advanced (optional)" bucket last,
+     one submit under all of it. */
   const headings = numberSections([
-    { key: "rule", title: "Rule" },
-    { key: "scope", title: "Scope" },
+    { key: "rule", title: fromFile ? "The file" : "How prices change" },
+    { key: "scope", title: "Which products", when: !fromFile },
+    { key: "when", title: "When", when: !fromFile },
+    { key: "markets", title: "Markets and catalogues", when: !fromFile && priceLists.length > 0 },
+    { key: "advanced", title: "Advanced (optional)", when: !fromFile },
   ]);
 
   return (
@@ -595,204 +609,9 @@ export default function NewCampaign() {
                 the merchant is still deciding. With the rarely-touched settings moved to
                 the end, it now lands directly under the rule it is previewing. */}
 
-            {!fromFile && priceLists.length > 0 ? (
-              <>
-                <s-divider />
-
-                <s-heading>Markets and catalogues</s-heading>
-                <s-paragraph>
-                  <s-text>
-                    Your base price always changes. Tick a market to run this campaign
-                    there too &mdash; each is priced from{" "}
-                    <s-text>its own normal price in its own currency</s-text>, not
-                    converted from the base sale price.
-                  </s-text>
-                </s-paragraph>
-
-                {priceLists.map((list) => {
-                  const gate = list.surfaceKind === "B2B" ? gates.b2b : gates.market;
-
-                  return (
-                    <s-checkbox
-                      key={list.priceListGid}
-                      name="priceList"
-                      value={list.priceListGid}
-                      disabled={!gate.allowed || undefined}
-                      label={`${list.name} (${list.currency})${
-                        list.surfaceKind === "B2B" ? " · wholesale" : ""
-                      }`}
-                      details={
-                        !gate.allowed
-                          ? gate.message
-                          : list.adjustmentBps === null
-                            ? "Prices set per product here."
-                            : `Normally ${describeAdjustment(list.adjustmentBps)} the base price.`
-                      }
-                    />
-                  );
-                })}
-
-                {!gates.market.allowed || !gates.b2b.allowed ? (
-                  <s-banner tone="info">
-                    <s-paragraph>
-                      Some of these need a different plan than {planName}. Everything
-                      already running keeps running, and reverts always work whatever
-                      plan you are on.
-                    </s-paragraph>
-                    <ActionRow>
-                      <s-button href="/app/settings/plan">See the plans</s-button>
-                    </ActionRow>
-                  </s-banner>
-                ) : null}
-
-                <s-paragraph>
-                  <s-text>
-                    A price ending that looks considered in one currency can look like a
-                    mistake in another, and some currencies have no cents to end in.
-                  </s-text>
-                </s-paragraph>
-
-                {/* One select per currency, in columns. A store selling in six currencies
-                    rendered six full-width bars each holding the phrase "Ends in .99". */}
-                <FieldGrid>
-                  {currencies.map((code) => (
-                    <s-select key={code} name={`rounding.${code}`} label={`Rounding for ${code}`}>
-                      <s-option
-                        value="inherit"
-                        defaultSelected={!storeRounding.byCurrency[code]}
-                      >
-                        Same as this campaign&rsquo;s rounding (
-                        {roundingLabel(profileNameFor(storeRounding, code), code).toLowerCase()})
-                      </s-option>
-                      {roundingOptions.map((option) => (
-                        <s-option
-                          key={option.value}
-                          value={option.value}
-                          defaultSelected={storeRounding.byCurrency[code] === option.value}
-                        >
-                          {option.label}
-                        </s-option>
-                      ))}
-                    </s-select>
-                  ))}
-                </FieldGrid>
-              </>
-            ) : null}
-
-            {/* Everything from here to the submit belongs to the rule path.
-                
-                A file import creates its campaign through its own two-phase flow — dry
-                run, then commit — so a schedule, a priority and a tag kit set here would
-                be silently discarded. The import block below has the submit for that
-                path. */}
-            {fromFile ? null : (
-              <>
-            <s-divider />
-
-            <s-heading>Schedule (optional)</s-heading>
-            <s-paragraph>
-              <s-text>
-                Times are in your store&rsquo;s zone, {timeZone}, where it is currently{" "}
-                {timeZoneNow}. That comes from your Shopify store settings, so it matches
-                your orders. Leave the start blank to run the campaign only when you apply
-                it by hand.
-              </s-text>
-            </s-paragraph>
-
-            {/* Date and time as two fields, because Polaris has no datetime component:
-                `s-date-field` is date-only. Two Polaris fields beat one native
-                datetime-local that would style itself differently from everything
-                around it, and the two are recombined server-side.
-
-                The grid rather than an inline stack, so the two pairs line up with each
-                other: a stack sizes each child to its content, so End sat a few pixels
-                left of Start and the four fields read as four rather than as two pairs. */}
-            <FieldGrid>
-              <s-date-field name="startDate" label="Start" value={presetStart.slice(0, 10)} />
-              <s-text-field
-                name="startTime"
-                label="Start time"
-                placeholder="09:00"
-                value={presetStart.slice(11)}
-                details="24-hour, in your store's zone."
-              />
-              <s-date-field name="endDate" label="End (optional)" />
-              <s-text-field
-                name="endTime"
-                label="End time"
-                placeholder="23:59"
-                details="Defaults to the end of that day."
-              />
-            </FieldGrid>
-
-            <s-divider />
-
-            {/* The pressure valve.
-
-                Four controls a first campaign never touches, all with defaults that are
-                right for almost everybody: priority only matters once two campaigns
-                overlap, tags only matter if the theme reads them, auto-enrol is on, and
-                the revert buffer is meaningless without an end date. They were sitting
-                between the rule and the schedule, so the merchant read four settings they
-                had no opinion about before reaching the one thing they came to set.
-
-                Named "optional" rather than hidden: Polaris has no disclosure element —
-                all 57 tags checked, there is no `s-details` and no accordion — so a
-                collapsible here would be hand-rolled chrome in an app that has none. A
-                heading that says a block can be skipped does the same job honestly. */}
-            <s-heading>Advanced (optional)</s-heading>
-            <s-paragraph>
-              <s-text color="subdued">
-                Every one of these has a default that suits most campaigns. Skip them
-                unless you have a reason.
-              </s-text>
-            </s-paragraph>
-
-            <FieldGrid>
-              <s-number-field
-                name="priority"
-                label="Priority"
-                value="100"
-                details="Higher wins when two campaigns cover the same variant. They never stack."
-              />
-
-              <s-number-field
-                name="revertBuffer"
-                label="Revert this many minutes early"
-                value="5"
-                details="A busy bulk queue takes time; starting early means prices are back before the window closes."
-              />
-
-              <FullRow>
-                <s-text-field
-                  name="tagKit"
-                  label="Storefront tags (optional)"
-                  placeholder="SALE, SUMMER"
-                  details="Comma separated. Added to each product while the campaign runs and removed when it ends, so your theme can badge sale items. Tags a product already has are never removed."
-                />
-              </FullRow>
-
-              <FullRow>
-                <s-checkbox
-                  name="autoEnroll"
-                  label="Price products that join this campaign while it runs"
-                  checked
-                  details="A product you add to the sale later is priced from its own normal price, not the sale price."
-                />
-              </FullRow>
-            </FieldGrid>
-
-            <s-divider />
-
-            <ActionRow>
-              <s-button type="submit" variant="primary">
-                {practice ? "Preview it — nothing will be written" : "Create and preview"}
-              </s-button>
-            </ActionRow>
-              </>
-            )}
           </s-stack>
       </s-section>
+
       {/* Not rendered at all, rather than rendered and ignored. A file names its own
           variants — a frozen list of exactly the rows it matched — so a scope here would
           be a control a merchant fills in and the import discards, which is the confusion
@@ -913,6 +732,213 @@ export default function NewCampaign() {
           </FullRow>
         </FieldGrid>
       </s-section>
+      )}
+
+      {/* Its own card, not a heading inside the rule's.
+
+          The editor had two numbered sections and eight subjects. "1 · Rule" held the
+          name, the rule, compare-at, rounding, the markets checkboxes, a rounding select
+          per currency, the schedule and four advanced controls; "2 · Scope" held the
+          other one — and the submit was inside section 1, above the heading of section 2.
+          A merchant who filled in the rule and pressed the obvious button never read the
+          section that says which products it applies to. */}
+      {fromFile ? null : (
+      <s-section heading={headings.when}>
+        {/* The card's own heading says "When". A second one saying "Schedule (optional)"
+            inside it was the heading this block needed while it lived in the middle of
+            the rule's card, and it is a heading inside a heading now. The optionality is
+            in the sentence below, where it belongs — a merchant who reads "leave the
+            start blank" knows what leaving it blank does, which "(optional)" does
+            not. */}
+        <s-paragraph>
+        <s-text>
+          Times are in your store&rsquo;s zone, {timeZone}, where it is currently{" "}
+          {timeZoneNow}. That comes from your Shopify store settings, so it matches
+          your orders. Leave the start blank to run the campaign only when you apply
+          it by hand.
+        </s-text>
+      </s-paragraph>
+
+      {/* Date and time as two fields, because Polaris has no datetime component:
+          `s-date-field` is date-only. Two Polaris fields beat one native
+          datetime-local that would style itself differently from everything
+          around it, and the two are recombined server-side.
+
+          The grid rather than an inline stack, so the two pairs line up with each
+          other: a stack sizes each child to its content, so End sat a few pixels
+          left of Start and the four fields read as four rather than as two pairs. */}
+      <FieldGrid>
+        <s-date-field name="startDate" label="Start" value={presetStart.slice(0, 10)} />
+        <s-text-field
+          name="startTime"
+          label="Start time"
+          placeholder="09:00"
+          value={presetStart.slice(11)}
+          details="24-hour, in your store's zone."
+        />
+        <s-date-field name="endDate" label="End (optional)" />
+        <s-text-field
+          name="endTime"
+          label="End time"
+          placeholder="23:59"
+          details="Defaults to the end of that day."
+        />
+      </FieldGrid>
+      </s-section>
+      )}
+
+      {!fromFile && priceLists.length > 0 ? (
+      <s-section heading={headings.markets}>
+          <s-paragraph>
+            <s-text>
+              Your base price always changes. Tick a market to run this campaign
+              there too &mdash; each is priced from{" "}
+              <s-text>its own normal price in its own currency</s-text>, not
+              converted from the base sale price.
+            </s-text>
+          </s-paragraph>
+
+          {priceLists.map((list) => {
+            const gate = list.surfaceKind === "B2B" ? gates.b2b : gates.market;
+
+            return (
+              <s-checkbox
+                key={list.priceListGid}
+                name="priceList"
+                value={list.priceListGid}
+                disabled={!gate.allowed || undefined}
+                label={`${list.name} (${list.currency})${
+                  list.surfaceKind === "B2B" ? " · wholesale" : ""
+                }`}
+                details={
+                  !gate.allowed
+                    ? gate.message
+                    : list.adjustmentBps === null
+                      ? "Prices set per product here."
+                      : `Normally ${describeAdjustment(list.adjustmentBps)} the base price.`
+                }
+              />
+            );
+          })}
+
+          {!gates.market.allowed || !gates.b2b.allowed ? (
+            <s-banner tone="info">
+              <s-paragraph>
+                Some of these need a different plan than {planName}. Everything
+                already running keeps running, and reverts always work whatever
+                plan you are on.
+              </s-paragraph>
+              <ActionRow>
+                <s-button href="/app/settings/plan">See the plans</s-button>
+              </ActionRow>
+            </s-banner>
+          ) : null}
+
+          <s-paragraph>
+            <s-text>
+              A price ending that looks considered in one currency can look like a
+              mistake in another, and some currencies have no cents to end in.
+            </s-text>
+          </s-paragraph>
+
+          {/* One select per currency, in columns. A store selling in six currencies
+              rendered six full-width bars each holding the phrase "Ends in .99". */}
+          <FieldGrid>
+            {currencies.map((code) => (
+              <s-select key={code} name={`rounding.${code}`} label={`Rounding for ${code}`}>
+                <s-option
+                  value="inherit"
+                  defaultSelected={!storeRounding.byCurrency[code]}
+                >
+                  Same as this campaign&rsquo;s rounding (
+                  {roundingLabel(profileNameFor(storeRounding, code), code).toLowerCase()})
+                </s-option>
+                {roundingOptions.map((option) => (
+                  <s-option
+                    key={option.value}
+                    value={option.value}
+                    defaultSelected={storeRounding.byCurrency[code] === option.value}
+                  >
+                    {option.label}
+                  </s-option>
+                ))}
+              </s-select>
+            ))}
+          </FieldGrid>
+      </s-section>
+      ) : null}
+
+      {fromFile ? null : (
+      <s-section heading={headings.advanced}>
+      {/* The pressure valve.
+
+          Four controls a first campaign never touches, all with defaults that are
+          right for almost everybody: priority only matters once two campaigns
+          overlap, tags only matter if the theme reads them, auto-enrol is on, and
+          the revert buffer is meaningless without an end date. They were sitting
+          between the rule and the schedule, so the merchant read four settings they
+          had no opinion about before reaching the one thing they came to set.
+
+          Named "optional" rather than hidden: Polaris has no disclosure element —
+          all 57 tags checked, there is no `s-details` and no accordion — so a
+          collapsible here would be hand-rolled chrome in an app that has none. A
+          heading that says a block can be skipped does the same job honestly, and
+          it is the card's own heading now rather than a second one inside it. */}
+      <s-paragraph>
+        <s-text color="subdued">
+          Every one of these has a default that suits most campaigns. Skip them
+          unless you have a reason.
+        </s-text>
+      </s-paragraph>
+
+      <FieldGrid>
+        <s-number-field
+          name="priority"
+          label="Priority"
+          value="100"
+          details="Higher wins when two campaigns cover the same variant. They never stack."
+        />
+
+        <s-number-field
+          name="revertBuffer"
+          label="Revert this many minutes early"
+          value="5"
+          details="A busy bulk queue takes time; starting early means prices are back before the window closes."
+        />
+
+        <FullRow>
+          <s-text-field
+            name="tagKit"
+            label="Storefront tags (optional)"
+            placeholder="SALE, SUMMER"
+            details="Comma separated. Added to each product while the campaign runs and removed when it ends, so your theme can badge sale items. Tags a product already has are never removed."
+          />
+        </FullRow>
+
+        <FullRow>
+          <s-checkbox
+            name="autoEnroll"
+            label="Price products that join this campaign while it runs"
+            checked
+            details="A product you add to the sale later is priced from its own normal price, not the sale price."
+          />
+        </FullRow>
+      </FieldGrid>
+      </s-section>
+      )}
+
+      {/* Last, and outside every card.
+
+          It was inside "1 · Rule", above the heading of "2 · Scope" — so the obvious
+          button was reachable before the merchant had read the section that decides
+          which products the rule applies to. A form's submit belongs after the last
+          thing it is submitting. */}
+      {fromFile ? null : (
+        <ActionRow>
+          <s-button type="submit" variant="primary">
+            {practice ? "Preview it — nothing will be written" : "Create and preview"}
+          </s-button>
+        </ActionRow>
       )}
 
         </PageSections>
