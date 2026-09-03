@@ -382,12 +382,34 @@ export default function Dashboard() {
         </s-banner>
       ) : null}
 
+      {/* The banner carries the action it asks for.
+
+          It said "Re-syncing captures them" and offered no button, and the re-sync it
+          meant was in the Store card two columns away, below the plan. This is the exact
+          shape of the worst bug this product has had (#252): a warning whose only remedy
+          was somewhere else, and which the action a merchant could find did not clear.
+          The remedy being present is not a nicety here — it is the difference between the
+          warning being true and the warning being a dead end.
+
+          The same intent as the Store card's button, posted to the same action. Two forms
+          rather than a shared component because a form is four lines and a second
+          component with one prop would be the harder thing to read; what must not drift
+          is the intent, and `home-actions.test` asserts every sync on this page posts
+          the same one. */}
       {health.missing > 0 ? (
         <s-banner tone="warning" heading="Some variants have no baseline">
           <s-paragraph>
             {formatCount(health.missing)} variants cannot be included in a campaign until they have
             one. Re-syncing captures them.
           </s-paragraph>
+          <ActionRow>
+            <fetcher.Form method="post">
+              <input type="hidden" name="intent" value="sync" />
+              <s-button type="submit" loading={busy || undefined}>
+                {busy ? "Syncing…" : "Re-sync catalogue"}
+              </s-button>
+            </fetcher.Form>
+          </ActionRow>
         </s-banner>
       ) : null}
 
