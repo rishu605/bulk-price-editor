@@ -93,7 +93,10 @@ describe("drift is countable without being opened", () => {
   });
 
   it("puts the count on the tab", () => {
-    expect(layout).toMatch(/label: "Drift", badge: drifted/);
+    // Matched on the badge rather than on the label: the tab is called "Price drift" now
+    // — the page's own name, see `one-name.test.ts` — and this assertion is about where
+    // the count goes, not about what the tab is called.
+    expect(layout).toMatch(/label: "Price drift", badge: drifted/);
   });
 
   it("shows nothing at zero, since an empty count is noise", () => {

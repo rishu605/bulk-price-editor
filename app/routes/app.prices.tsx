@@ -44,7 +44,10 @@ export default function PricesSection() {
           { href: "/app/prices/baselines", label: "Baselines" },
           { href: "/app/prices/costs", label: "Costs" },
           { href: "/app/prices/live", label: "What's live" },
-          { href: "/app/prices/drift", label: "Drift", badge: drifted },
+          // "Price drift", the page's own heading. It said "Drift" while the page said
+          // "Price drift" and Home linked to it as the "Drift queue" — three names for
+          // one destination, which is the thing this section was already worst at.
+          { href: "/app/prices/drift", label: "Price drift", badge: drifted },
         ]}
       />
       <Outlet />

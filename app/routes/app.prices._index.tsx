@@ -104,7 +104,16 @@ export default function Catalog() {
   const [params] = useSearchParams();
 
   return (
-    <PageShell heading="Catalogue">
+    /* "Variants", the same word as the tab that opens this page.
+
+        It was headed "Catalogue" while its tab said "Variants" and the nav item above
+        both said "Prices" — three words for one place, read in that order. The tab bar is
+        the set this belongs to (Variants · Baselines · Costs · What's live · Drift), and
+        every other name in it is the column it lists. This one lists variants.
+
+        "Catalogue" stays in the prose, where it means the mirror of the shop rather than
+        this page: syncing the catalogue is what fills this table. */
+    <PageShell heading="Variants">
       <s-section>
         <VariantSearch fields={CATALOGUE_FIELDS} query={query} />
 

@@ -421,7 +421,7 @@ export default function Dashboard() {
             overwritten — each is waiting on your decision.
           </s-paragraph>
           <ActionRow>
-            <s-button href="/app/prices/drift">Open the drift queue</s-button>
+            <s-button href="/app/prices/drift">Review price drift</s-button>
           </ActionRow>
         </s-banner>
       ) : null}
@@ -510,7 +510,7 @@ export default function Dashboard() {
               Create campaign
             </s-button>
             <s-button variant="tertiary" href="/app/campaigns">Campaigns</s-button>
-            <s-button variant="tertiary" href="/app/prices/drift">Drift queue</s-button>
+            <s-button variant="tertiary" href="/app/prices/drift">Price drift</s-button>
             <s-button variant="tertiary" href="/app/activity">Activity log</s-button>
           </ActionRow>
         </s-section>
