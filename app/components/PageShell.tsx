@@ -1,8 +1,13 @@
-import { Children, cloneElement, isValidElement, type ReactNode } from "react";
+import {
+  Children,
+  cloneElement,
+  isValidElement,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 
-import { ActionRow } from "./ActionRow";
 import { HelpNote } from "./HelpNote";
-import { PAGE_INSET, SPACE } from "../lib/ui/spacing";
+import { SPACE } from "../lib/ui/spacing";
 
 /**
  * How much of the frame a page occupies, leaving a tenth on each side.
@@ -106,24 +111,96 @@ export function PageWidth({ children }: { children: ReactNode }) {
  *   the page stops having visible structure at all.
  */
 /**
- * The way back, above the title.
+ * What a page can put in the admin's own title bar.
  *
- * Above rather than beside: `s-page` renders its own heading and takes no slot for this
- * in the version pinned here, and a back link under the title would read as the first
- * thing *in* the page rather than as the way out of it. The padding matches what `s-page`
- * insets its own contents by, so it lines up with the heading below it.
+ * The admin reserves a strip at the top right of every page for the thing you came to
+ * do, and until this existed it was empty on all twenty of ours — so "Create campaign"
+ * sat to the right of a tab bar, the editor's submit was in the middle of its form, and
+ * the campaign header carried six buttons in a row of its own.
+ *
+ * ## How it gets there
+ *
+ * Not through the `primaryAction` prop the Polaris types describe. Those are Preact
+ * slots; React 18 renders a custom element's unknown props as attributes, so handing
+ * `s-page` a JSX element would stringify it. What App Bridge actually looks for, in
+ * `app-bridge.js`, is a **direct child of `s-page` carrying the slot as an attribute**:
+ *
+ *     ':scope > s-button[slot="primary-action"], :scope > s-link[slot="primary-action"]'
+ *
+ * It reads those, renders them in the admin's title bar, and hides the originals. So
+ * the contract is: an `s-button` or `s-link`, a `slot` attribute, and nothing wrapping
+ * it. A `<form>` around the button is not a direct child and would never be found —
+ * which is why this takes links and buttons rather than arbitrary children, and why the
+ * campaign header's Duplicate and Archive (both form posts) stay where they are.
+ *
+ * The same scan reads `slot="breadcrumb-actions"`, which is the way back, and
+ * `slot="accessory"`, which is a badge beside the title.
+ *
+ * ## What happens if it is not hoisted
+ *
+ * The page renders the button inline at the top of the content instead. That is the
+ * important difference from the `aside` trap described above: an unhoisted action is
+ * misplaced, not deleted, so this cannot silently remove the only way to apply a
+ * campaign.
+ */
+export interface PageAction {
+  label: string;
+  href?: string;
+  icon?: ComponentProps<"s-button">["icon"];
+  /** Only for an action that opens a modal — `commandFor` plus `command="--show"`. */
+  commandFor?: string;
+  tone?: "critical" | "auto";
+  disabled?: boolean;
+  loading?: boolean;
+}
+
+/**
+ * The way back, in the title bar.
+ *
+ * It used to be a tertiary button in a box above `s-page`, with a comment saying
+ * `s-page` "takes no slot for this". It does: `breadcrumb-actions`, read by the same
+ * scan as the actions above.
  */
 function BackLink({ backTo }: { backTo?: { href: string; label: string } }) {
   if (!backTo) return null;
 
+  /* An `s-button`, not an `s-link`, though App Bridge's scan accepts either.
+     Hoisted, the admin draws its own control and neither matters. Unhoisted, the page
+     renders what it is given — and the app's action vocabulary reserves blue for a word
+     inside a sentence, so the fallback has to be the tertiary button this used to be. */
   return (
-    <s-box paddingInline={PAGE_INSET}>
-      <ActionRow>
-        <s-button variant="tertiary" icon="arrow-left" href={backTo.href}>
-          {backTo.label}
-        </s-button>
-      </ActionRow>
-    </s-box>
+    <s-button
+      slot="breadcrumb-actions"
+      variant="tertiary"
+      icon="arrow-left"
+      href={backTo.href}
+    >
+      {backTo.label}
+    </s-button>
+  );
+}
+
+/** The command a modal opener issues. Typed as a constant because the prop is `Lowercase<string>`. */
+const SHOW = "--show" as const;
+
+/** One title-bar action, in whichever slot the caller asked for. */
+type TitleBarSlot = "primary-action" | "secondary-actions";
+
+function TitleBarAction({ action, slot }: { action: PageAction; slot: TitleBarSlot }) {
+  return (
+    <s-button
+      slot={slot}
+      href={action.href}
+      icon={action.icon}
+      tone={action.tone}
+      variant={slot === "primary-action" ? "primary" : "secondary"}
+      disabled={action.disabled || undefined}
+      loading={action.loading || undefined}
+      commandFor={action.commandFor}
+      command={action.commandFor ? SHOW : undefined}
+    >
+      {action.label}
+    </s-button>
   );
 }
 
@@ -179,10 +256,21 @@ const ASIDE_TRACK: Record<AsideWidth, string> = {
 export function PageShell({
   heading,
   backTo,
+  primaryAction,
+  secondaryActions,
   asideWidth = "base",
   children,
 }: {
   heading: string;
+  /**
+   * The one thing this page is for, in the admin's title bar. See `PageAction`.
+   *
+   * One per page, and only ever a link or a modal opener — a form submit cannot be
+   * hoisted, because App Bridge only reads direct children of `s-page`.
+   */
+  primaryAction?: PageAction;
+  /** Beside the primary one, for actions that are still page-level but not the point. */
+  secondaryActions?: PageAction[];
   /** See `AsideWidth`. Defaults to the narrow strip every other page wants. */
   asideWidth?: AsideWidth;
   /**
@@ -218,6 +306,18 @@ export function PageShell({
 
   const aside = all.filter(isAside);
   const help = all.filter(isHelp);
+
+  /* Direct children of `s-page`, and they have to stay that way — see `PageAction`. */
+  const actions = (
+    <>
+      {primaryAction ? (
+        <TitleBarAction action={primaryAction} slot="primary-action" />
+      ) : null}
+      {(secondaryActions ?? []).map((action) => (
+        <TitleBarAction key={action.label} action={action} slot="secondary-actions" />
+      ))}
+    </>
+  );
   const main = all.filter((child) => !isAside(child) && !isHelp(child));
 
   if (aside.length === 0) {
@@ -236,8 +336,9 @@ export function PageShell({
     // aside — `/app/prices/live` is one — and looking at it.
     return (
       <PageWidth>
-        <BackLink backTo={backTo} />
         <s-page heading={heading} inlineSize="large">
+          <BackLink backTo={backTo} />
+          {actions}
           {help}
           {main}
         </s-page>
@@ -247,8 +348,9 @@ export function PageShell({
 
   return (
     <PageWidth>
-      <BackLink backTo={backTo} />
       <s-page heading={heading} inlineSize="large">
+        <BackLink backTo={backTo} />
+        {actions}
         <s-grid
           gap={SPACE.page}
           // The column gap is the page rhythm too, not a smaller one. Two columns set

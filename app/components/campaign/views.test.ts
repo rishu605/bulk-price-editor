@@ -56,11 +56,18 @@ describe("both views read the same filters", () => {
 });
 
 describe("the page header is a header, not a card", () => {
-  it("puts the primary action in the tab bar's action slot", () => {
-    // It used to sit in an `s-section` of its own above the tabs: a card holding one
-    // button and a two-item toggle, mostly empty white space, which is the shape a page
-    // takes when nobody has decided what its header is.
-    expect(route).toMatch(/<TabBar[\s\S]*?action=\{[\s\S]*?Create campaign/);
+  it("puts the primary action in the admin's title bar", () => {
+    // Three homes in three releases, and this is the last of them. It began in an
+    // `s-section` of its own above the tabs — a card holding one button and a two-item
+    // toggle, mostly empty white space. Then it moved into `TabBar`'s action slot, which
+    // made a row of tabs also a row of actions. It belongs in the strip the admin keeps
+    // for a page's action, which `PageShell` now fills; a tab bar carrying a button is
+    // what this assertion exists to stop coming back.
+    expect(route).toMatch(/primaryAction=\{\{[\s\S]*?Create campaign/);
+    expect(
+      route.slice(route.indexOf("<TabBar"), route.indexOf("/>", route.indexOf("tabs={"))),
+      "a tab bar chooses a view; it does not also carry what you can do to one",
+    ).not.toContain("action={");
   });
 
   it("does not wrap the tabs and the action in a card", () => {

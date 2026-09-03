@@ -117,7 +117,22 @@ export default function Campaigns() {
   };
 
   return (
-    <PageShell heading="Campaigns">
+    <PageShell
+      heading="Campaigns"
+      /* One way in, and in the strip the admin keeps for it.
+
+         It used to sit in `TabBar`'s action slot, so the row that chooses *which view
+         you are looking at* was also carrying the only thing you can do to the list —
+         and the title bar the admin reserves for exactly that was empty.
+
+         Still one door. The second one was the last of the "Imports" thinking: a
+         spreadsheet of exact prices creates a campaign exactly as a rule does, so "From
+         a spreadsheet" was a second entrance to the same object, and a merchant had to
+         know which of their two intentions the app had filed their case under before
+         they could start. It is an option inside the editor now (#445), which is where
+         "how should prices change" is actually asked. */
+      primaryAction={{ label: "Create campaign", href: "/app/campaigns/new" }}
+    >
       {/* Counted across the shop rather than the filtered page: a campaign needing a
           decision must not be hidden by an unrelated filter. */}
       {list.attentionCount > 0 ? (
@@ -135,37 +150,13 @@ export default function Campaigns() {
         </s-banner>
       ) : null}
 
-      {/* The page's header, and not a card.
+      {/* Which view you are looking at, and nothing else.
 
-          A card is a container for content, and this one held a button and a two-item
-          toggle with nothing else in it — an empty white rectangle above the actual page,
-          which is what the screenshot that prompted this looked wrong for. What belongs
-          here is a header: which view you are in on the left, the one thing you can do
-          about it on the right, a rule under both, and no box around any of it.
-
-          Which view / what you can do is exactly the split `TabBar` and its action slot
-          make, so the row is one control rather than two stacked ones.
-
-          `s-button` takes an href, so the action is one anchor styled as a button rather
-          than a button nested inside a link — which is what it was, and which no browser
-          is obliged to make sense of. */}
+          It used to carry Create campaign on its right, which made a row of tabs also a
+          row of actions; the action is in the title bar now. What is left is a header
+          rather than a card — no box around a two-item toggle. */}
       <TabBar
         label="Campaign views"
-        action={
-          // One way in.
-          //
-          // There were two, and the second was the last of the "Imports" thinking: a
-          // spreadsheet of exact prices creates a campaign exactly as a rule does, so
-          // "From a spreadsheet" was a second door to the same object — and a merchant
-          // had to know which of their two intentions the app had filed their case under
-          // before they could start. It is an option inside the editor now (#445), which
-          // is where the question "how should prices change" is actually asked.
-          <ActionRow>
-            <s-button variant="primary" href="/app/campaigns/new">
-              Create campaign
-            </s-button>
-          </ActionRow>
-        }
         tabs={[
           {
             label: "List",
