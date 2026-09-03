@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { QueryContainer } from "./QueryContainer";
 
 import type { OnboardingState, OnboardingStep } from "../lib/onboarding/steps";
 import { SPACE } from "../lib/ui/spacing";
@@ -101,7 +100,6 @@ function Step({ step, isNext }: { step: OnboardingStep; isNext: boolean }) {
 
   return (
     <s-stack gap={SPACE.tight}>
-      <QueryContainer>
       <s-grid
         // Three columns, collapsing to two. `auto 1fr auto` keeps the status glyph and
         // the action tight to their content and gives the title everything left over,
@@ -150,7 +148,6 @@ function Step({ step, isNext }: { step: OnboardingStep; isNext: boolean }) {
           ) : null}
         </ActionRow>
       </s-grid>
-      </QueryContainer>
 
       {/* Progressive disclosure, not a link away. The reasoning belongs next to the step
           it explains — sending a merchant to a docs page to find out why they are being
