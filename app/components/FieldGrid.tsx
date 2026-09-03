@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 
-import { QueryContainer } from "./QueryContainer";
 import { SPACE } from "../lib/ui/spacing";
 
 /**
@@ -82,7 +81,6 @@ export function Field({
  */
 export function FieldGrid({ children }: { children: ReactNode }) {
   return (
-    <QueryContainer>
     <s-grid
       gap={SPACE.section}
       // Capped, for the reason `FIELD` exists. Two equal columns of a 970px card are
@@ -99,7 +97,6 @@ export function FieldGrid({ children }: { children: ReactNode }) {
     >
       {children}
     </s-grid>
-    </QueryContainer>
   );
 }
 
