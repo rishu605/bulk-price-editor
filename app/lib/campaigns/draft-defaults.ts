@@ -18,6 +18,16 @@ export const DRAFT_DEFAULTS = {
   percentValue: "-20",
   /** The money equivalent, used by the two rules that take an amount. */
   fixedValue: "-10",
+  /* The same two defaults said the way the editor now asks for them: a direction and a
+     positive magnitude. The signed pair above is still what `draftDefaultParams` sends,
+     what quick create on Home posts, and what a bookmarked URL carries, and
+     `draft-form.ts` explains why both spellings have to keep working. */
+  /** Which way a change goes, when the form asks rather than relying on a minus sign. */
+  direction: "down",
+  /** 20% off, as the merchant says it. */
+  percentMagnitude: "20",
+  /** The money equivalent of the same. */
+  fixedMagnitude: "10",
   /** A strike-through by default: a sale that does not look like one converts worse. */
   compareAt: "set-to-baseline",
   /** Only matters once two campaigns overlap. */

@@ -46,18 +46,60 @@ export function readerFor(source: FormData | URLSearchParams): FieldReader {
  * ¥3,000 price as ¥300,000 and a 1.5 KWD price as 0.15 KWD. The same literal has been
  * removed from three service files already.
  */
+/**
+ * Which way a change goes, asked as a direction rather than as a minus sign.
+ *
+ * To take 20% off, a merchant used to type `-20` into a field labelled "Percentage",
+ * under a line of help reading "Negative discounts. -20 means 20% off the baseline." It
+ * is the first control in the create flow, so the sign convention was the first thing the
+ * product taught — and a merchant who typed `20`, which is what "20% off" sounds like,
+ * got a twenty per cent price *rise* with nothing on the screen refusing it.
+ *
+ * The magnitude is read as an absolute value once a direction is present, so the two
+ * halves cannot disagree: a merchant who chooses "Reduce by" and types `-20` gets 20% off
+ * rather than 20% on.
+ *
+ * ## Why the absent case still means what it used to
+ *
+ * `ruleDirection` is only sent by the editor's form. Quick create on Home,
+ * `draftDefaultParams`, and the four old import URLs all pass a signed `ruleValue` and no
+ * direction, and a bookmarked `?ruleValue=-20` has to keep meaning what it meant. So the
+ * signed value is used exactly as given when no direction is present, and this reads as
+ * two spellings of one thing rather than as a migration.
+ */
+export type RuleDirection = "up" | "down";
+
+function signedAmount(read: FieldReader): number {
+  const amount = Number(read("ruleValue") ?? 0);
+  const direction = read("ruleDirection");
+
+  if (direction !== "up" && direction !== "down") return amount;
+
+  const magnitude = Math.abs(amount);
+  // `|| 0` collapses `-0`, which `-Math.abs(0)` produces and which is a different value
+  // to `0` for anything comparing rules — including the test that asserts these two
+  // spellings agree. Nothing downstream means anything by the sign of zero.
+  return (direction === "up" ? magnitude : -magnitude) || 0;
+}
+
 export function ruleFrom(read: FieldReader, currency: string): AdjustmentRule {
   const kind = read("ruleKind") ?? "percent-change";
-  const amount = Number(read("ruleValue") ?? 0);
   const perMajor = 10 ** decimalsFor(currency);
 
   if (kind === "fixed-change") {
-    return { kind: "fixed-change", amount: money(Math.round(amount * perMajor), currency) };
+    return {
+      kind: "fixed-change",
+      amount: money(Math.round(signedAmount(read) * perMajor), currency),
+    };
   }
   if (kind === "set-exact") {
+    // An exact price has no direction — it is not a change, so a sign would be a
+    // negative price. The raw value is right here, and the editor renders no direction
+    // control for it.
+    const amount = Number(read("ruleValue") ?? 0);
     return { kind: "set-exact", amount: money(Math.round(amount * perMajor), currency) };
   }
-  return { kind: "percent-change", percent: amount };
+  return { kind: "percent-change", percent: signedAmount(read) };
 }
 
 export function compareAtFrom(read: FieldReader): CompareAtPolicy {
