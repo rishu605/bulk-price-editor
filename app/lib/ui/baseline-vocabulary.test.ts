@@ -42,14 +42,19 @@ describe("the editor defines baseline the way the help centre does", () => {
   });
 
   it("names the baseline where the rule is entered, not only in a note at the foot", () => {
+    // Anchored on the end of the rule's own card rather than on the "Advanced (optional)"
+    // heading, which used to sit below it inside the same card and is a separate section
+    // now — so its name appears near the top of the file, in the list of section titles,
+    // and an index comparison against it stopped meaning anything.
     const rule = EDITOR.indexOf("<RuleValueField");
-    const advanced = EDITOR.indexOf("Advanced (optional)");
+    const nextSection = EDITOR.indexOf("headings.scope", rule);
 
     expect(rule).toBeGreaterThan(-1);
+    expect(nextSection).toBeGreaterThan(rule);
     expect(
       EDITOR.indexOf("baseline", rule),
-      "the word appears only after the settings a merchant is told to skip",
-    ).toBeLessThan(advanced);
+      "the word does not appear in the section where the rule is set",
+    ).toBeLessThan(nextSection);
   });
 
   it("states the consequence, which is the part that sells it", () => {
