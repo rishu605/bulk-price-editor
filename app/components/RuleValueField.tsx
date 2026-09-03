@@ -47,6 +47,9 @@ export function RuleValueField({
   selectName?: string;
 }) {
   const money = kind === "fixed-change" || kind === "set-exact";
+  /* An exact price is not a change, so it has no direction — a sign on it would be a
+     negative price. The spreadsheet path has no rule at all. */
+  const directional = kind === DRAFT_DEFAULTS.ruleKind || kind === "fixed-change";
 
   return (
     <>
@@ -87,23 +90,44 @@ export function RuleValueField({
         </s-option>
       </s-select>
 
+      {/* Which way, as a question rather than as a minus sign.
+
+          To take 20% off, a merchant used to type `-20` into a field labelled
+          "Percentage" under a line of help explaining the convention. This is the first
+          control in the create flow, so that sign was the first thing the product taught
+          — and typing `20`, which is what "20% off" sounds like, gave a twenty per cent
+          price rise with nothing on the screen refusing it.
+
+          A select and not two radios: it sits in a grid cell beside the amount, and the
+          pair reads as one sentence — "Reduce by · 20". `draft-form.ts` takes the
+          magnitude as an absolute value, so choosing "Reduce by" and typing a negative
+          number still reduces rather than quietly inverting. */}
+      {directional ? (
+        <s-select name="ruleDirection" label="Which way">
+          <s-option value="down" defaultSelected>
+            Reduce by
+          </s-option>
+          <s-option value="up">Increase by</s-option>
+        </s-select>
+      ) : null}
+
       {kind === FROM_FILE ? null : money ? (
         <s-money-field
           name={name}
           label={kind === "set-exact" ? `Price (${currency})` : `Amount (${currency})`}
-          value={kind === "set-exact" ? "" : DRAFT_DEFAULTS.fixedValue}
+          value={kind === "set-exact" ? "" : DRAFT_DEFAULTS.fixedMagnitude}
           details={
             kind === "set-exact"
               ? "Every variant in scope gets this exact price."
-              : `Negative reduces. ${DRAFT_DEFAULTS.fixedValue} takes ${currency} ${DRAFT_DEFAULTS.fixedValue.replace('-', '')} off the baseline.`
+              : "Taken off, or added to, each variant's baseline."
           }
         />
       ) : (
         <s-number-field
           name={name}
           label="Percentage"
-          value={DRAFT_DEFAULTS.percentValue}
-          details={`Negative discounts. ${DRAFT_DEFAULTS.percentValue} means ${DRAFT_DEFAULTS.percentValue.replace("-", "")}% off the baseline.`}
+          value={DRAFT_DEFAULTS.percentMagnitude}
+          details="Of each variant's baseline."
         />
       )}
     </>
