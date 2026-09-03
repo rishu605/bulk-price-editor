@@ -25,6 +25,7 @@ import type { ActionFunctionArgs } from "react-router";
 
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { logger } from "../lib/logging/logger";
 import { parseMoney } from "../lib/money/money";
 import { checkForDrift } from "../services/drift.server";
 import { enrollNewVariants } from "../services/auto-enroll.server";
@@ -182,9 +183,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     if (removed.count > 0) {
-      console.log(
-        `[webhook] ${productGid}: tombstoned ${removed.count} variant(s) no longer on the product`,
-      );
+      logger.info("tombstoned variants no longer on the product", {
+        shop: shop.domain,
+        productGid,
+        tombstoned: removed.count,
+      });
     }
   }
 
@@ -197,10 +200,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   try {
     await enrollNewVariants(shop.id, seenVariantGids);
   } catch (error) {
-    console.error(
-      `[webhook] auto-enroll failed for ${productGid}:`,
-      error instanceof Error ? error.message : error,
-    );
+    // Through the logger: this is the enrolment path, which captures baselines, so
+    // its failures are the ones in this file most likely to name a price.
+    logger.error("auto-enroll failed", { shop: shop.domain, productGid, error });
   }
 
   return new Response();

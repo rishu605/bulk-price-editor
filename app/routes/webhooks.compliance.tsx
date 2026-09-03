@@ -13,6 +13,7 @@
 import type { ActionFunctionArgs } from "react-router";
 
 import { authenticate } from "../shopify.server";
+import { logger } from "../lib/logging/logger";
 import prisma from "../db.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -30,13 +31,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     case "CUSTOMERS_DATA_REQUEST":
       // We store no customer-specific data, so there is nothing to hand over.
       // Acknowledging is the complete and honest response.
-      console.log(`[compliance] ${topic} for ${shop}: no customer data held`);
+      logger.info("compliance webhook: no customer data held", { topic, shop });
       break;
 
     case "CUSTOMERS_REDACT":
       // Nothing to erase, for the same reason. Logged so the acknowledgement is
       // auditable if a merchant ever asks what happened to a request.
-      console.log(`[compliance] ${topic} for ${shop}: no customer data to redact`);
+      logger.info("compliance webhook: no customer data to redact", { topic, shop });
       break;
 
     case "SHOP_REDACT": {
@@ -45,14 +46,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       // entries with it.
       const deleted = await prisma.shop.deleteMany({ where: { domain: shop } });
       await prisma.session.deleteMany({ where: { shop } });
-      console.log(`[compliance] ${topic} for ${shop}: purged ${deleted.count} shop record(s)`);
+      logger.info("compliance webhook: shop purged", { topic, shop, purged: deleted.count });
       break;
     }
 
     default:
       // An unexpected topic on this endpoint means the app config and this handler
       // have drifted apart. Surface it rather than returning a silent 200.
-      console.error(`[compliance] Unhandled topic ${topic} for ${shop}`);
+      logger.error("compliance webhook: unhandled topic", { topic, shop });
       return new Response(`Unhandled topic ${topic}`, { status: 422 });
   }
 
