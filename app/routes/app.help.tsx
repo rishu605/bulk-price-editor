@@ -32,6 +32,7 @@
  */
 
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { Fragment } from "react";
 import { useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
@@ -93,9 +94,25 @@ export default function HelpIndex() {
           <s-stack gap={SPACE.section}>
             {section.blurb ? <s-paragraph>{section.blurb}</s-paragraph> : null}
 
-            <s-stack gap={SPACE.item}>
+            {/* A grid, so the list has a left edge.
+
+                Each row was a title button followed by its blurb on the same line, and a
+                button is as wide as its label — so every blurb started at a different x.
+                "and why every campaign computes from it" began a hundred and thirty
+                pixels right of "one winner per product, never stacked", and a reader
+                scanning for the article they want had no column to scan down.
+
+                `auto 1fr` rather than two equal halves: the titles are what is being
+                chosen between, so they take the room they need and the blurbs take what
+                is left. Below 700px the blurb wraps under its title instead, which is a
+                list rather than two cramped columns. */}
+            <s-grid
+              gridTemplateColumns="@container (inline-size <= 700px) 1fr, auto 1fr"
+              gap={SPACE.item}
+              alignItems="center"
+            >
               {section.items.map((item) => (
-                <ActionRow key={item.slug}>
+                <Fragment key={item.slug}>
                   {/* Root-relative and a new tab. Relative because the app document is
                       served from our own origin inside the frame as well as outside it,
                       and a new tab because the destination is not an embedded page — see
@@ -108,10 +125,14 @@ export default function HelpIndex() {
                   >
                     {item.title}
                   </s-button>
-                  {item.blurb ? <s-text color="subdued">{item.blurb}</s-text> : null}
-                </ActionRow>
+                  {/* Always rendered, even when there is no blurb: the grid places
+                      children in order, so a skipped cell would pull the next article's
+                      title into the blurb column and every row after it would be one
+                      cell out of step. */}
+                  <s-text color="subdued">{item.blurb ?? ""}</s-text>
+                </Fragment>
               ))}
-            </s-stack>
+            </s-grid>
           </s-stack>
         </s-section>
       ))}
