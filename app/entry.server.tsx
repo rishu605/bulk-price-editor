@@ -7,6 +7,7 @@ import { isbot } from "isbot";
 import { addDocumentResponseHeaders } from "./shopify.server";
 import { initSentry } from "./lib/observability/sentry.server";
 import { initOtel } from "./lib/observability/otel.server";
+import { logger } from "./lib/logging/logger";
 
 // Once per process, at import time, before any request is handled. Initialising lazily
 // on the first error would miss the errors that happen during startup, which are the ones
@@ -55,7 +56,11 @@ export default async function handleRequest(
         },
         onError(error) {
           responseStatusCode = 500;
-          console.error(error);
+          // Through the logger, not `console.error(error)`. This prints a render
+          // failure's message and stack, and a render below a loader that touched a
+          // price is exactly where one appears — stdout ships to the aggregator, so it
+          // goes through the same two passes as every other line.
+          logger.error("render failed", { route: new URL(request.url).pathname, error });
         },
       }
     );
