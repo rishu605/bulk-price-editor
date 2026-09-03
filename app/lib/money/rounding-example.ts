@@ -89,9 +89,36 @@ export function roundingExample(
 }
 
 /** The one-line example a select's help text shows. */
+/**
+ * The result only, for a select option that has to fit inside a closed control.
+ *
+ * It used to be the whole sentence — "$2,347.62 becomes $2,347.99" — repeated in every
+ * option, which made the longest of the six read `Leave prices exactly as calculated ·
+ * $2,347.62 → $2,347.62`: fifty-eight characters in a control the campaign editor gives
+ * about half a column. What a merchant saw was "Leave prices exactly as calc…".
+ *
+ * The starting price is identical in all six, so saying it once above the select and
+ * showing only what each does to it loses nothing and halves the line. The comparison is
+ * the point of putting examples in the options at all — all six explaining themselves
+ * while the merchant chooses between them, rather than one line describing whichever is
+ * already chosen — and that survives.
+ *
+ * `sampleLine` is the sentence that has to accompany this. An option reading "$2,347.99"
+ * with nothing saying what it started from is a number with no question attached.
+ */
 export function roundingExampleLine(name: RoundingProfileName, currency: string): string {
   const example = roundingExample(name, currency);
-  return example.unavailable ?? `${example.before} becomes ${example.after}`;
+  return example.unavailable ?? example.after ?? example.before;
+}
+
+/**
+ * What the examples above start from, said once.
+ *
+ * Belongs in the `details` of any select whose options are built by `roundingChoices` —
+ * see `rounding-choices.test.ts`, which refuses one that omits it.
+ */
+export function sampleLine(currency: string): string {
+  return `Examples show what ${formatMoneyForDisplay(money(samplePrice(), currency))} becomes.`;
 }
 
 /**

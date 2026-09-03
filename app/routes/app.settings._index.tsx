@@ -16,7 +16,7 @@ import {
   readRoundingPolicy,
   roundingLabel,
 } from "../lib/money/rounding-policy";
-import { roundingChoices } from "../lib/money/rounding-example";
+import { roundingChoices, sampleLine } from "../lib/money/rounding-example";
 import { PageSections, PageShell } from "../components/PageShell";
 import { SettingsSaveBar } from "../components/SettingsSaveBar";
 import { Field, FieldGrid, FullRow } from "../components/FieldGrid";
@@ -55,6 +55,7 @@ export const loader = withGuard("/app/settings", async ({ request }: LoaderFunct
     // Currency-aware: a step is in minor units, so "Nearest 10" means ten cents on a USD
     // store and ten yen on a JPY one, and the option list itself differs (#489).
     roundingOptions: roundingChoices(currency),
+    sample: sampleLine(currency),
     withCost,
     variants,
     notifications,
@@ -124,6 +125,7 @@ export default function Settings() {
     currency,
     currencies,
     roundingOptions,
+    sample,
     withCost,
     variants,
     notifications,
@@ -247,7 +249,14 @@ export default function Settings() {
               {/* A rounding rule is half a dozen words. Unbounded it was a 970px bar, and
                   the per-currency selects below it were five more. */}
               <Field width="medium">
-                <s-select name="rounding.default" label="Everywhere, unless overridden">
+                <s-select
+                  name="rounding.default"
+                  label="Everywhere, unless overridden"
+                  /* Said once, above six options that each show only their own result.
+                     Repeating "$2,347.62 becomes" in all six is what made the longest of
+                     them too long to read inside a closed select. */
+                  details={sample}
+                >
                   {roundingOptions.map((option) => (
                     <s-option
                       key={option.value}

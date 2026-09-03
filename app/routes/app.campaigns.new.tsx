@@ -19,7 +19,7 @@ import {
   readRoundingPolicy,
   roundingLabel,
 } from "../lib/money/rounding-policy";
-import { roundingChoices } from "../lib/money/rounding-example";
+import { roundingChoices, sampleLine } from "../lib/money/rounding-example";
 import { ActionRow } from "../components/ActionRow";
 import { CampaignNameField } from "../components/campaign/CampaignNameField";
 import { RouteBoundary } from "../components/RouteBoundary";
@@ -186,6 +186,7 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
     // what "Nearest 10" means and knowing — see `rounding-example.ts`, and #489 for what
     // the examples turned out to reveal about two of the labels.
     roundingOptions: roundingChoices(currency),
+    sample: sampleLine(currency),
     facets: available,
     segments,
     usingSegment: segment ? { id: segment.id, name: segment.name, kind: segment.kind } : null,
@@ -319,6 +320,7 @@ export default function NewCampaign() {
     currencies,
     storeRounding,
     roundingOptions,
+    sample,
     presetStart,
     gates,
     planName,
@@ -505,18 +507,40 @@ export default function NewCampaign() {
                   confusion having two pages caused. */}
               {fromFile ? null : (
                 <>
-              <s-select name="compareAt" label="Compare-at price">
+              {/* The parenthetical moved into `details`.
+
+                  "Set to baseline (shows a strike-through)" is forty characters, and a
+                  select in this column shows about twenty-eight before it clips — so the
+                  merchant read "Set to baseline (shows a strik…", which is the label plus
+                  a promise that gets cut off half way through. What the option *is* is
+                  three words; what it *does* is a note, and a note has a place. */}
+              <s-select
+                name="compareAt"
+                label="Compare-at price"
+                details="Setting it to the baseline is what shows a customer the old price struck through."
+              >
                 <s-option value="set-to-baseline" defaultSelected>
-                  Set to baseline (shows a strike-through)
+                  Set to baseline
                 </s-option>
                 <s-option value="leave">Leave unchanged</s-option>
                 <s-option value="clear">Clear it</s-option>
               </s-select>
 
+              {/* The whole row, because these six options are the longest text in the
+                  form: `label · example` puts "Leave prices exactly as calculated ·
+                  $2,347.62 → $2,347.62" in a control that gets half a column otherwise,
+                  and a rounding rule a merchant cannot read is a rounding rule they will
+                  not check.
+
+                  The examples stay in the options rather than moving to a line under the
+                  select. A single line describes whichever is already chosen; the point
+                  of putting them in the options is that all six explain themselves while
+                  the merchant is still comparing them. */}
+              <FullRow>
               <s-select
                 name="rounding.default"
                 label="Rounding"
-                details="Starts from your store setting. Change it here to round this campaign differently."
+                details={`Starts from your store setting. Change it here to round this campaign differently. ${sample}`}
               >
                 {roundingOptions.map((option) => (
                   <s-option
@@ -532,6 +556,7 @@ export default function NewCampaign() {
                   </s-option>
                 ))}
               </s-select>
+              </FullRow>
                 </>
               )}
             </FieldGrid>
