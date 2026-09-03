@@ -1,4 +1,5 @@
 import { formatAgo, formatCount } from "../lib/format/display";
+import { QueryContainer } from "./QueryContainer";
 import { HAIRLINE, PAD, SPACE } from "../lib/ui/spacing";
 import { RUN_TONE, toneFor } from "./tone";
 
@@ -43,6 +44,7 @@ export function LastRunSummary({
       borderColor={HAIRLINE.borderColor}
       borderRadius="base"
     >
+      <QueryContainer>
       <s-grid
         // One comma only: Polaris reads the comma as the separator between the responsive
         // value and the default, so a second one anywhere stops the value parsing.
@@ -65,6 +67,7 @@ export function LastRunSummary({
           View campaign
         </s-button>
       </s-grid>
+      </QueryContainer>
     </s-box>
   );
 }

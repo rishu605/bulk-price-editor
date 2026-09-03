@@ -7,6 +7,7 @@ import {
 } from "react";
 
 import { HelpNote } from "./HelpNote";
+import { QueryContainer } from "./QueryContainer";
 import { SPACE } from "../lib/ui/spacing";
 
 /**
@@ -351,6 +352,10 @@ export function PageShell({
       <s-page heading={heading} inlineSize="large">
         <BackLink backTo={backTo} />
         {actions}
+        {/* The page is what this grid's `@container` value is measured against. Without
+            one it was measured against nothing, so the aside never fell below the
+            content however narrow the admin got. See `QueryContainer`. */}
+        <QueryContainer>
         <s-grid
           gap={SPACE.page}
           // The column gap is the page rhythm too, not a smaller one. Two columns set
@@ -380,6 +385,7 @@ export function PageShell({
             )}
           </s-stack>
         </s-grid>
+        </QueryContainer>
       </s-page>
     </PageWidth>
   );

@@ -1,4 +1,5 @@
 import { Fragment } from "react";
+import { QueryContainer } from "./QueryContainer";
 
 import { formatAgo } from "../lib/format/display";
 import { humanise } from "../lib/format/label";
@@ -33,6 +34,7 @@ export function UpcomingCampaigns({
     //
     // One comma only: Polaris reads it as the separator between the responsive value and
     // the default, so a second one stops the value parsing.
+    <QueryContainer>
     <s-grid
       gridTemplateColumns="@container (inline-size <= 520px) auto 1fr, auto 1fr auto"
       gap={SPACE.item}
@@ -56,5 +58,6 @@ export function UpcomingCampaigns({
         </Fragment>
       ))}
     </s-grid>
+    </QueryContainer>
   );
 }

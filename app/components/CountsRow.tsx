@@ -1,4 +1,5 @@
 import { formatCount } from "../lib/format/display";
+import { QueryContainer } from "./QueryContainer";
 import { HAIRLINE, PAD, SPACE } from "../lib/ui/spacing";
 
 /**
@@ -59,6 +60,9 @@ export function CountsRow({ items }: { items: CountItem[] }) {
   const columns = items.map(() => "1fr").join(" ") || "1fr";
 
   return (
+    // The container the query below is measured against. Without one it resolved
+    // against nothing and the tiles never went two up, whatever the card's width.
+    <QueryContainer>
     <s-grid
       // Two up when the card gets narrow. Four tiles in a 400px column would be four
       // slivers, and a figure that wraps mid-number is worse than a second row.
@@ -83,6 +87,7 @@ export function CountsRow({ items }: { items: CountItem[] }) {
         ),
       )}
     </s-grid>
+    </QueryContainer>
   );
 }
 
