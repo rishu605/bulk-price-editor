@@ -36,6 +36,9 @@ import { RevertConfirmation, REVERT_MODAL_ID } from "./RevertConfirmation";
 import { SPACE } from "../../lib/ui/spacing";
 import type { CampaignDetailProps } from "./props";
 
+/** Links the "More actions" button to the menu it opens. */
+const MORE_MENU_ID = "campaign-more-actions";
+
 export function CampaignHeader({
   rollback,
   practice,
@@ -139,43 +142,74 @@ export function CampaignHeader({
           </s-button>
         )}
 
-        {/* Copy it and file it away. Both tertiary, and last: they are about the campaign
-            as a record rather than about the prices, so they must not compete with the
-            one button that writes to a storefront.
+        {/* Everything that files the campaign rather than prices it, behind one control.
+
+            The row rendered up to six buttons at once — Apply, Resume, Revert or "Review
+            N edited", Duplicate, Contact support, Archive — and three of those are about
+            the campaign as a record. A merchant scanning for the one button that writes
+            to a storefront had to read past them every time.
+
+            Nothing that writes a price is ever in here. That is the rule, and
+            `campaign-header.test.tsx` holds it: an overflow is where an action goes when
+            it is *not* what the page is for, and a merchant who has to open a menu to
+            find Apply has been given the wrong menu.
 
             Duplicate is not recurrence, which this app already has. Recurrence re-arms
-            *this* campaign for its next occurrence and keeps one history; duplicate is
-            how next month's different sale gets built out of last month's sale that
-            worked. NA offers `Copy to new job` in place of recurrence; Sami offers both,
-            and both is right.
+            the same sale; Duplicate is how next month's different sale gets built out of
+            last month's sale that worked. NA offers `Copy to new job` in place of
+            recurrence; Sami offers both, and both is right.
 
             There is no delete anywhere, and that is deliberate rather than missing: the
             ledger hangs off this campaign's runs, so deleting the row would erase the
             record of every price we ever wrote for it. Archive keeps all of it and takes
-            the campaign out of the list. `delete-guard.test.ts` holds the line. */}
-        <fetcher.Form method="post">
-          <input type="hidden" name="intent" value="duplicate" />
-          <s-button type="submit" variant="tertiary" icon="duplicate" loading={busy || undefined}>
+            the campaign out of the list. `delete-guard.test.ts` holds the line.
+
+            `command` as well as `commandFor`, which is the scar `HelpNote` records: in
+            `polaris.js` the activator's click handler is built only when both are
+            present, so `commandFor` alone renders a button that is focusable and inert —
+            no error, no warning. */}
+        <s-button
+          variant="tertiary"
+          icon="menu-horizontal"
+          commandFor={MORE_MENU_ID}
+          command="--toggle"
+          loading={busy || undefined}
+        >
+          More actions
+        </s-button>
+
+        {/* Buttons only. Polaris' own types say of `s-menu`: "Only Button components are
+            allowed as children of a Menu… Any other component placed here will be
+            ignored" — so the two form posts that used to wrap their submits are
+            `fetcher.submit` calls instead. A `<form>` in here would be dropped silently,
+            which is the failure mode this app has been bitten by twice. */}
+        <s-menu id={MORE_MENU_ID} accessibilityLabel="More actions for this campaign">
+          <s-button
+            icon="duplicate"
+            onClick={() => fetcher.submit({ intent: "duplicate" }, { method: "post" })}
+          >
             Duplicate
           </s-button>
-        </fetcher.Form>
 
-        {/* Only where the campaign is in a state a merchant might need help with. On a
-            draft it would be a support button next to a form nobody has submitted yet;
-            on Held or Partial it is beside the two states this product is *about*, and
-            the ones whose questions are hardest to ask without a run id. */}
-        {needsAttention ? (
-          <s-button variant="tertiary" icon="chat" href={supportHref(campaignId)}>
-            Contact support
-          </s-button>
-        ) : null}
-
-        <fetcher.Form method="post">
-          <input type="hidden" name="intent" value={archived ? "unarchive" : "archive"} />
-          <s-button type="submit" variant="tertiary" icon="archive" loading={busy || undefined}>
+          <s-button
+            icon="archive"
+            onClick={() =>
+              fetcher.submit({ intent: archived ? "unarchive" : "archive" }, { method: "post" })
+            }
+          >
             {archived ? "Restore" : "Archive"}
           </s-button>
-        </fetcher.Form>
+
+          {/* Only where the campaign is in a state a merchant might need help with. On a
+              draft it would be a support link beside a form nobody has submitted yet; on
+              Held or Partial it is beside the two states this product is *about*, and the
+              ones whose questions are hardest to ask without a run id. */}
+          {needsAttention ? (
+            <s-button icon="chat" href={supportHref(campaignId)}>
+              Contact support
+            </s-button>
+          ) : null}
+        </s-menu>
       </ActionRow>
     </s-grid>
 
