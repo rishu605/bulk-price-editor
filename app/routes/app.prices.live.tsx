@@ -96,7 +96,10 @@ export default function Reconciliation() {
   const busy = fetcher.state !== "idle";
 
   return (
-    <PageShell heading="What is live, and why">
+    /* The tab's own words. It read "What is live, and why" under a tab saying "What's
+        live" — the heading was answering a second question the tab had not asked, and the
+        sentence below already answers it better than a title can. */
+    <PageShell heading="What's live">
       <s-section>
         <s-paragraph>
           <s-text>
