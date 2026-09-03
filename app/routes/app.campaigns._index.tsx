@@ -8,7 +8,6 @@ import { ActionRow } from "../components/ActionRow";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
-import { TabBar } from "../components/TabBar";
 import { CampaignCalendar } from "../components/campaign/CampaignCalendar";
 import { CampaignListView } from "../components/campaign/CampaignListView";
 import { HelpNote } from "../components/HelpNote";
@@ -132,6 +131,21 @@ export default function Campaigns() {
          they could start. It is an option inside the editor now (#445), which is where
          "how should prices change" is actually asked. */
       primaryAction={{ label: "Create campaign", href: "/app/campaigns/new" }}
+      /* The view switch, beside the action rather than as a second tab bar.
+
+         The page used to open with two tab bars stacked: List/Calendar, then All/Needs a
+         decision/Draft/… Both looked like tabs and they were answering different
+         questions — one picks a *shape* of view, the other filters what is in it — so the
+         merchant had to read both before the first campaign. The status filter is the one
+         a merchant uses, so it keeps the tabs; this is one button that swaps.
+
+         It has to sit outside the list card because the calendar replaces that card
+         entirely, and a view switch that disappears in one of its two views is a trap. */
+      secondaryActions={[
+        view === "calendar"
+          ? { label: "List", icon: "list-bulleted", href: linkTo({ view: "list" }) }
+          : { label: "Calendar", icon: "calendar", href: linkTo({ view: "calendar" }) },
+      ]}
     >
       {/* Counted across the shop rather than the filtered page: a campaign needing a
           decision must not be hidden by an unrelated filter. */}
@@ -150,30 +164,7 @@ export default function Campaigns() {
         </s-banner>
       ) : null}
 
-      {/* Which view you are looking at, and nothing else.
 
-          It used to carry Create campaign on its right, which made a row of tabs also a
-          row of actions; the action is in the title bar now. What is left is a header
-          rather than a card — no box around a two-item toggle. */}
-      <TabBar
-        label="Campaign views"
-        tabs={[
-          {
-            label: "List",
-            // A glyph each, because these two name a *shape* of view rather than a
-            // subject, and the shape is the thing being chosen between.
-            icon: "list-bulleted",
-            href: linkTo({ view: "list" }),
-            current: view === "list",
-          },
-          {
-            label: "Calendar",
-            icon: "calendar",
-            href: linkTo({ view: "calendar" }),
-            current: view === "calendar",
-          },
-        ]}
-      />
 
       {view === "calendar" && calendar ? (
         <CampaignCalendar {...calendar} />

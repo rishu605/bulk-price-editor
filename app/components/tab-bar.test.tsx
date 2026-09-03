@@ -67,7 +67,11 @@ describe("every set of tabs uses the shared bar", () => {
   it.each([
     "app/components/SectionTabs.tsx",
     "app/components/campaign/CampaignTabs.tsx",
-    "app/routes/app.campaigns._index.tsx",
+    // The campaigns *index* no longer appears here, and its list view does instead. The
+    // page used to render two bars stacked — List/Calendar, then the status filter — and
+    // the top one is a view switch in the title bar now. One question per control: the
+    // tabs filter what is in the list, and a button swaps which shape the list takes.
+    "app/components/campaign/CampaignListView.tsx",
   ])("%s renders TabBar rather than its own row", (path) => {
     const source = files.find((file) => file.path === path)?.source ?? "";
     expect(source, `${path} should be a known tab surface`).not.toBe("");
