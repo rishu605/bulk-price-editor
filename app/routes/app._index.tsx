@@ -1,4 +1,5 @@
 import { formatAgo, formatCount, formatDay } from "../lib/format/display";
+import type { ReactNode } from "react";
 import { quickCampaignName, readQuickPercent } from "../lib/campaigns/quick-campaign";
 import { merchantFacing } from "../lib/audit/housekeeping";
 import { createCampaign } from "../services/campaigns/index.server";
@@ -309,6 +310,138 @@ export default function Dashboard() {
     onboardingComplete: guide.complete,
   });
 
+  /**
+   * Everything asking for the merchant, in the order it should be dealt with.
+   *
+   * Built here rather than in the loader because every entry is a sentence and an
+   * action, and both belong with the markup that renders them. The order is the
+   * argument: a run that stopped half way has prices live that nobody chose, and a
+   * variant with no baseline cannot be put in a campaign at all — which matters, but not
+   * today.
+   *
+   * `tone` decides the block's colour, not each item's: a banner has one, and it should
+   * be the strongest of what is open.
+   */
+  const attention: Array<{
+    id: string;
+    heading: string;
+    tone: "warning" | "info";
+    body: ReactNode;
+  }> = [];
+
+  if (needsAttention > 0) {
+    attention.push({
+      id: "unclean-runs",
+      heading: "Some campaigns did not finish cleanly",
+      tone: "warning",
+      body: (
+        <>
+          <s-paragraph>
+            {formatCount(needsAttention)} campaign{needsAttention === 1 ? "" : "s"} stopped part
+            way. Every row that did not complete has a reason recorded, and resuming retries only
+            those.
+          </s-paragraph>
+          <ActionRow>
+            <s-button href="/app/campaigns">Review campaigns</s-button>
+          </ActionRow>
+        </>
+      ),
+    });
+  }
+
+  if (driftOpen > 0) {
+    attention.push({
+      id: "drift",
+      heading: "Prices changed outside Anchor",
+      tone: "info",
+      body: (
+        <>
+          <s-paragraph>
+            {formatCount(driftOpen)} price{driftOpen === 1 ? " was" : "s were"} changed somewhere
+            else while a campaign was running. Those edits were deliberate, so nothing has been
+            overwritten — each is waiting on your decision.
+          </s-paragraph>
+          <ActionRow>
+            <s-button href="/app/prices/drift">Review price drift</s-button>
+          </ActionRow>
+        </>
+      ),
+    });
+  }
+
+  for (const notice of notices) {
+    attention.push({
+      id: `notice-${notice.id}`,
+      heading: "Your markets changed",
+      tone: "warning",
+      body: (
+        <>
+          <s-paragraph>{notice.detail}</s-paragraph>
+          <ActionRow>
+            {notice.kind === "added" ? (
+              <fetcher.Form method="post">
+                <input type="hidden" name="intent" value="resolve-notice" />
+                <input type="hidden" name="noticeId" value={notice.id} />
+                <input type="hidden" name="resolution" value="extended" />
+                <s-button type="submit" loading={busy || undefined}>
+                  Add it to {notice.campaigns === 1 ? "that campaign" : "those campaigns"}
+                </s-button>
+              </fetcher.Form>
+            ) : (
+              <fetcher.Form method="post">
+                <input type="hidden" name="intent" value="resolve-notice" />
+                <input type="hidden" name="noticeId" value={notice.id} />
+                <input type="hidden" name="resolution" value="removed" />
+                <s-button type="submit" loading={busy || undefined}>
+                  Remove it from {notice.campaigns === 1 ? "that campaign" : "those campaigns"}
+                </s-button>
+              </fetcher.Form>
+            )}
+
+            <fetcher.Form method="post">
+              <input type="hidden" name="intent" value="resolve-notice" />
+              <input type="hidden" name="noticeId" value={notice.id} />
+              <input type="hidden" name="resolution" value="ignored" />
+              <s-button type="submit" variant="tertiary" loading={busy || undefined}>
+                Leave it as it is
+              </s-button>
+            </fetcher.Form>
+          </ActionRow>
+        </>
+      ),
+    });
+  }
+
+  if (health.missing > 0) {
+    attention.push({
+      id: "missing-baselines",
+      heading: "Some variants have no baseline",
+      tone: "warning",
+      body: (
+        <>
+          <s-paragraph>
+            {formatCount(health.missing)} variants cannot be included in a campaign until they have
+            one. Re-syncing captures them.
+          </s-paragraph>
+          {/* The banner carries the action it asks for.
+
+              It said "Re-syncing captures them" and offered no button, and the re-sync it
+              meant was in the Store card two columns away. This is the exact shape of the
+              worst bug this product has had (#252): a warning whose only remedy was
+              somewhere else, and which the action a merchant could find did not clear. */}
+          <ActionRow>
+            <fetcher.Form method="post">
+              <input type="hidden" name="intent" value="sync" />
+              <s-button type="submit" loading={busy || undefined}>
+                {busy ? "Syncing…" : "Re-sync catalogue"}
+              </s-button>
+            </fetcher.Form>
+          </ActionRow>
+        </>
+      ),
+    });
+  }
+
   return (
     <PageShell heading="Home">
       {result ? (
@@ -320,112 +453,47 @@ export default function Dashboard() {
         </s-banner>
       ) : null}
 
-      {/* Everything that wants the merchant, at the top and together.
+      {/* One block, however many things want the merchant.
 
-          These four used to be filed inside whichever section they were about — two in
-          Catalogue, two in what-is-live — which meant "2 campaigns did not finish
-          cleanly" was reachable by scrolling and reading the section headings to work out
-          where it would have been put. Grouping them is not decoration: a dashboard's
+          These were four banners stacked — campaigns that did not finish cleanly, markets
+          that changed, variants with no baseline, prices changed outside Anchor — and a
+          shop with all four opened on a wall of yellow with the most consequential item
+          indistinguishable from the least.
+
+          Grouping them at the top was right and is kept: #452's note says a dashboard's
           first job is to say whether anything needs doing, and it cannot do that while
-          the answer is distributed. */}
-      {needsAttention > 0 ? (
-        <s-banner tone="warning" heading="Some campaigns did not finish cleanly">
-          <s-paragraph>
-            {formatCount(needsAttention)} campaign{needsAttention === 1 ? "" : "s"} stopped part
-            way. Every row that did not complete has a reason recorded, and resuming retries only
-            those.
-          </s-paragraph>
-          <ActionRow>
-            <s-button href="/app/campaigns">Review campaigns</s-button>
-          </ActionRow>
+          the answer is distributed. What was missing is that four things needing
+          attention are a *list*, not four announcements.
+
+          Ordered by consequence rather than by whatever order the loader computed them
+          in. A run that stopped half way has prices live that nobody chose; a variant
+          with no baseline cannot be put in a campaign at all, which matters but not
+          today. One tone for the block, and it is the strongest of the ones open. */}
+      {attention.length > 0 ? (
+        <s-banner
+          tone={attention.some((item) => item.tone === "warning") ? "warning" : "info"}
+          heading={
+            attention.length === 1
+              ? attention[0].heading
+              : `${formatCount(attention.length)} things need your attention`
+          }
+        >
+          <s-stack gap={SPACE.section}>
+            {attention.map((item, index) => (
+              <s-stack key={item.id} gap={SPACE.item}>
+                {/* A rule between items rather than a box around each: the separator is
+                    the same information at a fraction of the ink, and it does not nest a
+                    card inside a banner. Not before the first, and not at all when there
+                    is only one — a lone item is a banner, and the heading is already
+                    its own. */}
+                {index > 0 ? <s-divider /> : null}
+                {attention.length > 1 ? <s-text type="strong">{item.heading}</s-text> : null}
+                {item.body}
+              </s-stack>
+            ))}
+          </s-stack>
         </s-banner>
       ) : null}
-
-      {notices.length > 0 ? (
-        <s-banner tone="warning" heading="Your markets changed">
-          {notices.map((notice) => (
-            <s-stack key={notice.id} gap={SPACE.item}>
-              <s-paragraph>{notice.detail}</s-paragraph>
-              <ActionRow>
-                {notice.kind === "added" ? (
-                  <fetcher.Form method="post">
-                    <input type="hidden" name="intent" value="resolve-notice" />
-                    <input type="hidden" name="noticeId" value={notice.id} />
-                    <input type="hidden" name="resolution" value="extended" />
-                    <s-button type="submit" loading={busy || undefined}>
-                      Add it to {notice.campaigns === 1 ? "that campaign" : "those campaigns"}
-                    </s-button>
-                  </fetcher.Form>
-                ) : (
-                  <fetcher.Form method="post">
-                    <input type="hidden" name="intent" value="resolve-notice" />
-                    <input type="hidden" name="noticeId" value={notice.id} />
-                    <input type="hidden" name="resolution" value="removed" />
-                    <s-button type="submit" loading={busy || undefined}>
-                      Remove it from{" "}
-                      {notice.campaigns === 1 ? "that campaign" : "those campaigns"}
-                    </s-button>
-                  </fetcher.Form>
-                )}
-
-                <fetcher.Form method="post">
-                  <input type="hidden" name="intent" value="resolve-notice" />
-                  <input type="hidden" name="noticeId" value={notice.id} />
-                  <input type="hidden" name="resolution" value="ignored" />
-                  <s-button type="submit" variant="tertiary" loading={busy || undefined}>
-                    Leave it as it is
-                  </s-button>
-                </fetcher.Form>
-              </ActionRow>
-            </s-stack>
-          ))}
-        </s-banner>
-      ) : null}
-
-      {/* The banner carries the action it asks for.
-
-          It said "Re-syncing captures them" and offered no button, and the re-sync it
-          meant was in the Store card two columns away, below the plan. This is the exact
-          shape of the worst bug this product has had (#252): a warning whose only remedy
-          was somewhere else, and which the action a merchant could find did not clear.
-          The remedy being present is not a nicety here — it is the difference between the
-          warning being true and the warning being a dead end.
-
-          The same intent as the Store card's button, posted to the same action. Two forms
-          rather than a shared component because a form is four lines and a second
-          component with one prop would be the harder thing to read; what must not drift
-          is the intent, and `home-actions.test` asserts every sync on this page posts
-          the same one. */}
-      {health.missing > 0 ? (
-        <s-banner tone="warning" heading="Some variants have no baseline">
-          <s-paragraph>
-            {formatCount(health.missing)} variants cannot be included in a campaign until they have
-            one. Re-syncing captures them.
-          </s-paragraph>
-          <ActionRow>
-            <fetcher.Form method="post">
-              <input type="hidden" name="intent" value="sync" />
-              <s-button type="submit" loading={busy || undefined}>
-                {busy ? "Syncing…" : "Re-sync catalogue"}
-              </s-button>
-            </fetcher.Form>
-          </ActionRow>
-        </s-banner>
-      ) : null}
-
-      {driftOpen > 0 ? (
-        <s-banner tone="info" heading="Prices changed outside Anchor">
-          <s-paragraph>
-            {formatCount(driftOpen)} price{driftOpen === 1 ? " was" : "s were"} changed somewhere
-            else while a campaign was running. Those edits were deliberate, so nothing has been
-            overwritten — each is waiting on your decision.
-          </s-paragraph>
-          <ActionRow>
-            <s-button href="/app/prices/drift">Review price drift</s-button>
-          </ActionRow>
-        </s-banner>
-      ) : null}
-
       {/* Before the numbers while it is unfinished, and gone once it is. The card
           retires itself, so this ordering says "your next step first" to a new shop and
           "your storefront first" to an established one without a conditional. */}
