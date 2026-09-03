@@ -311,19 +311,20 @@ describe("the way back", () => {
 
     expect(html).toContain('href="/app/campaigns"');
     expect(html).toContain("Campaigns");
-    expect(html).toContain('icon="arrow-left"');
   });
 
-  it("sits above the title rather than inside the page", () => {
-    // Under the heading it reads as the first thing *in* the page rather than the way
-    // out of it, and `s-page` takes no slot for one in this version.
+  it("goes in the slot App Bridge reads, as a direct child of the page", () => {
+    // `app-bridge.js` looks for `:scope > s-link[slot="breadcrumb-actions"]` and renders
+    // it in the admin's own title bar. Wrapped in anything, or on any other element, it
+    // is never found — so this asserts the two things that make it work rather than the
+    // appearance of a button we used to draw ourselves.
     const html = render(
       <PageShell heading="Summer sale" backTo={{ href: "/app/campaigns", label: "Campaigns" }}>
         <s-section>detail</s-section>
       </PageShell>,
     );
 
-    expect(html.indexOf('href="/app/campaigns"')).toBeLessThan(html.indexOf("<s-page"));
+    expect(html).toMatch(/<s-page[^>]*><s-button slot="breadcrumb-actions"/);
   });
 
   it("is absent on a page that has a tab bar, which is already the way back", () => {
@@ -333,7 +334,81 @@ describe("the way back", () => {
       </PageShell>,
     );
 
-    expect(html).not.toContain('icon="arrow-left"');
+    expect(html).not.toContain('slot="breadcrumb-actions"');
+  });
+});
+
+describe("the title bar", () => {
+  /**
+   * These assert the contract in `app-bridge.js`, not a look.
+   *
+   * It scans for `:scope > s-button[slot="primary-action"]` — a **direct child** of
+   * `s-page`, an `s-button` or `s-link`, carrying the slot as an attribute. Anything
+   * else is simply not found, and an action that is not found is an action a merchant
+   * cannot reach from where the admin has taught them to look for it.
+   */
+  const html = render(
+    <PageShell
+      heading="Campaigns"
+      primaryAction={{ label: "Create campaign", href: "/app/campaigns/new" }}
+      secondaryActions={[{ label: "Export", href: "/app/export" }]}
+    >
+      <s-section>rows</s-section>
+    </PageShell>,
+  );
+
+  it("puts the primary action in the slot the admin reads", () => {
+    expect(html).toContain('slot="primary-action"');
+    expect(html).toContain("Create campaign");
+  });
+
+  it("renders it as a direct child of the page", () => {
+    // Nested one element deeper and the `:scope >` selector misses it entirely.
+    expect(html).toMatch(/<s-page[^>]*><s-button slot="primary-action"/);
+  });
+
+  it("marks the primary action primary and the secondary ones secondary", () => {
+    expect(html).toMatch(/slot="primary-action"[^>]*variant="primary"/);
+    expect(html).toMatch(/slot="secondary-actions"[^>]*variant="secondary"/);
+  });
+
+  it("renders every secondary action, not just the first", () => {
+    const many = render(
+      <PageShell
+        heading="Prices"
+        secondaryActions={[{ label: "Import" }, { label: "Recapture" }]}
+      >
+        <s-section>rows</s-section>
+      </PageShell>,
+    );
+
+    expect(many).toContain("Import");
+    expect(many).toContain("Recapture");
+  });
+
+  it("leaves the bar empty on a page that has no page-level action", () => {
+    const plain = render(
+      <PageShell heading="Variants">
+        <s-section>rows</s-section>
+      </PageShell>,
+    );
+
+    expect(plain).not.toContain('slot="primary-action"');
+    expect(plain).not.toContain('slot="secondary-actions"');
+  });
+
+  it("carries a modal opener's command, so Apply can be hoisted without a form", () => {
+    // A form submit cannot go in the title bar — App Bridge only reads direct children
+    // of `s-page`, and a button inside a `<form>` is not one. A modal opener can, and
+    // that is how a confirmed action reaches the bar.
+    const opener = render(
+      <PageShell heading="Summer sale" primaryAction={{ label: "Apply", commandFor: "apply-modal" }}>
+        <s-section>detail</s-section>
+      </PageShell>,
+    );
+
+    expect(opener).toContain('commandFor="apply-modal"');
+    expect(opener).toContain('command="--show"');
   });
 });
 
