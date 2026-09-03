@@ -19,8 +19,8 @@
 import { metrics, trace, type Counter, type Histogram, type Span, type Tracer } from "@opentelemetry/api";
 
 import { logger } from "../logging/logger";
-import { redactPrices } from "../telemetry/redact";
-import { redact } from "../logging/redact";
+import { redactPrices, redactPricesInText } from "../telemetry/redact";
+import { redact, redactText } from "../logging/redact";
 import type { Metric, MetricLabels } from "../telemetry/metrics";
 
 const SERVICE = "anchor";
@@ -211,18 +211,47 @@ export async function span<T>(
 
   const tracer: Tracer = trace.getTracer(SERVICE);
 
-  return tracer.startActiveSpan(name, { attributes }, async (active) => {
+  // Redacted on the way in, exactly as `record()` does for a metric label. A span
+  // attribute reaches the same collector by the same wire; nothing about the rule
+  // changes because this one describes a duration rather than a measurement.
+  return tracer.startActiveSpan(name, { attributes: attributesFrom(attributes) }, async (active) => {
     try {
       const result = await work(active);
       active.end();
       return result;
     } catch (error) {
-      active.recordException(error as Error);
+      active.recordException(safeException(error));
       active.setStatus({ code: 2 });
       active.end();
       throw error;
     }
   });
+}
+
+/**
+ * An exception with the price and the secrets taken out of its text.
+ *
+ * `recordException` writes the message *and* the stacktrace onto the span, and both
+ * carry whatever the thrown message said. That matters here more than it looks: every
+ * Admin API call is wrapped in `span("shopify.graphql", …)`, and `admin-client` throws
+ * Shopify's own error text for the mutation that just ran — which for a price mutation
+ * is the single most likely string in the system to contain a price.
+ *
+ * Sentry has guarded this shape since it was written. Until this, the trace path did
+ * not, so one thrown error was scrubbed on its way to Sentry and exported intact to the
+ * collector. Same two passes, same order, same reason as `logger`.
+ */
+function safeException(error: unknown): { name: string; message: string; stack?: string } {
+  const thrown = error instanceof Error ? error : new Error(String(error));
+  const scrub = (text: string) => redactText(redactPricesInText(text));
+
+  return {
+    name: thrown.name,
+    message: scrub(thrown.message),
+    // The stacktrace repeats the message on its first line, so leaving it alone would
+    // have redacted the field somebody reads and kept the value beside it.
+    ...(thrown.stack ? { stack: scrub(thrown.stack) } : {}),
+  };
 }
 
 export async function shutdownOtel(): Promise<void> {

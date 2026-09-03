@@ -20,7 +20,7 @@
 import * as Sentry from "@sentry/node";
 
 import { redact, redactText } from "../logging/redact";
-import { redactPrices } from "../telemetry/redact";
+import { redactPrices, redactPricesInText } from "../telemetry/redact";
 import { logger } from "../logging/logger";
 
 let started = false;
@@ -107,30 +107,6 @@ export function scrub(event: Sentry.ErrorEvent): Sentry.ErrorEvent {
   return event;
 }
 
-/**
- * Money-shaped substrings inside free text.
- *
- * The structured redactor works on keys and values; an exception message is one string,
- * and "cannot set price 19.99 on variant 12345" carries a price in the middle of a
- * sentence. Numbers with exactly two decimals are the shape worth catching — variant ids
- * and counts do not look like that.
- *
- * The lookbehind and lookahead are load-bearing rather than tidiness. Without them
- * "API version 2025.10" matched its own tail as "5.10" and became "API version 2[price]",
- * which is both a corrupted message and a false sense that something was protected. And
- * without them the leading space was consumed, so every redaction ran the previous word
- * into the placeholder.
- *
- * Over-matching costs more than it looks: a log full of unreadable messages is a log
- * people stop reading, which is worse than the leak it was guarding against.
- */
-export function redactPricesInText(text: string): string {
-  return text.replace(
-    /(?<![\d.])[$£€¥]?\d{1,3}(?:[,\s]\d{3})*\.\d{2}(?!\d)/g,
-    "[price]",
-  );
-}
-
 /** Attaches shop context. Never prices — see the note at the top. */
 export function setShopContext(shopId: string | null, shop?: string | null): void {
   if (!started) return;
@@ -160,3 +136,7 @@ export function captureError(error: unknown, context: Record<string, unknown> = 
 export function resetSentryForTests(): void {
   started = false;
 }
+
+// Re-exported so the callers and tests that knew it here keep working; it now lives
+// beside the structured price redactor, which is where the trace path can reach it too.
+export { redactPricesInText };
