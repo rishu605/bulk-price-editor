@@ -35,6 +35,7 @@ import {
 } from "./market-surfaces.server";
 import { notify } from "../notifications.server";
 import { metric } from "../../lib/telemetry/metrics";
+import { addLogContext, withLogContext } from "../../lib/logging/context.server";
 
 export interface RunOptions {
   revert?: boolean;
@@ -134,7 +135,17 @@ export async function runCampaign(
   const releaseTo = (options.claimedFrom ?? before?.status) as CampaignState | undefined;
 
   try {
-    return await executeCampaignRun(shopId, campaignId, client, options);
+    // Every line this run produces carries the shop and the campaign, and the run id
+    // from the moment there is one. Bound here rather than in the worker because this is
+    // the function both callers share: a queued apply arrives through the job wrapper,
+    // an inline Apply or Revert arrives straight from a route, and per CLAUDE.md rule 2
+    // both genuinely write. Binding at the job alone would have left the web half — the
+    // half a merchant is watching — with no ids at all.
+    //
+    // Merges with the job's context when there is one, so a queued run keeps its job id.
+    return await withLogContext({ shopId, campaignId }, () =>
+      executeCampaignRun(shopId, campaignId, client, options),
+    );
   } catch (error) {
     // Only release to a state that is not itself a claim. A campaign that was already
     // APPLYING when this was called -- a resume, a second worker -- has nowhere to be
@@ -362,6 +373,11 @@ async function executeCampaignRun(
       },
       select: { id: true },
     });
+
+    // The one id that cannot be bound at the boundary: it does not exist until this row
+    // does. Everything after this point — planning results, execution, verification,
+    // tags, markets — logs with the run it belongs to.
+    addLogContext({ runId: run.id });
   } catch (error) {
     if (!isOccurrenceTaken(error)) throw error;
 

@@ -25,11 +25,52 @@ export interface LogFields {
   errorId?: string;
   code?: string;
   shop?: string;
+  /** The internal id. `shop` is the myshopify domain; both get logged, they are not the same key. */
+  shopId?: string;
   route?: string;
   campaignId?: string;
   runId?: string;
+  /** BullMQ's id for the job this line happened inside. Absent when the work ran inline. */
+  jobId?: string;
   durationMs?: number;
   [key: string]: unknown;
+}
+
+/**
+ * Where the ambient fields come from, when anything is providing them.
+ *
+ * A seam rather than a direct import, because this module is reachable from the browser:
+ * `lib/errors/report.ts` is the isomorphic half of error reporting, renders inside the
+ * ErrorBoundary on both sides, and imports the logger. `node:async_hooks` in this file
+ * would put it in the client bundle, which is the same class of mistake as the `process`
+ * guard below.
+ *
+ * The default returns nothing, so a logger with nothing registered — every browser
+ * render, every test that does not opt in — behaves exactly as it did before.
+ */
+export type LogContextSource = () => LogFields;
+
+let contextSource: LogContextSource = () => ({});
+
+/** Called once by `context.server.ts` at import. Server-only by construction. */
+export function installLogContext(source: LogContextSource): void {
+  contextSource = source;
+}
+
+/** Test seam: puts the logger back to reading no ambient context. */
+export function resetLogContextForTests(): void {
+  contextSource = () => ({});
+}
+
+function ambient(): LogFields {
+  try {
+    return contextSource();
+  } catch {
+    // A logger that throws while assembling a line loses the line, and the lines most
+    // likely to be assembled during a broken async context are the ones explaining why
+    // it broke. Missing ids are a worse log; no log is a worse incident.
+    return {};
+  }
 }
 
 const LEVELS: Record<LogLevel, number> = { debug: 10, info: 20, warn: 30, error: 40 };
@@ -58,11 +99,21 @@ function isPretty(): boolean {
 function emit(level: LogLevel, message: string, fields: LogFields = {}): void {
   if (LEVELS[level] < threshold()) return;
 
+  // Ambient first, so an explicit field at the call site wins. A caller naming a runId
+  // means *that* run — most often when it is reporting on a run other than the one it is
+  // currently inside, which is exactly when being overwritten would mislead.
+  //
+  // Merged before redaction rather than after, so context goes through the same two
+  // passes as everything else. An id bound at a boundary is no more trustworthy than a
+  // field passed at a call site; `shop` is already a domain and nothing stops a future
+  // binding carrying something money-shaped.
+  const merged = { ...ambient(), ...fields };
+
   // Prices first, then secrets. The order matters: the secret pass renders a bigint as
   // "8000n", and a price that has already become a string slips past a money-shaped
   // check. Every price in this codebase is a bigint, so catching it while it still is
   // one is the only reliable pass.
-  const safe = redact(redactPrices(fields)) as LogFields;
+  const safe = redact(redactPrices(merged)) as LogFields;
   const sink = level === "error" ? console.error : level === "warn" ? console.warn : console.log;
 
   if (isPretty()) {
