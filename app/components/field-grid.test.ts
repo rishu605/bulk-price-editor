@@ -93,34 +93,66 @@ describe("a single control is sized the same way", () => {
   });
 });
 
-describe("no settings tab leaves a control unbounded", () => {
+describe("no page leaves a control unbounded", () => {
   /**
-   * The rule, checked rather than remembered: a field on a settings page is inside a
-   * `Field` or a `FieldGrid`. Checkboxes and choice lists are exempt — they are a tick
-   * and a sentence, so they take the room their text needs and a cap would wrap the
-   * label under the box.
+   * The rule, checked rather than remembered: a field on any page is inside a `Field`,
+   * a `FieldGrid`, or a component that supplies its own columns.
    *
-   * Read from the routes directory rather than a list, so the sixth settings tab is
-   * covered without anyone remembering this file exists.
+   * This scanned `app.settings*` only for one release, and the four pages it could not
+   * see were the four still rendering a select the width of the card — Activity laid out
+   * "Who", "What", "From" and "To" as five stacked full-width rows, Costs did the same
+   * with three, Support gave an email address a message box's worth of room, and Home
+   * gave a two-digit percentage the same. That is the repeating lesson from the last two
+   * epics: a fix that lands on one instance of a pattern has to be checked against every
+   * instance, and the check has to read the directory rather than a list.
+   *
+   * Checkboxes and choice lists stay exempt — they are a tick and a sentence, so they
+   * take the room their text needs and a cap would wrap the label under the box.
    */
   const ROUTES = join(process.cwd(), "app", "routes");
-  const TABS: Array<[name: string, path: string]> = [
+
+  /**
+   * Components that place their children in columns of their own.
+   *
+   * A select handed to `VariantSearch` as a child lands in its grid, so it is bounded —
+   * just not lexically, which is the only reason this list exists. Adding to it means
+   * saying which component does the sizing.
+   */
+  const SUPPLIES_COLUMNS = ["Field", "FieldGrid", "VariantSearch"];
+
+  const PAGES: Array<[name: string, path: string]> = [
     ...readdirSync(ROUTES)
-      .filter((name) => name.startsWith("app.settings") && name.endsWith(".tsx"))
+      .filter((name) => name.startsWith("app.") && name.endsWith(".tsx"))
       .map((name) => [name, join(ROUTES, name)] as [string, string]),
-    // The Feedback tab renders no field of its own -- they are all in this shared form,
-    // so scanning only the routes would report that tab clean without looking at it.
+    // Rendered by the routes above but written here, so scanning only the routes would
+    // report those pages clean without looking at the fields they show.
     ["FeedbackForm.tsx", join(process.cwd(), "app", "components", "FeedbackForm.tsx")],
+    ["ImportForm.tsx", join(process.cwd(), "app", "components", "imports", "ImportForm.tsx")],
   ];
 
-  /** Fields that hold typed or chosen values, and therefore have a natural width. */
-  const BOUNDED = /<s-(text-field|select|number-field|money-field|text-area|search-field|email-field)\b/g;
+  /**
+   * Fields that hold one line, and therefore have a natural width.
+   *
+   * `s-text-area` is not one of them: it declares its own size with `rows`, and what it
+   * holds — a message, a pasted spreadsheet — is genuinely long. The import form's paste
+   * box is the clearest case, and capping it would be the same mistake in the other
+   * direction.
+   */
+  const BOUNDED = /<s-(text-field|select|number-field|money-field|search-field|email-field)\b/g;
 
-  it("finds the tabs, so this cannot pass by checking nothing", () => {
-    expect(TABS.length).toBeGreaterThanOrEqual(5);
+  it("finds the pages, so this cannot pass by checking nothing", () => {
+    expect(PAGES.length).toBeGreaterThanOrEqual(20);
   });
 
-  it.each(TABS)("%s", (name, path) => {
+  it("covers the four pages that were rendering full-width controls", () => {
+    // Named rather than counted: this is the list the widening was for, and a rename
+    // that drops one of them should fail here rather than quietly stop checking it.
+    for (const page of ["app.activity.tsx", "app.prices.costs.tsx", "app.support.tsx", "app._index.tsx"]) {
+      expect(PAGES.map(([name]) => name)).toContain(page);
+    }
+  });
+
+  it.each(PAGES)("%s", (name, path) => {
     const source = sourceOf(path);
 
     /** How many of these are open at this point in the file. */
@@ -131,8 +163,8 @@ describe("no settings tab leaves a control unbounded", () => {
       return open - close;
     };
 
-    const unbounded = [...source.matchAll(BOUNDED)].filter(
-      (match) => depth("Field", match.index!) === 0 && depth("FieldGrid", match.index!) === 0,
+    const unbounded = [...source.matchAll(BOUNDED)].filter((match) =>
+      SUPPLIES_COLUMNS.every((tag) => depth(tag, match.index!) === 0),
     );
 
     expect(

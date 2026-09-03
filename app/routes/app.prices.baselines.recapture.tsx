@@ -32,6 +32,8 @@ import { withGuard } from "../lib/errors/guard.server";
 import { reportError } from "../services/error-report.server";
 import { PageShell } from "../components/PageShell";
 import { HelpNote } from "../components/HelpNote";
+import { Field } from "../components/FieldGrid";
+import { ActionRow } from "../components/ActionRow";
 import { SPACE } from "../lib/ui/spacing";
 
 export const loader = withGuard("/app/prices/baselines/recapture", async ({ request }: LoaderFunctionArgs) => {
@@ -128,6 +130,7 @@ export default function Recapture() {
 
         <fetcher.Form method="get">
           <s-stack gap={SPACE.section}>
+            <Field width="medium">
             <s-select name="segment" label="Scope">
               <s-option value="" defaultSelected={!segmentId}>
                 The whole catalogue
@@ -142,7 +145,10 @@ export default function Recapture() {
                 </s-option>
               ))}
             </s-select>
-            <s-button type="submit">Check this scope</s-button>
+            </Field>
+            <ActionRow>
+              <s-button type="submit">Check this scope</s-button>
+            </ActionRow>
           </s-stack>
         </fetcher.Form>
 
@@ -183,11 +189,13 @@ export default function Recapture() {
           <input type="hidden" name="segment" value={segmentId} />
           <s-stack gap={SPACE.section}>
             {assessment.confirmationPhrase ? (
-              <s-text-field
-                name="confirmation"
-                label={`Type “${assessment.confirmationPhrase}” to confirm`}
-                details="Typed rather than clicked, because a button is muscle memory by the third time."
-              />
+              <Field width="medium">
+                <s-text-field
+                  name="confirmation"
+                  label={`Type “${assessment.confirmationPhrase}” to confirm`}
+                  details="Typed rather than clicked, because a button is muscle memory by the third time."
+                />
+              </Field>
             ) : null}
 
             <s-button

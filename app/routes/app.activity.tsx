@@ -26,6 +26,7 @@ import { describeAction } from "../lib/audit/action";
 import { describeActor } from "../lib/audit/actor";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
+import { FieldGrid } from "../components/FieldGrid";
 import { HelpNote } from "../components/HelpNote";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { SPACE } from "../lib/ui/spacing";
@@ -70,7 +71,14 @@ export default function Activity() {
     <PageShell heading="Activity" backTo={{ href: "/app", label: "Home" }}>
       <s-section>
         <FilterForm fields={FILTER_FIELDS}>
+          {/* A grid, not a stack.
+
+              Stacked, "Who", "What", "From" and "To" each took the full width of the
+              card — five rows of controls, four of which hold one word or one date, for
+              a filter that fits on two lines. It is the failure `FieldGrid` was written
+              for, on the page that showed it most clearly. */}
           <s-stack gap={SPACE.section}>
+            <FieldGrid>
             <s-select name="actor" label="Who">
               <s-option value="" defaultSelected={!filters.actor}>
                 Anyone
@@ -100,8 +108,14 @@ export default function Activity() {
 
             <s-date-field name="from" label="From" value={filters.from ?? ""} />
             <s-date-field name="to" label="To" value={filters.to ?? ""} />
+            </FieldGrid>
 
-            <s-button type="submit">Filter</s-button>
+            {/* Its own row, and an inline stack rather than a block one: a block stack
+                stretches its children, which is how a Filter button becomes a
+                full-width submit bar. */}
+            <ActionRow>
+              <s-button type="submit">Filter</s-button>
+            </ActionRow>
           </s-stack>
         </FilterForm>
 

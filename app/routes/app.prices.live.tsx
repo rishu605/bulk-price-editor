@@ -23,6 +23,7 @@ import { VariantSearch } from "../components/prices/VariantSearch";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
+import { Field } from "../components/FieldGrid";
 import { SPACE } from "../lib/ui/spacing";
 
 /** Filters that ride in the query string, so a merchant can bookmark a view. */
@@ -199,7 +200,9 @@ export default function Reconciliation() {
               baseline at item rhythm. At section rhythm they read as two separate
               things that happen to be adjacent. */}
           <s-stack direction="inline" gap={SPACE.item} alignItems="end">
-            <s-number-field name="size" label="How many to check" value="100" />
+            <Field width="short">
+              <s-number-field name="size" label="How many to check" value="100" />
+            </Field>
             <s-button type="submit" loading={busy || undefined}>
               Check now
             </s-button>
