@@ -7,9 +7,10 @@
  */
 
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { sourceOf } from "../lib/testing/source";
+import { logger } from "../lib/logging/logger";
 
 import { inlineRuntime, runtimeFor } from "./queue-runtime.server";
 import type { JobRef, QueueName } from "./queues";
@@ -106,5 +107,65 @@ describe("both ends of a job's life are traced", () => {
       const uses = source.split(attribute).length - 1;
       expect(uses, `${attribute} appears on only one of the two spans`).toBeGreaterThanOrEqual(2);
     }
+  });
+});
+
+describe("a job's log lines carry the ids the job was asked for", () => {
+  /**
+   * Before this, `job failed` was the only line in the tree with a `jobId` on it. The
+   * handler output that would explain *why* it failed carried nothing to filter on, so
+   * reconstructing a failed run meant ordering by timestamp and guessing.
+   *
+   * Asserted through `inlineRuntime` because that runs the real wrapper — the same
+   * `traced()` the Redis worker goes through — rather than a copy of it.
+   */
+  async function lineFrom(ref: JobRef): Promise<Record<string, unknown>> {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      const runtime = inlineRuntime(async () => {
+        // A handler logging exactly as handlers do: no ids passed.
+        logger.info("handling");
+      });
+      await runtime.enqueue("execution", ref);
+      return JSON.parse(String(spy.mock.calls.at(-1)?.[0])) as Record<string, unknown>;
+    } finally {
+      vi.unstubAllEnvs();
+      spy.mockRestore();
+    }
+  }
+
+  it("binds the shop, campaign and run onto a line that passed none of them", async () => {
+    const line = await lineFrom({ shopId: "s1", campaignId: "c1", runId: "r1" });
+
+    expect(line).toMatchObject({
+      message: "handling",
+      shopId: "s1",
+      campaignId: "c1",
+      runId: "r1",
+    });
+  });
+
+  it("omits the ids the job does not carry rather than binding them empty", async () => {
+    const line = await lineFrom({ shopId: "s1" });
+
+    expect(line.shopId).toBe("s1");
+    expect(line.campaignId).toBeUndefined();
+    expect(line.runId).toBeUndefined();
+  });
+
+  /**
+   * The one id `inlineRuntime` cannot exercise: it exists only where BullMQ minted it,
+   * so the check that the Redis worker hands it over is over the source. Comments are
+   * stripped by `sourceOf`, so the note beside the call cannot satisfy this on its own.
+   */
+  it("hands the queue worker's job id to the same wrapper", () => {
+    const source = sourceOf("app/worker/queue-runtime.server.ts");
+
+    expect(
+      source,
+      "the Redis worker runs traced() without the BullMQ job id, so a queued job's log " +
+        "lines cannot be filtered back to the job",
+    ).toMatch(/traced\(name, job\.data, \(\) => handler\(name, job\.data\), job\.id\)/);
   });
 });

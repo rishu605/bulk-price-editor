@@ -22,6 +22,7 @@ import { Queue, Worker, type Job } from "bullmq";
 import { logger } from "../lib/logging/logger";
 import { metric } from "../lib/telemetry/metrics";
 import { span } from "../lib/observability/otel.server";
+import { withLogContext } from "../lib/logging/context.server";
 import {
   jobOptionsFor,
   QUEUE_NAMES,
@@ -83,7 +84,7 @@ export function redisRuntime(handler: Handler, options: RedisRuntimeOptions): Qu
       const worker = new Worker(
         name,
         async (job: Job<JobRef>) => {
-          await traced(name, job.data, () => handler(name, job.data));
+          await traced(name, job.data, () => handler(name, job.data), job.id);
         },
         { connection, concurrency: policy.concurrency },
       );
@@ -93,7 +94,9 @@ export function redisRuntime(handler: Handler, options: RedisRuntimeOptions): Qu
       worker.on("failed", (job, error) => {
         logger.error("job failed", {
           queue: name,
-          jobId: job?.id ?? null,
+          // Explicit, because a `failed` listener fires outside the job's own async
+          // context — the ambient binding in `traced` is long gone by then.
+          jobId: job?.id ?? undefined,
           attempts: job?.attemptsMade ?? 0,
           error: error?.message ?? String(error),
         });
@@ -203,16 +206,36 @@ export async function reportDepths(runtime: QueueRuntime): Promise<void> {
  * deployment running inline looks the same as one from a deployment with a queue. A
  * degraded mode that is invisible in tracing is a degraded mode nobody notices.
  */
-async function traced(name: QueueName, ref: JobRef, work: () => Promise<void>): Promise<void> {
-  await span(
-    `job ${name}`,
+async function traced(
+  name: QueueName,
+  ref: JobRef,
+  work: () => Promise<void>,
+  jobId?: string,
+): Promise<void> {
+  // The same ids on the log lines as on the span. They were on the span from the day it
+  // was written and on exactly one log line — `job failed` — so a failing job could be
+  // seen but the handler output explaining it could not be filtered back to it.
+  //
+  // Outside the span rather than inside, so a handler that throws still logs with its
+  // ids while `span()` is recording the exception.
+  await withLogContext(
     {
-      "queue.name": name,
-      "shop.id": ref.shopId,
-      ...(ref.campaignId ? { "campaign.id": ref.campaignId } : {}),
-      ...(ref.runId ? { "run.id": ref.runId } : {}),
-      ...(ref.revert === undefined ? {} : { "job.revert": ref.revert }),
+      shopId: ref.shopId,
+      campaignId: ref.campaignId,
+      runId: ref.runId,
+      jobId,
     },
-    work,
+    () =>
+      span(
+        `job ${name}`,
+        {
+          "queue.name": name,
+          "shop.id": ref.shopId,
+          ...(ref.campaignId ? { "campaign.id": ref.campaignId } : {}),
+          ...(ref.runId ? { "run.id": ref.runId } : {}),
+          ...(ref.revert === undefined ? {} : { "job.revert": ref.revert }),
+        },
+        work,
+      ),
   );
 }

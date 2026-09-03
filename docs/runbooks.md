@@ -9,6 +9,14 @@ holds one row per variant per surface per run, written *before* the API call and
 after it. If you want to know what is live and why, that table and the reconciliation view
 over it are the answer — not the logs, and not a guess from the campaign's status.
 
+The logs are the second question: *why* did it do that. Every line emitted inside a job or
+a run carries the ids to filter on — shopId, campaignId, runId, and jobId where the work
+came off a queue — bound at the boundary rather than passed by each call site, so a
+handler's own output can be narrowed to the run it belongs to. Filter by runId to get one
+run's whole story; by jobId to get everything a failing job did before it failed. Lines
+outside a run or job (route handlers, startup, the nightly audit) carry whatever their
+call site passes, which is usually a shop and a route.
+
 ---
 
 ## Alert: mirror divergence above 0.5%
