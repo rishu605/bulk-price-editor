@@ -31,6 +31,7 @@ import { ActionRow } from "../components/ActionRow";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
+import { FieldGrid, FullRow } from "../components/FieldGrid";
 import { ImportForm, ImportReport, type ImportProblem } from "../components/imports/ImportForm";
 import { importCosts, type CostImportResult } from "../services/cost-import.server";
 import { costErrorCsv } from "../lib/reporting/cost-errors";
@@ -235,7 +236,15 @@ export default function Costs() {
               buttons set before submitting. One form, because both actions read the same
               rule and duplicating the fields would let them drift apart. */}
           <input type="hidden" name="intent" ref={intent} value="dry-run" readOnly />
+          {/* A grid, not a stack.
+
+              Stacked, each of these took the full width of the card: a "Which products"
+              select holding the words "Every product" rendered nine hundred and seventy
+              pixels wide, and so did a two-digit percentage. `FieldGrid`'s own doc
+              comment calls that "the single most unstyled-looking thing in this app" —
+              and this page was one of the four still doing it. */}
           <s-stack gap={SPACE.section}>
+            <FieldGrid>
             <s-select
               name="vendor"
               label="Which products"
@@ -262,12 +271,15 @@ export default function Costs() {
               </s-option>
             </s-select>
 
-            <s-number-field
-              name="value"
-              label={`Amount (percent, or ${currency})`}
-              value="4"
-              details="Products with no cost are skipped by the first two rules rather than treated as zero."
-            />
+            <FullRow>
+              <s-number-field
+                name="value"
+                label={`Amount (percent, or ${currency})`}
+                value="4"
+                details="Products with no cost are skipped by the first two rules rather than treated as zero."
+              />
+            </FullRow>
+            </FieldGrid>
 
             <ActionRow>
               <s-button

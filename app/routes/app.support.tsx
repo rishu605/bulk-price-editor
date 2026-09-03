@@ -26,6 +26,8 @@ import { billingFor } from "../services/billing.server";
 import { sendSupportRequest } from "../services/support.server";
 import { CONTEXT_FIELDS, CONTEXT_LABELS, supportContext } from "../lib/support/context";
 import { PageShell } from "../components/PageShell";
+import { Field } from "../components/FieldGrid";
+import { ActionRow } from "../components/ActionRow";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { HelpNote } from "../components/HelpNote";
 import { withGuard } from "../lib/errors/guard.server";
@@ -107,29 +109,42 @@ export default function Support() {
 
       <s-section heading="What happened">
         <fetcher.Form method="post">
+          {/* Each field at the width of what it holds. An email address and a subject
+              line rendered the full width of the card, which is a message box's worth of
+              room for one line — and it made the three fields read as one block rather
+              than as a short answer, a short answer and a long one. */}
           <s-stack direction="block" gap={SPACE.item}>
-            <s-text-field
-              name="replyTo"
-              label="Your email"
-              details="Where we reply. Not stored."
-              placeholder="you@yourshop.com"
-            />
-            <s-text-field
-              name="subject"
-              label="Subject"
-              placeholder="A campaign is stuck on Held"
-            />
-            <s-text-area
-              name="body"
-              label="What happened"
-              rows={6}
-              placeholder="What you expected, what happened instead, and what you have already tried."
-            />
-            <s-stack direction="inline" gap={SPACE.item} justifyContent="end">
+            <Field width="medium">
+              <s-text-field
+                name="replyTo"
+                label="Your email"
+                details="Where we reply. Not stored."
+                placeholder="you@yourshop.com"
+              />
+            </Field>
+            <Field width="long">
+              <s-text-field
+                name="subject"
+                label="Subject"
+                placeholder="A campaign is stuck on Held"
+              />
+            </Field>
+            <Field width="long">
+              <s-text-area
+                name="body"
+                label="What happened"
+                rows={6}
+                placeholder="What you expected, what happened instead, and what you have already tried."
+              />
+            </Field>
+            {/* Under the fields it belongs to rather than pushed to the far right of the
+                card, where it was the only thing on its line and a long way from the last
+                thing typed. */}
+            <ActionRow>
               <s-button type="submit" variant="primary" loading={busy || undefined}>
                 Send
               </s-button>
-            </s-stack>
+            </ActionRow>
           </s-stack>
         </fetcher.Form>
       </s-section>

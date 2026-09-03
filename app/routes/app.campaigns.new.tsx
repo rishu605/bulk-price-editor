@@ -46,7 +46,7 @@ import {
   type ImportProblem,
 } from "../components/imports/ImportForm";
 import type { PriceImportResult } from "../services/price-import.server";
-import { FieldGrid, FullRow } from "../components/FieldGrid";
+import { Field, FieldGrid, FullRow } from "../components/FieldGrid";
 import { HelpNote } from "../components/HelpNote";
 import { firstPreviewParams } from "../lib/campaigns/first-preview";
 import { numberSections } from "../lib/ui/sections";
@@ -923,7 +923,9 @@ export default function NewCampaign() {
         >
           {/* The campaign's name, again, because this form posts on its own and the one
               in the section above goes with the form it belongs to. */}
-          <s-text-field name="name" label="Call this" value={defaultName} />
+          <Field width="medium">
+            <s-text-field name="name" label="Call this" value={defaultName} />
+          </Field>
         </ImportForm>
       ) : null}
 

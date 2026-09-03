@@ -20,6 +20,7 @@ import { OnboardingCard } from "../components/OnboardingCard";
 import { ActionRow } from "../components/ActionRow";
 import { ActivityFeed } from "../components/ActivityFeed";
 import { CountsRow } from "../components/CountsRow";
+import { Field } from "../components/FieldGrid";
 import { LastRunSummary } from "../components/LastRunSummary";
 import { UpcomingCampaigns } from "../components/UpcomingCampaigns";
 import { RouteBoundary } from "../components/RouteBoundary";
@@ -500,12 +501,17 @@ export default function Dashboard() {
           <fetcher.Form method="post">
             <input type="hidden" name="intent" value="quick-campaign" />
             <s-stack gap={SPACE.item}>
-              <s-number-field
-                name="percent"
-                label="% off"
-                placeholder="20"
-                details={`Applies to all ${formatCount(health.variants)} variants, priced from their baselines.`}
-              />
+              {/* One two-digit number, so a control the width of the card would be
+                  fourteen times what it holds — the failure `FieldGrid` exists for,
+                  here in its single-field form. */}
+              <Field width="short">
+                <s-number-field
+                  name="percent"
+                  label="% off"
+                  placeholder="20"
+                  details={`Applies to all ${formatCount(health.variants)} variants, priced from their baselines.`}
+                />
+              </Field>
               <s-paragraph>
                 <s-text color="subdued">
                   Creates a draft. Nothing is written until you apply it, and the next
