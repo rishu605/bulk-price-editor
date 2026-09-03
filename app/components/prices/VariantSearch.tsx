@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { FilterForm } from "../FilterForm";
+import { QueryContainer } from "../QueryContainer";
 import { SPACE } from "../../lib/ui/spacing";
 
 /**
@@ -86,6 +87,7 @@ export function VariantSearch({
         // `1fr 1fr 1fr`, never `repeat(3, 1fr)`: Polaris splits a responsive value on
         // the comma to separate the two branches, so a comma inside a value makes the
         // whole thing unparseable and it silently falls back to `none`.
+        <QueryContainer>
         <s-stack gap={SPACE.section}>
           <s-grid
             gap={SPACE.section}
@@ -108,6 +110,7 @@ export function VariantSearch({
             <s-button type="submit">Search</s-button>
           </s-stack>
         </s-stack>
+        </QueryContainer>
       )}
     </FilterForm>
   );
