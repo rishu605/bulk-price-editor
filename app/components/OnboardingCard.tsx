@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
-import type { OnboardingState, OnboardingStep } from "../lib/onboarding/steps";
+import type { OnboardingState, OnboardingStep, StepId } from "../lib/onboarding/steps";
 import { SPACE } from "../lib/ui/spacing";
 import { ActionRow } from "./ActionRow";
 
@@ -43,7 +43,28 @@ import { ActionRow } from "./ActionRow";
  * separated by hairlines rather than each being drawn as its own card, and the eye can
  * run down the status column to see where it is up to.
  */
-export function OnboardingCard({ state }: { state: OnboardingState }) {
+/**
+ * A step's action, where a link cannot be one.
+ *
+ * Two of the three steps go somewhere — the editor, in practice or guided mode — and a
+ * link is the right control for those. The first does not: capturing baselines is a
+ * `POST` from the page the checklist is already on, and it was written as a link to
+ * `/app`. On Home that is a button that reloads the page you are looking at and changes
+ * nothing, sitting directly above a second, black button that actually does the work
+ * under a different name.
+ *
+ * So a page can hand the card the real control for a step, and the checklist stops being
+ * a set of links that mostly work.
+ */
+export type StepActions = Partial<Record<StepId, ReactNode>>;
+
+export function OnboardingCard({
+  state,
+  actions,
+}: {
+  state: OnboardingState;
+  actions?: StepActions;
+}) {
   if (state.complete) return null;
 
   const done = state.steps.filter((step) => step.done).length;
@@ -68,7 +89,11 @@ export function OnboardingCard({ state }: { state: OnboardingState }) {
                   the same information as the box — where one step stops — at a fraction
                   of the ink, and it does not nest a card inside a card. */}
               {index > 0 ? <s-divider /> : null}
-              <Step step={step} isNext={step.id === state.next?.id} />
+              <Step
+                step={step}
+                isNext={step.id === state.next?.id}
+                action={actions?.[step.id]}
+              />
             </s-stack>
           ))}
         </s-stack>
@@ -95,7 +120,15 @@ function StatusIcon({ done, isNext }: { done: boolean; isNext: boolean }) {
   return <s-icon type="circle-dashed" color="subdued" />;
 }
 
-function Step({ step, isNext }: { step: OnboardingStep; isNext: boolean }) {
+function Step({
+  step,
+  isNext,
+  action,
+}: {
+  step: OnboardingStep;
+  isNext: boolean;
+  action?: ReactNode;
+}) {
   const [why, setWhy] = useState(false);
 
   return (
@@ -141,7 +174,12 @@ function Step({ step, isNext }: { step: OnboardingStep; isNext: boolean }) {
               checklist whose every row shouts equally is a checklist that has not said
               what to do next — which is the only thing it is for. See `ActionRow` for
               the vocabulary. */}
-          {step.href && step.cta ? (
+          {/* The page's own control wins where it supplied one. A finished step keeps
+              none either way: `onboarding()` drops the href and the label once a step is
+              done, and a page that hands over a form has to do the same or the checklist
+              would offer to redo work it has just ticked off. */}
+          {step.done ? null : action}
+          {!action && step.href && step.cta ? (
             <s-button href={step.href} variant={isNext ? "primary" : "secondary"}>
               {step.cta}
             </s-button>

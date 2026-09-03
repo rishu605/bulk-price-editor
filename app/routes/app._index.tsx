@@ -429,28 +429,37 @@ export default function Dashboard() {
       {/* Before the numbers while it is unfinished, and gone once it is. The card
           retires itself, so this ordering says "your next step first" to a new shop and
           "your storefront first" to an established one without a conditional. */}
-      <OnboardingCard state={guide} />
+      {/* The card is handed the real sync, not a link to this page.
 
-      {neverSynced ? (
-        <s-section heading="Start by capturing your baselines">
-          <s-paragraph>
-            Anchor computes every price change from a <strong>baseline</strong> — a
-            stored reference price for each variant — rather than from whatever price
-            happens to be live. That is what makes running a campaign twice safe, and
-            what makes reverting exact.
-          </s-paragraph>
-          <s-paragraph>
-            Syncing reads your catalogue and records today&rsquo;s prices as those
-            baselines. Nothing on your storefront is changed.
-          </s-paragraph>
-          <fetcher.Form method="post">
-            <input type="hidden" name="intent" value="sync" />
-            <s-button type="submit" variant="primary" loading={busy || undefined}>
-              {busy ? "Syncing…" : "Sync catalogue and capture baselines"}
-            </s-button>
-          </fetcher.Form>
-        </s-section>
-      ) : null}
+          Its first step used to render `Sync catalogue` as an anchor to `/app` while the
+          section below it rendered `Sync catalogue and capture baselines` as the form
+          that does the work — two black buttons on one screen, one of them inert, naming
+          the same operation two ways. The checklist is the spine of a first run, so the
+          working control belongs on it. */}
+      <OnboardingCard
+        state={guide}
+        actions={{
+          sync: (
+            <fetcher.Form method="post">
+              <input type="hidden" name="intent" value="sync" />
+              <s-button
+                type="submit"
+                variant={guide.next?.id === "sync" ? "primary" : "secondary"}
+                loading={busy || undefined}
+              >
+                {busy ? "Syncing…" : "Sync catalogue"}
+              </s-button>
+            </fetcher.Form>
+          ),
+        }}
+      />
+
+      {/* The "Start by capturing your baselines" section that used to sit here is gone.
+
+          It explained what a baseline is and offered a black button to capture them —
+          both of which the checklist above already had: the same explanation, almost
+          word for word, behind that step's "Why?", and the same operation behind its
+          action. What is left is one place to read it and one button to press. */}
 
       {/* Only when there is something live to report.
 
@@ -578,8 +587,17 @@ export default function Dashboard() {
               nothing the second time, and ending it puts prices back exactly.
             </s-text>
           </s-paragraph>
+          {/* Secondary, not black. This card and the quick-create card below it always
+              render together — `emptyState` is a strict subset of `quickCreate` — so a
+              black button here is the second one on the page, pointing at the long way
+              round to what the card underneath does in one number.
+
+              `home.test` already made the same call for the live section's Create
+              campaign, in the same words: quick create *is* creating a campaign, for
+              the case that covers most of them. This card is the teaching, not the
+              action. */}
           <ActionRow>
-            <s-button variant="primary" href="/app/campaigns/new">
+            <s-button variant="secondary" href="/app/campaigns/new">
               Create a campaign
             </s-button>
           </ActionRow>

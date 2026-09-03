@@ -77,3 +77,41 @@ describe("one sync, however many places offer it", () => {
     expect(new Set(syncs).size, `two spellings of one operation: ${[...new Set(syncs)]}`).toBe(1);
   });
 });
+
+describe("one thing to do at a time", () => {
+  /**
+   * At most one primary button on the page, in every state a shop can be in.
+   *
+   * A first run rendered two: the checklist's "Sync catalogue" and, directly below it,
+   * "Sync catalogue and capture baselines". The same operation under two names, in two
+   * black buttons — and the louder-looking half of the pair was an anchor to `/app`, so
+   * it reloaded the page the merchant was already on and did nothing.
+   *
+   * `action-row.test.tsx` already refuses two primaries inside one `s-section`. This is
+   * the same rule read at the level a merchant reads it: two black buttons in two cards
+   * are still two things being demanded at once.
+   */
+  const primaries = [...home.matchAll(/variant="primary"/g)].length;
+
+  it("renders at most one unconditional primary button", () => {
+    expect(
+      primaries,
+      "two black buttons is the page failing to say which one thing to do",
+    ).toBeLessThanOrEqual(1);
+  });
+
+  it("does not offer the same operation under two names", () => {
+    // "Sync catalogue" and "Sync catalogue and capture baselines" were one POST.
+    const labels = [...home.matchAll(/busy \? "Syncing…" : "([^"]+)"/g)].map((match) => match[1]);
+
+    // Two are allowed and two is the ceiling: a first sync and a re-sync are different
+    // requests to make of a merchant even though they post the same intent. What is not
+    // allowed is a third name, or the pair that started this — "Sync catalogue" and
+    // "Sync catalogue and capture baselines" side by side on a first run.
+    expect(labels.length).toBeGreaterThanOrEqual(1);
+    expect(
+      new Set(labels).size,
+      `${[...new Set(labels)].join(" / ")} name one operation`,
+    ).toBeLessThanOrEqual(2);
+  });
+});

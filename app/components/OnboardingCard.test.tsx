@@ -18,8 +18,19 @@ import { describe, expect, it } from "vitest";
 import { OnboardingCard } from "./OnboardingCard";
 import { onboarding } from "../lib/onboarding/steps";
 
+/**
+ * The sync step's control comes from the page, not from the step.
+ *
+ * Capturing baselines is a `POST` from the page the checklist is already on. It used to
+ * be written as a link to `/app` — on Home, a button that reloads the page you are
+ * looking at and changes nothing, directly above a second black button that did the work
+ * under a different name. So the card takes the real control and the step carries no
+ * href of its own.
+ */
+const SYNC = <s-button type="submit">Sync catalogue</s-button>;
+
 const render = (facts: Parameters<typeof onboarding>[0]) =>
-  renderToStaticMarkup(<OnboardingCard state={onboarding(facts)} />);
+  renderToStaticMarkup(<OnboardingCard state={onboarding(facts)} actions={{ sync: SYNC }} />);
 
 const fresh = {
   hasBaselines: false,
@@ -51,6 +62,17 @@ describe("a brand new shop", () => {
 
   it("leads with the next action", () => {
     expect(html).toContain("Sync catalogue");
+  });
+
+  it("has no action for that step unless the page supplies one", () => {
+    // The step offers no href of its own, so a card rendered without the page's control
+    // shows the step and no button — rather than a link back to the page it is on.
+    const bare = renderToStaticMarkup(<OnboardingCard state={onboarding(fresh)} />);
+
+    expect(bare).toContain("Capture your baselines");
+    expect(bare, "a link to /app is a button that reloads the page you are on").not.toContain(
+      'href="/app"',
+    );
   });
 
   it("keeps each step's Why with its own step, not the one below", () => {

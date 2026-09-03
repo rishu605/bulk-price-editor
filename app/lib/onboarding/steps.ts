@@ -56,8 +56,10 @@ export function onboarding(facts: OnboardingFacts): OnboardingState {
         "harmless, and what makes ending one exact. Syncing records today's prices as those " +
         "baselines and changes nothing on your storefront.",
       done: facts.hasBaselines,
-      href: facts.hasBaselines ? undefined : "/app",
-      cta: facts.hasBaselines ? undefined : "Sync catalogue",
+      // No href, and that is the point. Capturing baselines is a POST from the page the
+      // checklist is already on; this used to link to `/app`, which on Home is a button
+      // that reloads the page you are looking at and changes nothing. The page hands the
+      // card the real control instead — see `StepActions` in `OnboardingCard`.
     },
     {
       id: "practice",
