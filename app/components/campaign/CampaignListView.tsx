@@ -91,7 +91,13 @@ export function CampaignListView({
           }))}
         />
 
-        {/* FilterForm rather than a native form element: a plain GET submit replaces the
+        {/* Search and the archive on one row.
+
+            They were two, stacked, so the card opened with a tab bar, a search bar and a
+            lone tertiary button on a line of its own before the first campaign. Both are
+            ways of narrowing what the list shows, and neither needed a row of its own.
+
+            FilterForm rather than a native form element: a plain GET submit replaces the
             whole query string, including the `host` and `id_token` App Bridge put there,
             and the merchant gets a blank page with nothing in the console. It also merges
             rather than replaces, so the view and status already in the URL survive a
@@ -100,8 +106,8 @@ export function CampaignListView({
           {/* A grid, not an inline stack. The stack put the button *after* a field that
               takes the full width, so it wrapped onto its own line and sat under the
               field's left edge looking like an orphan. Here the field takes what is left
-              and the button takes what it needs, on one baseline. */}
-          <s-grid gridTemplateColumns="1fr auto" gap={SPACE.item} alignItems="center">
+              and the two buttons take what they need, on one baseline. */}
+          <s-grid gridTemplateColumns="1fr auto auto" gap={SPACE.item} alignItems="center">
             <s-search-field
               name="q"
               label="Search campaigns"
@@ -115,23 +121,21 @@ export function CampaignListView({
             <s-button type="submit" icon="search">
               Search
             </s-button>
+            {/* Not a seventh status tab. Archiving is a filing decision and the tabs are
+                the lifecycle; folding them together would mean giving up the status
+                filter to look in the archive, and "archived" would have to claim to be a
+                state a campaign can be in. A merchant looking for an archived campaign is
+                usually looking for a finished one, so both controls have to work at
+                once. */}
+            <s-button
+              variant="tertiary"
+              icon="archive"
+              href={linkTo({ archived: filters.archived ? "" : "1" })}
+            >
+              {filters.archived ? "Show active" : "Show archived"}
+            </s-button>
           </s-grid>
         </FilterForm>
-
-        {/* Not a seventh status tab. Archiving is a filing decision and the tabs are the
-            lifecycle; folding them together would mean giving up the status filter to
-            look in the archive, and "archived" would have to claim to be a state a
-            campaign can be in. A merchant looking for an archived campaign is usually
-            looking for a finished one, so both controls have to work at once. */}
-        <ActionRow>
-          <s-button
-            variant="tertiary"
-            icon="archive"
-            href={linkTo({ archived: filters.archived ? "" : "1" })}
-          >
-            {filters.archived ? "Show active campaigns" : "Show archived"}
-          </s-button>
-        </ActionRow>
 
         {list.campaigns.length === 0 ? (
           filters.archived ? (

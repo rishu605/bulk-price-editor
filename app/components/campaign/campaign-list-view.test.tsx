@@ -17,6 +17,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { StaticRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 
+import { sourceOf } from "../../lib/testing/source";
+
 import { CampaignListView } from "./CampaignListView";
 import { describeState } from "../../lib/lifecycle/transitions";
 import { describeRule, describeScope } from "../../lib/campaigns/describe";
@@ -129,5 +131,45 @@ describe("when there is nothing to list", () => {
 
     expect(html).toContain("No campaigns match those filters");
     expect(html).toContain("Clear filters");
+  });
+});
+
+describe("what a merchant reads before the first campaign", () => {
+  /**
+   * Two control rows, and only one of them looks like tabs.
+   *
+   * The page opened with four: List/Calendar tabs, then All/Needs a decision/Draft/… tabs,
+   * then a search bar, then a lone tertiary "Show archived" on a line of its own. Two of
+   * those were tab bars answering different questions — one picks a *shape* of view, the
+   * other filters what is in it — and nothing in their appearance said so.
+   *
+   * The status filter keeps the tabs, because it is the one a merchant uses. The view
+   * switch is a button in the page's title bar, which is also the only place it can live:
+   * the calendar replaces this card entirely, so a switch inside it would vanish in one
+   * of its two views.
+   */
+  const view = sourceOf(process.cwd(), "app", "components", "campaign", "CampaignListView.tsx");
+  const route = sourceOf(process.cwd(), "app", "routes", "app.campaigns._index.tsx");
+
+  it("renders one tab bar, not two", () => {
+    expect((view.match(/<TabBar/g) ?? []).length).toBe(1);
+    expect(
+      route,
+      "a second bar above this one is the arrangement that made the page unreadable",
+    ).not.toContain("<TabBar");
+  });
+
+  it("puts search and the archive toggle on the same row", () => {
+    const row = view.slice(view.indexOf("<FilterForm"), view.indexOf("</FilterForm>"));
+
+    expect(row).toContain("<s-search-field");
+    expect(row, "the archive toggle is back on a row of its own").toContain('icon="archive"');
+  });
+
+  it("keeps the view switch reachable from the calendar", () => {
+    // It is in the title bar rather than in this card precisely so that it survives the
+    // calendar replacing the card.
+    expect(route).toContain("secondaryActions");
+    expect(route).toContain('view === "calendar"');
   });
 });
