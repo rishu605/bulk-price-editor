@@ -208,9 +208,12 @@ export function CampaignListView({
                           for a word inside a sentence, and names a row-leading title as
                           exactly what tertiary is for. It keeps an anchor's behaviour,
                           so middle-click still opens a tab. */}
-                      <s-button variant="tertiary" href={`/app/campaigns/${campaign.id}`}>
-                        {campaign.name}
-                      </s-button>
+                      {/* A link, because it is the row's identity and the way in. As a
+                          tertiary button it rendered as plain text, so the only thing in
+                          the table that opens a campaign looked like a caption — and a
+                          merchant scanning the list had nothing telling them the name was
+                          clickable at all. */}
+                      <s-link href={`/app/campaigns/${campaign.id}`}>{campaign.name}</s-link>
                       {/* Only in the archive view, where every row has it, and on a
                           campaign that turns up in a search from the active list —
                           which is the case that would otherwise be confusing, because

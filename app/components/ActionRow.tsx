@@ -10,27 +10,40 @@ import { SPACE } from "../lib/ui/spacing";
  * The app was written almost entirely in links. Every way out of a card — a page to
  * visit, a row to open, a queue to review, a spreadsheet to import — was the same blue
  * underlined phrase, so a screen with four of them offered four things of apparently
- * equal weight and no clue which one it wanted you to press. Blue text is also the one
- * treatment Polaris reserves for *inline* links, where colour is the only thing marking a
- * word inside a sentence as clickable; spending it on standalone actions wastes it and
- * leaves a page looking like a bibliography.
+ * equal weight and no clue which one it wanted you to press.
  *
- * Four treatments, in descending loudness:
+ * The first answer to that was to remove the blue: `variant="tertiary"` — dark text with
+ * no chrome — became the replacement for almost every link in the app. Rendered, that is
+ * **plain static text**. "Why?", "See plans", "See everything", "Show archived", and every
+ * campaign name in the list read as captions, and a merchant had no way to know that a
+ * campaign's name was the way into it.
  *
+ * Both of those are the same mistake from opposite ends: **loudness was being used to
+ * carry two different things at once** — how much a page wants something pressed, and
+ * whether it can be pressed at all. The second is not negotiable. Hierarchy is what
+ * answers the four-equal-links problem, and one primary per card already provides it.
+ *
+ * So the question a caller answers is *what kind of thing is this*, and the loudness
+ * follows:
+ *
+ * - **`s-link`** — navigation that is part of the content. A name in a table row, an
+ *   article title in a list, a word inside a sentence. These are **read, then clicked**:
+ *   the merchant is looking at the thing itself, and the link is the thing. Blue, because
+ *   colour is what marks a word among words.
  * - **`variant="primary"`** — the black button. The one thing a page or card most wants
- *   done: the next step in getting started, "Create campaign", "Sync catalogue". At most
+ *   done: "Create campaign", "Sync catalogue", the next step in getting started. At most
  *   one per card; two black buttons is the same failure as four blue links.
- * - **`variant="secondary"`** (the default) — a real alternative, and every action inside
- *   a banner. Bordered, quiet, unmistakably pressable.
- * - **`variant="tertiary"`** — dark text with no chrome. Navigation and row-level actions
- *   that must not compete: "See everything", "Open", "View ledger", a product name that
- *   leads to the Shopify admin. This is the replacement for most of the old links, and
- *   the reason the pages stopped being blue.
- * - **`s-link`** — kept for exactly two things: a link *inside a sentence*, where colour
- *   is doing necessary work, and the App Bridge nav menu, which must be anchors.
+ * - **`variant="secondary"`** (the default) — a standalone action or destination that
+ *   sits in a row of them. These are **looked for, then clicked**: the merchant has
+ *   finished reading and wants to do something. Bordered, quiet, unmistakably pressable.
+ * - **`variant="tertiary"`** — text with no border, **and only ever with an icon**. For a
+ *   control repeated on every row of a table or every item of a list, where a border per
+ *   row would be more ink than the rows. The icon is what makes it a control rather than
+ *   a caption, so it is not optional; `action-row.test.tsx` refuses one without.
  *
- * `s-button` takes an `href`, so a tertiary button that navigates is still an anchor —
- * middle-click and "open in new tab" behave the way a merchant expects.
+ * `s-button` takes an `href`, so a secondary button that navigates is still an anchor —
+ * middle-click and "open in new tab" behave the way a merchant expects, whichever of
+ * these it is.
  *
  * ## Why a component rather than a stack written out each time
  *

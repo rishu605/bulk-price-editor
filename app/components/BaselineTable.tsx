@@ -54,7 +54,7 @@ export function BaselineTable({
                   anything else on the row. Two buttons that do the same kind of job are
                   an ActionRow. */}
               <ActionRow>
-                <s-button variant="tertiary" onClick={() => onShowHistory(row.variantGid)}>
+                <s-button variant="tertiary" icon="clock" onClick={() => onShowHistory(row.variantGid)}>
                   History
                 </s-button>
                 {/* The same treatment as History beside it, which it was not: one cell

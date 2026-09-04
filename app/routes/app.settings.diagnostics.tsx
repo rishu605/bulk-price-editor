@@ -198,12 +198,9 @@ export default function Debug() {
                   <s-table-row key={row.errorId}>
                     <s-table-cell>{row.createdAt}</s-table-cell>
                     <s-table-cell>
-                      <s-button
-                        variant="tertiary"
-                        href={`/app/settings/diagnostics?id=${row.errorId}`}
-                      >
+                      <s-link href={`/app/settings/diagnostics?id=${row.errorId}`}>
                         {row.errorId}
-                      </s-button>
+                      </s-link>
                     </s-table-cell>
                     <s-table-cell>
                       <s-badge tone={row.retryable ? "warning" : "critical"}>

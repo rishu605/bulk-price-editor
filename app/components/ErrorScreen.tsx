@@ -61,7 +61,7 @@ export function ErrorScreen({
               Try again
             </s-button>
             <s-button href="/app">Back to dashboard</s-button>
-            <s-button variant="tertiary" href={helpPathFor(code)} target="_blank">
+            <s-button variant="secondary" href={helpPathFor(code)} target="_blank">
               {helpLabelFor(code)}
             </s-button>
           </ActionRow>

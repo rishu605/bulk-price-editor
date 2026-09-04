@@ -116,14 +116,13 @@ export default function HelpIndex() {
                       served from our own origin inside the frame as well as outside it,
                       and a new tab because the destination is not an embedded page — see
                       the note at the top of this file for what happens when it is not. */}
-                  <s-button
-                    variant="tertiary"
-                    icon="external"
-                    href={`${HELP_ROUTE}/${item.slug}`}
-                    target="_blank"
-                  >
+                  {/* Links, not tertiary buttons. A reading list is content: the
+                      titles are what the merchant is scanning, and a list of them in
+                      plain dark text is a list of things that do not look like they go
+                      anywhere. */}
+                  <s-link href={`${HELP_ROUTE}/${item.slug}`} target="_blank">
                     {item.title}
-                  </s-button>
+                  </s-link>
                   {/* Always rendered, even when there is no blurb: the grid places
                       children in order, so a skipped cell would pull the next article's
                       title into the blurb column and every row after it would be one

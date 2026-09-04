@@ -44,9 +44,7 @@ export function UpcomingCampaigns({
             {humanise(moment.status)}
           </s-badge>
 
-          <s-button variant="tertiary" href={`/app/campaigns/${moment.id}`}>
-            {moment.name}
-          </s-button>
+          <s-link href={`/app/campaigns/${moment.id}`}>{moment.name}</s-link>
 
           {/* The timing is pinned to the far edge, so the column of "in 3 days" reads
               down the page as one thing whatever the names do. */}

@@ -225,6 +225,7 @@ export default function Reconciliation() {
         <s-button
           type="button"
           variant="tertiary"
+          icon="download"
           onClick={() => downloadCsv("anchor-reconciliation.csv", reconciliationCsv(rows))}
         >
           Export this page (CSV)

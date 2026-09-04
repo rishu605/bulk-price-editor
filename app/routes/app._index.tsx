@@ -403,7 +403,7 @@ export default function Dashboard() {
               <input type="hidden" name="intent" value="resolve-notice" />
               <input type="hidden" name="noticeId" value={notice.id} />
               <input type="hidden" name="resolution" value="ignored" />
-              <s-button type="submit" variant="tertiary" loading={busy || undefined}>
+              <s-button type="submit" variant="secondary" loading={busy || undefined}>
                 Leave it as it is
               </s-button>
             </fetcher.Form>
@@ -578,9 +578,13 @@ export default function Dashboard() {
             >
               Create campaign
             </s-button>
-            <s-button variant="tertiary" href="/app/campaigns">Campaigns</s-button>
-            <s-button variant="tertiary" href="/app/prices/drift">Price drift</s-button>
-            <s-button variant="tertiary" href="/app/activity">Activity log</s-button>
+            {/* Secondary, not tertiary. These are three destinations in a row of
+                actions — looked for, then clicked — and as tertiary they rendered as
+                three pieces of plain text beside a real button, which reads as a caption
+                under it rather than as three places to go. */}
+            <s-button variant="secondary" href="/app/campaigns">Campaigns</s-button>
+            <s-button variant="secondary" href="/app/prices/drift">Price drift</s-button>
+            <s-button variant="secondary" href="/app/activity">Activity log</s-button>
           </ActionRow>
         </s-section>
       ) : null}
@@ -620,7 +624,7 @@ export default function Dashboard() {
                 <s-button type="submit" variant="primary" loading={busy || undefined}>
                   Create the draft
                 </s-button>
-                <s-button variant="tertiary" href="/app/campaigns/new">
+                <s-button variant="secondary" href="/app/campaigns/new">
                   Or set a scope, a schedule and more
                 </s-button>
               </ActionRow>
@@ -725,14 +729,14 @@ export default function Dashboard() {
           ) : null}
 
           <ActionRow>
-            <s-button variant="tertiary" href="/app/prices">
+            <s-button variant="secondary" href="/app/prices">
               Browse variants and baselines
             </s-button>
             {/* Tertiary, and the only action on this page deliberately kept quiet. One
                 click was not enough ceremony for the most destructive operation in the
                 app, and a bordered button next to the coverage figure would read as the
                 thing to do about it. */}
-            <s-button variant="tertiary" href="/app/prices/baselines/recapture">
+            <s-button variant="secondary" href="/app/prices/baselines/recapture">
               Recapture baselines…
             </s-button>
           </ActionRow>
@@ -766,9 +770,11 @@ export default function Dashboard() {
             <s-text type={usage.attention ? "strong" : undefined}>{usage.headline}</s-text>
             <s-text color="subdued">{usage.detail}</s-text>
             <ActionRow>
-              <s-button variant="tertiary" href="/app/settings/plan">
-                See plans
-              </s-button>
+              {/* A link. It sits under the sentence about the plan, inside a card of
+                  facts rather than in a row of actions, so it is read rather than looked
+                  for — and as plain dark text it was indistinguishable from the sentence
+                  above it. */}
+              <s-link href="/app/settings/plan">See plans</s-link>
             </ActionRow>
           </s-stack>
 
