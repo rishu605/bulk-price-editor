@@ -493,3 +493,68 @@ describe("support from where the problem is", () => {
     expect(render(<CampaignHeader {...props()} />)).not.toContain("Contact support");
   });
 });
+
+describe("the overflow holds what files a campaign, never what prices one", () => {
+  /**
+   * The header rendered up to six buttons at once — Apply, Resume, Revert or "Review N
+   * edited", Duplicate, Contact support, Archive. Three of those are about the campaign
+   * as a record, and a merchant scanning for the one button that writes to a storefront
+   * had to read past them every time.
+   *
+   * The rule, which is the part that must not drift: an overflow is where an action goes
+   * when it is *not* what the page is for. A merchant who has to open a menu to find
+   * Apply has been given the wrong menu.
+   */
+  const html = render(<CampaignHeader {...props({ needsAttention: true })} />);
+  const menu = html.slice(html.indexOf("<s-menu"), html.indexOf("</s-menu>"));
+
+  it("renders a menu rather than three more buttons in the row", () => {
+    expect(html).toContain("<s-menu");
+    expect(html).toContain("More actions");
+  });
+
+  it("opens it with both commandFor and command", () => {
+    // `polaris.js` builds the activator's click handler only when both are present, so
+    // `commandFor` alone is a button that is focusable and inert — no error, no warning.
+    // `HelpNote` records the same scar.
+    //
+    // Scoped to the activator's own tag rather than to everything above the menu: the
+    // header already has two modal openers carrying `command="--show"`, and a looser
+    // match reads one of theirs and passes with this one's missing. Found by deleting it
+    // and watching the test stay green.
+    const start = html.indexOf('commandFor="campaign-more-actions"');
+    const activator = html.slice(html.lastIndexOf("<s-button", start), html.indexOf(">", start));
+
+    expect(start).toBeGreaterThan(-1);
+    expect(activator).toMatch(/command="--(toggle|show)"/);
+  });
+
+  it("puts Duplicate, Archive and support inside it", () => {
+    expect(menu).toContain("Duplicate");
+    expect(menu).toContain("Archive");
+    expect(menu).toContain("Contact support");
+  });
+
+  it("keeps every price-writing action out of it", () => {
+    for (const action of ["Apply to storefront", "Resume", "Revert"]) {
+      expect(menu, `${action} is behind an overflow`).not.toContain(action);
+    }
+  });
+
+  it("holds only buttons, because a menu silently drops anything else", () => {
+    // Polaris' own types: "Only Button components are allowed as children of a Menu…
+    // Any other component placed here will be ignored." The two form posts that used to
+    // wrap their submits are `fetcher.submit` calls for exactly this reason, and a
+    // `<form>` reintroduced here would vanish with no error.
+    expect(menu).not.toMatch(/<form[\s>]/);
+  });
+
+  it("still offers support only where the campaign needs a decision", () => {
+    const quiet = render(<CampaignHeader {...props()} />);
+    const quietMenu = quiet.slice(quiet.indexOf("<s-menu"), quiet.indexOf("</s-menu>"));
+
+    expect(quietMenu).toContain("Duplicate");
+    expect(quietMenu).not.toContain("Contact support");
+  });
+});
+
