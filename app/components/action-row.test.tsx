@@ -55,6 +55,26 @@ describe("the action vocabulary", () => {
     ).toEqual([]);
   });
 
+  it("does not leave a row action that changes something looking like text", () => {
+    // A table is scanned, not read, and whatever sits in the last column is repeated on
+    // every row. A row action is quiet when it only reveals — Baselines' History opens a
+    // panel and closes it again — and bordered when it changes state.
+    //
+    // Price drift bordered its three from the start while the campaigns list left
+    // Duplicate as text, so two tables were following different rules for the same kind
+    // of control.
+    const offenders = sources(APP).flatMap(({ path, text }) =>
+      [...text.matchAll(/<s-table-cell>[\s\S]*?<\/s-table-cell>/g)]
+        .filter((cell) => /<s-button[^>]*type="submit"[^>]*variant="tertiary"/s.test(cell[0]))
+        .map(() => path),
+    );
+
+    expect(
+      [...new Set(offenders)],
+      "a row action that submits changes something, so it is bordered",
+    ).toEqual([]);
+  });
+
   it("keeps a link for navigation rather than for actions", () => {
     // The other half of the rule. An `s-link` is content you read and then click, so it
     // goes somewhere; a link with no destination is a button wearing the wrong clothes.

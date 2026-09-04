@@ -216,7 +216,16 @@ export default function Segments() {
                       <fetcher.Form method="post">
                         <input type="hidden" name="intent" value="delete" />
                         <input type="hidden" name="segmentId" value={segment.id} />
-                        <s-button type="submit" tone="critical" variant="tertiary" icon="delete" loading={busy || undefined}>
+                        {/* Bordered, like every other row action that changes something.
+                            Deleting a segment is the most consequential thing this table
+                            does, and it was the quietest control on the page. */}
+                        <s-button
+                          type="submit"
+                          tone="critical"
+                          variant="secondary"
+                          icon="delete"
+                          loading={busy || undefined}
+                        >
                           Delete
                         </s-button>
                       </fetcher.Form>
