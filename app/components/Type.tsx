@@ -31,9 +31,9 @@ import type { ReactNode } from "react";
  *
  * - **heading** — the card's own, set by `s-section`'s `heading` and sized by `Card`.
  * - **`Lede`** — body size, base colour. What this card is for, in a sentence.
- * - **`Secondary`** — small and subdued. What qualifies it: a count, a caveat, a
- *   consequence. Smaller *and* quieter, so it cannot be mistaken for a lede or for a
- *   field's label.
+ * - **`Secondary`** — subdued. What qualifies it: a count, a caveat, a consequence. One
+ *   grey, decided here, rather than each route choosing whether to grey a paragraph, the
+ *   text inside it, or neither.
  *
  * ## What is deliberately not here
  *
@@ -62,33 +62,36 @@ export function Lede({ children }: { children: ReactNode }) {
 /**
  * Prose that qualifies rather than explains: a count, a caveat, a consequence.
  *
- * Small and subdued. It used to be `<s-paragraph><s-text color="subdued">` written out at
- * twenty-one call sites — body size, grey — which is the same size as the lede above it
- * and the label beside it, so the only thing marking it as subordinate was a colour.
+ * Subdued, and one decision rather than twenty-one. It used to be
+ * `<s-paragraph><s-text color="subdued">` written out at every call site.
  *
- * ## The cast, and why it is not a shortcut
+ * ## The size lever that is not there
  *
- * `small` is a real Polaris type: `ParagraphType` is `'paragraph' | 'small'`, documented
+ * `small` is a real Polaris type — `ParagraphType` is `'paragraph' | 'small'`, documented
  * as "considered less important than the main content… surfaces should apply a smaller
- * font size than the default size", rendered as `<small>`. What does not have it is the
- * **React** props for this version — `ReactProps` for `s-paragraph` picks only `id` and
- * `children`, the same way it omits `s-page`'s `subheading`. The element still receives
- * the attribute, because React passes unknown attributes through to a custom element.
+ * font size than the default size", rendered as `<small>`. It is not in the **React**
+ * props for the pinned version, which pick only `id` and `children` for a paragraph, the
+ * same way they omit `s-page`'s `subheading`.
  *
- * So the cast asserts something the platform documents and the pinned wrapper has not
- * caught up with, in one place, with the alternative named: without it there is exactly
- * one de-emphasis lever in the typed API — subdued colour — which is one bit of
- * information doing the work of three ranks.
+ * That omission turned out not to be the wrapper lagging behind the runtime. Passed
+ * through anyway — React forwards unknown attributes to a custom element — the rendered
+ * text was **byte-for-byte the same width** on the deployed page as it had been without
+ * it. The runtime does not implement it either, so the attribute arrives and nothing
+ * reads it: no error, no warning, no change.
  *
- * **If it does not render smaller, this is worth nothing and should go.** The rank would
- * then have to come from the heading (#589) and the card's rhythm (#578) alone. Checked
- * on the deployed build at 4× zoom, which is the only way to know.
+ * So within the typed API this app has exactly **one** de-emphasis lever, and it is
+ * colour. That is the constraint these roles are designed inside, and it is why the
+ * separation between a card's lede and a field's label has to come from the heading
+ * (#589) and the card's rhythm (#578) instead — neither of which depends on a size we
+ * cannot set.
+ *
+ * What `Secondary` still earns without it: one grey, decided once, instead of the same
+ * two elements written out at twenty-one call sites where the next one gets it slightly
+ * different. When the runtime grows the size, it is one line here.
  */
-const SMALL = { type: "small" } as unknown as { type?: never };
-
 export function Secondary({ children }: { children: ReactNode }) {
   return (
-    <s-paragraph {...SMALL} color="subdued">
+    <s-paragraph color="subdued">
       {children}
     </s-paragraph>
   );
@@ -98,15 +101,15 @@ export function Secondary({ children }: { children: ReactNode }) {
  * The label half of a labelled fact — "Last synced", "Plan", "Oldest baseline captured".
  *
  * Inline rather than a paragraph, because it sits directly above the value it names and a
- * paragraph's own leading would push the two apart. Small and subdued for the same reason
- * `Secondary` is: a caption that is the same size as its value is not a caption.
+ * paragraph's own leading would push the two apart. Subdued for the same reason
+ * `Secondary` is, and by the same single decision.
  *
  * The value itself is deliberately not a component here — it is whatever it is, a number,
  * a date, a badge — and wrapping it would mean guessing.
  */
 export function Caption({ children }: { children: ReactNode }) {
   return (
-    <s-text {...SMALL} color="subdued">
+    <s-text color="subdued">
       {children}
     </s-text>
   );
