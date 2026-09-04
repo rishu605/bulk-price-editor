@@ -23,33 +23,37 @@ import { sourceOf } from "../testing/source";
 
 const home = sourceOf(process.cwd(), "app", "routes", "app._index.tsx");
 
-/** Each `<s-banner …>` on the page, from its tag to its close. */
-function banners(source: string): string[] {
-  const found: string[] = [];
-  let from = source.indexOf("<s-banner");
+/**
+ * Each entry in the page's attention list, from its heading to the end of its body.
+ *
+ * They were four separate banners once. A shop with all four open met a wall of yellow
+ * with the most consequential item indistinguishable from the least, so they are one
+ * block with a list inside it — which means this can no longer count banners, and counts
+ * what the merchant is actually being asked to deal with.
+ */
+function attentionItems(source: string): string[] {
+  const list = source.slice(
+    source.indexOf("const attention: Array<{"),
+    source.indexOf("return (\n    <PageShell"),
+  );
 
-  while (from !== -1) {
-    const end = source.indexOf("</s-banner>", from);
-    found.push(source.slice(from, end));
-    from = source.indexOf("<s-banner", end);
-  }
-
-  return found;
+  return list
+    .split("attention.push({")
+    .slice(1)
+    .map((item) => item.slice(0, item.indexOf("\n    });")));
 }
 
 describe("a warning on Home offers its own remedy", () => {
-  const warnings = banners(home).filter(
-    (banner) => banner.includes('tone="warning"') || banner.includes('tone="info"'),
-  );
+  const items = attentionItems(home);
 
-  it("finds the warnings, so this cannot pass by checking nothing", () => {
-    expect(warnings.length).toBeGreaterThanOrEqual(4);
+  it("finds the items, so this cannot pass by checking nothing", () => {
+    expect(items.length).toBeGreaterThanOrEqual(4);
   });
 
-  it("every one of them has a button or a link", () => {
-    const silent = warnings
-      .filter((banner) => !banner.includes("<s-button"))
-      .map((banner) => /heading="([^"]*)"/.exec(banner)?.[1] ?? banner.slice(0, 60));
+  it("every one of them has a button", () => {
+    const silent = items
+      .filter((item) => !item.includes("<s-button"))
+      .map((item) => /heading: "([^"]*)"/.exec(item)?.[1] ?? item.slice(0, 60));
 
     expect(
       silent,
@@ -58,23 +62,27 @@ describe("a warning on Home offers its own remedy", () => {
   });
 
   it("the baseline warning re-syncs rather than describing a re-sync", () => {
-    const banner = warnings.find((each) => each.includes("no baseline"));
+    const item = items.find((each) => each.includes("no baseline"));
 
-    expect(banner).toBeDefined();
-    expect(banner).toContain('value="sync"');
+    expect(item).toBeDefined();
+    expect(item).toContain('value="sync"');
   });
-});
 
-describe("one sync, however many places offer it", () => {
-  it("every sync on the page posts the same intent", () => {
-    // The Store card's button and the banner's are two forms. What must not drift is
-    // what they post: a second intent would be a second code path for the operation
-    // this page exists to get right.
-    const intents = [...home.matchAll(/name="intent" value="([^"]+)"/g)].map((match) => match[1]);
-    const syncs = intents.filter((intent) => intent.includes("sync"));
+  it("leads with the run that stopped, not with the tidiest item", () => {
+    // The order is the argument: prices are live that nobody chose. A variant with no
+    // baseline cannot be put in a campaign at all, which matters, but not today.
+    const headings = items.map((item) => /heading: "([^"]*)"/.exec(item)?.[1] ?? "");
 
-    expect(syncs.length).toBeGreaterThanOrEqual(2);
-    expect(new Set(syncs).size, `two spellings of one operation: ${[...new Set(syncs)]}`).toBe(1);
+    expect(headings[0]).toContain("did not finish cleanly");
+    expect(headings[headings.length - 1]).toContain("no baseline");
+  });
+
+  it("renders one block rather than a stack of banners", () => {
+    const banners = [...home.matchAll(/<s-banner/g)].length;
+
+    // Two: the attention block, and the one that reports the result of an action the
+    // merchant has just taken.
+    expect(banners, "the wall of yellow is back").toBeLessThanOrEqual(2);
   });
 });
 
