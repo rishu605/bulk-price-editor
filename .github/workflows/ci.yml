@@ -77,8 +77,44 @@ jobs:
       # until the one that matters is indistinguishable from the nineteen that do not.
       # Transitive advisories with no reachable path here are pinned to patched versions
       # in package.json `overrides`, with the reasoning written down beside them.
+      #
+      # Retried, and the registry's own failures told apart from a real advisory.
+      #
+      # Bare `npm audit` posts to `/-/npm/v1/security/audits/quick`, which npm is retiring
+      # — it says so in the output — and which returned a 503 or a 400 on three of eight
+      # PRs in one afternoon, each costing six to ten minutes and a manual re-run that
+      # passed unchanged. This is the only gate on a merge in this repo, so a flaky one is
+      # worse than a slow one: it trains you to re-run without reading, and on 2026-09-04
+      # that is exactly what happened — a genuinely red PR was merged on the assumption it
+      # was this. See #570.
+      #
+      # `--json` uses the bulk advisory endpoint rather than the retiring quick one. Three
+      # attempts, because a registry outage is not this repository's fault; a non-empty
+      # advisory list still fails, because a real one is.
       - name: Audit dependencies
-        run: npm audit --audit-level=high
+        run: |
+          for attempt in 1 2 3; do
+            if npm audit --audit-level=high --json > audit.json; then
+              echo "No advisories at or above high."
+              exit 0
+            fi
+
+            # `npm audit` exits non-zero for both "found advisories" and "could not ask".
+            # The difference is whether the body is a report or an error, and only the
+            # first is ours to fix.
+            if jq -e '.metadata.vulnerabilities' audit.json > /dev/null 2>&1; then
+              echo "::error::High or critical advisories found."
+              jq '.metadata.vulnerabilities' audit.json
+              exit 1
+            fi
+
+            echo "Audit endpoint did not answer (attempt ${attempt}/3):"
+            head -c 400 audit.json
+            sleep $((attempt * 15))
+          done
+
+          echo "::error::The npm audit endpoint did not answer after three attempts."
+          exit 1
 
       # Includes the property tests for the resolver invariants (RFC-001 §4).
       # These are the tests that make the correctness claims real; a failure here
