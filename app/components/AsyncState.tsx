@@ -51,8 +51,15 @@ export function EmptyState({ title, description, action }: EmptyStateProps) {
     
        The measure stays. It is what stops the description running the width of a table,
        and it is the reason this was given a box in the first place; it just no longer
-       has to be centred to have one. */
-    <s-box paddingBlock={PAD.block} maxInlineSize={MEASURE}>
+       has to be centred to have one.
+
+       Padding at the **end** only. It used to be on both edges, so that the words "sit in
+       space that was obviously left for them" — right for a centred block floating in the
+       middle of a card, and wrong the moment it moved to the card's own left edge: `Card`
+       already puts a deliberate gap under its heading, and the two stacked into about
+       110px of nothing between two headings four words apart. Below is still the empty
+       state's own business, because nothing under it is being separated from anything. */
+    <s-box paddingBlockEnd={PAD.block} maxInlineSize={MEASURE}>
       <s-stack gap={SPACE.item}>
         <s-heading>{title}</s-heading>
         {description ? <Secondary>{description}</Secondary> : null}

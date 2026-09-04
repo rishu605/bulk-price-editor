@@ -31,12 +31,16 @@ const render = (node: React.ReactElement) =>
   renderToStaticMarkup(<StaticRouter location="/app/prices">{node}</StaticRouter>);
 
 describe("an empty state is an answer, not a missing table", () => {
-  it("gives the words room, so it does not read as a render that failed", () => {
+  it("gives the words room below, and lets the card own the room above", () => {
     const html = render(<EmptyState title="No baselines captured yet" />);
 
     expect(html).toContain("No baselines captured yet");
-    // Block padding: the words have to sit in space that was obviously left for them.
-    expect(html).toMatch(/paddingblock="large-200"/i);
+    expect(html).toMatch(/paddingblockend="large-200"/i);
+    // Not both edges. `Card` already puts a deliberate gap under its heading — it is the
+    // only lever this app has for making a heading read as a title — and padding at the
+    // start too stacked the two into about 110px of nothing between two headings four
+    // words apart.
+    expect(html).not.toMatch(/paddingblock="/i);
   });
 
   it("sits on the card's own left edge rather than in the middle of it", () => {
