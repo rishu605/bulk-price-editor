@@ -39,6 +39,7 @@ import { linesOf } from "../lib/reporting/lines";
 import { isCommit } from "../lib/imports/intent";
 import { reportError } from "../services/error-report.server";
 import { SPACE } from "../lib/ui/spacing";
+import { Card } from "../components/Card";
 
 export const loader = withGuard("/app/prices/costs", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -214,18 +215,16 @@ export default function Costs() {
       ) : null}
 
 
-      <s-section heading="What your cost floors can protect">
-        <s-paragraph>
+      <Card heading="What your cost floors can protect">    <s-paragraph>
           <s-text>
             {withCost} of {variants} variants have a cost ({coverage}%). Cost-based
             guardrails skip the rest entirely, so a low number here means &ldquo;never
             price below cost&rdquo; is doing less than it looks.
           </s-text>
         </s-paragraph>
-      </s-section>
+      </Card>
 
-      <s-section heading="Change costs in bulk">
-        {fetcher.data ? (
+      <Card heading="Change costs in bulk">    {fetcher.data ? (
           <s-banner tone={fetcher.data.ok ? "success" : "critical"}>
             <s-paragraph>{fetcher.data.message}</s-paragraph>
           </s-banner>
@@ -309,7 +308,7 @@ export default function Costs() {
             ))}
           </s-unordered-list>
         ) : null}
-      </s-section>
+      </Card>
       <ImportForm
         heading="Import costs from a spreadsheet"
         fetcher={fetcher}

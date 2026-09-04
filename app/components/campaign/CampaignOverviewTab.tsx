@@ -12,6 +12,7 @@ import { ALL_STATES, describeState } from "../../lib/lifecycle/transitions";
 import { humanise } from "../../lib/format/label";
 import { CampaignNote } from "./CampaignNote";
 import type { CampaignDetailProps } from "./props";
+import { Card } from "../Card";
 
 export function CampaignOverviewTab(props: CampaignDetailProps) {
   const {
@@ -26,14 +27,13 @@ export function CampaignOverviewTab(props: CampaignDetailProps) {
 
   return (
     <>
-      <s-section heading="Status">
-        <s-paragraph>
+      <Card heading="Status">    <s-paragraph>
           <s-badge tone={lifecycle.tone}>{lifecycle.label}</s-badge>
         </s-paragraph>
         <s-paragraph>
           <s-text>{lifecycle.explanation}</s-text>
         </s-paragraph>
-      </s-section>
+      </Card>
 
       {/* Above the history, because the note is why the history happened. */}
       <CampaignNote {...props} />
@@ -49,8 +49,7 @@ export function CampaignOverviewTab(props: CampaignDetailProps) {
         //    or names the account;
         //  - `at` was loaded, carried through the loader, and never rendered, so the one
         //    column a history is *for* was missing.
-        <s-section heading="How it got here">
-          <s-table>
+        <Card heading="How it got here">      <s-table>
             <s-table-header-row>
               <s-table-header listSlot="kicker">When</s-table-header>
               <s-table-header listSlot="primary">Change</s-table-header>
@@ -70,20 +69,18 @@ export function CampaignOverviewTab(props: CampaignDetailProps) {
               ))}
             </s-table-body>
           </s-table>
-        </s-section>
+        </Card>
       ) : null}
 
-      <s-section heading="Schedule">
-        <s-paragraph>{scheduleText}</s-paragraph>
+      <Card heading="Schedule">    <s-paragraph>{scheduleText}</s-paragraph>
         {warnings.map((warning) => (
           <s-banner key={warning} tone="warning">
             <s-paragraph>{warning}</s-paragraph>
           </s-banner>
         ))}
-      </s-section>
+      </Card>
 
-      <s-section heading="New products">
-        <s-paragraph>
+      <Card heading="New products">    <s-paragraph>
           {autoEnroll
             ? "Products that enter this campaign's scope while it runs are priced automatically, from their own normal price."
             : "Products added while this campaign runs are left at their current price."}
@@ -95,7 +92,7 @@ export function CampaignOverviewTab(props: CampaignDetailProps) {
             </s-paragraph>
           </s-banner>
         ) : null}
-      </s-section>
+      </Card>
     </>
   );
 }

@@ -22,6 +22,7 @@ import { formatMinorUnits } from "../lib/money/format";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
+import { Card } from "../components/Card";
 
 export const loader = withGuard("/app/settings/plan", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -108,24 +109,25 @@ export default function PlanPage() {
           because a table that reads correctly beats a card saved. The write-up is in
           `docs/polaris-notes.md`; **do not re-merge these two without loading the page.** */}
 
-      <s-section heading="Plans">
-        <s-paragraph>
-          <s-text type="strong">
-            You are on {PLANS[current as keyof typeof PLANS].name}
-          </s-text>
-          {" — "}
-          <s-text color="subdued">
+      <Card
+        heading="Plans"
+        lede={
+          <>
+            <s-text type="strong">
+              You are on {PLANS[current as keyof typeof PLANS].name}
+            </s-text>
+            {" — "}
             {formatCount(variants)} variants in your catalogue.
-          </s-text>
-        </s-paragraph>
-
-        <s-paragraph>
-          <s-text>
+          </>
+        }
+        secondary={
+          <>
             Pricing is by how much of your catalogue a campaign manages and which
             surfaces it reaches &mdash; never by how many changes you make. Charging per
             change would tax the thing the app is for.
-          </s-text>
-        </s-paragraph>
+          </>
+        }
+      >
 
         <s-table>
           <s-table-header-row>
@@ -160,32 +162,35 @@ export default function PlanPage() {
             ))}
           </s-table-body>
         </s-table>
-      </s-section>
+      </Card>
 
-      <s-section heading="Every plan, including free">
-        <s-paragraph>
-          <s-text>
+      <Card
+        heading="Every plan, including free"
+        lede={
+          <>
             Preview before applying. Guardrails that refuse to price below cost or
             margin. The full history of every change, kept indefinitely. One-click
             rollback of a campaign or a single product.
-          </s-text>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>
+          </>
+        }
+        secondary={
+          <>
             None of that is ever paywalled. Charging for the ability to undo a mistake
             the app helped you make would be indefensible.
-          </s-text>
-        </s-paragraph>
-      </s-section>
+          </>
+        }
+      />
 
-      <s-section heading="If you downgrade">
-        <s-paragraph>
-          <s-text>
+      <Card
+        heading="If you downgrade"
+        lede={
+          <>
             Running campaigns finish, including their scheduled reverts. Nothing is
             deleted, nothing is paused, and no price is left on sale because a plan
             changed. A smaller plan limits what you can <s-text>start</s-text> next.
-          </s-text>
-        </s-paragraph>
+          </>
+        }
+      >
 
         {affected.length > 0 ? (
           <>
@@ -203,7 +208,7 @@ export default function PlanPage() {
             </s-unordered-list>
           </>
         ) : null}
-      </s-section>
+      </Card>
     </PageShell>
   );
 }

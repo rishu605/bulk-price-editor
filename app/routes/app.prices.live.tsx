@@ -25,6 +25,7 @@ import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
 import { Field } from "../components/FieldGrid";
 import { SPACE } from "../lib/ui/spacing";
+import { Card } from "../components/Card";
 
 /** Filters that ride in the query string, so a merchant can bookmark a view. */
 export const RECONCILE_FIELDS = ["q", "surface", "campaign", "state"] as const;
@@ -182,8 +183,7 @@ export default function Reconciliation() {
         </VariantSearch>
       </s-section>
 
-      <s-section heading="Check against Shopify right now">
-        <s-paragraph>
+      <Card heading="Check against Shopify right now">    <s-paragraph>
           <s-text>
             Reads a sample of prices straight from Shopify and compares them with what
             this page shows. Anything that disagrees is corrected here — the storefront
@@ -211,10 +211,9 @@ export default function Reconciliation() {
             </s-button>
           </s-stack>
         </fetcher.Form>
-      </s-section>
+      </Card>
 
-      <s-section heading="Prices">
-        <ReconciliationTable rows={rows} clearHref={clearedSearch(params, RECONCILE_FIELDS)} />
+      <Card heading="Prices">    <ReconciliationTable rows={rows} clearHref={clearedSearch(params, RECONCILE_FIELDS)} />
 
         {/* This page has been paged server-side since it was written and had no pager, so
             row 26 was unreachable by anything but typing `?page=2` into a URL a merchant
@@ -230,7 +229,7 @@ export default function Reconciliation() {
         >
           Export this page (CSV)
         </s-button>
-      </s-section>
+      </Card>
     </PageShell>
   );
 }

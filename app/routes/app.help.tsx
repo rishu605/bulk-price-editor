@@ -45,6 +45,7 @@ import { withGuard } from "../lib/errors/guard.server";
 import { helpNav } from "../lib/help/nav.server";
 import { SPACE } from "../lib/ui/spacing";
 import { Secondary } from "../components/Type";
+import { Card } from "../components/Card";
 
 export const loader = withGuard("/app/help", async ({ request }: LoaderFunctionArgs) => {
   // Authenticated like every other embedded route, even though the content is public
@@ -73,8 +74,7 @@ export default function HelpIndex() {
           question; making them scan every article before finding out a person will
           answer is the arrangement that makes support feel unreachable. Secondary,
           because most questions really are answered by the pages below. */}
-      <s-section heading="Still stuck">
-        <s-stack gap={SPACE.item}>
+      <Card heading="Still stuck">    <s-stack gap={SPACE.item}>
           <s-paragraph>
             Write to us and we reply to every message. Your shop, plan and the page you
             came from are attached, so you do not have to describe your setup — and you
@@ -86,11 +86,10 @@ export default function HelpIndex() {
             </s-button>
           </ActionRow>
         </s-stack>
-      </s-section>
+      </Card>
 
       {nav.sections.map((section) => (
-        <s-section key={section.id} heading={section.title}>
-          <s-stack gap={SPACE.section}>
+        <Card key={section.id} heading={section.title}>      <s-stack gap={SPACE.section}>
             {section.blurb ? <s-paragraph>{section.blurb}</s-paragraph> : null}
 
             {/* A grid, so the list has a left edge.
@@ -132,7 +131,7 @@ export default function HelpIndex() {
               ))}
             </s-grid>
           </s-stack>
-        </s-section>
+        </Card>
       ))}
     </PageShell>
   );

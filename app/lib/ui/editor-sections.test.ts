@@ -24,7 +24,7 @@ const editor = sourceOf(process.cwd(), "app", "routes", "app.campaigns.new.tsx")
 
 /** Where each numbered section's card opens, in source order. */
 function sectionAt(key: string): number {
-  return editor.indexOf(`<s-section heading={headings.${key}}>`);
+  return editor.indexOf(`<Card heading={headings.${key}}>`);
 }
 
 const SECTIONS = ["rule", "scope", "when", "markets", "advanced"];
@@ -69,10 +69,12 @@ describe("the submit", () => {
   });
 
   it("is not inside a card", () => {
-    // Inside one it reads as that section's action rather than as the form's.
+    // Inside one it reads as that section's action rather than as the form's. Matched on
+    // `Card` rather than `s-section` since #578 — every titled section in the main column
+    // is one, and the section element is now an implementation detail of that component.
     const submit = editor.indexOf('<s-button type="submit" variant="primary">');
-    const lastOpen = editor.lastIndexOf("<s-section", submit);
-    const lastClose = editor.lastIndexOf("</s-section>", submit);
+    const lastOpen = editor.lastIndexOf("<Card", submit);
+    const lastClose = editor.lastIndexOf("</Card>", submit);
 
     expect(lastClose).toBeGreaterThan(lastOpen);
   });

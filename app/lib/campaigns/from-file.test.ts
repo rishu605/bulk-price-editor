@@ -39,7 +39,7 @@ describe("choosing it", () => {
   it("removes the scope rather than leaving it inert", () => {
     // The acceptance criterion, and the reason the second page was confusing: a file
     // names its own variants, so a scope a merchant fills in would be discarded.
-    expect(EDITOR).toMatch(/\{fromFile \? null : \(\s*<s-section heading=\{headings\.scope\}/);
+    expect(EDITOR).toMatch(/\{fromFile \? null : \(\s*<Card heading=\{headings\.scope\}/);
   });
 
   it("removes the arithmetic controls too", () => {

@@ -24,6 +24,7 @@ import { HelpNote } from "../components/HelpNote";
 import { formatCount } from "../lib/format/display";
 import { SPACE } from "../lib/ui/spacing";
 import { Secondary } from "../components/Type";
+import { Card } from "../components/Card";
 
 export const loader = withGuard("/app/settings", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -154,21 +155,22 @@ export default function Settings() {
             that pushes a price under a floor is a conversation between two of them —
             and splitting them across pages is what made the nav sixteen items long. */}
 
-        <s-section heading="Guardrails">
-          <s-paragraph>
-            Floors that no campaign may price below. They are checked after rounding,
-            so a rounding rule cannot push a price under them.
-          </s-paragraph>
-
-          {/* Coverage sits with the fields it qualifies, not in a sidebar card of its own.
-              Two of the controls below — "never price at or below cost" and what to do when
-              a cost-based floor meets a variant without one — mean nothing until you know
-              how many variants that second case actually is. */}
-          <Secondary>
-            {formatCount(withCost)} of {formatCount(variants)} variants have a cost
-            ({costCoverage}%). Cost-based floors only constrain those; the last setting
-            in this section decides the rest.
-          </Secondary>
+        {/* Coverage sits with the fields it qualifies, not in a sidebar card of its own.
+            Two of the controls below — "never price at or below cost" and what to do when a
+            cost-based floor meets a variant without one — mean nothing until you know how
+            many variants that second case actually is. As the card's `secondary` it is
+            tight against the lede, which is the point: the two are one thought. */}
+        <Card
+          heading="Guardrails"
+          lede="Floors that no campaign may price below. They are checked after rounding, so a rounding rule cannot push a price under them."
+          secondary={
+            <>
+              {formatCount(withCost)} of {formatCount(variants)} variants have a cost
+              ({costCoverage}%). Cost-based floors only constrain those; the last setting
+              in this section decides the rest.
+            </>
+          }
+        >
 
           {settings.neverBelowCost && costCoverage < 100 ? (
             <s-banner tone="warning">
@@ -234,10 +236,9 @@ export default function Settings() {
                 </s-option>
               </s-select>
             </FieldGrid>
-        </s-section>
+        </Card>
 
-        <s-section heading="Rounding">
-          <s-paragraph>
+        <Card heading="Rounding">      <s-paragraph>
             <s-text>
               How campaign prices are tidied up after the discount is calculated. Set
               once here; each campaign can override it.
@@ -311,10 +312,9 @@ export default function Settings() {
                 </>
               ) : null}
             </s-stack>
-        </s-section>
+        </Card>
 
-        <s-section heading="Notifications">
-          <s-paragraph>
+        <Card heading="Notifications">      <s-paragraph>
             <s-text>
               A campaign over a large catalogue runs for a while. These let you close the
               tab and still find out what happened.
@@ -378,7 +378,7 @@ export default function Settings() {
               pricing should end up.
             </s-text>
           </s-paragraph>
-        </s-section>
+        </Card>
 
       </PageSections>
       </fetcher.Form>

@@ -48,6 +48,7 @@ import { PageShell } from "../components/PageShell";
 import { HelpNote } from "../components/HelpNote";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { SPACE } from "../lib/ui/spacing";
+import { Card } from "../components/Card";
 
 const FILTER_FIELDS = ["q", "vendor", "source", "diverged", "variant"] as const;
 
@@ -255,8 +256,7 @@ export default function Baselines() {
       </s-section>
 
       {variantGid && history.length > 0 ? (
-        <s-section heading="Baseline history">
-          <s-paragraph>
+        <Card heading="Baseline history">      <s-paragraph>
             <s-text>{variantGid}</s-text>
           </s-paragraph>
           <s-table>
@@ -294,7 +294,7 @@ export default function Baselines() {
               ))}
             </s-table-body>
           </s-table>
-        </s-section>
+        </Card>
       ) : null}
 
       <ImportForm
@@ -347,8 +347,7 @@ export default function Baselines() {
           scope that can be half a million variants and cross-references every running
           campaign — neither of which belongs on a page a merchant opens to look one
           price up. */}
-      <s-section heading="Recapture baselines">
-        <s-paragraph>
+      <Card heading="Recapture baselines">    <s-paragraph>
           <s-text>
             Replaces the reference price of every variant in scope with the price its
             storefront shows right now. Do it when your real prices have genuinely
@@ -361,7 +360,7 @@ export default function Baselines() {
             Check a scope and recapture
           </s-button>
         </ActionRow>
-      </s-section>
+      </Card>
 
       <HelpNote label="Reading this page">
         <s-paragraph>

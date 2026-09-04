@@ -53,6 +53,7 @@ import { numberSections } from "../lib/ui/sections";
 import { SPACE } from "../lib/ui/spacing";
 import type { DraftPreview as Preview } from "../services/campaigns/draft-preview.server";
 import { Secondary } from "../components/Type";
+import { Card } from "../components/Card";
 
 export const loader = withGuard("/app/campaigns/new", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -487,8 +488,7 @@ export default function NewCampaign() {
             exactly this case. Without it two cards touch and read as one card with a
             line through it. */}
         <PageSections>
-      <s-section heading={headings.rule}>
-          <s-stack gap={SPACE.section}>
+      <Card heading={headings.rule}>      <s-stack gap={SPACE.section}>
             {/* The rule, and nothing else, first.
 
                 This block was one flat stack of about fifteen full-width controls -- name,
@@ -607,15 +607,14 @@ export default function NewCampaign() {
                 the end, it now lands directly under the rule it is previewing. */}
 
           </s-stack>
-      </s-section>
+      </Card>
 
       {/* Not rendered at all, rather than rendered and ignored. A file names its own
           variants — a frozen list of exactly the rows it matched — so a scope here would
           be a control a merchant fills in and the import discards, which is the confusion
           the second page caused in the first place. */}
       {fromFile ? null : (
-      <s-section heading={headings.scope}>
-        <s-paragraph>
+      <Card heading={headings.scope}>    <s-paragraph>
           Which variants the rule above applies to. Leave everything blank to target the
           whole catalogue; conditions combine with AND.
         </s-paragraph>
@@ -728,7 +727,7 @@ export default function NewCampaign() {
             </s-select>
           </FullRow>
         </FieldGrid>
-      </s-section>
+      </Card>
       )}
 
       {/* Its own card, not a heading inside the rule's.
@@ -740,8 +739,7 @@ export default function NewCampaign() {
           A merchant who filled in the rule and pressed the obvious button never read the
           section that says which products it applies to. */}
       {fromFile ? null : (
-      <s-section heading={headings.when}>
-        {/* The card's own heading says "When". A second one saying "Schedule (optional)"
+      <Card heading={headings.when}>    {/* The card's own heading says "When". A second one saying "Schedule (optional)"
             inside it was the heading this block needed while it lived in the middle of
             the rule's card, and it is a heading inside a heading now. The optionality is
             in the sentence below, where it belongs — a merchant who reads "leave the
@@ -781,12 +779,11 @@ export default function NewCampaign() {
           details="Defaults to the end of that day."
         />
       </FieldGrid>
-      </s-section>
+      </Card>
       )}
 
       {!fromFile && priceLists.length > 0 ? (
-      <s-section heading={headings.markets}>
-          <s-paragraph>
+      <Card heading={headings.markets}>      <s-paragraph>
             <s-text>
               Your base price always changes. Tick a market to run this campaign
               there too &mdash; each is priced from{" "}
@@ -862,12 +859,11 @@ export default function NewCampaign() {
               </s-select>
             ))}
           </FieldGrid>
-      </s-section>
+      </Card>
       ) : null}
 
       {fromFile ? null : (
-      <s-section heading={headings.advanced}>
-      {/* The pressure valve.
+      <Card heading={headings.advanced}>  {/* The pressure valve.
 
           Four controls a first campaign never touches, all with defaults that are
           right for almost everybody: priority only matters once two campaigns
@@ -919,7 +915,7 @@ export default function NewCampaign() {
           />
         </FullRow>
       </FieldGrid>
-      </s-section>
+      </Card>
       )}
 
       {/* Last, and outside every card.

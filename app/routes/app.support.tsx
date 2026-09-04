@@ -33,6 +33,7 @@ import { HelpNote } from "../components/HelpNote";
 import { withGuard } from "../lib/errors/guard.server";
 import { SPACE } from "../lib/ui/spacing";
 import { Secondary } from "../components/Type";
+import { Card } from "../components/Card";
 
 /**
  * Which build this is.
@@ -115,8 +116,7 @@ export default function Support() {
           email address and a subject line in between. The card holds the whole message;
           the field holds the account of the problem. Naming the container after one of
           its contents is how a form stops being legible as a form. */}
-      <s-section heading="Your message">
-        <fetcher.Form method="post">
+      <Card heading="Your message">    <fetcher.Form method="post">
           {/* Each field at the width of what it holds. An email address and a subject
               line rendered the full width of the card, which is a message box's worth of
               room for one line — and it made the three fields read as one block rather
@@ -155,10 +155,9 @@ export default function Support() {
             </ActionRow>
           </s-stack>
         </fetcher.Form>
-      </s-section>
+      </Card>
 
-      <s-section heading="What we attach">
-        {/* Listed, not summarised. A merchant cannot consent to "diagnostic
+      <Card heading="What we attach">    {/* Listed, not summarised. A merchant cannot consent to "diagnostic
             information", and the fastest way to make somebody distrust a Send button is
             to be vague about it one time. */}
         <Secondary>
@@ -179,7 +178,7 @@ export default function Support() {
             ))}
           </s-table-body>
         </s-table>
-      </s-section>
+      </Card>
 
       <HelpNote label="Before you write">
         <s-paragraph>

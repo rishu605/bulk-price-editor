@@ -20,11 +20,11 @@
 
 import { SPACE } from "../../lib/ui/spacing";
 import type { CampaignDetailProps } from "./props";
+import { Card } from "../Card";
 
 export function CampaignNote({ note, fetcher, busy }: CampaignDetailProps) {
   return (
-    <s-section heading="Why this campaign exists">
-      <fetcher.Form method="post">
+    <Card heading="Why this campaign exists">  <fetcher.Form method="post">
         <input type="hidden" name="intent" value="note" />
         <s-stack direction="block" gap={SPACE.item}>
           <s-text-area
@@ -49,6 +49,6 @@ export function CampaignNote({ note, fetcher, busy }: CampaignDetailProps) {
           </s-stack>
         </s-stack>
       </fetcher.Form>
-    </s-section>
+    </Card>
   );
 }

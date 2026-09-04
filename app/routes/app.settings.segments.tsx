@@ -36,6 +36,7 @@ import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { ShowingSome } from "../components/Pagination";
 import { HelpNote } from "../components/HelpNote";
 import { Secondary } from "../components/Type";
+import { Card } from "../components/Card";
 
 export const loader = withGuard("/app/settings/segments", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -174,8 +175,7 @@ export default function Segments() {
 
       {result?.report ? <ImportReport report={result.report} /> : null}
 
-      <s-section heading="Your segments">
-        {segments.length === 0 ? (
+      <Card heading="Your segments">    {segments.length === 0 ? (
           <EmptyState
             title="No segments yet"
             description="A segment is a saved way of describing which products a campaign covers, so you do not rebuild the same filter for every sale. Make one below."
@@ -226,7 +226,7 @@ export default function Segments() {
             </s-table-body>
           </s-table>
         )}
-      </s-section>
+      </Card>
 
       <NewSegment available={available} fetcher={fetcher} busy={busy} />
 
@@ -286,8 +286,7 @@ function NewSegment({
   const [how, setHow] = useState<"filter" | "list">("filter");
 
   return (
-    <s-section heading="New segment">
-      <fetcher.Form method="post">
+    <Card heading="New segment">  <fetcher.Form method="post">
         {/* The two branches were two intents on two forms. One form, and the intent
             follows the choice — so the name field cannot be filled in on one card and
             submitted from the other. */}
@@ -415,7 +414,7 @@ function NewSegment({
           </ActionRow>
         </s-stack>
       </fetcher.Form>
-    </s-section>
+    </Card>
   );
 }
 
@@ -424,8 +423,7 @@ function ImportReport({ report }: { report: NonNullable<ActionData["report"]> })
     report.unmatched.length === 0 && report.ambiguous.length === 0 && report.repeated === 0;
 
   return (
-    <s-section heading="What the list matched">
-      <s-paragraph>
+    <Card heading="What the list matched">  <s-paragraph>
         <s-text>
           {report.matched} of {report.total} rows matched a product.
           {clean ? " Every row was placed." : ""}
@@ -503,7 +501,7 @@ function ImportReport({ report }: { report: NonNullable<ActionData["report"]> })
           </s-text>
         </s-paragraph>
       ) : null}
-    </s-section>
+    </Card>
   );
 }
 

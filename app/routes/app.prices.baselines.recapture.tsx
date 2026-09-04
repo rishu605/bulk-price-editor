@@ -35,6 +35,7 @@ import { HelpNote } from "../components/HelpNote";
 import { Field } from "../components/FieldGrid";
 import { ActionRow } from "../components/ActionRow";
 import { SPACE } from "../lib/ui/spacing";
+import { Card } from "../components/Card";
 
 export const loader = withGuard("/app/prices/baselines/recapture", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -112,8 +113,7 @@ export default function Recapture() {
         </s-banner>
       ) : null}
 
-      <s-section heading="What this does">
-        <s-paragraph>
+      <Card heading="What this does">    <s-paragraph>
           <s-text>
             Recapturing replaces the reference price of every variant in scope with the
             price its storefront shows right now. Every campaign from then on computes
@@ -157,11 +157,10 @@ export default function Recapture() {
             {assessment.scope} variant{assessment.scope === 1 ? "" : "s"} in scope.
           </s-text>
         </s-paragraph>
-      </s-section>
+      </Card>
 
       {assessment.risk === "overlaps-active-campaign" ? (
-        <s-section heading="These are on sale right now">
-          <s-banner tone="critical">
+        <Card heading="These are on sale right now">      <s-banner tone="critical">
             <s-paragraph>{assessment.warning}</s-paragraph>
           </s-banner>
 
@@ -181,11 +180,10 @@ export default function Recapture() {
               ))}
             </s-table-body>
           </s-table>
-        </s-section>
+        </Card>
       ) : null}
 
-      <s-section heading="Recapture">
-        <fetcher.Form method="post">
+      <Card heading="Recapture">    <fetcher.Form method="post">
           <input type="hidden" name="segment" value={segmentId} />
           <s-stack gap={SPACE.section}>
             {assessment.confirmationPhrase ? (
@@ -209,7 +207,7 @@ export default function Recapture() {
             </s-button>
           </s-stack>
         </fetcher.Form>
-      </s-section>
+      </Card>
 
       <HelpNote label="If you get this wrong">
         <s-paragraph>

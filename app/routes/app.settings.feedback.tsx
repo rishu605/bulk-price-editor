@@ -19,6 +19,7 @@ import { FeedbackForm } from "../components/FeedbackForm";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
+import { Card } from "../components/Card";
 
 export const loader = withGuard("/app/settings/feedback", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -65,8 +66,7 @@ export default function FeedbackPage() {
       <FeedbackForm route="/app/settings/feedback" />
 
       {sent.length > 0 ? (
-        <s-section heading="What you have sent">
-          <s-table>
+        <Card heading="What you have sent">      <s-table>
             <s-table-header-row>
               <s-table-header listSlot="kicker">When</s-table-header>
               <s-table-header listSlot="inline">Kind</s-table-header>
@@ -92,7 +92,7 @@ export default function FeedbackPage() {
               ))}
             </s-table-body>
           </s-table>
-        </s-section>
+        </Card>
       ) : null}
     </PageShell>
   );
