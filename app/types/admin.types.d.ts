@@ -29451,11 +29451,11 @@ export type FulfillmentTrackingInfo = {
    *
    * For tracking company names from the list below
    * Shopify will automatically build tracking URLs for all provided tracking numbers,
-   * which will make the tracking numbers clickable in the interface.
+   * which will make the tracking numbers clickable in the interface. This doesn't mean
+   * that Shopify automatically updates the fulfillment's `shipment_status` field in Admin.
    *
-   * Additionally, for the tracking companies listed on the
-   * [Shipping Carriers help page](https://help.shopify.com/manual/shipping/understanding-shipping/shipping-carriers#integrated-shipping-carriers)
-   * Shopify will automatically update the fulfillment's `shipment_status` field during the fulfillment process.
+   * For tracking companies whose `shipment_status` field is updated automatically, see the
+   * [Shipping Carriers help page](https://help.shopify.com/manual/shipping/understanding-shipping/shipping-carriers#integrated-shipping-carriers).
    *
    * ### Supported tracking companies
    *
@@ -29473,6 +29473,7 @@ export type FulfillmentTrackingInfo = {
    *   * Bonshaw
    *   * BPost
    *   * BPost International
+   *   * Better Trucks
    *   * Canada Post
    *   * Canpar
    *   * CDL Last Mile
@@ -29551,6 +29552,7 @@ export type FulfillmentTrackingInfo = {
    *   * SHREE NANDAN COURIER
    *   * Singapore Post
    *   * Southwest Air Cargo
+   *   * SpeedX
    *   * StarTrack
    *   * Step Forward Freight
    *   * Swiss Post
@@ -29559,6 +29561,7 @@ export type FulfillmentTrackingInfo = {
    *   * TNT
    *   * Toll IPEC
    *   * United Delivery Service
+   *   * Uni Uni
    *   * UPS
    *   * USPS
    *   * Venipak
@@ -29662,12 +29665,12 @@ export type FulfillmentTrackingInput = {
    * If you specify a tracking company name from
    * [the list](https://shopify.dev/api/admin-graphql/latest/objects/FulfillmentTrackingInfo#supported-tracking-companies),
    * Shopify will automatically build tracking URLs for all provided tracking numbers,
-   * which will make the tracking numbers clickable in the interface.
+   * which will make the tracking numbers clickable in the interface. This doesn't mean
+   * that Shopify automatically updates the fulfillment's `shipment_status` field in Admin.
    * The same tracking company will be applied to all tracking numbers specified.
    *
-   * Additionally, for the tracking companies listed on the
-   * [Shipping Carriers help page](https://help.shopify.com/manual/shipping/understanding-shipping/shipping-carriers#integrated-shipping-carriers)
-   * Shopify will automatically update the fulfillment's `shipment_status` field during the fulfillment process.
+   * For tracking companies whose `shipment_status` field is updated automatically, see the
+   * [Shipping Carriers help page](https://help.shopify.com/manual/shipping/understanding-shipping/shipping-carriers#integrated-shipping-carriers).
    *
    * > Note:
    * > Send the tracking company name exactly as written in
@@ -39264,7 +39267,7 @@ export enum MetafieldDefinitionUpdateUserErrorCode {
  * For example, for a metafield definition of `number_integer` type, you can set a validation with the name `max`
  * and a value of `15`. This validation will ensure that the value of the metafield is a number less than or equal to 15.
  *
- * Refer to the [list of supported validations](https://shopify.dev/api/admin/graphql/reference/common-objects/metafieldDefinitionTypes#examples-Fetch_all_metafield_definition_types).
+ * Refer to the [list of supported validations](https://shopify.dev/docs/apps/build/metafields/list-of-validation-options).
  */
 export type MetafieldDefinitionValidation = {
   __typename?: 'MetafieldDefinitionValidation';
@@ -39282,7 +39285,7 @@ export type MetafieldDefinitionValidation = {
  * For example, for a metafield definition of `single_line_text_field` type, you can set a validation with the name `min` and a value of `10`.
  * This validation will ensure that the value of the metafield is at least 10 characters.
  *
- * Refer to the [list of supported validations](https://shopify.dev/apps/build/custom-data/metafields/list-of-validation-options).
+ * Refer to the [list of supported validations](https://shopify.dev/docs/apps/build/metafields/list-of-validation-options).
  */
 export type MetafieldDefinitionValidationInput = {
   /** The name for the metafield definition validation. */
@@ -44346,7 +44349,10 @@ export type Mutation = {
    *
    * After you create the draft, you can either modify it with the [`subscriptionDraftUpdate`](https://shopify.dev/docs/api/admin-graphql/latest/mutations/subscriptionDraftUpdate) mutation or finalize and create the active subscription contract with [`subscriptionDraftCommit`](https://shopify.dev/docs/api/admin-graphql/latest/mutations/subscriptionDraftCommit).
    *
+   * This mutation and the draft-based flow are deprecated in favor of the [SubscriptionContractCalculation API](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/contracts/migrate-to-subscription-calculation-api).
+   *
    * Learn more about [building subscription contracts](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/contracts/build-a-subscription-contract).
+   * @deprecated Use [`subscriptionContractCreateCalculate`](https://shopify.dev/docs/api/admin-graphql/latest/mutations/subscriptionContractCreateCalculate) instead.
    */
   subscriptionContractCreate?: Maybe<SubscriptionContractCreatePayload>;
   /** Expires a Subscription Contract. */
@@ -44369,30 +44375,66 @@ export type Mutation = {
    *
    * Changes remain in draft state and don't affect the live contract until committed. After you've made all necessary changes to the draft, commit it using [`subscriptionDraftCommit`](https://shopify.dev/docs/api/admin-graphql/latest/mutations/subscriptionDraftCommit) to apply the updates to the original contract.
    *
+   * This mutation and the draft-based edit flow are deprecated in favor of the [SubscriptionContractCalculation API](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/contracts/migrate-to-subscription-calculation-api).
+   *
    * Learn more about [updating subscription contracts](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/contracts/update-a-subscription-contract#step-2-create-a-draft-of-an-existing-contract).
+   * @deprecated Use [`subscriptionContractUpdateCalculate`](https://shopify.dev/docs/api/admin-graphql/latest/mutations/subscriptionContractUpdateCalculate) instead.
    */
   subscriptionContractUpdate?: Maybe<SubscriptionContractUpdatePayload>;
-  /** Commits the updates of a Subscription Contract draft. */
+  /**
+   * Commits the updates of a Subscription Contract draft.
+   * @deprecated Use the [SubscriptionContractCalculation API](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/contracts/migrate-to-subscription-calculation-api) instead.
+   */
   subscriptionDraftCommit?: Maybe<SubscriptionDraftCommitPayload>;
-  /** Adds a subscription discount to a subscription draft. */
+  /**
+   * Adds a subscription discount to a subscription draft.
+   * @deprecated Use the [SubscriptionContractCalculation API](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/contracts/migrate-to-subscription-calculation-api) instead.
+   */
   subscriptionDraftDiscountAdd?: Maybe<SubscriptionDraftDiscountAddPayload>;
-  /** Applies a code discount on the subscription draft. */
+  /**
+   * Applies a code discount on the subscription draft.
+   * @deprecated Use the [SubscriptionContractCalculation API](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/contracts/migrate-to-subscription-calculation-api) instead.
+   */
   subscriptionDraftDiscountCodeApply?: Maybe<SubscriptionDraftDiscountCodeApplyPayload>;
-  /** Removes a subscription discount from a subscription draft. */
+  /**
+   * Removes a subscription discount from a subscription draft.
+   * @deprecated Use the [SubscriptionContractCalculation API](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/contracts/migrate-to-subscription-calculation-api) instead.
+   */
   subscriptionDraftDiscountRemove?: Maybe<SubscriptionDraftDiscountRemovePayload>;
-  /** Updates a subscription discount on a subscription draft. */
+  /**
+   * Updates a subscription discount on a subscription draft.
+   * @deprecated Use the [SubscriptionContractCalculation API](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/contracts/migrate-to-subscription-calculation-api) instead.
+   */
   subscriptionDraftDiscountUpdate?: Maybe<SubscriptionDraftDiscountUpdatePayload>;
-  /** Adds a subscription free shipping discount to a subscription draft. */
+  /**
+   * Adds a subscription free shipping discount to a subscription draft.
+   * @deprecated Use the [SubscriptionContractCalculation API](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/contracts/migrate-to-subscription-calculation-api) instead.
+   */
   subscriptionDraftFreeShippingDiscountAdd?: Maybe<SubscriptionDraftFreeShippingDiscountAddPayload>;
-  /** Updates a subscription free shipping discount on a subscription draft. */
+  /**
+   * Updates a subscription free shipping discount on a subscription draft.
+   * @deprecated Use the [SubscriptionContractCalculation API](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/contracts/migrate-to-subscription-calculation-api) instead.
+   */
   subscriptionDraftFreeShippingDiscountUpdate?: Maybe<SubscriptionDraftFreeShippingDiscountUpdatePayload>;
-  /** Adds a subscription line to a subscription draft. */
+  /**
+   * Adds a subscription line to a subscription draft.
+   * @deprecated Use the [SubscriptionContractCalculation API](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/contracts/migrate-to-subscription-calculation-api) instead.
+   */
   subscriptionDraftLineAdd?: Maybe<SubscriptionDraftLineAddPayload>;
-  /** Removes a subscription line from a subscription draft. */
+  /**
+   * Removes a subscription line from a subscription draft.
+   * @deprecated Use the [SubscriptionContractCalculation API](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/contracts/migrate-to-subscription-calculation-api) instead.
+   */
   subscriptionDraftLineRemove?: Maybe<SubscriptionDraftLineRemovePayload>;
-  /** Updates a subscription line on a subscription draft. */
+  /**
+   * Updates a subscription line on a subscription draft.
+   * @deprecated Use the [SubscriptionContractCalculation API](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/contracts/migrate-to-subscription-calculation-api) instead.
+   */
   subscriptionDraftLineUpdate?: Maybe<SubscriptionDraftLineUpdatePayload>;
-  /** Updates a Subscription Draft. */
+  /**
+   * Updates a Subscription Draft.
+   * @deprecated Use the [SubscriptionContractCalculation API](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/contracts/migrate-to-subscription-calculation-api) instead.
+   */
   subscriptionDraftUpdate?: Maybe<SubscriptionDraftUpdatePayload>;
   /**
    * Adds tags to a resource. If the resource type doesn't support tagging, the `id` argument returns a resource-not-found error.
@@ -50336,12 +50378,12 @@ export type OrderCreateFulfillmentInput = {
    * If you specify a tracking company name from
    * [the list](https://shopify.dev/api/admin-graphql/latest/objects/FulfillmentTrackingInfo#supported-tracking-companies),
    * Shopify will automatically build tracking URLs for all provided tracking numbers,
-   * which will make the tracking numbers clickable in the interface.
+   * which will make the tracking numbers clickable in the interface. This doesn't mean
+   * that Shopify automatically updates the fulfillment's `shipment_status` field in Admin.
    * The same tracking company will be applied to all tracking numbers specified.
    *
-   * Additionally, for the tracking companies listed on the
-   * [Shipping Carriers help page](https://help.shopify.com/manual/shipping/understanding-shipping/shipping-carriers#integrated-shipping-carriers)
-   * Shopify will automatically update the fulfillment's `shipment_status` field during the fulfillment process.
+   * For tracking companies whose `shipment_status` field is updated automatically, see the
+   * [Shipping Carriers help page](https://help.shopify.com/manual/shipping/understanding-shipping/shipping-carriers#integrated-shipping-carriers).
    *
    * > Note:
    * > Send the tracking company name exactly as written in
@@ -61692,7 +61734,10 @@ export type QueryRoot = {
    * Filter results with the [`query`](https://shopify.dev/docs/api/admin-graphql/latest/queries/subscriptionContracts#arguments-query) argument. You can paginate results using standard [cursor-based pagination](https://shopify.dev/docs/api/usage/pagination-graphql).
    */
   subscriptionContracts: SubscriptionContractConnection;
-  /** Returns a Subscription Draft resource by ID. */
+  /**
+   * Returns a Subscription Draft resource by ID.
+   * @deprecated Use the [SubscriptionContractCalculation API](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/contracts/migrate-to-subscription-calculation-api) instead.
+   */
   subscriptionDraft?: Maybe<SubscriptionDraft>;
   /**
    * Access to Shopify's [standardized product taxonomy](https://shopify.github.io/product-taxonomy/releases/unstable/?categoryId=sg-4-17-2-17) for categorizing products. The [`Taxonomy`](https://shopify.dev/docs/api/admin-graphql/latest/objects/Taxonomy) organizes products into a hierarchical tree structure with categories, attributes, and values.
@@ -74291,6 +74336,8 @@ export type SubscriptionDiscountValue = SubscriptionDiscountFixedAmountValue | S
  * [subscription contract](https://shopify.dev/docs/api/admin-graphql/latest/objects/SubscriptionContract)
  * before it's committed. It serves as a staging area for making changes to an existing subscription or creating
  * a new one. The draft allows you to preview and modify various aspects of a subscription before applying the changes.
+ * This object is deprecated in favor of the
+ * [SubscriptionContractCalculation API](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/contracts/migrate-to-subscription-calculation-api).
  *
  * Use the `SubscriptionDraft` object to:
  *
@@ -74377,6 +74424,8 @@ export type SubscriptionDraft = Node & {
  * [subscription contract](https://shopify.dev/docs/api/admin-graphql/latest/objects/SubscriptionContract)
  * before it's committed. It serves as a staging area for making changes to an existing subscription or creating
  * a new one. The draft allows you to preview and modify various aspects of a subscription before applying the changes.
+ * This object is deprecated in favor of the
+ * [SubscriptionContractCalculation API](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/contracts/migrate-to-subscription-calculation-api).
  *
  * Use the `SubscriptionDraft` object to:
  *
@@ -74417,6 +74466,8 @@ export type SubscriptionDraftConcatenatedBillingCyclesArgs = {
  * [subscription contract](https://shopify.dev/docs/api/admin-graphql/latest/objects/SubscriptionContract)
  * before it's committed. It serves as a staging area for making changes to an existing subscription or creating
  * a new one. The draft allows you to preview and modify various aspects of a subscription before applying the changes.
+ * This object is deprecated in favor of the
+ * [SubscriptionContractCalculation API](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/contracts/migrate-to-subscription-calculation-api).
  *
  * Use the `SubscriptionDraft` object to:
  *
@@ -74452,6 +74503,8 @@ export type SubscriptionDraftCustomerPaymentMethodArgs = {
  * [subscription contract](https://shopify.dev/docs/api/admin-graphql/latest/objects/SubscriptionContract)
  * before it's committed. It serves as a staging area for making changes to an existing subscription or creating
  * a new one. The draft allows you to preview and modify various aspects of a subscription before applying the changes.
+ * This object is deprecated in favor of the
+ * [SubscriptionContractCalculation API](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/contracts/migrate-to-subscription-calculation-api).
  *
  * Use the `SubscriptionDraft` object to:
  *
@@ -74487,6 +74540,8 @@ export type SubscriptionDraftDeliveryOptionsArgs = {
  * [subscription contract](https://shopify.dev/docs/api/admin-graphql/latest/objects/SubscriptionContract)
  * before it's committed. It serves as a staging area for making changes to an existing subscription or creating
  * a new one. The draft allows you to preview and modify various aspects of a subscription before applying the changes.
+ * This object is deprecated in favor of the
+ * [SubscriptionContractCalculation API](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/contracts/migrate-to-subscription-calculation-api).
  *
  * Use the `SubscriptionDraft` object to:
  *
@@ -74526,6 +74581,8 @@ export type SubscriptionDraftDiscountsArgs = {
  * [subscription contract](https://shopify.dev/docs/api/admin-graphql/latest/objects/SubscriptionContract)
  * before it's committed. It serves as a staging area for making changes to an existing subscription or creating
  * a new one. The draft allows you to preview and modify various aspects of a subscription before applying the changes.
+ * This object is deprecated in favor of the
+ * [SubscriptionContractCalculation API](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/contracts/migrate-to-subscription-calculation-api).
  *
  * Use the `SubscriptionDraft` object to:
  *
@@ -74565,6 +74622,8 @@ export type SubscriptionDraftDiscountsAddedArgs = {
  * [subscription contract](https://shopify.dev/docs/api/admin-graphql/latest/objects/SubscriptionContract)
  * before it's committed. It serves as a staging area for making changes to an existing subscription or creating
  * a new one. The draft allows you to preview and modify various aspects of a subscription before applying the changes.
+ * This object is deprecated in favor of the
+ * [SubscriptionContractCalculation API](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/contracts/migrate-to-subscription-calculation-api).
  *
  * Use the `SubscriptionDraft` object to:
  *
@@ -74604,6 +74663,8 @@ export type SubscriptionDraftDiscountsRemovedArgs = {
  * [subscription contract](https://shopify.dev/docs/api/admin-graphql/latest/objects/SubscriptionContract)
  * before it's committed. It serves as a staging area for making changes to an existing subscription or creating
  * a new one. The draft allows you to preview and modify various aspects of a subscription before applying the changes.
+ * This object is deprecated in favor of the
+ * [SubscriptionContractCalculation API](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/contracts/migrate-to-subscription-calculation-api).
  *
  * Use the `SubscriptionDraft` object to:
  *
@@ -74643,6 +74704,8 @@ export type SubscriptionDraftDiscountsUpdatedArgs = {
  * [subscription contract](https://shopify.dev/docs/api/admin-graphql/latest/objects/SubscriptionContract)
  * before it's committed. It serves as a staging area for making changes to an existing subscription or creating
  * a new one. The draft allows you to preview and modify various aspects of a subscription before applying the changes.
+ * This object is deprecated in favor of the
+ * [SubscriptionContractCalculation API](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/contracts/migrate-to-subscription-calculation-api).
  *
  * Use the `SubscriptionDraft` object to:
  *
@@ -74682,6 +74745,8 @@ export type SubscriptionDraftLinesArgs = {
  * [subscription contract](https://shopify.dev/docs/api/admin-graphql/latest/objects/SubscriptionContract)
  * before it's committed. It serves as a staging area for making changes to an existing subscription or creating
  * a new one. The draft allows you to preview and modify various aspects of a subscription before applying the changes.
+ * This object is deprecated in favor of the
+ * [SubscriptionContractCalculation API](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/contracts/migrate-to-subscription-calculation-api).
  *
  * Use the `SubscriptionDraft` object to:
  *
@@ -74721,6 +74786,8 @@ export type SubscriptionDraftLinesAddedArgs = {
  * [subscription contract](https://shopify.dev/docs/api/admin-graphql/latest/objects/SubscriptionContract)
  * before it's committed. It serves as a staging area for making changes to an existing subscription or creating
  * a new one. The draft allows you to preview and modify various aspects of a subscription before applying the changes.
+ * This object is deprecated in favor of the
+ * [SubscriptionContractCalculation API](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/contracts/migrate-to-subscription-calculation-api).
  *
  * Use the `SubscriptionDraft` object to:
  *
@@ -74760,6 +74827,8 @@ export type SubscriptionDraftLinesRemovedArgs = {
  * [subscription contract](https://shopify.dev/docs/api/admin-graphql/latest/objects/SubscriptionContract)
  * before it's committed. It serves as a staging area for making changes to an existing subscription or creating
  * a new one. The draft allows you to preview and modify various aspects of a subscription before applying the changes.
+ * This object is deprecated in favor of the
+ * [SubscriptionContractCalculation API](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/contracts/migrate-to-subscription-calculation-api).
  *
  * Use the `SubscriptionDraft` object to:
  *
