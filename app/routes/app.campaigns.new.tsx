@@ -52,6 +52,7 @@ import { firstPreviewParams } from "../lib/campaigns/first-preview";
 import { numberSections } from "../lib/ui/sections";
 import { SPACE } from "../lib/ui/spacing";
 import type { DraftPreview as Preview } from "../services/campaigns/draft-preview.server";
+import { Secondary } from "../components/Type";
 
 export const loader = withGuard("/app/campaigns/new", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -584,23 +585,19 @@ export default function NewCampaign() {
                 competitor computes from the live price, which is why RUBIX's own FAQ has
                 to explain that running two sales leaves a product wrong for ever. */}
             {fromFile ? (
-              <s-paragraph>
-                <s-text color="subdued">
-                  A spreadsheet sets each price directly, so there is no baseline
-                  arithmetic and no scope to choose — the file names the variants. It
-                  still becomes a campaign, which is what gives it a preview, your
-                  guardrails and a one-click revert.
-                </s-text>
-              </s-paragraph>
+              <Secondary>
+                A spreadsheet sets each price directly, so there is no baseline
+                arithmetic and no scope to choose — the file names the variants. It
+                still becomes a campaign, which is what gives it a preview, your
+                guardrails and a one-click revert.
+              </Secondary>
             ) : (
-              <s-paragraph>
-                <s-text color="subdued">
-                  Changes are computed from each variant&rsquo;s{" "}
-                  <s-text type="strong">baseline</s-text> — the price it would be if no
-                  campaign were running — never from what the storefront shows today. So
-                  running this campaign twice gives the same result as running it once.
-                </s-text>
-              </s-paragraph>
+              <Secondary>
+                Changes are computed from each variant&rsquo;s{" "}
+                <s-text type="strong">baseline</s-text> — the price it would be if no
+                campaign were running — never from what the storefront shows today. So
+                running this campaign twice gives the same result as running it once.
+              </Secondary>
             )}
 
             {/* What this rule does to prices, from the same resolver the run uses --
@@ -884,12 +881,10 @@ export default function NewCampaign() {
           collapsible here would be hand-rolled chrome in an app that has none. A
           heading that says a block can be skipped does the same job honestly, and
           it is the card's own heading now rather than a second one inside it. */}
-      <s-paragraph>
-        <s-text color="subdued">
-          Every one of these has a default that suits most campaigns. Skip them
-          unless you have a reason.
-        </s-text>
-      </s-paragraph>
+      <Secondary>
+        Every one of these has a default that suits most campaigns. Skip them
+        unless you have a reason.
+      </Secondary>
 
       <FieldGrid>
         <s-number-field

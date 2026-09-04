@@ -10,6 +10,7 @@
 import { formatCount } from "../lib/format/display";
 import { CountsRow } from "./CountsRow";
 import type { CampaignResult } from "../services/campaigns/result.server";
+import { Secondary } from "./Type";
 
 export function RunResultSection({ result }: { result: CampaignResult }) {
   const { counts, margin } = result;
@@ -111,9 +112,7 @@ export function RunResultSection({ result }: { result: CampaignResult }) {
         </s-paragraph>
       ) : null}
 
-      <s-paragraph>
-        <s-text color="subdued">{result.unavailable}</s-text>
-      </s-paragraph>
+      <Secondary>{result.unavailable}</Secondary>
     </s-section>
   );
 }

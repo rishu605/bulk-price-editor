@@ -33,6 +33,7 @@ import { PageShell } from "../components/PageShell";
 import { SPACE } from "../lib/ui/spacing";
 import { planUsage } from "../services/plan-usage.server";
 import { usageLine } from "../lib/billing/usage-line";
+import { Secondary } from "../components/Type";
 
 export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -611,12 +612,10 @@ export default function Dashboard() {
                   details={`Applies to all ${formatCount(health.variants)} variants, priced from their baselines.`}
                 />
               </Field>
-              <s-paragraph>
-                <s-text color="subdued">
-                  Creates a draft. Nothing is written until you apply it, and the next
-                  screen shows every price that would change.
-                </s-text>
-              </s-paragraph>
+              <Secondary>
+                Creates a draft. Nothing is written until you apply it, and the next
+                screen shows every price that would change.
+              </Secondary>
               <ActionRow>
                 <s-button type="submit" variant="primary" loading={busy || undefined}>
                   Create the draft
@@ -718,13 +717,11 @@ export default function Dashboard() {
           </s-stack>
 
           {health.withBaseline > health.variants ? (
-            <s-paragraph>
-              <s-text color="subdued">
-                More baselines than variants is expected: baselines are kept for products
-                you have deleted, so a campaign that priced them can still be explained
-                and reverted.
-              </s-text>
-            </s-paragraph>
+            <Secondary>
+              More baselines than variants is expected: baselines are kept for products
+              you have deleted, so a campaign that priced them can still be explained
+              and reverted.
+            </Secondary>
           ) : null}
 
           <ActionRow>

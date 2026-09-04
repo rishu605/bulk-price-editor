@@ -2,6 +2,7 @@ import { describeRunDuration } from "../../lib/planning/duration";
 import { formatCount } from "../../lib/format/display";
 import { SPACE } from "../../lib/ui/spacing";
 import type { CampaignPreview } from "../../services/campaigns/types";
+import { Secondary } from "../Type";
 
 /**
  * What is about to happen, in sentences, before anything is written.
@@ -128,13 +129,11 @@ export function ApplyConfirmation({
         {/* The one thing this app can say that none of the three competitors can. It is
             here rather than only in the help centre because this is the moment a merchant
             is deciding whether it is safe to press the button. */}
-        <s-paragraph>
-          <s-text color="subdued">
-            Every price is computed from its baseline, so applying twice gives the same
-            result. Reverting recomputes without this campaign rather than restoring a
-            saved number.
-          </s-text>
-        </s-paragraph>
+        <Secondary>
+          Every price is computed from its baseline, so applying twice gives the same
+          result. Reverting recomputes without this campaign rather than restoring a
+          saved number.
+        </Secondary>
 
         {blastRadius ? (
           <s-banner tone="warning">

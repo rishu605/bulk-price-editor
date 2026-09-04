@@ -44,6 +44,7 @@ import { HELP_ROUTE } from "../lib/errors/help-links";
 import { withGuard } from "../lib/errors/guard.server";
 import { helpNav } from "../lib/help/nav.server";
 import { SPACE } from "../lib/ui/spacing";
+import { Secondary } from "../components/Type";
 
 export const loader = withGuard("/app/help", async ({ request }: LoaderFunctionArgs) => {
   // Authenticated like every other embedded route, even though the content is public
@@ -62,11 +63,9 @@ export default function HelpIndex() {
       <s-section>
         <s-stack gap={SPACE.section}>
           {nav.lede ? <s-paragraph>{nav.lede}</s-paragraph> : null}
-          <s-paragraph>
-            <s-text color="subdued">
-              Each page opens in a new tab, so nothing you have open in here is lost.
-            </s-text>
-          </s-paragraph>
+          <Secondary>
+            Each page opens in a new tab, so nothing you have open in here is lost.
+          </Secondary>
         </s-stack>
       </s-section>
 

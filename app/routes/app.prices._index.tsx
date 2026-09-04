@@ -17,6 +17,7 @@ import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
 import { HelpNote } from "../components/HelpNote";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
+import { Secondary } from "../components/Type";
 
 const PAGE_SIZE = ROWS_PER_VIEW;
 
@@ -190,11 +191,9 @@ export default function Catalog() {
               </s-table-body>
             </s-table>
 
-            <s-paragraph>
-              <s-text color="subdued">
-                Amounts are your store&rsquo;s base price, in {currency}.
-              </s-text>
-            </s-paragraph>
+            <Secondary>
+              Amounts are your store&rsquo;s base price, in {currency}.
+            </Secondary>
 
             <Pagination page={page} total={total} pageSize={pageSize} />
           </>

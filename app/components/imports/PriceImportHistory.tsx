@@ -17,6 +17,7 @@
 import { EmptyState } from "../AsyncState";
 import { Blank } from "../Blank";
 import { formatCount } from "../../lib/format/display";
+import { Secondary } from "../Type";
 
 export interface PriceImportRow {
   id: string;
@@ -81,9 +82,7 @@ export function PriceImportHistory({
               ))}
             </s-table-body>
           </s-table>
-          <s-paragraph>
-            <s-text color="subdued">Times are your store&rsquo;s, in {timeZone}.</s-text>
-          </s-paragraph>
+          <Secondary>Times are your store&rsquo;s, in {timeZone}.</Secondary>
         </>
       )}
     </s-section>

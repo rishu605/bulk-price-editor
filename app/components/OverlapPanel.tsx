@@ -1,6 +1,7 @@
 import { formatCount } from "../lib/format/display";
 import { SPACE } from "../lib/ui/spacing";
 import type { DraftOverlap } from "../services/campaigns/draft-preview.server";
+import { Secondary } from "./Type";
 
 /**
  * What this campaign meets, and who keeps it.
@@ -56,13 +57,11 @@ export function OverlapPanel({ overlaps }: { overlaps: DraftOverlap[] }) {
         {/* The half a competitor cannot write. Their revert restores a number, so the
             order campaigns are reverted in changes the result; ours recomputes without
             the campaign, so it does not. */}
-        <s-paragraph>
-          <s-text color="subdued">
-            Campaigns never stack. Each variant is priced by exactly one of them, and
-            reverting either recomputes the rest from their baselines rather than
-            restoring a saved price — so the order you revert in does not matter.
-          </s-text>
-        </s-paragraph>
+        <Secondary>
+          Campaigns never stack. Each variant is priced by exactly one of them, and
+          reverting either recomputes the rest from their baselines rather than
+          restoring a saved price — so the order you revert in does not matter.
+        </Secondary>
       </s-stack>
     </s-banner>
   );

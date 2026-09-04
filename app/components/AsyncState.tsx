@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { PAD, SPACE } from "../lib/ui/spacing";
+import { Secondary } from "./Type";
 
 /**
  * The three states a data-bearing section can be in, in one place.
@@ -41,9 +42,7 @@ export function EmptyState({ title, description, action }: EmptyStateProps) {
         <s-heading>{title}</s-heading>
         {description ? (
           <s-box maxInlineSize="520px">
-            <s-paragraph>
-              <s-text color="subdued">{description}</s-text>
-            </s-paragraph>
+            <Secondary>{description}</Secondary>
           </s-box>
         ) : null}
         {action ? <s-button href={action.href}>{action.label}</s-button> : null}
