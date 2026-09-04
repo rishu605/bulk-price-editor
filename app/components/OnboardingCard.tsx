@@ -143,7 +143,19 @@ function Step({
         // One comma only. Polaris splits a responsive value on the comma to separate
         // "when the query matches" from "otherwise", so a second one anywhere in the
         // value stops the whole thing parsing and it falls back to `none`.
-        gridTemplateColumns="@container (inline-size <= 500px) auto 1fr, auto 1fr auto"
+        // Four columns, not three. "Why?" and the action shared one cell, and a cell
+        // sized `auto` is as wide as its contents — so where "Why?" landed depended on how
+        // wide *that row's* button happened to be. On the deployed build the three sat at
+        // three different x positions about a hundred pixels apart, and the eye read three
+        // ragged rows rather than a list.
+        //
+        // A column each fixes both halves: "Why?" lines up down the card, and the actions
+        // share an edge because they share a column.
+        //
+        // One comma only. Polaris splits a responsive value on the comma to separate
+        // "when the query matches" from "otherwise", so a second one anywhere in the
+        // value stops the whole thing parsing and it falls back to `none`.
+        gridTemplateColumns="@container (inline-size <= 500px) auto 1fr, auto 1fr auto auto"
         gap={SPACE.item}
         alignItems="center"
       >
@@ -159,26 +171,27 @@ function Step({
           {isNext ? <s-badge tone="info">Next</s-badge> : null}
         </s-stack>
 
-        {/* Why before the action, deliberately: when the row wraps it is the action
-            that should fall to the next line, not the explanation, which would then read
-            as belonging to the step below it. */}
+        {/* Its own column, and before the action deliberately: when the row wraps it is
+            the action that should fall to the next line, not the explanation, which would
+            then read as belonging to the step below it.
+
+            Not on a finished step: the reasoning for work already done is the one thing on
+            this card nobody needs.
+
+            An icon on the toggle, because a tertiary control is text with no border and
+            "Why?" beside a real button read as a caption for it. The same question mark
+            `HelpNote` uses, so the two say "this is help" the same way. */}
+        {step.done ? null : (
+          <s-button
+            variant="tertiary"
+            icon="question-circle"
+            onClick={() => setWhy((open) => !open)}
+          >
+            {why ? "Hide why" : "Why?"}
+          </s-button>
+        )}
+
         <ActionRow>
-          {/* Not on a finished step. The reasoning for work already done is the one
-              thing on this card nobody needs, and on a completed row — which has no
-              action beside it — it was also the only thing left hanging off the right
-              edge, so the column of actions read as ragged. */}
-          {/* An icon on the toggle, because a tertiary control is text with no border
-              and "Why?" beside a real button read as a caption for it. The same question
-              mark `HelpNote` uses, so the two say "this is help" the same way. */}
-          {step.done ? null : (
-            <s-button
-              variant="tertiary"
-              icon="question-circle"
-              onClick={() => setWhy((open) => !open)}
-            >
-              {why ? "Hide why" : "Why?"}
-            </s-button>
-          )}
           {/* Black on the step being asked for, bordered on the ones after it. A
               checklist whose every row shouts equally is a checklist that has not said
               what to do next — which is the only thing it is for. See `ActionRow` for
