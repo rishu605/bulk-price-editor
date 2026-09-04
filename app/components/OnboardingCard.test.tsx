@@ -163,6 +163,25 @@ describe("the checklist reads as a list", () => {
     expect(html).toMatch(/gridtemplatecolumns="[^"]*auto 1fr auto auto"/i);
   });
 
+  it("puts every row in one grid, because columns only line up inside one", () => {
+    // Giving "Why?" its own column was necessary and not sufficient. Each step used to
+    // render its own grid, so on the deployed build the three "Why?" controls still sat
+    // at 608, 510 and 504 and the three buttons' left edges at 721, 626 and 621.
+    // `UpcomingCampaigns` records the same lesson: one grid for every row, not a grid
+    // per row.
+    expect(html.match(/<s-grid[ >]/g) ?? []).toHaveLength(1);
+  });
+
+  it("spans the row with the things that belong to the whole step", () => {
+    // The rule between steps and the opened explanation are about the step, not about
+    // the column they sit under.
+    const open = renderToStaticMarkup(
+      <OnboardingCard state={onboarding({ ...fresh, hasBaselines: true })} actions={{ sync: SYNC }} />,
+    );
+
+    expect(open).toMatch(/gridcolumn="span 4"/i);
+  });
+
   it("does not put them back in one cell", () => {
     // The shape that caused it: both inside a single `ActionRow`. One `ActionRow` per row
     // is still right — it holds the action — but "Why?" is outside it.

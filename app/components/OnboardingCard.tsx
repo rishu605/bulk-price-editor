@@ -84,21 +84,37 @@ export function OnboardingCard({
           <s-text color="subdued">Nothing here changes a price until you apply one.</s-text>
         </s-stack>
 
-        <s-stack gap={SPACE.item}>
+        {/* One grid for every row, not a grid per row.
+
+            `UpcomingCampaigns` records this exact lesson and it had not been applied here:
+            "Columns sized per row would place each campaign's name wherever its own badge
+            happened to end — and three names at three different distances from the edge
+            read as three unrelated things rather than as a list."
+
+            Giving "Why?" its own column was necessary and not sufficient. A grid's columns
+            only line up *within one grid*, and each step was rendering its own — so on the
+            deployed build the three "Why?" controls still sat at 608, 510 and 504, and the
+            three buttons' left edges at 721, 626 and 621. One grid is what makes a column
+            a column.
+
+            Four columns: the status glyph, the title, the disclosure, the action. Each
+            step contributes exactly four cells, and the two things that span the row —
+            the rule between steps and the opened explanation — say so. */}
+        <s-grid
+          gridTemplateColumns="@container (inline-size <= 500px) auto 1fr, auto 1fr auto auto"
+          gap={SPACE.item}
+          alignItems="center"
+        >
           {state.steps.map((step, index) => (
-            <s-stack key={step.id} gap={SPACE.item}>
-              {/* A rule between steps rather than a border around each. The separator is
-                  the same information as the box — where one step stops — at a fraction
-                  of the ink, and it does not nest a card inside a card. */}
-              {index > 0 ? <s-divider /> : null}
-              <Step
-                step={step}
-                isNext={step.id === state.next?.id}
-                action={actions?.[step.id]}
-              />
-            </s-stack>
+            <Step
+              key={step.id}
+              step={step}
+              isNext={step.id === state.next?.id}
+              action={actions?.[step.id]}
+              divided={index > 0}
+            />
           ))}
-        </s-stack>
+        </s-grid>
       </s-stack>
     </Card>
   );
@@ -126,95 +142,90 @@ function Step({
   step,
   isNext,
   action,
+  divided,
 }: {
   step: OnboardingStep;
   isNext: boolean;
   action?: ReactNode;
+  /** A rule above this step, for every row but the first. */
+  divided: boolean;
 }) {
   const [why, setWhy] = useState(false);
 
   return (
-    <s-stack gap={SPACE.tight}>
-      <s-grid
-        // Three columns, collapsing to two. `auto 1fr auto` keeps the status glyph and
-        // the action tight to their content and gives the title everything left over,
-        // which is what stops the row from breaking into three.
-        //
-        // One comma only. Polaris splits a responsive value on the comma to separate
-        // "when the query matches" from "otherwise", so a second one anywhere in the
-        // value stops the whole thing parsing and it falls back to `none`.
-        // Four columns, not three. "Why?" and the action shared one cell, and a cell
-        // sized `auto` is as wide as its contents — so where "Why?" landed depended on how
-        // wide *that row's* button happened to be. On the deployed build the three sat at
-        // three different x positions about a hundred pixels apart, and the eye read three
-        // ragged rows rather than a list.
-        //
-        // A column each fixes both halves: "Why?" lines up down the card, and the actions
-        // share an edge because they share a column.
-        //
-        // One comma only. Polaris splits a responsive value on the comma to separate
-        // "when the query matches" from "otherwise", so a second one anywhere in the
-        // value stops the whole thing parsing and it falls back to `none`.
-        gridTemplateColumns="@container (inline-size <= 500px) auto 1fr, auto 1fr auto auto"
-        gap={SPACE.item}
-        alignItems="center"
-      >
-        <StatusIcon done={step.done} isNext={isNext} />
+    <>
+      {/* A rule between steps rather than a border around each. The separator is the same
+          information as the box — where one step stops — at a fraction of the ink, and it
+          does not nest a card inside a card. Spanning the row, because it separates whole
+          steps rather than one column of them. */}
+      {divided ? (
+        <s-grid-item gridColumn="span 4">
+          <s-divider />
+        </s-grid-item>
+      ) : null}
 
-        <s-stack direction="inline" gap={SPACE.item} alignItems="center">
-          {/* Subdued once done. A finished step should still be findable — it is the
-              evidence the checklist is being honest — without competing with the step
-              the merchant is actually being asked to do. */}
-          <s-text type={step.done ? undefined : "strong"} color={step.done ? "subdued" : undefined}>
-            {step.title}
-          </s-text>
-          {isNext ? <s-badge tone="info">Next</s-badge> : null}
-        </s-stack>
+      <StatusIcon done={step.done} isNext={isNext} />
 
-        {/* Its own column, and before the action deliberately: when the row wraps it is
-            the action that should fall to the next line, not the explanation, which would
-            then read as belonging to the step below it.
+      <s-stack direction="inline" gap={SPACE.item} alignItems="center">
+        {/* Subdued once done. A finished step should still be findable — it is the
+            evidence the checklist is being honest — without competing with the step the
+            merchant is actually being asked to do. */}
+        <s-text type={step.done ? undefined : "strong"} color={step.done ? "subdued" : undefined}>
+          {step.title}
+        </s-text>
+        {isNext ? <s-badge tone="info">Next</s-badge> : null}
+      </s-stack>
 
-            Not on a finished step: the reasoning for work already done is the one thing on
-            this card nobody needs.
+      {/* Its own column, and before the action deliberately: when the row wraps it is the
+          action that should fall to the next line, not the explanation, which would then
+          read as belonging to the step below it.
 
-            An icon on the toggle, because a tertiary control is text with no border and
-            "Why?" beside a real button read as a caption for it. The same question mark
-            `HelpNote` uses, so the two say "this is help" the same way. */}
-        {step.done ? null : (
-          <s-button
-            variant="tertiary"
-            icon="question-circle"
-            onClick={() => setWhy((open) => !open)}
-          >
-            {why ? "Hide why" : "Why?"}
+          Not on a finished step: the reasoning for work already done is the one thing on
+          this card nobody needs.
+
+          An icon on the toggle, because a tertiary control is text with no border and
+          "Why?" beside a real button read as a caption for it. The same question mark
+          `HelpNote` uses, so the two say "this is help" the same way. */}
+      {step.done ? (
+        <s-box />
+      ) : (
+        <s-button
+          variant="tertiary"
+          icon="question-circle"
+          onClick={() => setWhy((open) => !open)}
+        >
+          {why ? "Hide why" : "Why?"}
+        </s-button>
+      )}
+
+      <ActionRow>
+        {/* Black on the step being asked for, bordered on the ones after it. A checklist
+            whose every row shouts equally is a checklist that has not said what to do
+            next — which is the only thing it is for. See `ActionRow` for the vocabulary.
+
+            The page's own control wins where it supplied one. A finished step keeps none
+            either way: `onboarding()` drops the href and the label once a step is done,
+            and a page that hands over a form has to do the same or the checklist would
+            offer to redo work it has just ticked off. */}
+        {step.done ? null : action}
+        {!action && step.href && step.cta ? (
+          <s-button href={step.href} variant={isNext ? "primary" : "secondary"}>
+            {step.cta}
           </s-button>
-        )}
-
-        <ActionRow>
-          {/* Black on the step being asked for, bordered on the ones after it. A
-              checklist whose every row shouts equally is a checklist that has not said
-              what to do next — which is the only thing it is for. See `ActionRow` for
-              the vocabulary. */}
-          {/* The page's own control wins where it supplied one. A finished step keeps
-              none either way: `onboarding()` drops the href and the label once a step is
-              done, and a page that hands over a form has to do the same or the checklist
-              would offer to redo work it has just ticked off. */}
-          {step.done ? null : action}
-          {!action && step.href && step.cta ? (
-            <s-button href={step.href} variant={isNext ? "primary" : "secondary"}>
-              {step.cta}
-            </s-button>
-          ) : null}
-        </ActionRow>
-      </s-grid>
+        ) : null}
+      </ActionRow>
 
       {/* Progressive disclosure, not a link away. The reasoning belongs next to the step
           it explains — sending a merchant to a docs page to find out why they are being
-          asked to sync is how they end up not syncing. */}
+          asked to sync is how they end up not syncing.
+
+          Spanning the row: it explains the whole step, not the column it opened from. */}
       {why ? (
-        <Secondary>{step.detail}</Secondary>
+        <s-grid-item gridColumn="span 4">
+          <Secondary>{step.detail}</Secondary>
+        </s-grid-item>
       ) : null}
-    </s-stack>
+    </>
   );
 }
+
