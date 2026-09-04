@@ -24,6 +24,7 @@ import { CountsRow } from "../components/CountsRow";
 import { Field } from "../components/FieldGrid";
 import { HelpNote } from "../components/HelpNote";
 import { SPACE } from "../lib/ui/spacing";
+import { Secondary } from "../components/Type";
 
 export const loader = withGuard("/app/settings/diagnostics", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -222,12 +223,10 @@ export default function Debug() {
         <s-paragraph>
           One code dominating usually means one broken thing, not fifty.
         </s-paragraph>
-        <s-paragraph>
-          <s-text color="subdued">
-            The breakdown counts the fifty most recent failures — the same rows the table
-            lists.
-          </s-text>
-        </s-paragraph>
+        <Secondary>
+          The breakdown counts the fifty most recent failures — the same rows the table
+          lists.
+        </Secondary>
       </HelpNote>
     </PageShell>
   );

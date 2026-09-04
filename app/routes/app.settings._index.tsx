@@ -23,6 +23,7 @@ import { Field, FieldGrid, FullRow } from "../components/FieldGrid";
 import { HelpNote } from "../components/HelpNote";
 import { formatCount } from "../lib/format/display";
 import { SPACE } from "../lib/ui/spacing";
+import { Secondary } from "../components/Type";
 
 export const loader = withGuard("/app/settings", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -163,13 +164,11 @@ export default function Settings() {
               Two of the controls below — "never price at or below cost" and what to do when
               a cost-based floor meets a variant without one — mean nothing until you know
               how many variants that second case actually is. */}
-          <s-paragraph>
-            <s-text color="subdued">
-              {formatCount(withCost)} of {formatCount(variants)} variants have a cost
-              ({costCoverage}%). Cost-based floors only constrain those; the last setting
-              in this section decides the rest.
-            </s-text>
-          </s-paragraph>
+          <Secondary>
+            {formatCount(withCost)} of {formatCount(variants)} variants have a cost
+            ({costCoverage}%). Cost-based floors only constrain those; the last setting
+            in this section decides the rest.
+          </Secondary>
 
           {settings.neverBelowCost && costCoverage < 100 ? (
             <s-banner tone="warning">
@@ -392,11 +391,9 @@ export default function Settings() {
           Rounding down can push an otherwise-legal price under the line, so checking
           earlier would let it through.
         </s-paragraph>
-        <s-paragraph>
-          <s-text color="subdued">
-            A price is never zero or negative, whatever these settings say.
-          </s-text>
-        </s-paragraph>
+        <Secondary>
+          A price is never zero or negative, whatever these settings say.
+        </Secondary>
       </HelpNote>
     </PageShell>
   );

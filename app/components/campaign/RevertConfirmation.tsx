@@ -1,6 +1,7 @@
 import { formatCount } from "../../lib/format/display";
 import { SPACE } from "../../lib/ui/spacing";
 import type { KeepersAfterRevert } from "../../services/campaigns/keepers.server";
+import { Secondary } from "../Type";
 
 /**
  * The modal's id, and the handle the header's button opens it by.
@@ -73,22 +74,18 @@ export function RevertConfirmation({
           ) : null}
 
           {counts.deleted > 0 ? (
-            <s-paragraph>
-              <s-text color="subdued">
-                {formatCount(counts.deleted)}{" "}
-                {counts.deleted === 1 ? "was" : "were"} deleted in Shopify. Nothing is
-                written for {counts.deleted === 1 ? "it" : "them"}.
-              </s-text>
-            </s-paragraph>
+            <Secondary>
+              {formatCount(counts.deleted)}{" "}
+              {counts.deleted === 1 ? "was" : "were"} deleted in Shopify. Nothing is
+              written for {counts.deleted === 1 ? "it" : "them"}.
+            </Secondary>
           ) : null}
         </s-stack>
 
         {/* The half no competitor can render: not "some prices may not return to normal",
             but which campaign holds which variants, by name. */}
         {pending ? (
-          <s-paragraph>
-            <s-text color="subdued">Working out what the prices would become…</s-text>
-          </s-paragraph>
+          <Secondary>Working out what the prices would become…</Secondary>
         ) : null}
 
         {keepers && keepers.keepers.length > 0 ? (
@@ -110,12 +107,10 @@ export function RevertConfirmation({
         ) : null}
 
         {keepers && keepers.keepers.length === 0 && !pending ? (
-          <s-paragraph>
-            <s-text color="subdued">
-              No other campaign covers these variants, so every one of them returns to its
-              baseline.
-            </s-text>
-          </s-paragraph>
+          <Secondary>
+            No other campaign covers these variants, so every one of them returns to its
+            baseline.
+          </Secondary>
         ) : null}
       </s-stack>
 

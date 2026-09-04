@@ -35,6 +35,7 @@ import { SPACE } from "../lib/ui/spacing";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { ShowingSome } from "../components/Pagination";
 import { HelpNote } from "../components/HelpNote";
+import { Secondary } from "../components/Type";
 
 export const loader = withGuard("/app/settings/segments", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -242,13 +243,11 @@ export default function Segments() {
             save it.
           </s-text>
         </s-paragraph>
-        <s-paragraph>
-          <s-text color="subdued">
-            Neither is safer — they answer different questions. A segment cannot switch
-            between them, because that would change what a running campaign prices. Make a
-            new one.
-          </s-text>
-        </s-paragraph>
+        <Secondary>
+          Neither is safer — they answer different questions. A segment cannot switch
+          between them, because that would change what a running campaign prices. Make a
+          new one.
+        </Secondary>
       </HelpNote>
     </PageShell>
   );

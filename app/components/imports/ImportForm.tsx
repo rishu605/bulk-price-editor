@@ -10,6 +10,7 @@ import { CsvDropZone } from "./CsvDropZone";
 import { UnsavedChanges } from "../UnsavedChanges";
 import { downloadCsv } from "../../lib/reporting/csv";
 import { SPACE } from "../../lib/ui/spacing";
+import { Secondary } from "../Type";
 
 /**
  * One CSV import, whatever the file is for.
@@ -272,12 +273,10 @@ export function ImportReport({
           </s-table>
 
           {problems.length > limit ? (
-            <s-paragraph>
-              <s-text color="subdued">
-                Showing the first {limit} of {problems.length}.
-                {download ? " The download has all of them." : ""}
-              </s-text>
-            </s-paragraph>
+            <Secondary>
+              Showing the first {limit} of {problems.length}.
+              {download ? " The download has all of them." : ""}
+            </Secondary>
           ) : null}
         </>
       )}

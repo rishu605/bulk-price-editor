@@ -6,6 +6,7 @@ import { exampleRowFrom, StorefrontExample } from "./StorefrontExample";
 import { OverlapPanel } from "./OverlapPanel";
 import { SPACE } from "../lib/ui/spacing";
 import type { DraftPreview as Preview } from "../services/campaigns/draft-preview.server";
+import { Secondary } from "./Type";
 
 /**
  * What this rule would do to prices, before the campaign exists.
@@ -49,16 +50,14 @@ export function DraftPreview({
 }) {
   if (!preview) {
     return (
-      <s-paragraph>
-        <s-text color="subdued">
-          {/* "Set a rule" is wrong while one is being priced — and on first load a rule
-              is already set, so it would be wrong immediately. The panel used to be
-              primed by the loader, which is what made that sentence unreachable; asking
-              from the client instead (#468) makes this the first thing a merchant reads,
-              for about a second. */}
-          {pending ? "Working out what this would do…" : "Set a rule to see what it would do."}
-        </s-text>
-      </s-paragraph>
+      <Secondary>
+        {/* "Set a rule" is wrong while one is being priced — and on first load a rule
+            is already set, so it would be wrong immediately. The panel used to be
+            primed by the loader, which is what made that sentence unreachable; asking
+            from the client instead (#468) makes this the first thing a merchant reads,
+            for about a second. */}
+        {pending ? "Working out what this would do…" : "Set a rule to see what it would do."}
+      </Secondary>
     );
   }
 
@@ -119,11 +118,9 @@ export function DraftPreview({
       {/* Every row that will not move, and why. A merchant who expected 400 and sees 380
           needs the other 20 explained here rather than after the run. */}
       {preview.alreadyCorrect > 0 ? (
-        <s-paragraph>
-          <s-text color="subdued">
-            {formatCount(preview.alreadyCorrect)} already at this price.
-          </s-text>
-        </s-paragraph>
+        <Secondary>
+          {formatCount(preview.alreadyCorrect)} already at this price.
+        </Secondary>
       ) : null}
       {preview.skipped > 0 ? (
         <s-paragraph>
@@ -152,13 +149,11 @@ export function DraftPreview({
           Absent when no row has drifted, which is the ordinary case. */}
       {preview.rows.some((row) => row.live) ? (
         <s-stack gap={SPACE.tight}>
-          <s-paragraph>
-            <s-text color="subdued">
-              Some of these show a <s-text type="strong">live</s-text> price that is not
-              their baseline: either another campaign is pricing them, or the storefront
-              was changed outside this app.
-            </s-text>
-          </s-paragraph>
+          <Secondary>
+            Some of these show a <s-text type="strong">live</s-text> price that is not
+            their baseline: either another campaign is pricing them, or the storefront
+            was changed outside this app.
+          </Secondary>
           {/* A tertiary button, not a link. `ActionRow`'s vocabulary reserves blue text
               for a word *inside* a sentence where colour is doing necessary work; this
               is a standalone way out of the card, which is what tertiary is for. */}

@@ -3,6 +3,7 @@ import { useState, type ReactNode } from "react";
 import type { OnboardingState, OnboardingStep, StepId } from "../lib/onboarding/steps";
 import { SPACE } from "../lib/ui/spacing";
 import { ActionRow } from "./ActionRow";
+import { Secondary } from "./Type";
 
 /**
  * The checklist, until the first campaign has run cleanly.
@@ -191,9 +192,7 @@ function Step({
           it explains — sending a merchant to a docs page to find out why they are being
           asked to sync is how they end up not syncing. */}
       {why ? (
-        <s-paragraph>
-          <s-text color="subdued">{step.detail}</s-text>
-        </s-paragraph>
+        <Secondary>{step.detail}</Secondary>
       ) : null}
     </s-stack>
   );

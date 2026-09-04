@@ -32,6 +32,7 @@ import { RouteBoundary } from "../components/RouteBoundary";
 import { HelpNote } from "../components/HelpNote";
 import { withGuard } from "../lib/errors/guard.server";
 import { SPACE } from "../lib/ui/spacing";
+import { Secondary } from "../components/Type";
 
 /**
  * Which build this is.
@@ -160,12 +161,10 @@ export default function Support() {
         {/* Listed, not summarised. A merchant cannot consent to "diagnostic
             information", and the fastest way to make somebody distrust a Send button is
             to be vague about it one time. */}
-        <s-paragraph>
-          <s-text color="subdued">
-            Sent with your message so we do not have to ask. No prices are included — this
-            is the same rule our error reporting follows.
-          </s-text>
-        </s-paragraph>
+        <Secondary>
+          Sent with your message so we do not have to ask. No prices are included — this
+          is the same rule our error reporting follows.
+        </Secondary>
         <s-table>
           <s-table-header-row>
             <s-table-header listSlot="primary">What</s-table-header>
