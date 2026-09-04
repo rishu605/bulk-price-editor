@@ -17,7 +17,7 @@
     "prisma": "prisma",
     "graphql-codegen": "graphql-codegen",
     "vite": "vite",
-    "typecheck": "react-router typegen && tsc --noEmit",
+    "typecheck": "rm -rf .react-router/types && react-router typegen && tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "worker": "tsx scripts/worker.ts",
