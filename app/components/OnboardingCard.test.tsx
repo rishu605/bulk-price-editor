@@ -146,3 +146,32 @@ describe("a shop that has finished", () => {
     ).toBe("");
   });
 });
+
+describe("the checklist reads as a list", () => {
+  /**
+   * "Why?" and the action shared one grid cell, and a cell sized `auto` is as wide as its
+   * contents — so where "Why?" landed depended on how wide *that row's* button happened to
+   * be. On the deployed build the three sat at three different x positions about a hundred
+   * pixels apart, and the eye read three ragged rows rather than a list.
+   *
+   * A column each fixes both halves: "Why?" lines up down the card, and the actions share
+   * an edge because they share a column.
+   */
+  const html = render(fresh);
+
+  it("gives Why? and the action a column each", () => {
+    expect(html).toMatch(/gridtemplatecolumns="[^"]*auto 1fr auto auto"/i);
+  });
+
+  it("does not put them back in one cell", () => {
+    // The shape that caused it: both inside a single `ActionRow`. One `ActionRow` per row
+    // is still right — it holds the action — but "Why?" is outside it.
+    const row = html.slice(html.indexOf("Capture your baselines"));
+    const why = row.indexOf("Why?");
+    const actionRow = row.indexOf("Sync catalogue");
+
+    expect(why).toBeGreaterThan(-1);
+    expect(actionRow).toBeGreaterThan(why);
+  });
+});
+
