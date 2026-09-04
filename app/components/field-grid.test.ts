@@ -82,8 +82,16 @@ describe("a single control is sized the same way", () => {
     // Two right edges in one card is what read as odd — the gutter itself is correct,
     // because a field the width of a card is the failure this module exists to prevent.
     expect(grid).toContain("export const MEASURE");
-    expect(grid).toMatch(/MEASURE = `calc\(\$\{FIELD\.medium\} \* 2/);
+    expect(grid).toMatch(/MEASURE = `\$\{px\(FIELD\.medium\) \* 2 \+ GRID_GAP\}px`/);
     expect(grid).toContain("maxInlineSize={MEASURE}");
+  });
+
+  it("expresses it in pixels, because Polaris will not take a calc", () => {
+    // Every size prop is typed `${number}px | ${number}% | '0'`. The first attempt at
+    // this shipped a `calc(...)` string, which typechecked clean only because a corrupted
+    // `.react-router/types` was failing the run before it reached these files.
+    expect(grid).not.toContain("calc(");
+    expect(grid).toContain("const GRID_GAP");
   });
 
   it("shares that measure with the prose above the fields", () => {

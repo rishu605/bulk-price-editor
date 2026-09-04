@@ -39,10 +39,22 @@ export const FIELD = {
  * what actually read as odd — not the gutter, which is correct. A field the width of a
  * card is the failure this whole module exists to prevent.
  *
- * `calc` rather than arithmetic here: `SPACE.section` is a Polaris token, not a number,
- * so the gap is only known to the browser.
+ * ## Why this is arithmetic and not `calc()`
+ *
+ * `calc(...)` is what you would write, and Polaris will not take it: every size prop is
+ * typed `` `${number}px` | `${number}%` | '0' ``, so a `calc` string is a type error —
+ * and the first attempt at this shipped one, which typechecked clean only because a
+ * corrupted `.react-router/types` was failing the run before it reached these files.
+ *
+ * So the gap is a number here. `GRID_GAP` is Polaris' `base` space token in pixels, and
+ * it is the one value in this file that has to be kept in step with something outside it
+ * — hence the name and this paragraph rather than a bare `16`.
  */
-export const MEASURE = `calc(${FIELD.medium} * 2 + var(--s-space-base, 1rem))`;
+const GRID_GAP = 16;
+
+const px = (value: string) => Number.parseInt(value, 10);
+
+export const MEASURE = `${px(FIELD.medium) * 2 + GRID_GAP}px` as const;
 
 /**
  * One control, at the width of what it holds.

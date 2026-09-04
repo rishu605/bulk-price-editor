@@ -54,7 +54,7 @@ describe("an empty state is an answer, not a missing table", () => {
     // this component's own — see `MEASURE`.
     const html = render(<EmptyState title="No variants yet" description={"a ".repeat(200)} />);
 
-    expect(html).toMatch(/maxinlinesize="calc\(/i);
+    expect(html).toMatch(/maxinlinesize="\d+px"/i);
   });
 
   it("renders a way out only when there is one", () => {
