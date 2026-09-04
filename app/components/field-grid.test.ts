@@ -75,8 +75,30 @@ describe("a single control is sized the same way", () => {
     expect(grid).toMatch(/long:\s*"\d+px"/);
   });
 
-  it("caps the grid too, because two columns of a wide card are still too wide", () => {
-    expect(grid).toMatch(/maxInlineSize="\d+px"/);
+  it("caps the grid to a measure derived from the field widths", () => {
+    // It was a flat `720px`, which was arbitrary in both directions: wider than two
+    // fields need and narrower than the card, so a settings card's fields stopped a
+    // quarter short of the right edge while the prose above them ran the full width.
+    // Two right edges in one card is what read as odd — the gutter itself is correct,
+    // because a field the width of a card is the failure this module exists to prevent.
+    expect(grid).toContain("export const MEASURE");
+    expect(grid).toMatch(/MEASURE = `\$\{px\(FIELD\.medium\) \* 2 \+ GRID_GAP\}px`/);
+    expect(grid).toContain("maxInlineSize={MEASURE}");
+  });
+
+  it("expresses it in pixels, because Polaris will not take a calc", () => {
+    // Every size prop is typed `${number}px | ${number}% | '0'`. The first attempt at
+    // this shipped a `calc(...)` string, which typechecked clean only because a corrupted
+    // `.react-router/types` was failing the run before it reached these files.
+    expect(grid).not.toContain("calc(");
+    expect(grid).toContain("const GRID_GAP");
+  });
+
+  it("shares that measure with the prose above the fields", () => {
+    // The whole point: one card, one right edge.
+    const card = sourceOf(process.cwd(), "app", "components", "Card.tsx");
+
+    expect(card).toContain("maxInlineSize={MEASURE}");
   });
 
   it("gives a single field a definite width, not a ceiling", () => {

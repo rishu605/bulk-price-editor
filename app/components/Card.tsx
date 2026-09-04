@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { ActionRow } from "./ActionRow";
+import { MEASURE } from "./FieldGrid";
 import { Lede, Secondary } from "./Type";
 import { SPACE } from "../lib/ui/spacing";
 
@@ -64,12 +65,25 @@ export function Card({
   actions?: ReactNode;
   children?: ReactNode;
 }) {
+  /* The card's prose stops where its fields stop.
+
+     A settings card's fields end at the measure and its lede ran the full width of the
+     card, so one card had two right edges — the fields looked like they had given up a
+     quarter of the space while the sentence above them had not. Prose has its own reason
+     to be capped anyway: a line of text the width of this card is past the measure at
+     which a reader reliably finds the start of the next one.
+
+     Only the prose. A table, a preview or a set of tiles is content whose width is its
+     own business, and capping those is how a card ends up with a column of white space
+     down its right-hand side. */
   const intro =
     lede || secondary ? (
-      <s-stack gap={SPACE.tight}>
-        {lede ? <Lede>{lede}</Lede> : null}
-        {secondary ? <Secondary>{secondary}</Secondary> : null}
-      </s-stack>
+      <s-box maxInlineSize={MEASURE}>
+        <s-stack gap={SPACE.tight}>
+          {lede ? <Lede>{lede}</Lede> : null}
+          {secondary ? <Secondary>{secondary}</Secondary> : null}
+        </s-stack>
+      </s-box>
     ) : null;
 
   return (

@@ -29,6 +29,34 @@ export const FIELD = {
 } as const;
 
 /**
+ * How wide a card's content is allowed to be — its measure — and the one number every
+ * part of a card shares.
+ *
+ * Two `medium` columns and the gap between them. Derived rather than typed, because the
+ * flat `720px` it replaces was neither: it was wider than two fields need and narrower
+ * than the card, so on a settings card the fields stopped a quarter short of the right
+ * edge while **the prose above them ran the full width**. Two right edges in one card is
+ * what actually read as odd — not the gutter, which is correct. A field the width of a
+ * card is the failure this whole module exists to prevent.
+ *
+ * ## Why this is arithmetic and not `calc()`
+ *
+ * `calc(...)` is what you would write, and Polaris will not take it: every size prop is
+ * typed `` `${number}px` | `${number}%` | '0' ``, so a `calc` string is a type error —
+ * and the first attempt at this shipped one, which typechecked clean only because a
+ * corrupted `.react-router/types` was failing the run before it reached these files.
+ *
+ * So the gap is a number here. `GRID_GAP` is Polaris' `base` space token in pixels, and
+ * it is the one value in this file that has to be kept in step with something outside it
+ * — hence the name and this paragraph rather than a bare `16`.
+ */
+const GRID_GAP = 16;
+
+const px = (value: string) => Number.parseInt(value, 10);
+
+export const MEASURE = `${px(FIELD.medium) * 2 + GRID_GAP}px` as const;
+
+/**
  * One control, at the width of what it holds.
  *
  * A wrapper rather than a prop because Polaris fields have no width of their own — the
@@ -88,7 +116,9 @@ export function FieldGrid({ children }: { children: ReactNode }) {
       // percentage needs. Capping the grid rather than each field keeps the two columns
       // the same width, so the labels down each side stay in line -- fields sized
       // individually inside a grid would be tidy on their own and ragged together.
-      maxInlineSize="720px"
+      // The card's measure, shared with its prose so the two have one right edge. See
+      // `MEASURE`: the flat number this replaces was arbitrary in both directions.
+      maxInlineSize={MEASURE}
       // One comma. Polaris splits a responsive value on it to separate "when the query
       // matches" from "otherwise", so `repeat(2, 1fr)` is unparseable and falls back to
       // `none` — which stacks everything full width again, i.e. looks exactly like the
