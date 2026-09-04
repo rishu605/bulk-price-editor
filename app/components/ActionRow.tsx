@@ -41,6 +41,21 @@ import { SPACE } from "../lib/ui/spacing";
  *   row would be more ink than the rows. The icon is what makes it a control rather than
  *   a caption, so it is not optional; `action-row.test.tsx` refuses one without.
  *
+ * ## Inside a table row
+ *
+ * The same four, with one extra question, because a table is scanned rather than read and
+ * whatever is in the last column is repeated on every row.
+ *
+ * **A row action is quiet when it only reveals, and bordered when it changes something.**
+ * Baselines' History opens a panel and closes it again, so it is tertiary; Duplicate makes
+ * a campaign, Revert writes a price, and the drift queue's three decide what happens to a
+ * price that moved — so those are secondary.
+ *
+ * That line was not being held: Price drift bordered its three from the start while the
+ * campaigns list left Duplicate as text, so two tables were following different rules for
+ * the same kind of control. `action-row.test.tsx` refuses a form submit inside a table
+ * cell that renders as text.
+ *
  * `s-button` takes an `href`, so a secondary button that navigates is still an anchor —
  * middle-click and "open in new tab" behave the way a merchant expects, whichever of
  * these it is.

@@ -246,7 +246,13 @@ export function CampaignListView({
                         <fetcher.Form method="post">
                           <input type="hidden" name="intent" value="duplicate" />
                           <input type="hidden" name="campaignId" value={campaign.id} />
-                          <s-button type="submit" variant="tertiary" icon="duplicate">
+                          {/* Bordered, because it makes something. A row's action is
+                              quiet when it only reveals — Baselines' History opens a panel
+                              and closes it again — and bordered when it changes state, and
+                              duplicating creates a campaign. Price drift already bordered
+                              its three, so the two tables were following different rules
+                              for the same kind of control. */}
+                          <s-button type="submit" variant="secondary" icon="duplicate">
                             Duplicate
                           </s-button>
                         </fetcher.Form>
