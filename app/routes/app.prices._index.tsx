@@ -18,6 +18,7 @@ import { PageShell } from "../components/PageShell";
 import { HelpNote } from "../components/HelpNote";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { Secondary } from "../components/Type";
+import { TableBlock } from "../components/TableBlock";
 
 const PAGE_SIZE = ROWS_PER_VIEW;
 
@@ -134,7 +135,15 @@ export default function Catalog() {
           )
         ) : (
           <>
-            <s-table>
+                        <TableBlock
+              caption={
+<Secondary>
+              Amounts are your store&rsquo;s base price, in {currency}.
+            </Secondary>
+              }
+              pagination={<Pagination page={page} total={total} pageSize={pageSize} />}
+            >
+<s-table>
               <s-table-header-row>
                 <s-table-header listSlot="primary">Variant</s-table-header>
                 <s-table-header listSlot="secondary">SKU</s-table-header>
@@ -190,12 +199,7 @@ export default function Catalog() {
                 ))}
               </s-table-body>
             </s-table>
-
-            <Secondary>
-              Amounts are your store&rsquo;s base price, in {currency}.
-            </Secondary>
-
-            <Pagination page={page} total={total} pageSize={pageSize} />
+            </TableBlock>
           </>
         )}
       </s-section>

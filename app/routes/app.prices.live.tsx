@@ -26,6 +26,7 @@ import { PageShell } from "../components/PageShell";
 import { Field } from "../components/FieldGrid";
 import { SPACE } from "../lib/ui/spacing";
 import { Card } from "../components/Card";
+import { TableBlock } from "../components/TableBlock";
 
 /** Filters that ride in the query string, so a merchant can bookmark a view. */
 export const RECONCILE_FIELDS = ["q", "surface", "campaign", "state"] as const;
@@ -213,13 +214,16 @@ export default function Reconciliation() {
         </fetcher.Form>
       </Card>
 
-      <Card heading="Prices">    <ReconciliationTable rows={rows} clearHref={clearedSearch(params, RECONCILE_FIELDS)} />
-
+      <Card heading="Prices">
         {/* This page has been paged server-side since it was written and had no pager, so
             row 26 was unreachable by anything but typing `?page=2` into a URL a merchant
             cannot see. The loader already read the parameter and the service already
             returned the total; only the control was missing. */}
-        <Pagination page={page} total={total} pageSize={ROWS_PER_VIEW} noun="prices" />
+        <TableBlock
+          pagination={<Pagination page={page} total={total} pageSize={ROWS_PER_VIEW} noun="prices" />}
+        >
+          <ReconciliationTable rows={rows} clearHref={clearedSearch(params, RECONCILE_FIELDS)} />
+        </TableBlock>
 
         <s-button
           type="button"

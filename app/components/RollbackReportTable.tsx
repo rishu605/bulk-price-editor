@@ -3,6 +3,7 @@ import { Blank } from "./Blank";
 import { ShowingSome } from "./Pagination";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { RowState } from "./RowState";
+import { TableBlock } from "./TableBlock";
 
 /**
  * What reverting would do, row by row, with the drifted ones first.
@@ -51,7 +52,15 @@ export function RollbackReportTable({ rows }: { rows: RollbackRow[] }) {
 
   return (
     <>
-    <s-table>
+        <TableBlock
+      pagination={<ShowingSome
+      shown={shown.length}
+      total={rows.length}
+      noun="rows"
+      suffix="The rest are unchanged and revert without argument; the export lists every one."
+    />}
+    >
+<s-table>
       <s-table-header-row>
         <s-table-header listSlot="primary">Variant</s-table-header>
         <s-table-header listSlot="inline">State</s-table-header>
@@ -93,12 +102,7 @@ export function RollbackReportTable({ rows }: { rows: RollbackRow[] }) {
         ))}
       </s-table-body>
     </s-table>
-    <ShowingSome
-      shown={shown.length}
-      total={rows.length}
-      noun="rows"
-      suffix="The rest are unchanged and revert without argument; the export lists every one."
-    />
+    </TableBlock>
     </>
   );
 }
