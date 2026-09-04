@@ -1,11 +1,20 @@
 /**
  * The app's action vocabulary, guarded.
  *
- * Every way out of a card used to be the same blue underlined phrase, so a screen with
- * four of them offered four things of equal weight and no clue which one it wanted
- * pressed. `ActionRow` documents the replacement — primary, secondary, tertiary — and
- * this is what stops the links growing back one route at a time, which is exactly how
- * they arrived.
+ * It has been wrong in both directions. First every way out of a card was the same blue
+ * underlined phrase, so a screen with four of them offered four things of apparently equal
+ * weight. Then the fix removed the blue everywhere: `variant="tertiary"` — text with no
+ * chrome — became the replacement for almost every link, and "Why?", "See plans" and every
+ * campaign name in the list rendered as **plain static text**.
+ *
+ * Both are the same mistake from opposite ends. Loudness was carrying two things at once:
+ * how much a page wants something pressed, and whether it can be pressed at all. The
+ * second is not negotiable, and hierarchy — one primary per card — is what answers the
+ * four-equal-links problem.
+ *
+ * So this file no longer bans a link. It holds the two rules that keep the vocabulary
+ * legible: a tertiary control carries an icon, because that is the only thing separating
+ * it from a caption; and a card offers at most one black button.
  */
 
 import { readdirSync } from "node:fs";
@@ -20,24 +29,6 @@ import { SPACE } from "../lib/ui/spacing";
 
 const APP = join(process.cwd(), "app");
 
-/**
- * Where a bare `s-link` is still correct.
- *
- * The App Bridge nav menu must be anchors — Shopify reads them to build the sidebar, and
- * a button there renders nothing.
- *
- * A link *inside a sentence* is the other legitimate use, where colour is the only thing
- * marking a word mid-paragraph as clickable. Adding one means adding the file here, which
- * is the point: it should be a decision somebody made, not a habit that returned.
- *
- * `OverlapPanel` is the first, and it is the case the paragraph above describes. It reads
- * "**Autumn sale** keeps 1,240 of them — it outranks this campaign", and the campaign's
- * name is the subject of that sentence. A button in the middle of it would break the
- * sentence into three pieces to make one word clickable, and the sentence is the whole
- * point: it is the statement about overlap that no competitor can make.
- */
-const MAY_USE_LINKS = ["routes/app.tsx", "components/OverlapPanel.tsx"];
-
 function sources(dir: string): Array<{ path: string; text: string }> {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
@@ -48,16 +39,32 @@ function sources(dir: string): Array<{ path: string; text: string }> {
 }
 
 describe("the action vocabulary", () => {
-  it("keeps blue links out of everything but the nav", () => {
-    const linking = sources(APP)
-      .filter(({ text }) => text.includes("<s-link"))
-      .map(({ path }) => path)
-      .filter((path) => !MAY_USE_LINKS.includes(path));
+  it("gives every tertiary control an icon", () => {
+    // Tertiary is text with no border. Without an icon it is indistinguishable from a
+    // caption, which is how a campaign name, "Why?" and "See plans" all came to look
+    // like labels. The icon is what makes it a control, so it is not optional.
+    const offenders = sources(APP).flatMap(({ path, text }) =>
+      [...text.matchAll(/<s-button[^>]*?>/gs)]
+        .filter((match) => match[0].includes('variant="tertiary"') && !match[0].includes("icon="))
+        .map(() => path),
+    );
 
     expect(
-      linking,
-      "use a button — primary, secondary or tertiary — and see ActionRow for which",
+      [...new Set(offenders)],
+      "a tertiary button with no icon renders as plain text — give it an icon, or make it secondary or a link",
     ).toEqual([]);
+  });
+
+  it("keeps a link for navigation rather than for actions", () => {
+    // The other half of the rule. An `s-link` is content you read and then click, so it
+    // goes somewhere; a link with no destination is a button wearing the wrong clothes.
+    const offenders = sources(APP).flatMap(({ path, text }) =>
+      [...text.matchAll(/<s-link[^>]*?>/gs)]
+        .filter((match) => !match[0].includes("href"))
+        .map(() => path),
+    );
+
+    expect(offenders, "an s-link with no href is an action, not navigation").toEqual([]);
   });
 
   it("offers at most one black button per card", () => {

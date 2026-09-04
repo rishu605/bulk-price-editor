@@ -158,7 +158,7 @@ export function DraftPreview({
               for a word *inside* a sentence where colour is doing necessary work; this
               is a standalone way out of the card, which is what tertiary is for. */}
           <ActionRow>
-            <s-button variant="tertiary" href="/app/prices/drift">
+            <s-button variant="secondary" href="/app/prices/drift">
               Review drifted prices
             </s-button>
           </ActionRow>
@@ -245,7 +245,7 @@ export function DraftPreview({
               button under its inline preview. */}
           {fullPreviewHref ? (
             <ActionRow>
-              <s-button variant="tertiary" href={fullPreviewHref}>
+              <s-button variant="secondary" href={fullPreviewHref}>
                 See all {formatCount(preview.changing + preview.alreadyCorrect + preview.skipped)} rows
               </s-button>
             </ActionRow>

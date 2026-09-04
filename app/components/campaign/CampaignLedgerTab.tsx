@@ -57,7 +57,10 @@ export function CampaignLedgerTab({
                 <fetcher.Form method="post">
                   <input type="hidden" name="intent" value="revert-variant" />
                   <input type="hidden" name="variantGid" value={row.variantGid} />
-                  <s-button type="submit" variant="tertiary" loading={busy || undefined}>
+                  {/* Secondary. It is the only control in the row and it writes a
+                      price, so it is the last thing in the app that should render as
+                      text. */}
+                  <s-button type="submit" variant="secondary" loading={busy || undefined}>
                     Revert this variant
                   </s-button>
                 </fetcher.Form>

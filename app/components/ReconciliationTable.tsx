@@ -67,9 +67,7 @@ export function ReconciliationTable({
             <s-table-cell>{row.baseline ?? <Blank />}</s-table-cell>
             <s-table-cell>
               {row.campaignId ? (
-                <s-button variant="tertiary" href={`/app/campaigns/${row.campaignId}`}>
-                  {row.campaignName}
-                </s-button>
+                <s-link href={`/app/campaigns/${row.campaignId}`}>{row.campaignName}</s-link>
               ) : (
                 <Blank />
               )}

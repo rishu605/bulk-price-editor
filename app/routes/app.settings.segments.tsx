@@ -215,7 +215,7 @@ export default function Segments() {
                       <fetcher.Form method="post">
                         <input type="hidden" name="intent" value="delete" />
                         <input type="hidden" name="segmentId" value={segment.id} />
-                        <s-button type="submit" tone="critical" variant="tertiary" loading={busy || undefined}>
+                        <s-button type="submit" tone="critical" variant="tertiary" icon="delete" loading={busy || undefined}>
                           Delete
                         </s-button>
                       </fetcher.Form>

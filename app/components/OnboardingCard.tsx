@@ -166,8 +166,15 @@ function Step({
               thing on this card nobody needs, and on a completed row — which has no
               action beside it — it was also the only thing left hanging off the right
               edge, so the column of actions read as ragged. */}
+          {/* An icon on the toggle, because a tertiary control is text with no border
+              and "Why?" beside a real button read as a caption for it. The same question
+              mark `HelpNote` uses, so the two say "this is help" the same way. */}
           {step.done ? null : (
-            <s-button variant="tertiary" onClick={() => setWhy((open) => !open)}>
+            <s-button
+              variant="tertiary"
+              icon="question-circle"
+              onClick={() => setWhy((open) => !open)}
+            >
               {why ? "Hide why" : "Why?"}
             </s-button>
           )}

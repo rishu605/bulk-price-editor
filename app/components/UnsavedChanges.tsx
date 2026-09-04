@@ -111,7 +111,7 @@ export function UnsavedChanges({
         <s-button variant="primary" onClick={() => blocker.reset?.()}>
           Stay on this page
         </s-button>
-        <s-button variant="tertiary" onClick={() => blocker.proceed?.()}>
+        <s-button variant="secondary" onClick={() => blocker.proceed?.()}>
           Leave and discard
         </s-button>
       </ActionRow>

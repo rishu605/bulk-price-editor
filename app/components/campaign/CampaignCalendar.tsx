@@ -78,8 +78,12 @@ export function CampaignCalendar({
               >
                 Previous
               </s-button>
+              {/* An icon, like the two either side of it. The rule is that a tertiary
+                  control carries one — without it this is the only piece of plain text in
+                  a row of three controls, which reads as a label between two buttons. */}
               <s-button
                 variant="tertiary"
+                icon="calendar"
                 href={`/app/campaigns?view=calendar&period=${period}&on=${today}`}
               >
                 Today
@@ -125,8 +129,10 @@ export function CampaignCalendar({
               the app stopped using, and there is one of these per overlap. */}
           {overlaps.some((overlap) => overlap.sharedVariants > 0) ? (
             <ActionRow>
+              {/* Secondary: it sits in a row of actions rather than inside the prose,
+                  so it is looked for rather than read. */}
               <s-button
-                variant="tertiary"
+                variant="secondary"
                 href={`/app/campaigns/${
                   overlaps.find((overlap) => overlap.sharedVariants > 0)?.a.id
                 }`}
