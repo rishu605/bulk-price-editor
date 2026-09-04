@@ -11,13 +11,13 @@ import { formatCount } from "../lib/format/display";
 import { CountsRow } from "./CountsRow";
 import type { CampaignResult } from "../services/campaigns/result.server";
 import { Secondary } from "./Type";
+import { Card } from "./Card";
 
 export function RunResultSection({ result }: { result: CampaignResult }) {
   const { counts, margin } = result;
 
   return (
-    <s-section heading="What this run did">
-      {/* The headline states the outcome before any number, and leads with what went
+    <Card heading="What this run did">  {/* The headline states the outcome before any number, and leads with what went
           wrong. A partial run that opens with its successes is the failure this whole
           product exists to prevent. */}
       <s-banner tone={result.clean ? "success" : counts.failed > 0 ? "critical" : "warning"}>
@@ -113,6 +113,6 @@ export function RunResultSection({ result }: { result: CampaignResult }) {
       ) : null}
 
       <Secondary>{result.unavailable}</Secondary>
-    </s-section>
+    </Card>
   );
 }

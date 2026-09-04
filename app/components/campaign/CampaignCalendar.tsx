@@ -3,6 +3,7 @@ import { ActionRow } from "../ActionRow";
 import { CalendarGrid } from "../CalendarGrid";
 import { TabBar } from "../TabBar";
 import type { calendarFor } from "../../services/calendar.server";
+import { Card } from "../Card";
 
 type Calendar = Awaited<ReturnType<typeof calendarFor>>;
 
@@ -31,8 +32,7 @@ export function CampaignCalendar({
 }: CampaignCalendarProps) {
   return (
     <>
-      <s-section heading={heading}>
-        <s-paragraph>
+      <Card heading={heading}>    <s-paragraph>
           <s-text>
             Dates and times are your store&rsquo;s, in {timeZone}. Click a day to schedule
             a campaign starting then.
@@ -100,11 +100,10 @@ export function CampaignCalendar({
         />
 
         <CalendarGrid days={days} today={today} />
-      </s-section>
+      </Card>
 
       {overlaps.length > 0 ? (
-        <s-section heading="Campaigns running at the same time">
-          <s-paragraph>
+        <Card heading="Campaigns running at the same time">      <s-paragraph>
             <s-text>
               Overlapping campaigns never stack. The higher priority one wins every
               product they share, and the preview shows exactly which price each gets.
@@ -141,7 +140,7 @@ export function CampaignCalendar({
               </s-button>
             </ActionRow>
           ) : null}
-        </s-section>
+        </Card>
       ) : null}
     </>
   );

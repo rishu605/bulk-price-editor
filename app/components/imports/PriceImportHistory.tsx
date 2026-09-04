@@ -18,6 +18,7 @@ import { EmptyState } from "../AsyncState";
 import { Blank } from "../Blank";
 import { formatCount } from "../../lib/format/display";
 import { Secondary } from "../Type";
+import { Card } from "../Card";
 
 export interface PriceImportRow {
   id: string;
@@ -38,8 +39,7 @@ export function PriceImportHistory({
   timeZone: string;
 }) {
   return (
-    <s-section heading="Price files you have imported">
-      {imports.length === 0 ? (
+    <Card heading="Price files you have imported">  {imports.length === 0 ? (
         <EmptyState
           title="Nothing imported yet"
           description="Every file you import is recorded here with its row counts and who ran it, so you can always answer which file a campaign is pricing from."
@@ -85,6 +85,6 @@ export function PriceImportHistory({
           <Secondary>Times are your store&rsquo;s, in {timeZone}.</Secondary>
         </>
       )}
-    </s-section>
+    </Card>
   );
 }

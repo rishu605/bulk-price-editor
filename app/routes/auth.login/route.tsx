@@ -5,6 +5,7 @@ import { Form, useActionData, useLoaderData } from "react-router";
 
 import { login } from "../../shopify.server";
 import { loginErrorMessage } from "./error.server";
+import { Card } from "../../components/Card";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const errors = loginErrorMessage(await login(request));
@@ -30,8 +31,7 @@ export default function Auth() {
     <AppProvider embedded={false}>
       <s-page>
         <Form method="post">
-        <s-section heading="Log in">
-          <s-text-field
+        <Card heading="Log in">      <s-text-field
             name="shop"
             label="Shop domain"
             details="example.myshopify.com"
@@ -41,7 +41,7 @@ export default function Auth() {
             error={errors.shop}
           ></s-text-field>
           <s-button type="submit">Log in</s-button>
-        </s-section>
+        </Card>
         </Form>
       </s-page>
     </AppProvider>

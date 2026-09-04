@@ -25,6 +25,7 @@ import { Field } from "../components/FieldGrid";
 import { HelpNote } from "../components/HelpNote";
 import { SPACE } from "../lib/ui/spacing";
 import { Secondary } from "../components/Type";
+import { Card } from "../components/Card";
 
 export const loader = withGuard("/app/settings/diagnostics", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -92,13 +93,10 @@ export default function Debug() {
 
   return (
     <PageShell heading="Diagnostics">
-      <s-section heading="Look up an error">
-        <s-paragraph>
-          <s-text>
-            Paste the reference from an error screen, for example ANC-K3M2-P7QR.
-          </s-text>
-        </s-paragraph>
-
+      <Card
+        heading="Look up an error"
+        lede="Paste the reference from an error screen, for example ANC-K3M2-P7QR."
+      >
         <Form method="get">
           {/* The field and its button are one control. `alignItems="end"` because the
               field carries a label above it and the button does not, so without it the
@@ -170,9 +168,9 @@ export default function Debug() {
             ) : null}
           </s-stack>
         ) : null}
-      </s-section>
+      </Card>
 
-      <s-section heading="Recent failures">
+      <Card heading="Recent failures">
         {recent.length === 0 ? (
           <EmptyState
             title="Nothing has failed recently"
@@ -214,7 +212,7 @@ export default function Debug() {
             </s-table>
           </>
         )}
-      </s-section>
+      </Card>
 
       <HelpNote label="Reading the failures">
         <s-paragraph>

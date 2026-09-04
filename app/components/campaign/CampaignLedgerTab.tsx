@@ -10,6 +10,7 @@ import { ActionRow } from "../ActionRow";
 import { downloadCsv, filenameSlug } from "../../lib/reporting/csv";
 import { ledgerCsv } from "../../lib/reporting/ledger-csv";
 import type { CampaignDetailProps } from "./props";
+import { Card } from "../Card";
 
 export function CampaignLedgerTab({
   preview,
@@ -21,8 +22,7 @@ export function CampaignLedgerTab({
   return (
     <>
       {ledger.length > 0 ? (
-        <s-section heading="Ledger">
-          <s-paragraph>
+        <Card heading="Ledger">      <s-paragraph>
             <s-text>
               Every row we wrote, with what it was and what we intended. Retained
               indefinitely on every plan. Reverting a single variant takes it out of
@@ -69,7 +69,7 @@ export function CampaignLedgerTab({
               )
             }
           />
-        </s-section>
+        </Card>
       ) : null}
     </>
   );

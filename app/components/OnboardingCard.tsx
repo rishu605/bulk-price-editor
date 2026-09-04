@@ -4,6 +4,7 @@ import type { OnboardingState, OnboardingStep, StepId } from "../lib/onboarding/
 import { SPACE } from "../lib/ui/spacing";
 import { ActionRow } from "./ActionRow";
 import { Secondary } from "./Type";
+import { Card } from "./Card";
 
 /**
  * The checklist, until the first campaign has run cleanly.
@@ -71,7 +72,7 @@ export function OnboardingCard({
   const done = state.steps.filter((step) => step.done).length;
 
   return (
-    <s-section heading="Getting started">
+    <Card heading="Getting started">
       <s-stack gap={SPACE.section}>
         <s-stack direction="inline" gap={SPACE.item} alignItems="center">
           <s-badge tone={done === state.steps.length ? "success" : "info"}>
@@ -99,7 +100,7 @@ export function OnboardingCard({
           ))}
         </s-stack>
       </s-stack>
-    </s-section>
+    </Card>
   );
 }
 

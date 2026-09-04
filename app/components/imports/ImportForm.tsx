@@ -11,6 +11,7 @@ import { UnsavedChanges } from "../UnsavedChanges";
 import { downloadCsv } from "../../lib/reporting/csv";
 import { SPACE } from "../../lib/ui/spacing";
 import { Secondary } from "../Type";
+import { Card } from "../Card";
 
 /**
  * One CSV import, whatever the file is for.
@@ -117,8 +118,7 @@ export function ImportForm({
   };
 
   return (
-    <s-section heading={heading}>
-      {/* A pasted CSV can be fifty thousand rows, and none of it exists anywhere until
+    <Card heading={heading}>  {/* A pasted CSV can be fifty thousand rows, and none of it exists anywhere until
           the import runs. */}
       <UnsavedChanges form={form} describe="this import" saved={Boolean(fetcher.data)} />
 
@@ -177,7 +177,7 @@ export function ImportForm({
           </ActionRow>
         </s-stack>
       </fetcher.Form>
-    </s-section>
+    </Card>
   );
 }
 
@@ -223,8 +223,7 @@ export function ImportReport({
   limit?: number;
 }) {
   return (
-    <s-section heading={heading}>
-      <CountsRow items={counts} />
+    <Card heading={heading}>  <CountsRow items={counts} />
 
       {problems.length === 0 ? (
         <EmptyState
@@ -280,6 +279,6 @@ export function ImportReport({
           ) : null}
         </>
       )}
-    </s-section>
+    </Card>
   );
 }

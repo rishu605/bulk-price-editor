@@ -226,8 +226,13 @@ describe("the page rhythm is set in exactly one place", () => {
     // "Page rhythm has to be the largest gap on the screen to do its job. If a route can
     // set it, some route eventually sets it smaller than the gaps inside its own
     // sections, and the page stops having visible structure at all."
+    // `sourceOf`, not `readFileSync`. This read the raw file, so a *comment* naming
+    // `SPACE.page` failed it — which is how `Card.tsx` broke this the first time it
+    // explained why its own gaps are smaller than the page's. That is the eighth time
+    // the comment-grep trap has bitten in this repo, and #462 built the helper for it:
+    // any test that greps `app/` source strips comments first.
     const offenders = CHECKED.filter(
-      (file) => !file.endsWith("PageShell.tsx") && readFileSync(join(ROOT, file), "utf8").includes("SPACE.page"),
+      (file) => !file.endsWith("PageShell.tsx") && sourceOf(join(ROOT, file)).includes("SPACE.page"),
     );
 
     expect(offenders).toEqual([]);

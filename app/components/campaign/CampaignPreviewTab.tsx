@@ -28,6 +28,7 @@ import { downloadCsv, filenameSlug } from "../../lib/reporting/csv";
 import { previewCsv } from "../../lib/reporting/preview-csv";
 import { ActionRow } from "../ActionRow";
 import type { CampaignDetailProps } from "./props";
+import { Card } from "../Card";
 
 export function CampaignPreviewTab({ preview, approval, fetcher, busy }: CampaignDetailProps) {
 
@@ -35,8 +36,7 @@ export function CampaignPreviewTab({ preview, approval, fetcher, busy }: Campaig
     <>
 
       {approval.required ? (
-        <s-section heading="Approval">
-          <s-paragraph>
+        <Card heading="Approval">      <s-paragraph>
             <s-text>
               {approval.state === "approved"
                 ? `Approved by ${approval.who}.`
@@ -75,11 +75,10 @@ export function CampaignPreviewTab({ preview, approval, fetcher, busy }: Campaig
               </>
             ) : null}
           </ActionRow>
-        </s-section>
+        </Card>
       ) : null}
 
-      <s-section heading="Preview">
-        <CountsRow
+      <Card heading="Preview">    <CountsRow
           items={[
             { label: "Will change", value: preview.counts.planned },
             { label: "Already correct", value: preview.counts.noop },
@@ -124,11 +123,10 @@ export function CampaignPreviewTab({ preview, approval, fetcher, busy }: Campaig
             Export this preview (CSV)
           </s-button>
         </ActionRow>
-      </s-section>
+      </Card>
 
       {preview.margin ? (
-        <s-section heading="What this does to your margins">
-          <s-paragraph>
+        <Card heading="What this does to your margins">      <s-paragraph>
             <s-text>{preview.margin.summary}</s-text>
           </s-paragraph>
           <s-paragraph>
@@ -170,12 +168,11 @@ export function CampaignPreviewTab({ preview, approval, fetcher, busy }: Campaig
               </s-unordered-list>
             </s-banner>
           ) : null}
-        </s-section>
+        </Card>
       ) : null}
 
       {preview.markets.length > 0 ? (
-        <s-section heading="Markets">
-          <s-paragraph>
+        <Card heading="Markets">      <s-paragraph>
             <s-text>
               Each market is priced from its own normal price in its own currency,
               not converted from the base sale price.
@@ -195,7 +192,7 @@ export function CampaignPreviewTab({ preview, approval, fetcher, busy }: Campaig
               ) : null}
             </s-paragraph>
           ))}
-        </s-section>
+        </Card>
       ) : null}
     </>
   );

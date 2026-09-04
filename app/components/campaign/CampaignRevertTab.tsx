@@ -12,13 +12,13 @@ import { ActionRow } from "../ActionRow";
 import { downloadCsv, filenameSlug } from "../../lib/reporting/csv";
 import { rollbackReportCsv } from "../../lib/reporting/rollback";
 import type { CampaignDetailProps } from "./props";
+import { Card } from "../Card";
 
 export function CampaignRevertTab({ rollback, preview, fetcher, busy }: CampaignDetailProps) {
   return (
     <>
       {rollback && rollback.counts.total > 0 ? (
-        <s-section heading="If you revert this campaign">
-          <s-paragraph>
+        <Card heading="If you revert this campaign">      <s-paragraph>
             <s-text>
               {rollback.straightforward
                 ? `All ${rollback.counts.total} variants are still at the price this campaign set. Reverting recomputes each one without it.`
@@ -69,7 +69,7 @@ export function CampaignRevertTab({ rollback, preview, fetcher, busy }: Campaign
               </s-button>
             </ActionRow>
           </fetcher.Form>
-        </s-section>
+        </Card>
       ) : null}
     </>
   );

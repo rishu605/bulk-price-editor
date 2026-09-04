@@ -1,6 +1,7 @@
 import { useFetcher } from "react-router";
 import { Field } from "./FieldGrid";
 import { SPACE } from "../lib/ui/spacing";
+import { Card } from "./Card";
 
 /**
  * The feedback box, on every screen.
@@ -21,8 +22,7 @@ export function FeedbackForm({ route }: { route: string }) {
   const busy = fetcher.state !== "idle";
 
   return (
-    <s-section heading="Tell us how this is going">
-      {fetcher.data ? (
+    <Card heading="Tell us how this is going">  {fetcher.data ? (
         <s-banner tone={fetcher.data.ok ? "success" : "warning"}>
           <s-paragraph>{fetcher.data.message}</s-paragraph>
         </s-banner>
@@ -58,6 +58,6 @@ export function FeedbackForm({ route }: { route: string }) {
           </s-button>
         </s-stack>
       </fetcher.Form>
-    </s-section>
+    </Card>
   );
 }

@@ -47,6 +47,7 @@ import { CampaignPreviewTab } from "../components/campaign/CampaignPreviewTab";
 import { CampaignRevertTab } from "../components/campaign/CampaignRevertTab";
 import { CampaignLedgerTab } from "../components/campaign/CampaignLedgerTab";
 import type { CampaignDetailProps } from "../components/campaign/props";
+import { Card } from "../components/Card";
 
 export const loader = withGuard("/app/campaigns/$id", async ({ request, params }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
@@ -356,9 +357,8 @@ export default function CampaignDetail() {
         {runResult ? <RunResultSection result={runResult} /> : null}
 
         {runs.length > 0 ? (
-          <s-section heading="Run history">
-            <RunHistoryTable runs={runs} selectedRunId={selectedRunId} timeZone={timeZone} />
-          </s-section>
+          <Card heading="Run history">        <RunHistoryTable runs={runs} selectedRunId={selectedRunId} timeZone={timeZone} />
+          </Card>
         ) : null}
 
         </>

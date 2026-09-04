@@ -34,6 +34,7 @@ import { SPACE } from "../lib/ui/spacing";
 import { planUsage } from "../services/plan-usage.server";
 import { usageLine } from "../lib/billing/usage-line";
 import { Secondary } from "../components/Type";
+import { Card } from "../components/Card";
 
 export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -538,8 +539,7 @@ export default function Dashboard() {
           The checklist above is already answering "what now", and answering it with an
           action rather than with four zeroes. */}
       {sections.live ? (
-        <s-section heading="What is live right now">
-          {/* Each figure is a question, so each tile is the answer's front door. The
+        <Card heading="What is live right now">      {/* Each figure is a question, so each tile is the answer's front door. The
               status values are the campaigns index's own filter vocabulary — `attention`
               spans PARTIAL and HELD there, which is exactly what "Need attention"
               counts — so the number a merchant clicks and the list they land on are the
@@ -586,7 +586,7 @@ export default function Dashboard() {
             <s-button variant="secondary" href="/app/prices/drift">Price drift</s-button>
             <s-button variant="secondary" href="/app/activity">Activity log</s-button>
           </ActionRow>
-        </s-section>
+        </Card>
       ) : null}
 
       {/* The commonest job in the category, as one number.
@@ -601,8 +601,7 @@ export default function Dashboard() {
           is the safety property; trading it for parity would be trading away the reason to
           choose us — so the card says so before the button rather than after. */}
       {sections.quickCreate ? (
-        <s-section heading="Put everything on sale">
-          <fetcher.Form method="post">
+        <Card heading="Put everything on sale">      <fetcher.Form method="post">
             <input type="hidden" name="intent" value="quick-campaign" />
             <s-stack gap={SPACE.item}>
               {/* One two-digit number, so a control the width of the card would be
@@ -630,27 +629,25 @@ export default function Dashboard() {
               </ActionRow>
             </s-stack>
           </fetcher.Form>
-        </s-section>
+        </Card>
       ) : null}
 
       {/* What is about to happen, which "Scheduled: 1" could not say. Only when there is
           something ahead — an empty "nothing is scheduled" card is the same mistake as the
           four zeroes this page used to open with. */}
       {upcomingMoments.length > 0 ? (
-        <s-section heading="Next up">
-          <UpcomingCampaigns
+        <Card heading="Next up">      <UpcomingCampaigns
             moments={upcomingMoments}
             now={now}
             timeZone={timeZone}
           />
-        </s-section>
+        </Card>
       ) : null}
 
       {/* The one case the checklist does not cover: everything on it is done, and the
           campaigns it was done with have since been deleted. */}
       {sections.emptyState ? (
-        <s-section heading="What is live right now">
-          <s-paragraph>
+        <Card heading="What is live right now">      <s-paragraph>
             <s-text>
               Nothing is running. A <strong>campaign</strong> is a rule — “20% off
               everything tagged Summer” — plus when it should run. Anchor computes each
@@ -672,12 +669,11 @@ export default function Dashboard() {
               Create a campaign
             </s-button>
           </ActionRow>
-        </s-section>
+        </Card>
       ) : null}
 
       {sections.catalogue ? (
-        <s-section heading="Catalogue">
-          {/* The shared component, not a second copy of its markup. This page had
+        <Card heading="Catalogue">      {/* The shared component, not a second copy of its markup. This page had
               hand-rolled the same four tiles, so it kept the old flat look after the
               real one gained borders and equal columns -- and it is the first screen
               after installing, which is the worst place to be a version behind.
@@ -740,7 +736,7 @@ export default function Dashboard() {
               Recapture baselines…
             </s-button>
           </ActionRow>
-        </s-section>
+        </Card>
       ) : null}
 
       <s-section slot="aside" heading="Store">
