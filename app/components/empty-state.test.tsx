@@ -31,19 +31,30 @@ const render = (node: React.ReactElement) =>
   renderToStaticMarkup(<StaticRouter location="/app/prices">{node}</StaticRouter>);
 
 describe("an empty state is an answer, not a missing table", () => {
-  it("centres the title and gives it room, so it does not read as a render that failed", () => {
+  it("gives the words room, so it does not read as a render that failed", () => {
     const html = render(<EmptyState title="No baselines captured yet" />);
 
     expect(html).toContain("No baselines captured yet");
-    expect(html).toMatch(/alignitems="center"/i);
     // Block padding: the words have to sit in space that was obviously left for them.
     expect(html).toMatch(/paddingblock="large-200"/i);
   });
 
+  it("sits on the card's own left edge rather than in the middle of it", () => {
+    // Centring is right for a full-page empty state standing on its own. Inside a card
+    // whose heading is hard left two inches above it, a centred block reads as a
+    // different component that has wandered in — which is how Diagnostics looked, and
+    // Variants, Baselines, Campaigns, Segments, Activity and Price drift with it.
+    const html = render(<EmptyState title="No baselines captured yet" />);
+
+    expect(html).not.toMatch(/alignitems="center"/i);
+  });
+
   it("caps the measure of its body copy", () => {
+    // The card's measure, shared with its prose and its fields, rather than a number of
+    // this component's own — see `MEASURE`.
     const html = render(<EmptyState title="No variants yet" description={"a ".repeat(200)} />);
 
-    expect(html).toMatch(/maxinlinesize="520px"/i);
+    expect(html).toMatch(/maxinlinesize="calc\(/i);
   });
 
   it("renders a way out only when there is one", () => {

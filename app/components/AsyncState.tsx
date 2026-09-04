@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 
 import { PAD, SPACE } from "../lib/ui/spacing";
+import { ActionRow } from "./ActionRow";
+import { MEASURE } from "./FieldGrid";
 import { Secondary } from "./Type";
 
 /**
@@ -37,15 +39,28 @@ export interface EmptyStateProps {
  */
 export function EmptyState({ title, description, action }: EmptyStateProps) {
   return (
-    <s-box paddingBlock={PAD.block}>
-      <s-stack gap={SPACE.item} alignItems="center">
+    /* Left, on the card's own edge — not centred.
+    
+       Centring is right for a full-page empty state with an illustration, standing on
+       its own. Inside a card whose heading is hard left two inches above it, it reads as
+       a different component that has wandered in: on Diagnostics the "Recent failures"
+       card ran a left-aligned heading, then a gap, then a centred title and a centred
+       paragraph floating in the middle of the card. The same shape was on Variants,
+       Baselines, Campaigns, Segments, Activity and Price drift — most of the app's first
+       run.
+    
+       The measure stays. It is what stops the description running the width of a table,
+       and it is the reason this was given a box in the first place; it just no longer
+       has to be centred to have one. */
+    <s-box paddingBlock={PAD.block} maxInlineSize={MEASURE}>
+      <s-stack gap={SPACE.item}>
         <s-heading>{title}</s-heading>
-        {description ? (
-          <s-box maxInlineSize="520px">
-            <Secondary>{description}</Secondary>
-          </s-box>
+        {description ? <Secondary>{description}</Secondary> : null}
+        {action ? (
+          <ActionRow>
+            <s-button href={action.href}>{action.label}</s-button>
+          </ActionRow>
         ) : null}
-        {action ? <s-button href={action.href}>{action.label}</s-button> : null}
       </s-stack>
     </s-box>
   );

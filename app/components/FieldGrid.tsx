@@ -29,6 +29,22 @@ export const FIELD = {
 } as const;
 
 /**
+ * How wide a card's content is allowed to be — its measure — and the one number every
+ * part of a card shares.
+ *
+ * Two `medium` columns and the gap between them. Derived rather than typed, because the
+ * flat `720px` it replaces was neither: it was wider than two fields need and narrower
+ * than the card, so on a settings card the fields stopped a quarter short of the right
+ * edge while **the prose above them ran the full width**. Two right edges in one card is
+ * what actually read as odd — not the gutter, which is correct. A field the width of a
+ * card is the failure this whole module exists to prevent.
+ *
+ * `calc` rather than arithmetic here: `SPACE.section` is a Polaris token, not a number,
+ * so the gap is only known to the browser.
+ */
+export const MEASURE = `calc(${FIELD.medium} * 2 + var(--s-space-base, 1rem))`;
+
+/**
  * One control, at the width of what it holds.
  *
  * A wrapper rather than a prop because Polaris fields have no width of their own — the
@@ -88,7 +104,9 @@ export function FieldGrid({ children }: { children: ReactNode }) {
       // percentage needs. Capping the grid rather than each field keeps the two columns
       // the same width, so the labels down each side stay in line -- fields sized
       // individually inside a grid would be tidy on their own and ragged together.
-      maxInlineSize="720px"
+      // The card's measure, shared with its prose so the two have one right edge. See
+      // `MEASURE`: the flat number this replaces was arbitrary in both directions.
+      maxInlineSize={MEASURE}
       // One comma. Polaris splits a responsive value on it to separate "when the query
       // matches" from "otherwise", so `repeat(2, 1fr)` is unparseable and falls back to
       // `none` — which stacks everything full width again, i.e. looks exactly like the
