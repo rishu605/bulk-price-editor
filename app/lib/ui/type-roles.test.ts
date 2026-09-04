@@ -67,14 +67,17 @@ describe("the type roles", () => {
     expect(type).toContain("export function Caption");
   });
 
-  it("keeps the subordinate ranks both smaller and quieter", () => {
-    // One lever doing the work of three ranks is what this replaced. If the size goes,
-    // `Secondary` is body-size grey again — the state the ticket describes.
+  it("keeps the subordinate ranks quiet, by one decision rather than twenty-one", () => {
+    // Colour is the only de-emphasis lever the typed API has — `type="small"` shipped
+    // once and rendered byte-for-byte identically on the deployed page, so the runtime
+    // does not implement it either. What is left is worth holding: one grey, here.
     const type = sourceOf(join(APP, "components", "Type.tsx"));
 
-    expect(type).toContain('{ type: "small" }');
-    expect(type).toMatch(/<s-paragraph \{\.\.\.SMALL\} color="subdued">/);
-    expect(type).toMatch(/<s-text \{\.\.\.SMALL\} color="subdued">/);
+    expect(type).toMatch(/<s-paragraph color="subdued">/);
+    expect(type).toMatch(/<s-text color="subdued">/);
+    expect(type, "the size lever does not work — see the note in Type.tsx").not.toContain(
+      'type: "small"',
+    );
   });
 
   it("does not put field labels or helper text in here", () => {
