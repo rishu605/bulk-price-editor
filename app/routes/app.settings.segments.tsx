@@ -37,6 +37,7 @@ import { ShowingSome } from "../components/Pagination";
 import { HelpNote } from "../components/HelpNote";
 import { Secondary } from "../components/Type";
 import { Card } from "../components/Card";
+import { TableBlock } from "../components/TableBlock";
 
 export const loader = withGuard("/app/settings/segments", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -439,7 +440,14 @@ function ImportReport({ report }: { report: NonNullable<ActionData["report"]> })
               left out. Picking one for you could put the wrong product on sale.
             </s-paragraph>
           </s-banner>
-          <s-table>
+                    <TableBlock
+            pagination={<ShowingSome
+            shown={Math.min(report.ambiguous.length, ROWS_PER_VIEW)}
+            total={report.ambiguous.length}
+            noun="rows"
+          />}
+          >
+<s-table>
             <s-table-header-row>
               <s-table-header listSlot="kicker" format="numeric">Line</s-table-header>
               <s-table-header listSlot="primary">Value</s-table-header>
@@ -455,11 +463,7 @@ function ImportReport({ report }: { report: NonNullable<ActionData["report"]> })
               ))}
             </s-table-body>
           </s-table>
-          <ShowingSome
-            shown={Math.min(report.ambiguous.length, ROWS_PER_VIEW)}
-            total={report.ambiguous.length}
-            noun="rows"
-          />
+          </TableBlock>
         </>
       ) : null}
 
@@ -471,7 +475,14 @@ function ImportReport({ report }: { report: NonNullable<ActionData["report"]> })
               nothing in your catalogue:
             </s-text>
           </s-paragraph>
-          <s-table>
+                    <TableBlock
+            pagination={<ShowingSome
+            shown={Math.min(report.unmatched.length, ROWS_PER_VIEW)}
+            total={report.unmatched.length}
+            noun="rows"
+          />}
+          >
+<s-table>
             <s-table-header-row>
               <s-table-header listSlot="kicker" format="numeric">Line</s-table-header>
               <s-table-header listSlot="primary">Value</s-table-header>
@@ -485,11 +496,7 @@ function ImportReport({ report }: { report: NonNullable<ActionData["report"]> })
               ))}
             </s-table-body>
           </s-table>
-          <ShowingSome
-            shown={Math.min(report.unmatched.length, ROWS_PER_VIEW)}
-            total={report.unmatched.length}
-            noun="rows"
-          />
+          </TableBlock>
         </>
       ) : null}
 

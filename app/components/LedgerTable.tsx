@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import type { LedgerRow } from "../services/campaigns/index.server";
 import { LEDGER_TONE, toneFor } from "./tone";
 import { RowState } from "./RowState";
+import { TableBlock } from "./TableBlock";
 
 /**
  * Every row we wrote, with what it was and what we intended.
@@ -37,7 +38,18 @@ export function LedgerTable({
   renderAction?: (row: LedgerRow) => ReactNode;
 }) {
   return (
-    <>
+    <TableBlock
+      pagination={
+        total === undefined ? null : (
+          <ShowingSome
+            shown={rows.length}
+            total={total}
+            noun="rows"
+            suffix="The export has every one of them."
+          />
+        )
+      }
+    >
     <s-table>
       <s-table-header-row>
         <s-table-header listSlot="primary">Variant</s-table-header>
@@ -69,15 +81,7 @@ export function LedgerTable({
         ))}
       </s-table-body>
     </s-table>
-    {total === undefined ? null : (
-      <ShowingSome
-        shown={rows.length}
-        total={total}
-        noun="rows"
-        suffix="The export has every one of them."
-      />
-    )}
-    </>
+    </TableBlock>
   );
 }
 

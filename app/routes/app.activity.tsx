@@ -30,6 +30,7 @@ import { FieldGrid } from "../components/FieldGrid";
 import { HelpNote } from "../components/HelpNote";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { SPACE } from "../lib/ui/spacing";
+import { TableBlock } from "../components/TableBlock";
 
 const FILTER_FIELDS = ["actor", "action", "from", "to"] as const;
 
@@ -152,9 +153,13 @@ export default function Activity() {
               </s-button>
             </ActionRow>
 
-            <ActivityTable entries={entries} timeZone={timeZone} />
-
-            <Pagination page={page} total={total} pageSize={PAGE_SIZE} noun="entries" />
+            <TableBlock
+              pagination={
+                <Pagination page={page} total={total} pageSize={PAGE_SIZE} noun="entries" />
+              }
+            >
+              <ActivityTable entries={entries} timeZone={timeZone} />
+            </TableBlock>
           </>
         )}
       </s-section>

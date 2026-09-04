@@ -5,6 +5,7 @@ import { EmptyState } from "./AsyncState";
 import { ShowingSome } from "./Pagination";
 import type { MarketPreview, PreviewRow } from "../services/campaigns/index.server";
 import { PREVIEW_TONE, toneFor } from "./tone";
+import { TableBlock } from "./TableBlock";
 
 /**
  * Before/after for each variant a campaign would change, one column per surface.
@@ -40,7 +41,18 @@ export function PreviewTable({
   }
 
   return (
-    <>
+    <TableBlock
+      pagination={
+        total === undefined ? null : (
+          <ShowingSome
+            shown={rows.length}
+            total={total}
+            noun="rows"
+            suffix="Every row is priced the same way, and the export has all of them."
+          />
+        )
+      }
+    >
     <s-table>
       <s-table-header-row>
         <s-table-header listSlot="primary">Variant</s-table-header>
@@ -101,15 +113,7 @@ export function PreviewTable({
         ))}
       </s-table-body>
     </s-table>
-    {total === undefined ? null : (
-      <ShowingSome
-        shown={rows.length}
-        total={total}
-        noun="rows"
-        suffix="Every row is priced the same way, and the export has all of them."
-      />
-    )}
-    </>
+    </TableBlock>
   );
 }
 

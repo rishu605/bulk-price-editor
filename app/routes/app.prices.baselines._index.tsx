@@ -49,6 +49,7 @@ import { HelpNote } from "../components/HelpNote";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { SPACE } from "../lib/ui/spacing";
 import { Card } from "../components/Card";
+import { TableBlock } from "../components/TableBlock";
 
 const FILTER_FIELDS = ["q", "vendor", "source", "diverged", "variant"] as const;
 
@@ -247,9 +248,13 @@ export default function Baselines() {
                 </s-button>
               </ActionRow>
 
-              <BaselineTable rows={rows} onShowHistory={show} />
-
-              <Pagination page={page} total={total} pageSize={ROWS_PER_VIEW} noun="baselines" />
+              <TableBlock
+                pagination={
+                  <Pagination page={page} total={total} pageSize={ROWS_PER_VIEW} noun="baselines" />
+                }
+              >
+                <BaselineTable rows={rows} onShowHistory={show} />
+              </TableBlock>
             </>
           )}
         </s-stack>

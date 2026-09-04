@@ -27,6 +27,7 @@ import { ShowingSome } from "../components/Pagination";
 import { HelpNote } from "../components/HelpNote";
 import prisma from "../db.server";
 import { Secondary } from "../components/Type";
+import { TableBlock } from "../components/TableBlock";
 
 export const loader = withGuard("/app/prices/drift", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -92,7 +93,15 @@ export default function DriftQueue() {
               should happen to each.
             </s-paragraph>
 
-            <s-table>
+                        <TableBlock
+              pagination={<ShowingSome
+              shown={events.length}
+              total={pending}
+              noun="drifted prices"
+              suffix="Resolve these and the next appear."
+            />}
+            >
+<s-table>
               <s-table-header-row>
                 <s-table-header listSlot="primary">Variant</s-table-header>
                 <s-table-header listSlot="labeled" format="currency">Campaign set</s-table-header>
@@ -106,13 +115,7 @@ export default function DriftQueue() {
                 ))}
               </s-table-body>
             </s-table>
-
-            <ShowingSome
-              shown={events.length}
-              total={pending}
-              noun="drifted prices"
-              suffix="Resolve these and the next appear."
-            />
+            </TableBlock>
           </>
         )}
       </s-section>
