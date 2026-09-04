@@ -35,6 +35,7 @@ import { planUsage } from "../services/plan-usage.server";
 import { usageLine } from "../lib/billing/usage-line";
 import { Secondary } from "../components/Type";
 import { Card } from "../components/Card";
+import { Fact } from "../components/Fact";
 
 export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -707,14 +708,13 @@ export default function Dashboard() {
               box can take is a near-white grey, so at 100% — which is where a healthy
               shop lives — a full bar and an empty one were the same picture. The two
               tiles above are the same fact, unambiguously. */}
-          <s-stack gap={SPACE.tight}>
-            <s-text color="subdued">Oldest baseline captured</s-text>
+          <Fact label="Oldest baseline captured">
             <s-text>
               {health.oldestCapturedAt
                 ? formatDay(health.oldestCapturedAt, timeZone)
                 : "None captured"}
             </s-text>
-          </s-stack>
+          </Fact>
 
           {health.withBaseline > health.variants ? (
             <Secondary>
@@ -746,13 +746,9 @@ export default function Dashboard() {
             <s-text type="strong">{shopDomain}</s-text>
           </s-grid>
 
-          {/* Label above value, the same shape as a stat tile without the box. Two loose
-              paragraphs said the same words and left the reader to work out which of them
-              was the label. */}
-          <s-stack gap={SPACE.tight}>
-            <s-text color="subdued">Last synced</s-text>
+          <Fact label="Last synced">
             <s-text>{syncedAt ? formatAgo(syncedAt, now, timeZone) : "Not yet synced"}</s-text>
-          </s-stack>
+          </Fact>
 
           {/* The plan, and what it covers, before it ever refuses anything.
               
@@ -761,18 +757,16 @@ export default function Dashboard() {
               worst moment, and the one where it reads as a fault rather than as a plan.
               It sits in the store card because it is a fact about this shop, which is the
               only thing this column is for. */}
-          <s-stack gap={SPACE.tight}>
-            <s-text color="subdued">Plan</s-text>
+          <Fact
+            label="Plan"
+            detail={usage.detail}
+            /* A link. It sits under the sentence about the plan, inside a card of facts
+               rather than in a row of actions, so it is read rather than looked for — and
+               as plain dark text it was indistinguishable from the sentence above it. */
+            action={<s-link href="/app/settings/plan">See plans</s-link>}
+          >
             <s-text type={usage.attention ? "strong" : undefined}>{usage.headline}</s-text>
-            <s-text color="subdued">{usage.detail}</s-text>
-            <ActionRow>
-              {/* A link. It sits under the sentence about the plan, inside a card of
-                  facts rather than in a row of actions, so it is read rather than looked
-                  for — and as plain dark text it was indistinguishable from the sentence
-                  above it. */}
-              <s-link href="/app/settings/plan">See plans</s-link>
-            </ActionRow>
-          </s-stack>
+          </Fact>
 
           {/* The action belongs with the fact it acts on. It used to sit in the catalogue
               card, two columns away from the sentence saying how stale the catalogue
