@@ -120,7 +120,7 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
     shopDomain: shop.domain,
     // A sentence rather than the raw numbers: the reassuring-versus-threatening call is
     // one decision and it belongs in one place. See `usage-line.ts`.
-    usage: usageLine(usage),
+    usage: usageLine({ ...usage, synced: shop.initialSyncCompletedAt !== null }),
     syncedAt: shop.initialSyncCompletedAt?.toISOString() ?? null,
     health: {
       ...health,
