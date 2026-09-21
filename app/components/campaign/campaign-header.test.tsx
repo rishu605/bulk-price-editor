@@ -276,6 +276,55 @@ describe("no card is drawn inside another card", () => {
  * same thing is one nobody reads, so lines that do not apply must be absent rather than
  * empty, and the typed confirmation must appear only when it is earned.
  */
+/**
+ * Whether the dialogs can be committed at all.
+ *
+ * #609: both modals passed their submit in as `children` wrapped in a `fetcher.Form`
+ * carrying `slot="primary-action"`. Polaris matches that slot against the element holding
+ * it and says so in `polaris.js` — *"Only Button elements with a `variant` of `primary`
+ * are allowed in the `primary-action` slot"* — so both forms were dropped and both
+ * dialogs rendered Cancel and no way through. A campaign could not be applied from the
+ * UI, and the warning Polaris emits goes to a console inside a cross-origin iframe, so
+ * nothing anywhere said so.
+ *
+ * The whole suite passed against that, because every assertion here was about the words
+ * in the modal rather than about whether it had a button. These are the two shapes that
+ * fail when it does not.
+ */
+const modalOf = (html: string, id: string) => {
+  const opened = html.slice(html.indexOf(`<s-modal id="${id}"`));
+  return opened.slice(0, opened.indexOf("</s-modal>"));
+};
+
+/** The element carrying `slot="primary-action"`, whatever it turns out to be. */
+const primaryActionTag = (markup: string) =>
+  markup.match(/<([a-z-]+)[^>]*slot="primary-action"[^>]*>/)?.[0] ?? "";
+
+describe.each([
+  ["apply-confirmation", () => props()],
+  ["revert-confirmation", () => withRollback()],
+])("the %s dialog can be committed", (id, fixture) => {
+  it("carries the slot on a button rather than on a form", () => {
+    const tag = primaryActionTag(modalOf(render(<CampaignHeader {...fixture()} />), id));
+
+    expect(tag, "nothing carries slot=\"primary-action\" — the dialog has no submit").not.toBe("");
+    expect(tag, "Polaris only renders an s-button in this slot").toMatch(/^<s-button/);
+  });
+
+  it("gives that button the primary variant Polaris requires", () => {
+    const tag = primaryActionTag(modalOf(render(<CampaignHeader {...fixture()} />), id));
+
+    expect(tag, "a button without variant=\"primary\" is refused from this slot").toContain(
+      'variant="primary"',
+    );
+  });
+
+  it("puts no form inside the modal at all", () => {
+    // A form in here is not merely unused: it is the shape that swallowed the submit.
+    expect(modalOf(render(<CampaignHeader {...fixture()} />), id)).not.toContain("<form");
+  });
+});
+
 describe("what the apply button does now", () => {
   it("opens the confirmation rather than posting", () => {
     const html = render(<CampaignHeader {...props()} />);

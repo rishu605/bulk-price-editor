@@ -32,7 +32,8 @@ export function RevertConfirmation({
   counts,
   keepers,
   pending,
-  children,
+  busy,
+  onConfirm,
 }: {
   campaignName: string;
   /** From the rollback report the page already has. */
@@ -40,8 +41,10 @@ export function RevertConfirmation({
   /** Asked for when the modal opens, because answering means planning the scope again. */
   keepers: KeepersAfterRevert | null;
   pending: boolean;
-  /** The submit, carrying `slot="primary-action"` itself. */
-  children: React.ReactNode;
+  /** A request is in flight, so the submit shows it. */
+  busy?: boolean;
+  /** Commit. A callback rather than a passed-in control — see the button below. */
+  onConfirm: () => void;
 }) {
   return (
     <s-modal id={REVERT_MODAL_ID} heading={`Revert ${campaignName}?`}>
@@ -117,7 +120,28 @@ export function RevertConfirmation({
       <s-button slot="secondary-actions" commandFor={REVERT_MODAL_ID} command="--hide">
         Cancel
       </s-button>
-      {children}
+
+      {/* `variant="primary"` even though this is the destructive one, because Polaris
+          matches the slot against the variant and nothing else is allowed in it:
+
+              "Only Button elements with a `variant` of `primary` are allowed in the
+               `primary-action` slot."
+
+          What used to be here was a `fetcher.Form` wrapping an `s-button tone="critical"`
+          — wrong on both counts, so the dialog rendered Cancel and no way to revert.
+          `tone` is what carries the destructiveness; the variant is what gets it drawn at
+          all. See #609. */}
+      <s-button
+        slot="primary-action"
+        variant="primary"
+        tone="critical"
+        loading={busy || undefined}
+        commandFor={REVERT_MODAL_ID}
+        command="--hide"
+        onClick={onConfirm}
+      >
+        Revert now
+      </s-button>
     </s-modal>
   );
 }

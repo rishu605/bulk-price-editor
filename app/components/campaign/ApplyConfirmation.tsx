@@ -1,3 +1,5 @@
+import { useRef, type ElementRef } from "react";
+
 import { describeRunDuration } from "../../lib/planning/duration";
 import { formatCount } from "../../lib/format/display";
 import { SPACE } from "../../lib/ui/spacing";
@@ -40,7 +42,8 @@ export function ApplyConfirmation({
   scope,
   notifyEmail,
   scheduleText,
-  children,
+  busy,
+  onConfirm,
 }: {
   preview: CampaignPreview;
   /** From `describeCampaign`, the same call the campaigns index makes. */
@@ -55,16 +58,23 @@ export function ApplyConfirmation({
   notifyEmail: string | null;
   /** The schedule sentence the header shows, restated here where the decision is made. */
   scheduleText?: string | null;
+  /** A request is in flight, so the submit shows it. */
+  busy?: boolean;
   /**
-   * The submit control, which must carry `slot="primary-action"` itself.
+   * Commit, carrying whatever was typed into the confirmation box.
    *
-   * Passed in rather than built here so this component owns no fetcher and no intent —
-   * the header already has both, and a modal that submits on its own behalf is a second
-   * place the apply can be triggered from.
+   * A callback rather than a submit control passed in as `children`, because Polaris
+   * refuses to render anything else — see the note on the button below. This component
+   * still owns no fetcher and no intent: the header supplies both, and the string handed
+   * back is read from the field this modal owns, which is the only place it exists.
    */
-  children: React.ReactNode;
+  onConfirm: (confirmation: string) => void;
 }) {
   const { counts, markets, blastRadius, writePath } = preview;
+
+  // Read at click time rather than held in state. Polaris fields are uncontrolled here
+  // (see `docs/polaris-notes.md` on `defaultValue`), and the value is wanted once.
+  const confirmation = useRef<ElementRef<"s-text-field">>(null);
 
   return (
     <s-modal id={APPLY_MODAL_ID} heading={`Apply ${preview.name}?`}>
@@ -142,6 +152,7 @@ export function ApplyConfirmation({
               to confirm you have read the preview.
             </s-paragraph>
             <s-text-field
+              ref={confirmation}
               name="confirmation"
               label="Type apply to confirm"
               required
@@ -159,9 +170,33 @@ export function ApplyConfirmation({
         Cancel
       </s-button>
 
-      {/* The submit itself, passed in with its own `slot="primary-action"`, so this
-          component owns no fetcher and no intent. */}
-      {children}
+      {/* A button, directly, with `variant="primary"` — not a form wrapping one.
+
+          This is the whole of #609, and `polaris.js` says it in as many words:
+
+              "Only Button elements with a `variant` of `primary` are allowed in the
+               `primary-action` slot."
+
+          The slot is matched against the element carrying it, so the `fetcher.Form` that
+          used to be here was dropped and the dialog rendered Cancel and nothing else —
+          a campaign could not be applied from the UI at all. The warning Polaris emits
+          goes to the app's own console, which lives in a cross-origin iframe, so nothing
+          said so. `PageShell` records the same rule for `s-page`, and `CampaignHeader`
+          records it for `s-menu`; this is the third place it has bitten.
+
+          Which also fixes the typed confirmation: the field sits in the modal body, so
+          it was never inside that form and its value was never posted. Over a thousand
+          variants the server refused every apply, whatever the merchant typed. */}
+      <s-button
+        slot="primary-action"
+        variant="primary"
+        loading={busy || undefined}
+        commandFor={APPLY_MODAL_ID}
+        command="--hide"
+        onClick={() => onConfirm(String(confirmation.current?.value ?? ""))}
+      >
+        Apply now
+      </s-button>
     </s-modal>
   );
 }

@@ -222,35 +222,31 @@ export function CampaignHeader({
           counts={rollback.counts}
           keepers={keepers}
           pending={keepersPending}
-        >
-          <fetcher.Form method="post" slot="primary-action">
-            <input type="hidden" name="intent" value="revert" />
-            <s-button type="submit" tone="critical" loading={busy || undefined}>
-              Revert now
-            </s-button>
-          </fetcher.Form>
-        </RevertConfirmation>
+          busy={busy}
+          onConfirm={() => fetcher.submit({ intent: "revert" }, { method: "post" })}
+        />
       ) : null}
 
       {/* Outside the row, because a modal is not an action. Inside `ActionRow` it
           was a third child of a row of buttons, and it put its own primary button in
           the middle of the header's — which the "at most one black button" rule
-          reads, correctly, as two. */}
+          reads, correctly, as two.
+
+          `fetcher.submit` rather than a form, for the reason the menu above gives and
+          `ApplyConfirmation`'s own button records: only an `s-button` may carry
+          `slot="primary-action"`, so there is nowhere in a modal to put a form. */}
       {practice ? null : (
-      <ApplyConfirmation
-        preview={preview}
-        rule={rule}
-        scope={scope}
-        notifyEmail={notifyEmail}
-        scheduleText={scheduleText}
-      >
-        <fetcher.Form method="post" slot="primary-action">
-          <input type="hidden" name="intent" value="apply" />
-          <s-button type="submit" variant="primary" loading={busy || undefined}>
-            Apply now
-          </s-button>
-        </fetcher.Form>
-      </ApplyConfirmation>
+        <ApplyConfirmation
+          preview={preview}
+          rule={rule}
+          scope={scope}
+          notifyEmail={notifyEmail}
+          scheduleText={scheduleText}
+          busy={busy}
+          onConfirm={(confirmation) =>
+            fetcher.submit({ intent: "apply", confirmation }, { method: "post" })
+          }
+        />
       )}
     </>
   );
