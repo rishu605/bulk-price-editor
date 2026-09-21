@@ -65,17 +65,33 @@ describe("rendering an actor", () => {
   });
 
   it("renders a staff actor as an id, without pretending it is a name", () => {
-    // The module deliberately does not fetch names — that would need online tokens and a
+    // The module deliberately does not fetch names — that would need `read_users` and a
     // reinstall. So the display says "Staff <id>", which is honest about what it knows.
     expect(describeActor("staff:42")).toBe("Staff 42");
   });
 
-  it("keeps the whole id, including one that contains a colon", () => {
-    // Shopify staff ids are gids, which are full of colons and slashes. Splitting on the
-    // separator rather than trimming the prefix would truncate every real one.
-    expect(describeActor("staff:gid://shopify/StaffMember/42")).toBe(
-      "Staff gid://shopify/StaffMember/42",
-    );
+  it("shortens a real id to something a person can hold", () => {
+    // Live on the dashboard this read "Staff 91614707946" — eleven digits of noise on
+    // the first screen after installing, where the only question asked of it is "was
+    // that me or somebody else".
+    expect(describeActor("staff:91614707946")).toBe("Staff 7946");
+  });
+
+  it("still tells two people apart, which is the whole job of this column", () => {
+    // The alternative was "A staff member" for everybody, which renders the log unable
+    // to answer the question it exists for, and gives the Who filter four identical
+    // options on a shop with four admins.
+    expect(describeActor("staff:91614707946")).not.toBe(describeActor("staff:91614701234"));
+  });
+
+  it("takes the id out of a gid rather than the whole path", () => {
+    // Shopify staff ids arrive either bare or as a gid full of slashes. Shortening the
+    // raw string would leave "Staff r/42" — the tail of the path, not the id.
+    expect(describeActor("staff:gid://shopify/StaffMember/91614707946")).toBe("Staff 7946");
+  });
+
+  it("leaves a short id alone rather than padding or trimming it", () => {
+    expect(describeActor("staff:7")).toBe("Staff 7");
   });
 
   it("passes an unrecognised actor through rather than hiding it", () => {

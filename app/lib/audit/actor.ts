@@ -40,10 +40,47 @@ export function actorFor(
   return typeof sub === "string" && sub.length > 0 ? `staff:${sub}` : shopDomain;
 }
 
-/** Renders an actor for display, without pretending an id is a name. */
+/**
+ * The last few characters of an id, which is as much of one as a person can hold.
+ *
+ * Staff ids arrive either as a bare numeric id or as a gid full of slashes, so the last
+ * path segment comes off first. Four characters, because that is the length every bank
+ * and airline has settled on for "enough to tell yours from somebody else's".
+ */
+function shortId(id: string): string {
+  const last = id.split("/").pop() ?? id;
+  return last.length <= 4 ? last : last.slice(-4);
+}
+
+/**
+ * Renders an actor for display, without pretending an id is a name.
+ *
+ * ## Why not the name
+ *
+ * Because the app cannot have it. Names come from `staffMember`, which needs
+ * `read_users`, and this app asks for `write_products`, `read_markets` and
+ * `write_markets`. Adding a scope forces a reinstall, and the trade — every merchant
+ * re-consenting — is not worth a display string. `actorFor` above says the same thing
+ * about online tokens.
+ *
+ * ## Why not "a staff member" either
+ *
+ * That was the other option and it loses the only thing this column is for. The log
+ * exists to answer "who turned the cost floor off?" on a store where four people have
+ * admin access, and a feed that renders all four identically cannot. The **Who** filter
+ * on `/app/activity` would go further and offer four options with the same label.
+ *
+ * So: short, stable, and visibly an id rather than a name. "Staff 7946" instead of
+ * "Staff 91614707946" — eleven digits of noise on the first screen after installing,
+ * where the only question anybody asks of it is "was that me or somebody else".
+ *
+ * Nothing is lost. The filter's *value* is still the whole id, so filtering stays exact,
+ * and `activityCsv` exports the raw `staff:<id>` rather than this, so the export a
+ * support case attaches is still unambiguous.
+ */
 export function describeActor(actor: string | null): string {
   if (!actor || actor === SCHEDULER_ACTOR || actor === "system") return "Scheduler";
   if (actor === "drift-detector") return "Drift detector";
-  if (actor.startsWith("staff:")) return `Staff ${actor.slice("staff:".length)}`;
+  if (actor.startsWith("staff:")) return `Staff ${shortId(actor.slice("staff:".length))}`;
   return actor;
 }
