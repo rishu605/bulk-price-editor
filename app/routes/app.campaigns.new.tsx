@@ -4,6 +4,7 @@ import { Form, redirect, useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { actorFor } from "../lib/audit/actor";
+import { priceListLabel } from "../lib/markets/display-name";
 import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
 import { facetDetails } from "../lib/segments/facets";
@@ -93,6 +94,10 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
       select: {
         priceListGid: true,
         name: true,
+        // The market's own title, which is what a merchant called it in Shopify. The
+        // `name` beside it is Shopify's, and for a market's implicit list that is
+        // "pricing_by_market.19853246698_1786915628". See `priceListLabel`.
+        catalogTitle: true,
         currency: true,
         adjustmentBps: true,
         surfaceKind: true,
@@ -806,7 +811,7 @@ export default function NewCampaign() {
                 name="priceList"
                 value={list.priceListGid}
                 disabled={!gate.allowed || undefined}
-                label={`${list.name} (${list.currency})${
+                label={`${priceListLabel(list)} (${list.currency})${
                   list.surfaceKind === "B2B" ? " · wholesale" : ""
                 }`}
                 details={
