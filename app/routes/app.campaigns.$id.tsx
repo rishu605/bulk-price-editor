@@ -248,28 +248,25 @@ type ActionData = RunResponse & {
 };
 
 export default function CampaignDetail() {
+  // The whole payload, not only the fields read here: `detail` spreads it. See #611.
+  const data = useLoaderData<typeof loader>();
+  // Only what this component reads for itself. Everything else reaches the tab bodies
+  // through `detail`, which spreads the payload.
   const {
     rollback,
     practice,
     preview,
     runs,
     ledger,
-    ledgerTotal,
     // Renamed: `result` in this component is the fetcher's reply to the last action,
     // and two different "results" on one page is how the wrong one gets rendered.
     result: runResult,
     selectedRunId,
-    scheduleText,
     timeZone,
-    warnings,
-    autoEnroll,
-    enrollPendingAt,
     lifecycle,
-    approval,
     state,
     needsAttention: attention,
-    history,
-  } = useLoaderData<typeof loader>();
+  } = data;
   const fetcher = useFetcher<ActionData>();
   const busy = fetcher.state !== "idle";
   const result = fetcher.data;
@@ -289,14 +286,22 @@ export default function CampaignDetail() {
   const [params] = useSearchParams();
   const tab = currentTab(tabs, params.get("tab"));
 
-  // One bundle rather than threading twenty props through five components. These are
-  // not reusable widgets -- they are this page, split so it can be read.
-  const detail = {
-    rollback, practice, preview, runs, ledger, ledgerTotal, result: runResult, selectedRunId,
-    scheduleText, timeZone, warnings, autoEnroll, enrollPendingAt, lifecycle, approval,
-    state, needsAttention: attention, history, fetcher, busy, canApply, attention,
-    keepers, keepersPending,
-  } as CampaignDetailProps;
+  // One bundle rather than threading twenty props through five components. Spread from
+  // the loader payload and **not cast**: the hand-written literal that used to be here
+  // had drifted six fields behind the loader, and `as CampaignDetailProps` was what kept
+  // the compiler quiet — which is how the apply dialog came to show an empty Rule, an
+  // empty Applies to, and "Nobody is emailed" on a shop that had an address. See #611 and
+  // `detail-props.test.ts`. `attention` is the components' shorter name for the loader's
+  // `needsAttention`; both are declared, so both are passed.
+  const detail: CampaignDetailProps = {
+    ...data,
+    fetcher,
+    busy,
+    canApply,
+    attention,
+    keepers,
+    keepersPending,
+  };
 
 
   return (
