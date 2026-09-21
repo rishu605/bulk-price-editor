@@ -17,6 +17,7 @@ describe("a shop that cannot reach its limit", () => {
     variantLimit: 10_000,
     catalogueVariants: 1_240,
     couldExceed: false,
+    synced: true,
   });
 
   it("leads with what is covered, not with what is used", () => {
@@ -40,6 +41,7 @@ describe("a shop whose catalogue is bigger than the cap", () => {
     variantLimit: 500,
     catalogueVariants: 102_132,
     couldExceed: true,
+    synced: true,
   });
 
   it("says what would happen, not that something is wrong", () => {
@@ -65,10 +67,56 @@ describe("the tier with no cap", () => {
       variantLimit: null,
       catalogueVariants: 102_132,
       couldExceed: false,
+      synced: true,
     });
 
     expect(line.headline).toContain("no variant limit");
     expect(line.detail).toContain("can cover all of it");
     expect(line.attention).toBe(false);
+  });
+});
+
+describe("a shop that has not synced yet", () => {
+  // The first screen after installing. `catalogueVariants` is 0 because nobody has
+  // looked, not because the shop is empty — and the sentence used to read it as a fact
+  // about the store. Live on `anchor-perf`, which has 102,132 variants in Shopify, it
+  // said "Your whole catalogue is 0 variants, so no campaign can reach the limit."
+  const line = usageLine({
+    planName: "Free",
+    variantLimit: 500,
+    catalogueVariants: 0,
+    couldExceed: false,
+    synced: false,
+  });
+
+  it("still says what the plan covers", () => {
+    expect(line.headline).toBe("Free · campaigns up to 500 variants");
+  });
+
+  it("claims nothing about a catalogue it has not read", () => {
+    expect(line.detail).not.toContain("0 variants");
+    expect(line.detail).not.toContain("no campaign can reach the limit");
+  });
+
+  it("says what would make the sentence complete", () => {
+    expect(line.detail).toContain("Sync your catalogue");
+  });
+
+  it("draws no attention, because nothing is wrong yet", () => {
+    expect(line.attention).toBe(false);
+  });
+
+  it("does not invent a catalogue on an uncapped plan either", () => {
+    const uncapped = usageLine({
+      planName: "Scale",
+      variantLimit: null,
+      catalogueVariants: 0,
+      couldExceed: false,
+      synced: false,
+    });
+
+    expect(uncapped.headline).toContain("no variant limit");
+    expect(uncapped.detail).not.toContain("0 variants");
+    expect(uncapped.detail).toContain("whatever size it turns out to be");
   });
 });
