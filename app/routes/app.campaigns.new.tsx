@@ -5,6 +5,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { actorFor } from "../lib/audit/actor";
 import { priceListLabel } from "../lib/markets/display-name";
+import { GUIDED_PRODUCT_LIMIT } from "../lib/onboarding/steps";
 import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
 import { facetDetails } from "../lib/segments/facets";
@@ -221,6 +222,13 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
       title: url.searchParams.get("title") ?? "",
       segment: segmentId,
     },
+    // A guided campaign that still covers everything. The banner says "narrow the scope
+    // to a handful of products — five is plenty" and the form defaulted to the whole
+    // catalogue, so a merchant following the checklist and pressing the obvious button
+    // got a whole-catalogue sale having just been told they were doing a small one.
+    // See #624 and `GUIDED_PRODUCT_LIMIT`.
+    guidedNeedsScope:
+      guided && !segmentId && SCOPE_CONDITION_FIELDS.every((field) => !url.searchParams.get(field)),
   };
 });
 
@@ -324,6 +332,7 @@ export default function NewCampaign() {
     usingSegment,
     practice,
     guided,
+    guidedNeedsScope,
     timeZone,
     timeZoneNow,
     initialRuleKind,
@@ -472,10 +481,20 @@ export default function NewCampaign() {
         <s-banner tone="info">
           <s-paragraph>
             Start small. Set your rule, then narrow the scope to a handful of
-            products — five is plenty — so your first run is quick and easy to check.
-            The panel beside it shows every price that would change, before anything is
-            applied.
+            products — {GUIDED_PRODUCT_LIMIT} is plenty — so your first run is quick and
+            easy to check. The panel beside it shows every price that would change,
+            before anything is applied.
           </s-paragraph>
+          {/* The promise, kept. Saying "start small" and defaulting to everything left
+              the merchant one obvious button away from a whole-catalogue sale. */}
+          {guidedNeedsScope ? (
+            <s-paragraph>
+              <s-text type="strong">
+                Pick a collection, a vendor, a tag or a title to narrow this down — the
+                button below waits until you have.
+              </s-text>
+            </s-paragraph>
+          ) : null}
         </s-banner>
       ) : null}
 
@@ -936,7 +955,10 @@ export default function NewCampaign() {
           thing it is submitting. */}
       {fromFile ? null : (
         <ActionRow>
-          <s-button type="submit" variant="primary">
+          {/* Disabled rather than refused after the fact: the scope lives in the URL, so
+              the page already knows, and telling a merchant afterwards that their first
+              campaign was too big is telling them after they pressed the button. */}
+          <s-button type="submit" variant="primary" disabled={guidedNeedsScope || undefined}>
             {practice ? "Preview it — nothing will be written" : "Create and preview"}
           </s-button>
         </ActionRow>
