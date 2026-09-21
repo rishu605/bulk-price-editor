@@ -14,8 +14,19 @@
 export interface HomeFacts {
   /** The catalogue has never been synced, so there is nothing to count yet. */
   neverSynced: boolean;
-  /** Campaigns that exist at all, in any state. */
-  campaigns: number;
+  /**
+   * The four figures the live section renders, by name.
+   *
+   * It used to take `campaigns` — every campaign in any state — and that is what made a
+   * draft turn the section on. These are the tiles themselves, so "is there anything to
+   * report" and "what does the section say" cannot disagree.
+   */
+  running: number;
+  scheduled: number;
+  needsAttention: number;
+  driftOpen: number;
+  /** Campaigns a merchant made and has not applied. Nothing of theirs is live. */
+  drafts: number;
   /** Whether any run has ever happened. */
   hasRun: boolean;
   /** The getting-started checklist has retired itself. */
@@ -29,8 +40,26 @@ export interface HomeSections {
    * It used to render unconditionally, so a shop that had synced and not yet made a
    * campaign got four tiles reading 0, 0, 0, 0 and two paragraphs explaining that nothing
    * had happened — the largest block on the page, spent on the absence of news.
+   *
+   * The guard that replaced it was `campaigns > 0 || hasRun`, and `campaigns` counts
+   * **drafts**. So the four zeroes came straight back for every shop that made one —
+   * which is every shop that follows the product's own advice, since quick create says
+   * "Creates a draft" and the editor's primary button is "Create and preview". The page
+   * showed four zeroes *and* did not mention the draft that had turned them on.
+   *
+   * It is the tiles themselves now: the section appears when one of them would read
+   * above zero, or when a run has happened. A section that claims to say what is live
+   * cannot be switched on by something that is not.
    */
   live: boolean;
+  /**
+   * The draft line, for a shop whose only campaigns are ones it has not applied.
+   *
+   * Not a tile among the four. A draft is not a small amount of live — it is the thing
+   * the merchant left half-done, and the answer to "what now" on a page that would
+   * otherwise say nothing.
+   */
+  drafts: boolean;
   /**
    * The empty state, for the single case the checklist cannot cover: a merchant who
    * finished it and has since deleted the campaigns they finished it with. Any other
@@ -60,15 +89,23 @@ export interface HomeSections {
 }
 
 export function homeSections(facts: HomeFacts): HomeSections {
-  // Something to report is a campaign that exists or a run that happened — not a set of
-  // counters that all read zero.
-  const live = facts.campaigns > 0 || facts.hasRun;
+  // Something to report is a tile that would read above zero, or a run that happened —
+  // not a set of counters that all read zero. Adding them rather than testing each is
+  // deliberate: the list here and the list the section renders are the same four.
+  const counted =
+    facts.running + facts.scheduled + facts.needsAttention + facts.driftOpen;
+  const live = counted > 0 || facts.hasRun;
+
+  const drafts = !live && facts.drafts > 0;
 
   const quickCreate = !facts.neverSynced && facts.onboardingComplete;
 
   return {
     live,
-    emptyState: !facts.neverSynced && !live && facts.onboardingComplete,
+    drafts,
+    // Nothing live and no draft either. A shop with a draft is told about the draft,
+    // which answers the same question better than "nothing is running" does.
+    emptyState: !facts.neverSynced && !live && !drafts && facts.onboardingComplete,
     createIsPrimary: facts.onboardingComplete && !quickCreate,
     catalogue: !facts.neverSynced,
     quickCreate,

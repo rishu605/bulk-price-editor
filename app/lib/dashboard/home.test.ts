@@ -1,10 +1,16 @@
 /**
  * The decisions Home makes about itself.
  *
- * Each exists because of a way the page had previously embarrassed itself, and until now
- * every one was an untested conditional in JSX. The `live` rule was mutated to `true`
- * during review of the change that introduced it and the whole suite passed — which is
- * how a page goes back to opening with four zeroes.
+ * Each exists because of a way the page had previously embarrassed itself, and until they
+ * were extracted every one was an untested conditional in JSX. The `live` rule was
+ * mutated to `true` during review of the change that introduced it and the whole suite
+ * passed — which is how a page goes back to opening with four zeroes.
+ *
+ * It went back anyway. The guard that replaced the unconditional render was
+ * `campaigns > 0 || hasRun`, and `campaigns` counts drafts, so the four zeroes returned
+ * for every shop that made one — which is every shop that follows the product's own
+ * advice. The cases below are written in terms of the tiles, because that is the only
+ * way the guard and the thing it guards cannot drift apart again.
  */
 
 import { describe, expect, it } from "vitest";
@@ -14,7 +20,11 @@ import { homeSections } from "./home";
 const shop = (over: Partial<Parameters<typeof homeSections>[0]> = {}) =>
   homeSections({
     neverSynced: false,
-    campaigns: 0,
+    running: 0,
+    scheduled: 0,
+    needsAttention: 0,
+    driftOpen: 0,
+    drafts: 0,
     hasRun: false,
     onboardingComplete: false,
     ...over,
@@ -37,7 +47,7 @@ describe("a shop that has just installed", () => {
 });
 
 describe("a shop part-way through the checklist", () => {
-  const sections = shop({ campaigns: 0 });
+  const sections = shop();
 
   it("still gets no live section", () => {
     expect(sections.live).toBe(false);
@@ -48,15 +58,57 @@ describe("a shop part-way through the checklist", () => {
   });
 });
 
+describe("a shop whose only campaign is a draft", () => {
+  // The state every merchant passes through: quick create says "Creates a draft", and
+  // the editor's primary button is "Create and preview".
+  const sections = shop({ drafts: 1 });
+
+  it("is not shown four tiles reading zero", () => {
+    expect(
+      sections.live,
+      "a draft is not a small amount of live, and four zeroes is what this guard is for",
+    ).toBe(false);
+  });
+
+  it("is told about the draft instead", () => {
+    expect(sections.drafts).toBe(true);
+  });
+
+  it("is not also told that nothing is running", () => {
+    // Two blocks answering the same question, one of them less usefully.
+    expect(shop({ drafts: 1, onboardingComplete: true }).emptyState).toBe(false);
+  });
+});
+
 describe("a shop with something to report", () => {
-  it("shows the live section for a campaign that exists", () => {
-    expect(shop({ campaigns: 1 }).live).toBe(true);
+  it("shows the live section for a campaign that is running", () => {
+    expect(shop({ running: 1 }).live).toBe(true);
+  });
+
+  it("shows it for one that is scheduled", () => {
+    expect(shop({ scheduled: 1 }).live).toBe(true);
+  });
+
+  it("shows it for one that needs a decision", () => {
+    expect(shop({ needsAttention: 1 }).live).toBe(true);
+  });
+
+  it("shows it for prices changed outside the app", () => {
+    // The fourth tile counts something no campaign state covers, so it turns the
+    // section on by itself.
+    expect(shop({ driftOpen: 1 }).live).toBe(true);
   });
 
   it("shows it for a run that happened even if the campaign is gone", () => {
     // The last run is a thing a merchant opens the page to check, and deleting the
     // campaign does not make it not have happened.
-    expect(shop({ campaigns: 0, hasRun: true }).live).toBe(true);
+    expect(shop({ hasRun: true }).live).toBe(true);
+  });
+
+  it("does not add a draft line beside it", () => {
+    // The drafts are reachable from the campaigns index; the page is answering "what is
+    // live" and a draft is not.
+    expect(shop({ running: 1, drafts: 4 }).drafts).toBe(false);
   });
 });
 
@@ -95,15 +147,27 @@ describe("whatever the shop", () => {
   const every = [
     shop({ neverSynced: true }),
     shop(),
-    shop({ campaigns: 1 }),
+    shop({ drafts: 2 }),
+    shop({ running: 1 }),
+    shop({ scheduled: 3 }),
+    shop({ driftOpen: 7 }),
     shop({ hasRun: true }),
     shop({ onboardingComplete: true }),
-    shop({ onboardingComplete: true, campaigns: 3, hasRun: true }),
+    shop({ onboardingComplete: true, running: 3, hasRun: true }),
+    shop({ onboardingComplete: true, drafts: 1 }),
   ];
 
   it("never shows the empty state and the live section together", () => {
     // They answer the same question, and a page rendering both says "nothing is running"
     // directly above a list of what is running.
     expect(every.filter((sections) => sections.emptyState && sections.live)).toEqual([]);
+  });
+
+  it("never shows the draft line and the live section together", () => {
+    expect(every.filter((sections) => sections.drafts && sections.live)).toEqual([]);
+  });
+
+  it("never shows the draft line and the empty state together", () => {
+    expect(every.filter((sections) => sections.drafts && sections.emptyState)).toEqual([]);
   });
 });
