@@ -28,6 +28,7 @@ import { RouteBoundary } from "../components/RouteBoundary";
 import { onboarding } from "../lib/onboarding/steps";
 import { homeSections } from "../lib/dashboard/home";
 import { resultBanner } from "../lib/dashboard/action-result";
+import { syncMessage } from "../lib/dashboard/sync-message";
 import { nextMoments } from "../lib/scheduling/upcoming";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
@@ -260,16 +261,18 @@ export const action = withGuard("/app", async ({ request }: ActionFunctionArgs) 
 
     return {
       ok: sync.errors.length === 0,
-      message:
-        `Synced ${sync.variants} variants across ${sync.products} products. ` +
-        `Captured ${capture.captured} baselines` +
-        (capture.alreadyCurrent > 0 ? `, ${capture.alreadyCurrent} already current` : "") +
-        (markets.priceLists > 0
-          ? `. Mirrored ${markets.priceLists} price list${markets.priceLists === 1 ? "" : "s"}` +
-            (markets.relative > 0 ? ` (${markets.relative} derived from a percentage)` : "") +
-            (markets.entries > 0 ? `, ${markets.entries} fixed prices` : "")
-          : "") +
-        ".",
+      // Built in `sync-message`, which is where the grouping and the units live. This
+      // was the one place on Home that interpolated raw numbers, so the banner said
+      // "3669" two inches above a tile saying "3,669". See #617.
+      message: syncMessage({
+        variants: sync.variants,
+        products: sync.products,
+        captured: capture.captured,
+        alreadyCurrent: capture.alreadyCurrent,
+        priceLists: markets.priceLists,
+        relative: markets.relative,
+        entries: markets.entries,
+      }),
       errors: sync.errors.slice(0, 5),
     };
   }
