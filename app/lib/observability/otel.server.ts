@@ -41,6 +41,9 @@ export const INSTRUMENTS: Record<Metric, "counter" | "histogram" | "gauge"> = {
   // healthy answer is zero. A counter would accumulate across nights and never come back
   // down after a fix.
   "mirror.unpriceable": "gauge",
+  // A distribution, not a total: the question is "how long does this route take", and a
+  // counter would answer "how many milliseconds have ever been spent in it".
+  "route.server_ms": "histogram",
   "scheduler.tick": "counter",
   "budget.saturation": "gauge",
   "queue.depth": "gauge",
