@@ -7,6 +7,7 @@ import {
 } from "react";
 
 import { HelpNote } from "./HelpNote";
+import { QueryContainer } from "./QueryContainer";
 import { SPACE } from "../lib/ui/spacing";
 
 /**
@@ -351,6 +352,14 @@ export function PageShell({
       <s-page heading={heading} inlineSize="large">
         <BackLink backTo={backTo} />
         {actions}
+        {/* The page's content area is what this grid's `@container` value is measured
+            against. Without one it was measured against nothing, so the aside never fell
+            below the content however narrow the admin got — at a 900px window the main
+            column was squeezed to about 150px while the 22rem aside kept its full width,
+            and Home wrapped its intro sentence one word per line. A direct child of
+            `s-page`, which is a block context, so the wrapper fills rather than sizing
+            to its content. See `QueryContainer`. */}
+        <QueryContainer>
         <s-grid
           gap={SPACE.page}
           // The column gap is the page rhythm too, not a smaller one. Two columns set
@@ -380,6 +389,7 @@ export function PageShell({
             )}
           </s-stack>
         </s-grid>
+        </QueryContainer>
       </s-page>
     </PageWidth>
   );

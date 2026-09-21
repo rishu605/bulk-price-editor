@@ -1,3 +1,4 @@
+import { QueryContainer } from "./QueryContainer";
 import { formatCount } from "../lib/format/display";
 import { HAIRLINE, PAD, SPACE } from "../lib/ui/spacing";
 
@@ -58,8 +59,12 @@ export function CountsRow({ items }: { items: CountItem[] }) {
   // ending in a bare comma, which is the unparseable shape described above.
   const columns = items.map(() => "1fr").join(" ") || "1fr";
 
+  // Measured against the card this row sits in, so "two up when the card gets narrow"
+  // is finally a thing that happens rather than a string nothing reads. See
+  // `QueryContainer` for why the wrapper goes here and not around the card.
   return (
-    <s-grid
+    <QueryContainer>
+      <s-grid
       // Two up when the card gets narrow. Four tiles in a 400px column would be four
       // slivers, and a figure that wraps mid-number is worse than a second row.
       gridTemplateColumns={`@container (inline-size <= 600px) 1fr 1fr, ${columns}`}
@@ -82,7 +87,8 @@ export function CountsRow({ items }: { items: CountItem[] }) {
           <Tile key={item.label} item={item} />
         ),
       )}
-    </s-grid>
+      </s-grid>
+    </QueryContainer>
   );
 }
 

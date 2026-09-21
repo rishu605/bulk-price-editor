@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 
+import { QueryContainer } from "./QueryContainer";
 import type { OnboardingState, OnboardingStep, StepId } from "../lib/onboarding/steps";
 import { SPACE } from "../lib/ui/spacing";
 import { ActionRow } from "./ActionRow";
@@ -99,8 +100,13 @@ export function OnboardingCard({
 
             Four columns: the status glyph, the title, the disclosure, the action. Each
             step contributes exactly four cells, and the two things that span the row —
-            the rule between steps and the opened explanation — say so. */}
-        <s-grid
+            the rule between steps and the opened explanation — say so.
+
+            The card's interior is what these columns are measured against, and the
+            wrapper is a child of the stack above, which has already decided the width.
+            See `QueryContainer`. */}
+        <QueryContainer>
+          <s-grid
           gridTemplateColumns="@container (inline-size <= 500px) auto 1fr, auto 1fr auto auto"
           gap={SPACE.item}
           alignItems="center"
@@ -114,7 +120,8 @@ export function OnboardingCard({
               divided={index > 0}
             />
           ))}
-        </s-grid>
+          </s-grid>
+        </QueryContainer>
       </s-stack>
     </Card>
   );
