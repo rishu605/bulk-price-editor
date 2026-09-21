@@ -23,6 +23,7 @@
  * market following the base price at all.
  */
 
+import { priceListLabel } from "../../lib/markets/display-name";
 import prisma from "../../db.server";
 import type { MarketWritePath } from "../../lib/execution/price-list-parent";
 import {
@@ -272,7 +273,7 @@ export async function applyMarketSurfaces(
     if (refused.has(list.priceListGid)) {
       outcomes.push({
         priceListGid: list.priceListGid,
-        name: list.name,
+        name: priceListLabel(list),
         currency: list.currency,
         verified: 0,
         failed: 0,
@@ -302,7 +303,7 @@ export async function applyMarketSurfaces(
 
       outcomes.push({
         priceListGid: list.priceListGid,
-        name: list.name,
+        name: priceListLabel(list),
         currency: list.currency,
         verified: 0,
         failed: 0,
@@ -321,13 +322,13 @@ export async function applyMarketSurfaces(
     if (outcome.kind === "blocked") {
       outcomes.push({
         priceListGid: list.priceListGid,
-        name: list.name,
+        name: priceListLabel(list),
         currency: list.currency,
         verified: 0,
         failed: 0,
         chunks: 0,
         messages: [
-          `${list.name}: a guardrail stopped this market before anything was written (${outcome.reason}).`,
+          `${priceListLabel(list)}: a guardrail stopped this market before anything was written (${outcome.reason}).`,
         ],
         path: "per-product",
       });
@@ -390,7 +391,7 @@ export async function applyMarketSurfaces(
     if (remaining.length === 0) {
       outcomes.push({
         priceListGid: list.priceListGid,
-        name: list.name,
+        name: priceListLabel(list),
         currency: list.currency,
         verified: settled.size,
         failed: 0,
@@ -456,7 +457,7 @@ export async function applyMarketSurfaces(
 
       outcomes.push({
         priceListGid: list.priceListGid,
-        name: list.name,
+        name: priceListLabel(list),
         currency: list.currency,
         verified: wide.verified,
         failed: wide.failed,
@@ -707,7 +708,7 @@ function summarise(
 ): Omit<MarketSurfaceOutcome, "path"> {
   return {
     priceListGid: list.priceListGid,
-    name: list.name,
+    name: priceListLabel(list),
     currency: list.currency,
     verified: result.verified,
     failed: result.failed,
