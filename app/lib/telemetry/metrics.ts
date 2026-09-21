@@ -39,6 +39,20 @@ export type Metric =
    * path on a large catalogue look like a rounding error.
    */
   | "mirror.unpriceable"
+  /**
+   * How long one loader or action spent on the server, by route.
+   *
+   * Added because a page appearing blank for twelve seconds could not be attributed
+   * without it (#616). Locally Home's loader is 16–30ms end to end, auth included, so
+   * the blank period is the embedded-app boot rather than our work — but that was a
+   * measurement taken by hand on one machine, and the question recurs. A histogram makes
+   * it answerable from production, per route, without anybody instrumenting a loader
+   * again.
+   *
+   * A duration and a route name. No shop data beyond the id every metric already
+   * carries, and nothing about what the page showed.
+   */
+  | "route.server_ms"
   /** That the scheduler is alive and doing work. */
   | "scheduler.tick"
   /** How much of a shop's rate-limit budget a run consumed. */

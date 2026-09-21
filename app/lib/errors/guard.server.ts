@@ -16,6 +16,7 @@
 import { data } from "react-router";
 
 import { reportError, type ReportContext } from "../../services/error-report.server";
+import { metric } from "../telemetry/metrics";
 import { ANCHOR_ERROR, type ReportedError } from "./report";
 
 export { ANCHOR_ERROR };
@@ -31,16 +32,44 @@ export interface AnchorErrorPayload {
  * `authenticate.admin` signals "redirect this embedded app to re-authenticate" by
  * throwing a Response, and swallowing it would replace a silent sign-in with an
  * error screen.
+ *
+ * ## It also times them
+ *
+ * Every route in the app is already wrapped in one of these, which makes it the one
+ * place that can answer "how long does the server take" without instrumenting anything.
+ * The question came up when Home appeared blank for twelve seconds and there was no way
+ * to tell whether the loader, the embedded-app boot or the host was responsible; by hand
+ * on a local machine the answer was 16–30ms, but that is a measurement nobody else can
+ * repeat. See #616.
+ *
+ * A duration and a route name, which is what `CLAUDE.md` allows: counts and durations,
+ * never a price and never a product.
  */
 export function withGuard<Args, Result>(
   route: string,
   handler: (args: Args) => Promise<Result>,
 ): (args: Args) => Promise<Result> {
   return async (args: Args) => {
+    const started = Date.now();
+    const method = (args as { request?: Request })?.request?.method ?? "GET";
+
     try {
-      return await handler(args);
+      const result = await handler(args);
+      metric("route.server_ms", Date.now() - started, { route, method, outcome: "ok" });
+      return result;
     } catch (error) {
-      if (error instanceof Response) throw error;
+      // A redirect or a re-auth bounce is work the route did, not a failure, and timing
+      // only the successes would hide the slowest thing a route can do to a merchant.
+      if (error instanceof Response) {
+        metric("route.server_ms", Date.now() - started, {
+          route,
+          method,
+          outcome: "redirect",
+        });
+        throw error;
+      }
+
+      metric("route.server_ms", Date.now() - started, { route, method, outcome: "error" });
 
       const request = (args as { request?: Request })?.request;
       const reported = await reportError(error, {
