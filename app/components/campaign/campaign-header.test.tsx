@@ -325,6 +325,48 @@ describe.each([
   });
 });
 
+/**
+ * Whether the restatement reads as a list of facts or as eight loose fragments.
+ *
+ * #630. Each line used to be its own inline stack, so every row sized itself: eight
+ * labels at the left edge and eight values starting wherever their own label ended. A
+ * value long enough to wrap — "How long" always is — broke its row onto two lines, so it
+ * read as a heading with a paragraph under it while its neighbours read as pairs. And the
+ * labels were `strong`, which is emphasis within a line, not a rank for eight names in a
+ * column.
+ */
+describe("the apply confirmation's restatement", () => {
+  it("lays every line out in one grid rather than one stack per line", () => {
+    const modal = modalOf(render(<CampaignHeader {...props()} />), "apply-confirmation");
+
+    // Columns only line up within one grid — the lesson `OnboardingCard` already records.
+    expect(modal).toContain('<s-grid gridTemplateColumns="auto 1fr"');
+    expect(
+      modal.split("<s-grid")[1] ?? "",
+      "a per-line inline stack is what made eight rows start in eight places",
+    ).not.toContain('direction="inline"');
+  });
+
+  it("names each fact with the caption rank, not with strong", () => {
+    const modal = modalOf(render(<CampaignHeader {...props()} />), "apply-confirmation");
+    const restatement = modal.slice(modal.indexOf("<s-grid"), modal.indexOf("</s-grid>"));
+
+    expect(restatement).toContain('<s-text color="subdued">Rule</s-text>');
+    expect(
+      restatement,
+      "eight bold words down the left edge read as eight headings",
+    ).not.toContain('type="strong"');
+  });
+
+  it("keeps the label and its value adjacent, so the grid pairs them", () => {
+    const modal = modalOf(render(<CampaignHeader {...props()} />), "apply-confirmation");
+
+    // Two cells in order: the name, then the fact. Anything between them would put the
+    // pair in different rows of a two-column grid.
+    expect(modal).toContain('<s-text color="subdued">Rule</s-text><s-text>20%');
+  });
+});
+
 describe("what the apply button does now", () => {
   it("opens the confirmation rather than posting", () => {
     const html = render(<CampaignHeader {...props()} />);

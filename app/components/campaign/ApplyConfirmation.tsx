@@ -4,7 +4,7 @@ import { describeRunDuration } from "../../lib/planning/duration";
 import { formatCount } from "../../lib/format/display";
 import { SPACE } from "../../lib/ui/spacing";
 import type { CampaignPreview } from "../../services/campaigns/types";
-import { Secondary } from "../Type";
+import { Caption, Secondary } from "../Type";
 
 /**
  * What is about to happen, in sentences, before anything is written.
@@ -81,8 +81,22 @@ export function ApplyConfirmation({
       <s-stack gap={SPACE.section}>
         {/* A restatement, not a re-render of the form. Each line is a fact about this
             run; lines that do not apply are absent rather than empty, because a row
-            reading "Markets: none" is a thing to read and dismiss on every apply. */}
-        <s-stack gap={SPACE.item}>
+            reading "Markets: none" is a thing to read and dismiss on every apply.
+
+            One grid for every line, not a stack of inline pairs.
+
+            As a stack each row sized itself, so eight labels started at the left edge and
+            eight values began wherever their own label happened to end — eight different
+            distances, on the last screen before prices are written to a live storefront.
+            A long value made it worse rather than merely untidy: "How long" broke onto a
+            second line, so that row read as a heading with a paragraph under it while the
+            rows above it read as pairs. `OnboardingCard` records the same lesson in the
+            same words — a grid's columns only line up *within one grid*.
+
+            Two columns: what the fact is called, and the fact. A value that wraps now
+            wraps under itself, inside its own column, so it cannot change the shape of
+            its row relative to its neighbours. */}
+        <s-grid gridTemplateColumns="auto 1fr" gap={SPACE.item}>
           {/* The same two sentences the campaigns index shows, through the same
               formatter. A merchant who read "20% off · In Outerwear" in the list should
               meet those words again at the moment they commit, not a second description
@@ -134,7 +148,7 @@ export function ApplyConfirmation({
           <Fact label="When it finishes">
             {notifyEmail ? `We will email ${notifyEmail}` : "Nobody is emailed — set an address in Settings"}
           </Fact>
-        </s-stack>
+        </s-grid>
 
         {/* The one thing this app can say that none of the three competitors can. It is
             here rather than only in the help centre because this is the moment a merchant
@@ -201,12 +215,32 @@ export function ApplyConfirmation({
   );
 }
 
-/** A label and its value on one row, so the modal reads as a list of facts. */
+/**
+ * One line of the restatement: two cells of the grid above, never its own grid.
+ *
+ * ## Why the label is a caption and not `strong`
+ *
+ * It was `type="strong"`, which put eight bold words down the left edge of the dialog —
+ * and `spacing.ts` is explicit that strong is "emphasis *within* a line… not a small
+ * heading". Read down, those eight looked like the headings of eight sections rather
+ * than the names of eight values, so the eye landed on the labels and had to work back
+ * to the facts. `Caption` is the rank the rest of the app uses for exactly this, and it
+ * subordinates the name to the value the way a confirmation needs.
+ *
+ * ## Why this is not the shared `Fact`
+ *
+ * `components/Fact` puts the caption *above* its value, and its reasoning holds where it
+ * is used: a card column 22rem wide, where a pair beside each other competes for one
+ * line. Here there are eight pairs one after another in a dialog twice that width, and
+ * stacking every one of them would make the last screen before a price write twice as
+ * tall as the screen it interrupts. Beside is right here, and the ambiguity that argument
+ * is about — which half is which — is answered by the shared column instead.
+ */
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <s-stack direction="inline" gap={SPACE.item}>
-      <s-text type="strong">{label}</s-text>
+    <>
+      <Caption>{label}</Caption>
       <s-text>{children}</s-text>
-    </s-stack>
+    </>
   );
 }
