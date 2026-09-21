@@ -44,8 +44,22 @@ async function violationPolicyFor(shopId: string): Promise<GuardrailViolationPol
   return settings.violationPolicy;
 }
 
-export async function createCampaign(shopId: string, input: CampaignInput) {
-  return prisma.campaign.create({
+/**
+ * Who made this campaign, for the log.
+ *
+ * Optional because the scheduler and the Flow actions create campaigns too, and a row
+ * attributed to a person who was not there is worse than one attributed to nobody.
+ */
+export interface CreatedBy {
+  actor?: string | null;
+}
+
+export async function createCampaign(
+  shopId: string,
+  input: CampaignInput,
+  options: CreatedBy = {},
+) {
+  const campaign = await prisma.campaign.create({
     data: {
       shopId,
       name: input.name,
@@ -88,6 +102,31 @@ export async function createCampaign(shopId: string, input: CampaignInput) {
         : {}),
     },
   });
+
+  // The log's job is to answer "who decided this", and a campaign appearing out of
+  // nowhere was the largest hole in it: a merchant could make one, and Home's Recent
+  // activity — which is where most of them will ever see the log — would still be
+  // showing whatever the scheduler last did, days earlier. See #614.
+  //
+  // Written after the campaign rather than in the same transaction on purpose. A
+  // campaign that exists with no log row is a gap in the record; a log row for a
+  // campaign that does not exist is a lie about one, and the second is worse.
+  await prisma.auditLogEntry.create({
+    data: {
+      shopId,
+      actor: options.actor ?? null,
+      action: "campaign.created",
+      entity: "Campaign",
+      entityId: campaign.id,
+      after: {
+        name: campaign.name,
+        status: campaign.status,
+        practice: input.practice ?? false,
+      } as never,
+    },
+  });
+
+  return campaign;
 }
 
 /**
