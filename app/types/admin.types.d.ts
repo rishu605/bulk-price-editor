@@ -13851,7 +13851,7 @@ export type CompanyLocation = CommentEventSubject & HasEvents & HasMetafieldDefi
   /** The preferred locale of the company location. */
   locale?: Maybe<Scalars['String']['output']>;
   /**
-   * The market that includes the location's shipping address. If the shipping address is empty, then the value is the shop's primary market.
+   * The market that applies to the location's shipping address country. In cases where multiple markets match, this returns the most-specific country region market. If the shipping address is empty, then the value is the shop's backup region market.
    * @deprecated This `market` field will be removed in a future version of the API.
    */
   market: Market;
@@ -15680,7 +15680,7 @@ export type Customer = CommentEventSubject & HasEvents & HasMetafieldDefinitions
   /** The customer's locale. */
   locale: Scalars['String']['output'];
   /**
-   * The market that includes the customer’s default address.
+   * The market that applies to the customer’s default address country. In cases where multiple markets match, this returns the most-specific country region market.
    * @deprecated This `market` field will be removed in a future version of the API.
    */
   market?: Maybe<Market>;
@@ -19914,9 +19914,9 @@ export type DeliveryProfileInput = {
   /** The list of condition IDs to delete. */
   conditionsToDelete?: InputMaybe<Array<Scalars['ID']['input']>>;
   /**
-   * Whether this delivery profile covers all items in the shop. Providing this field requires
-   * the shop to be enabled and is only supported on app-owned shipping profiles. Set it to `true`
-   * to make the profile cover all shippable items, or `false` to disable this behavior. When omitted
+   * Whether this delivery profile covers all items in the shop. This field is only supported on
+   * app-owned shipping profiles. Set it to `true` to make the profile cover all shippable items,
+   * or `false` to disable this behavior. When omitted
    * on create, the profile is created with `coversAllItems: false`. When omitted on update, the
    * existing value is preserved.
    */
@@ -23457,7 +23457,10 @@ export type DiscountCountries = {
   __typename?: 'DiscountCountries';
   /** The codes for the countries where the discount can be applied. */
   countries: Array<CountryCode>;
-  /** Whether the discount is applicable to countries that haven't been defined in the shop's shipping zones. */
+  /**
+   * Whether the discount is applicable to countries that haven't been defined in the shop's shipping zones.
+   * @deprecated This field is being retired. Discounts that set `includeRestOfWorld: true` will be converted to an explicit list of countries, and `countries` will then return every country where the discount applies.
+   */
   includeRestOfWorld: Scalars['Boolean']['output'];
 };
 
@@ -23465,8 +23468,6 @@ export type DiscountCountries = {
 export type DiscountCountriesInput = {
   /** The country codes to add to the list of countries where the discount applies. */
   add?: InputMaybe<Array<CountryCode>>;
-  /** Whether the discount code is applicable to countries that haven't been defined in the shop's shipping zones. */
-  includeRestOfWorld?: InputMaybe<Scalars['Boolean']['input']>;
   /** The country codes to remove from the list of countries where the discount applies. */
   remove?: InputMaybe<Array<CountryCode>>;
 };
@@ -43516,10 +43517,10 @@ export type Mutation = {
    */
   productOptionUpdate?: Maybe<ProductOptionUpdatePayload>;
   /**
-   * Creates one or more [options](https://shopify.dev/docs/api/admin-graphql/latest/objects/ProductOption)
-   * on a [product](https://shopify.dev/docs/api/admin-graphql/latest/objects/Product),
+   * Creates one or more [options](https://shopify.dev/docs/api/admin-graphql/current/objects/ProductOption)
+   * on a [product](https://shopify.dev/docs/api/admin-graphql/current/objects/Product),
    * such as size, color, or material. Each option includes a name, position, and a list of values. The combination
-   * of a product option and value creates a [product variant](https://shopify.dev/docs/api/admin-graphql/latest/objects/ProductVariant).
+   * of a product option and value creates a [product variant](https://shopify.dev/docs/api/admin-graphql/current/objects/ProductVariant).
    *
    * Use the `productOptionsCreate` mutation for the following use cases:
    *
@@ -43538,16 +43539,23 @@ export type Mutation = {
    * > Note:
    * > The `productOptionsCreate` mutation enforces strict data integrity for product options and variants.
    * All option positions must be sequential, and every option should be used by at least one variant.
-   * If you use the [`CREATE` variant strategy](https://shopify.dev/docs/api/admin-graphql/latest/mutations/productOptionsCreate#arguments-variantStrategy.enums.CREATE), consider the maximum allowed number of variants for each product is 2048.
+   * If you use the [`CREATE` variant strategy](https://shopify.dev/docs/api/admin-graphql/current/mutations/productOptionsCreate#arguments-variantStrategy.enums.CREATE), consider the maximum allowed number of variants for each product is 2048.
+   *
+   * If the product already has an option with the same name, then the mutation returns an
+   * `OPTION_ALREADY_EXISTS` error. A product that has only its default variant is the exception,
+   * because its implicit `Title` option is a placeholder that the mutation replaces.
+   * To declare the complete set of options and variants that a product
+   * should have, and let Shopify create, update, or remove them to match, use the
+   * [`productSet`](https://shopify.dev/docs/api/admin-graphql/current/mutations/productSet) mutation instead.
    *
    * After you create product options, you can further manage a product's configuration using related mutations:
    *
-   * - [`productOptionUpdate`](https://shopify.dev/docs/api/admin-graphql/latest/mutations/productOptionUpdate)
-   * - [`productOptionsReorder`](https://shopify.dev/docs/api/admin-graphql/latest/mutations/productOptionsReorder)
-   * - [`productOptionsDelete`](https://shopify.dev/docs/api/admin-graphql/latest/mutations/productOptionsDelete)
-   * - [`productVariantsBulkCreate`](https://shopify.dev/docs/api/admin-graphql/latest/mutations/productVariantsBulkCreate)
-   * - [`productVariantsBulkUpdate`](https://shopify.dev/docs/api/admin-graphql/latest/mutations/productVariantsBulkUpdate)
-   * - [`productSet`](https://shopify.dev/docs/api/admin-graphql/latest/mutations/productSet)
+   * - [`productOptionUpdate`](https://shopify.dev/docs/api/admin-graphql/current/mutations/productOptionUpdate)
+   * - [`productOptionsReorder`](https://shopify.dev/docs/api/admin-graphql/current/mutations/productOptionsReorder)
+   * - [`productOptionsDelete`](https://shopify.dev/docs/api/admin-graphql/current/mutations/productOptionsDelete)
+   * - [`productVariantsBulkCreate`](https://shopify.dev/docs/api/admin-graphql/current/mutations/productVariantsBulkCreate)
+   * - [`productVariantsBulkUpdate`](https://shopify.dev/docs/api/admin-graphql/current/mutations/productVariantsBulkUpdate)
+   * - [`productSet`](https://shopify.dev/docs/api/admin-graphql/current/mutations/productSet)
    *
    * Learn more about the [product model](https://shopify.dev/docs/apps/build/graphql/migrate/new-product-model)
    * and [adding product data](https://shopify.dev/docs/apps/build/graphql/migrate/new-product-model/add-data).
@@ -46164,7 +46172,6 @@ export type MutationInventoryActivateArgs = {
   inventoryItemId: Scalars['ID']['input'];
   locationId: Scalars['ID']['input'];
   onHand?: InputMaybe<Scalars['Int']['input']>;
-  stockAtLegacyLocation?: InputMaybe<Scalars['Boolean']['input']>;
 };
 
 
@@ -54246,7 +54253,10 @@ export type PriceRuleShippingLineEntitlements = {
   __typename?: 'PriceRuleShippingLineEntitlements';
   /** The codes for the countries to which the price rule applies to. */
   countryCodes: Array<CountryCode>;
-  /** Whether the price rule is applicable to countries that haven't been defined in the shop's shipping zones. */
+  /**
+   * Whether the price rule is applicable to countries that haven't been defined in the shop's shipping zones.
+   * @deprecated This field is being retired. Price rules that set `includeRestOfWorld: true` will be converted to an explicit list of countries, and `countryCodes` will then return every country where the price rule applies.
+   */
   includeRestOfWorld: Scalars['Boolean']['output'];
   /** Whether the price rule applies to all shipping lines. */
   targetAllShippingLines: Scalars['Boolean']['output'];
@@ -55147,7 +55157,7 @@ export type Product = HasEvents & HasMetafieldDefinitions & HasMetafields & HasP
    * Whether the product can only be purchased with
    * a [selling plan](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/selling-plans).
    * Products that are sold on subscription (`requiresSellingPlan: true`) can be updated only for online stores.
-   * If you update a product to be subscription-only (`requiresSellingPlan:false`), then the product is unpublished from all channels, except the online store.
+   * If you update a product to be subscription-only (`requiresSellingPlan: true`), then the product is unpublished from all channels, except the online store.
    */
   requiresSellingPlan: Scalars['Boolean']['output'];
   /**
@@ -56365,7 +56375,7 @@ export type ProductCreateInput = {
    * Whether the product can only be purchased with
    * a [selling plan](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/selling-plans).
    * Products that are sold on subscription (`requiresSellingPlan: true`) can be updated only for online stores.
-   * If you update a product to be subscription-only (`requiresSellingPlan:false`), then the product is unpublished from all channels except the online store.
+   * If you update a product to be subscription-only (`requiresSellingPlan: true`), then the product is unpublished from all channels except the online store.
    */
   requiresSellingPlan?: InputMaybe<Scalars['Boolean']['input']>;
   /**
@@ -56835,7 +56845,7 @@ export type ProductInput = {
    * Whether the product can only be purchased with
    * a [selling plan](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/selling-plans).
    * Products that are sold on subscription (`requiresSellingPlan: true`) can be updated only for online stores.
-   * If you update a product to be subscription-only (`requiresSellingPlan:false`), then the product is unpublished from all channels except the online store.
+   * If you update a product to be subscription-only (`requiresSellingPlan: true`), then the product is unpublished from all channels except the online store.
    */
   requiresSellingPlan?: InputMaybe<Scalars['Boolean']['input']>;
   /**
@@ -57829,7 +57839,7 @@ export type ProductUpdateInput = {
    * Whether the product can only be purchased with
    * a [selling plan](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/selling-plans).
    * Products that are sold on subscription (`requiresSellingPlan: true`) can be updated only for online stores.
-   * If you update a product to be subscription-only (`requiresSellingPlan:false`), then the product is unpublished from all channels except the online store.
+   * If you update a product to be subscription-only (`requiresSellingPlan: true`), then the product is unpublished from all channels except the online store.
    */
   requiresSellingPlan?: InputMaybe<Scalars['Boolean']['input']>;
   /**
@@ -60583,7 +60593,7 @@ export type QueryRoot = {
   automaticDiscountSavedSearches: SavedSearchConnection;
   /**
    * Returns a list of automatic discounts that are applied in the cart and at checkout without requiring a discount code.
-   * @deprecated Use `automaticDiscountNodes` instead.
+   * @deprecated Use `automaticDiscountNodes` instead. This will be removed in 2027-01.
    */
   automaticDiscounts: DiscountAutomaticConnection;
   /** The geographic regions that you can set as the [`Shop`](https://shopify.dev/docs/api/admin-graphql/latest/objects/Shop)'s backup region. The backup region serves as a fallback when the system can't determine a buyer's actual location. */
@@ -67460,7 +67470,7 @@ export type SellingPlanFixedDeliveryPolicy = {
 export type SellingPlanFixedDeliveryPolicyInput = {
   /** The specific anchor dates upon which the delivery interval calculations should be made. */
   anchors?: InputMaybe<Array<SellingPlanAnchorInput>>;
-  /** A buffer period for orders to be included in a cycle. */
+  /** Number of days which represent a buffer period for orders to be included in a cycle. */
   cutoff?: InputMaybe<Scalars['Int']['input']>;
   /** The date and time when the fulfillment should trigger. */
   fulfillmentExactTime?: InputMaybe<Scalars['DateTime']['input']>;
@@ -68129,7 +68139,7 @@ export type SellingPlanRecurringDeliveryPolicy = {
 export type SellingPlanRecurringDeliveryPolicyInput = {
   /** The specific anchor dates upon which the delivery interval calculations should be made. */
   anchors?: InputMaybe<Array<SellingPlanAnchorInput>>;
-  /** A buffer period for orders to be included in a cycle. */
+  /** Number of days which represent a buffer period for orders to be included in a cycle. */
   cutoff?: InputMaybe<Scalars['Int']['input']>;
   /** Intention of this delivery policy, it can be either: delivery or fulfillment. */
   intent?: InputMaybe<SellingPlanRecurringDeliveryPolicyIntent>;
@@ -76577,7 +76587,10 @@ export enum TranslatableResourceType {
   MediaImage = 'MEDIA_IMAGE',
   /** A category of links. Translatable fields: `title`. */
   Menu = 'MENU',
-  /** A Metafield. Translatable fields: `value`. */
+  /**
+   * A Metafield. Translatable fields: `value`.
+   * @deprecated Query metafields via their respective resource owners and use `Metafield.translatable` to determine which is translatable.
+   */
   Metafield = 'METAFIELD',
   /** A Metaobject. Translatable fields are determined by the Metaobject type. */
   Metaobject = 'METAOBJECT',
