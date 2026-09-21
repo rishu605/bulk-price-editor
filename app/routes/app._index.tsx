@@ -97,9 +97,12 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
 
   // Runs that need somebody: the number a merchant should act on, distinct from how
   // many campaigns exist.
-  const [notices, needsAttention, cleanRuns, practiceCampaigns] = await Promise.all([
+  const [notices, needsAttention, drafts, cleanRuns, practiceCampaigns] = await Promise.all([
     openNotices(shop.id),
     prisma.campaign.count({ where: { shopId: shop.id, status: { in: ["PARTIAL", "HELD"] } } }),
+    // Campaigns the merchant made and has not applied. Counted because Home used to
+    // decide "is anything live" from every campaign row, drafts included — see #613.
+    prisma.campaign.count({ where: { shopId: shop.id, status: "DRAFT" } }),
     // The onboarding goal, asked of the data rather than of a dismissed flag: a
     // merchant who clicked past a step has not run a campaign cleanly.
     prisma.campaignRun.count({
@@ -133,6 +136,7 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
     live,
     upcoming,
     driftOpen,
+    drafts,
     notices: notices.map((notice) => ({
       id: notice.id,
       kind: notice.kind,
@@ -296,12 +300,12 @@ export default function Dashboard() {
     usage,
     syncedAt,
     health,
-    campaigns,
     onboarding: guide,
     live,
     upcoming,
     upcomingMoments,
     driftOpen,
+    drafts,
     notices,
     needsAttention,
     lastRun,
@@ -318,7 +322,11 @@ export default function Dashboard() {
   // a specific way this page used to embarrass itself; see `homeSections`.
   const sections = homeSections({
     neverSynced,
-    campaigns,
+    running: live,
+    scheduled: upcoming,
+    needsAttention,
+    driftOpen,
+    drafts,
     hasRun: lastRun !== null,
     onboardingComplete: guide.complete,
   });
@@ -599,6 +607,34 @@ export default function Dashboard() {
             <s-button variant="secondary" href="/app/campaigns">Campaigns</s-button>
             <s-button variant="secondary" href="/app/prices/drift">Price drift</s-button>
             <s-button variant="secondary" href="/app/activity">Activity log</s-button>
+          </ActionRow>
+        </Card>
+      ) : null}
+
+      {/* The one campaign a merchant has, when it is not running yet.
+
+          `homeSections` used to switch the live section on for any campaign row, drafts
+          included, so this shop got four tiles reading zero — and the draft that turned
+          them on appeared nowhere. Every merchant passes through this state, because
+          quick create says "Creates a draft" and the editor's primary button is "Create
+          and preview".
+
+          A card rather than a fifth tile. A draft is not a small amount of live; it is
+          the thing left half-done, and on a page that would otherwise say nothing it is
+          the answer to "what now". Secondary, because quick create below is the black
+          button whenever both are up. */}
+      {sections.drafts ? (
+        <Card heading="Not running yet">      <s-paragraph>
+            <s-text>
+              {formatCount(drafts)} draft campaign{drafts === 1 ? "" : "s"}, waiting to be
+              applied. Nothing has been written to your storefront, and nothing will be
+              until you apply {drafts === 1 ? "it" : "one"}.
+            </s-text>
+          </s-paragraph>
+          <ActionRow>
+            <s-button variant="secondary" href="/app/campaigns?status=DRAFT">
+              {drafts === 1 ? "Open the draft" : "Review drafts"}
+            </s-button>
           </ActionRow>
         </Card>
       ) : null}
