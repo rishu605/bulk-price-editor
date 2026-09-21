@@ -35,6 +35,7 @@ import { PageShell } from "../components/PageShell";
 import { SPACE } from "../lib/ui/spacing";
 import { planUsage } from "../services/plan-usage.server";
 import { usageLine } from "../lib/billing/usage-line";
+import { staleSync } from "../lib/dashboard/stale-sync";
 import { Secondary } from "../components/Type";
 import { Card } from "../components/Card";
 import { Fact } from "../components/Fact";
@@ -316,7 +317,11 @@ export default function Dashboard() {
     timeZone,
   } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
-  const busy = fetcher.state !== "idle";
+  // Which submit is in flight, not merely whether one is. There is one fetcher for the
+  // whole page, so a single `state !== "idle"` put every button on the page into its
+  // loading state at once: resolving a market notice spun the Re-sync button too.
+  const submitting = fetcher.state !== "idle" ? String(fetcher.formData?.get("intent") ?? "") : "";
+  const busy = (intent: string) => submitting === intent;
   const banner = resultBanner(fetcher.data);
 
   const neverSynced = syncedAt === null;
@@ -407,7 +412,7 @@ export default function Dashboard() {
                 <input type="hidden" name="intent" value="resolve-notice" />
                 <input type="hidden" name="noticeId" value={notice.id} />
                 <input type="hidden" name="resolution" value="extended" />
-                <s-button type="submit" loading={busy || undefined}>
+                <s-button type="submit" loading={busy("resolve-notice") || undefined}>
                   Add it to {notice.campaigns === 1 ? "that campaign" : "those campaigns"}
                 </s-button>
               </fetcher.Form>
@@ -416,7 +421,7 @@ export default function Dashboard() {
                 <input type="hidden" name="intent" value="resolve-notice" />
                 <input type="hidden" name="noticeId" value={notice.id} />
                 <input type="hidden" name="resolution" value="removed" />
-                <s-button type="submit" loading={busy || undefined}>
+                <s-button type="submit" loading={busy("resolve-notice") || undefined}>
                   Remove it from {notice.campaigns === 1 ? "that campaign" : "those campaigns"}
                 </s-button>
               </fetcher.Form>
@@ -426,7 +431,7 @@ export default function Dashboard() {
               <input type="hidden" name="intent" value="resolve-notice" />
               <input type="hidden" name="noticeId" value={notice.id} />
               <input type="hidden" name="resolution" value="ignored" />
-              <s-button type="submit" variant="secondary" loading={busy || undefined}>
+              <s-button type="submit" variant="secondary" loading={busy("resolve-notice") || undefined}>
                 Leave it as it is
               </s-button>
             </fetcher.Form>
@@ -456,8 +461,8 @@ export default function Dashboard() {
           <ActionRow>
             <fetcher.Form method="post">
               <input type="hidden" name="intent" value="sync" />
-              <s-button type="submit" loading={busy || undefined}>
-                {busy ? "Syncing…" : "Re-sync catalogue"}
+              <s-button type="submit" loading={busy("sync") || undefined}>
+                {busy("sync") ? "Syncing…" : "Re-sync catalogue"}
               </s-button>
             </fetcher.Form>
           </ActionRow>
@@ -540,9 +545,9 @@ export default function Dashboard() {
               <s-button
                 type="submit"
                 variant={guide.next?.id === "sync" ? "primary" : "secondary"}
-                loading={busy || undefined}
+                loading={busy("sync") || undefined}
               >
-                {busy ? "Syncing…" : "Sync catalogue"}
+                {busy("sync") ? "Syncing…" : "Sync catalogue"}
               </s-button>
             </fetcher.Form>
           ),
@@ -578,10 +583,22 @@ export default function Dashboard() {
                 value: needsAttention,
                 href: "/app/campaigns?status=attention",
               },
-              // Two words. "Prices changed outside the app" wrapped to three lines in
-              // this column and "Changed outside Anchor" to two, either of which makes
-              // its tile taller than the three beside it.
-              { label: "Changed elsewhere", value: driftOpen, href: "/app/prices/drift" },
+              /* "Edits to review", not "Changed elsewhere".
+              
+                 Beside the Catalogue card's "Not at baseline", the old label was the
+                 second of two similar-sounding numbers with nothing saying they measure
+                 different things — and on a live shop they disagreed: 0 here, 1 there.
+                 They are not the same axis. This counts *decisions waiting on you*, one
+                 per edit somebody made outside the app while a campaign was running;
+                 that one counts variants whose storefront price has moved away from
+                 their baseline, whether or not anybody has to do anything about it.
+              
+                 Naming this one as a queue is what separates them, and it is the word
+                 the destination already uses — the drift page asks for a decision per
+                 row. Still three words at most, for the reason the old label was two:
+                 anything longer wrapped to three lines and made this tile taller than
+                 the three beside it. */
+              { label: "Edits to review", value: driftOpen, href: "/app/prices/drift" },
             ]}
           />
 
@@ -673,7 +690,7 @@ export default function Dashboard() {
                 screen shows every price that would change.
               </Secondary>
               <ActionRow>
-                <s-button type="submit" variant="primary" loading={busy || undefined}>
+                <s-button type="submit" variant="primary" loading={busy("quick-campaign") || undefined}>
                   Create the draft
                 </s-button>
                 <s-button variant="secondary" href="/app/campaigns/new">
@@ -798,7 +815,15 @@ export default function Dashboard() {
             <s-text type="strong">{shopDomain}</s-text>
           </s-grid>
 
-          <Fact label="Last synced">
+          {/* `detail` once the catalogue is a week old.
+
+              `formatAgo` falls back to a date past seven days, which is right for the
+              activity feed — "47 days ago" is a subtraction the reader has to undo. It
+              is not right for this one fact, because this one is a *staleness*: every
+              price this app computes comes from the catalogue captured then, and a bare
+              "28/08/2026" says when without saying how long. The date stays, and the
+              sentence under it says what to do about it. */}
+          <Fact label="Last synced" detail={staleSync(syncedAt, now)}>
             <s-text>{syncedAt ? formatAgo(syncedAt, now, timeZone) : "Not yet synced"}</s-text>
           </Fact>
 
@@ -827,8 +852,8 @@ export default function Dashboard() {
             <ActionRow>
               <fetcher.Form method="post">
                 <input type="hidden" name="intent" value="sync" />
-                <s-button type="submit" loading={busy || undefined}>
-                  Re-sync catalogue
+                <s-button type="submit" loading={busy("sync") || undefined}>
+                  {busy("sync") ? "Syncing…" : "Re-sync catalogue"}
                 </s-button>
               </fetcher.Form>
             </ActionRow>

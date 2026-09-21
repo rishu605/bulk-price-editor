@@ -173,15 +173,26 @@ function Step({
 
       <StatusIcon done={step.done} isNext={isNext} />
 
-      <s-stack direction="inline" gap={SPACE.item} alignItems="center">
+      {/* A grid, not an inline stack, for one reason: `s-stack direction="inline"`
+          always wraps — Polaris' own types say so, and there is no `wrap` prop. The
+          title column is `1fr` between two `auto` ones, so on the longest step the
+          stack ran out of room and dropped the badge onto a second line, leaving that
+          row taller than its neighbours with the marker under the text instead of
+          beside it. A grid puts the badge in its own track: the title wraps inside
+          `1fr` if it must, and the badge stays where it belongs.
+
+          This is a grid inside a cell of another grid, which the note above argues
+          against — rightly, for anything that has to line up across rows. This does
+          not: "Next" is on exactly one step, so there is no column to align. */}
+      <s-grid gridTemplateColumns="1fr auto" gap={SPACE.item} alignItems="center">
         {/* Subdued once done. A finished step should still be findable — it is the
             evidence the checklist is being honest — without competing with the step the
             merchant is actually being asked to do. */}
         <s-text type={step.done ? undefined : "strong"} color={step.done ? "subdued" : undefined}>
           {step.title}
         </s-text>
-        {isNext ? <s-badge tone="info">Next</s-badge> : null}
-      </s-stack>
+        {isNext ? <s-badge tone="info">Next</s-badge> : <s-box />}
+      </s-grid>
 
       {/* Its own column, and before the action deliberately: when the row wraps it is the
           action that should fall to the next line, not the explanation, which would then

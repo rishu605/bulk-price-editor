@@ -69,13 +69,24 @@ export function CountsRow({ items }: { items: CountItem[] }) {
       // slivers, and a figure that wraps mid-number is worse than a second row.
       gridTemplateColumns={`@container (inline-size <= 600px) 1fr 1fr, ${columns}`}
       gap={SPACE.item}
+      // Equal height as well as equal width. Each tile was sizing to its own content, so
+      // "Scheduled" — a label that fits on one line where its neighbours wrap to two —
+      // came out visibly shorter than the three beside it. The argument above is that a
+      // row of unequal boxes reads as a ranking; it does not stop being true on the other
+      // axis.
+      alignItems="stretch"
     >
       {items.map((item) =>
         // Two shapes rather than one wrapped in a spare element: a `div` around the
         // non-linking tile would become the grid item, and the box inside it would size
         // to its content instead of filling the column — which is the unequal-width
         // failure this grid exists to prevent.
-        item.href ? (
+        // A zero leads nowhere. The premise of a linked tile is that the figure is a
+        // question and the next click is its answer — "three need attention" is only
+        // useful if the next click is the three. There is no three to be when the count
+        // is nought, and the click landed on "No campaigns match those filters", which
+        // is a dead end wearing the clothes of an answer.
+        item.href && item.value > 0 ? (
           <s-clickable
             key={item.label}
             href={item.href}

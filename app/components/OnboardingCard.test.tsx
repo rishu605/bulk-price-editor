@@ -169,7 +169,32 @@ describe("the checklist reads as a list", () => {
     // at 608, 510 and 504 and the three buttons' left edges at 721, 626 and 621.
     // `UpcomingCampaigns` records the same lesson: one grid for every row, not a grid
     // per row.
-    expect(html.match(/<s-grid[ >]/g) ?? []).toHaveLength(1);
+    // The template is matched on its own rather than with the tag in front of it:
+    // `polaris-attributes.test.ts` scans this file for element-plus-attribute literals
+    // and would read one here as markup this app renders. The same self-matching trap
+    // `lib/testing/source.ts` carries three paragraphs about.
+    const rowGrids = html.match(/gridtemplatecolumns="[^"]*auto 1fr auto auto"/gi) ?? [];
+
+    expect(rowGrids).toHaveLength(1);
+  });
+
+  it("nests a grid only to keep a step's badge beside its title", () => {
+    // #620: `s-stack direction="inline"` always wraps — Polaris offers no `wrap` prop —
+    // so on the longest step the "Next" badge dropped onto a second line and that row
+    // came out taller than its neighbours. A grid is the only primitive here that will
+    // hold two things on one line.
+    //
+    // It is the one nested grid allowed, and it is allowed because it has nothing to
+    // line up across rows: "Next" is on exactly one step at a time.
+    const templates = [...html.matchAll(/gridtemplatecolumns="([^"]*)"/gi)].map(
+      (match) => match[1],
+    );
+
+    expect(templates.length, "the checklist renders no grid at all").toBeGreaterThan(1);
+
+    for (const template of templates.filter((value) => !value.includes("auto 1fr auto auto"))) {
+      expect(template, "a nested grid here must be the title and its badge").toBe("1fr auto");
+    }
   });
 
   it("spans the row with the things that belong to the whole step", () => {
