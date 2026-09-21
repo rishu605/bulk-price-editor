@@ -27,6 +27,7 @@ import { UpcomingCampaigns } from "../components/UpcomingCampaigns";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { onboarding } from "../lib/onboarding/steps";
 import { homeSections } from "../lib/dashboard/home";
+import { resultBanner } from "../lib/dashboard/action-result";
 import { nextMoments } from "../lib/scheduling/upcoming";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
@@ -277,7 +278,16 @@ export const action = withGuard("/app", async ({ request }: ActionFunctionArgs) 
   return { ok: false, message: `Unknown action: ${intent}`, errors: [] };
 });
 
-type ActionData = { ok: boolean; message: string; errors: string[] };
+/**
+ * What the action hands back, taken from the action rather than asserted about it.
+ *
+ * It used to be written out by hand — `{ ok; message; errors: string[] }` — and two of
+ * the four paths return no `errors`, so the annotation was telling the compiler something
+ * untrue about the code directly above it. `Extract` drops the one path that returns a
+ * redirect and keeps the rest exactly as they are, so a new path that carries no detail
+ * is a fact the type already knows. See `action-result.ts`.
+ */
+type ActionData = Extract<Awaited<ReturnType<typeof action>>, { message: string }>;
 
 export default function Dashboard() {
   const {
@@ -300,7 +310,7 @@ export default function Dashboard() {
   } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
   const busy = fetcher.state !== "idle";
-  const result = fetcher.data;
+  const banner = resultBanner(fetcher.data);
 
   const neverSynced = syncedAt === null;
   // Which sections this page shows, decided in one tested place rather than in four
@@ -447,10 +457,13 @@ export default function Dashboard() {
 
   return (
     <PageShell heading="Home">
-      {result ? (
-        <s-banner tone={result.ok ? "success" : "critical"}>
-          <s-paragraph>{result.message}</s-paragraph>
-          {result.errors.map((error) => (
+      {/* Through `resultBanner`, which is the one place that knows a path returning no
+          detail returns no detail. Mapping `result.errors` straight took the page down
+          on two of the four things a merchant can do from here. */}
+      {banner ? (
+        <s-banner tone={banner.tone}>
+          <s-paragraph>{banner.message}</s-paragraph>
+          {banner.errors.map((error) => (
             <s-paragraph key={error}>{error}</s-paragraph>
           ))}
         </s-banner>
