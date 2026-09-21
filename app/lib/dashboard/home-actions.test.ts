@@ -110,7 +110,11 @@ describe("one thing to do at a time", () => {
 
   it("does not offer the same operation under two names", () => {
     // "Sync catalogue" and "Sync catalogue and capture baselines" were one POST.
-    const labels = [...home.matchAll(/busy \? "Syncing…" : "([^"]+)"/g)].map((match) => match[1]);
+    // `busy("sync")` rather than a bare `busy` since #619: one fetcher serves the whole
+    // page, so the loading state has to name the intent it belongs to.
+    const labels = [...home.matchAll(/busy\("sync"\) \? "Syncing…" : "([^"]+)"/g)].map(
+      (match) => match[1],
+    );
 
     // Two are allowed and two is the ceiling: a first sync and a re-sync are different
     // requests to make of a merchant even though they post the same intent. What is not
