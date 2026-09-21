@@ -1,3 +1,4 @@
+import { actorFor } from "../lib/audit/actor";
 import { formatAgo, formatCount, formatDay } from "../lib/format/display";
 import type { ReactNode } from "react";
 import { quickCampaignName, readQuickPercent } from "../lib/campaigns/quick-campaign";
@@ -182,7 +183,7 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
 });
 
 export const action = withGuard("/app", async ({ request }: ActionFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
+  const { admin, session, sessionToken } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
   const form = await request.formData();
   const intent = String(form.get("intent"));
@@ -205,7 +206,9 @@ export const action = withGuard("/app", async ({ request }: ActionFunctionArgs) 
 
     const settings = await readSettings(shop.id);
 
-    const campaign = await createCampaign(shop.id, {
+    const campaign = await createCampaign(
+      shop.id,
+      {
       name: quickCampaignName(parsed.percent, formatDay(new Date(), shop.timezone)),
       // The whole catalogue: an empty filter is every variant, which is what "everything"
       // means and what the card says it will do.
@@ -216,7 +219,9 @@ export const action = withGuard("/app", async ({ request }: ActionFunctionArgs) 
       // the long way would be a second set of defaults to keep in step.
       compareAtPolicy: { kind: "set-to-baseline" },
       rounding: settings.rounding,
-    });
+      },
+      { actor: actorFor(sessionToken, session.shop) },
+    );
 
     return redirect(`/app/campaigns/${campaign.id}`);
   }
@@ -259,6 +264,27 @@ export const action = withGuard("/app", async ({ request }: ActionFunctionArgs) 
     // the live price is the merchant's normal price.
     const capture = await captureBaselines(shop.id);
     await markSyncComplete(shop.id);
+
+    // A sync is a merchant decision with consequences — it rewrites the mirror every
+    // price is computed against, and captures a baseline for every surface that had
+    // none — and it left no trace at all. Minutes after a merchant re-synced, Home's
+    // Recent activity was still showing something the scheduler did seventeen days
+    // earlier, which reads as a broken panel rather than as a quiet shop. See #614.
+    await prisma.auditLogEntry.create({
+      data: {
+        shopId: shop.id,
+        actor: actorFor(sessionToken, session.shop),
+        action: "catalogue.synced",
+        entity: "Shop",
+        entityId: shop.id,
+        after: {
+          variants: sync.variants,
+          products: sync.products,
+          captured: capture.captured,
+          priceLists: markets.priceLists,
+        } as never,
+      },
+    });
 
     return {
       ok: sync.errors.length === 0,

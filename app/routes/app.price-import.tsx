@@ -70,14 +70,18 @@ export const action = withGuard("/app/price-import", async ({ request }: ActionF
     },
   });
 
-  const campaign = await createCampaign(shop.id, {
+  const campaign = await createCampaign(
+    shop.id,
+    {
     name,
     ast: { groups: [] },
     segmentId: segment.id,
     rule: { kind: "from-import", importId: result.importId },
     compareAtPolicy: { kind: "leave" },
     rounding: { default: "none", byCurrency: {} },
-  });
+    },
+    { actor },
+  );
 
   // Straight to the preview. The whole argument for routing an import through a campaign
   // is that the merchant sees what it will do before it does it.

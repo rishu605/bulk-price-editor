@@ -61,6 +61,10 @@ export function iconForAction(action: string) {
       return "shield-pending";
     case "mirror":
       return "globe";
+    // A sync reads the catalogue rather than touching a price, so it takes the product
+    // glyph rather than the price-list one the baselines namespace uses.
+    case "catalogue":
+      return "product";
     default:
       return "note";
   }

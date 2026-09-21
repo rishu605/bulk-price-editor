@@ -3,6 +3,7 @@ import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "re
 import { Form, redirect, useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
+import { actorFor } from "../lib/audit/actor";
 import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
 import { facetDetails } from "../lib/segments/facets";
@@ -230,7 +231,7 @@ export const SCOPE_FIELDS = [...SCOPE_CONDITION_FIELDS, "segment"] as const;
 /** Builds an AST from the simple scope form: all provided conditions ANDed. */
 
 export const action = withGuard("/app/campaigns/new", async ({ request }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, sessionToken } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
 
   const form = await request.formData();
@@ -284,7 +285,9 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
   const segmentId = String(form.get("segment") ?? "").trim();
   const practice = String(form.get("practice") ?? "") === "1";
 
-  const campaign = await createCampaign(shop.id, {
+  const campaign = await createCampaign(
+    shop.id,
+    {
     name: String(form.get("name") ?? "Untitled campaign").trim() || "Untitled campaign",
     ast: astFrom(readerFor(params)),
     ...(segmentId ? { segmentId } : {}),
@@ -301,7 +304,9 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
       .filter(Boolean),
     priceLists,
     schedule,
-  });
+    },
+    { actor: actorFor(sessionToken, session.shop) },
+  );
 
   return redirect(`/app/campaigns/${campaign.id}`);
 });
