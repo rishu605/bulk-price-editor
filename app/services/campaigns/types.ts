@@ -140,6 +140,16 @@ export interface MarketPreview {
    */
   clamped: number;
   skipped: number;
+  /**
+   * This market will not be priced, and `explanation` says why.
+   *
+   * The only cause today is a price list that answers in a currency other than its own,
+   * which the run refuses per market rather than failing the campaign over (#257). The
+   * preview has to say the same thing: a merchant who is told nothing here, and then
+   * sees one market missing from the run report, has been surprised by the product
+   * rather than warned by it (#645).
+   */
+  refused: boolean;
 }
 
 export interface CampaignPreview {

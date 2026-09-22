@@ -179,19 +179,28 @@ export function CampaignPreviewTab({ preview, approval, fetcher, busy }: Campaig
             </s-text>
           </s-paragraph>
 
-          {preview.markets.map((market) => (
-            <s-paragraph key={market.priceListGid}>
-              <s-text>{market.explanation}</s-text>
-              {market.clamped > 0 || market.skipped > 0 ? (
-                <s-text tone="caution">
-                  {" "}
-                  A guardrail affects {market.clamped + market.skipped} of them here
-                  {market.clamped > 0 ? ` (${market.clamped} raised to the floor)` : ""}
-                  {market.skipped > 0 ? ` (${market.skipped} left alone)` : ""}.
-                </s-text>
-              ) : null}
-            </s-paragraph>
-          ))}
+          {preview.markets.map((market) =>
+            /* A refused market is the one thing on this card a merchant must not scroll
+               past: every other market is priced, and this one silently will not be.
+               Its own sentence already names the cause and the next action. */
+            market.refused ? (
+              <s-banner key={market.priceListGid} tone="critical">
+                <s-paragraph>{market.explanation}</s-paragraph>
+              </s-banner>
+            ) : (
+              <s-paragraph key={market.priceListGid}>
+                <s-text>{market.explanation}</s-text>
+                {market.clamped > 0 || market.skipped > 0 ? (
+                  <s-text tone="caution">
+                    {" "}
+                    A guardrail affects {market.clamped + market.skipped} of them here
+                    {market.clamped > 0 ? ` (${market.clamped} raised to the floor)` : ""}
+                    {market.skipped > 0 ? ` (${market.skipped} left alone)` : ""}.
+                  </s-text>
+                ) : null}
+              </s-paragraph>
+            ),
+          )}
         </Card>
       ) : null}
     </>

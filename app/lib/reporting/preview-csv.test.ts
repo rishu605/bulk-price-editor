@@ -19,6 +19,7 @@ const markets: MarketPreview[] = [
     explanation: "",
     clamped: 0,
     skipped: 0,
+    refused: false,
   },
   {
     priceListGid: "gid://shopify/PriceList/jp",
@@ -28,6 +29,7 @@ const markets: MarketPreview[] = [
     explanation: "",
     clamped: 0,
     skipped: 0,
+    refused: false,
   },
 ];
 
