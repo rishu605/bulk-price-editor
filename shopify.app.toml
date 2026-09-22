@@ -11,7 +11,7 @@
 # The proper fix is a second app record for production, so dev and deploy stop sharing one
 # set of URLs. Until somebody makes that call, this comment is the guardrail.
 client_id = "5401aeddaf37aac5c9e1650bf6abb462"
-name = "bulk-price-editor"
+name = "Anchor"
 application_url = "https://bulk-price-editor-production-eb91.up.railway.app"
 embedded = true
 
