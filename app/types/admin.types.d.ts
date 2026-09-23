@@ -9518,6 +9518,8 @@ export type Collection = HasEvents & HasMetafieldDefinitions & HasMetafields & H
    * [feedback errors](https://shopify.dev/docs/api/admin-graphql/latest/objects/ResourceFeedback).
    */
   availablePublicationsCount?: Maybe<Count>;
+  /** The date and time when the collection was created. */
+  createdAt: Scalars['DateTime']['output'];
   /** A single-line, text-only description of the collection, stripped of any HTML tags and formatting that were included in the description. */
   description: Scalars['String']['output'];
   /** The description of the collection, including any HTML tags and formatting. This content is typically displayed to customers, such as on an online store, depending on the theme. */
@@ -36485,6 +36487,8 @@ export enum MarketUserErrorCode {
   SpecifiedNotValidForInput = 'SPECIFIED_NOT_VALID_FOR_INPUT',
   /** The subdivision doesn't exist. */
   SubdivisionDoesNotExist = 'SUBDIVISION_DOES_NOT_EXIST',
+  /** A market that includes a subdivision requires another market that includes the whole country. If the subdivision market is active, the country market must also be active. */
+  SubdivisionMarketRequiresCountryCoverage = 'SUBDIVISION_MARKET_REQUIRES_COUNTRY_COVERAGE',
   /** The selected subdivision does not belong to the selected country. */
   SubdivisionMustBelongToCountry = 'SUBDIVISION_MUST_BELONG_TO_COUNTRY',
   /** The subfolder suffix is invalid, please provide a different value. */
