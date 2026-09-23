@@ -29,6 +29,19 @@ function sectionAt(key: string): number {
 
 const SECTIONS = ["rule", "scope", "when", "markets", "advanced"];
 
+/**
+ * Where the form's primary submit opens.
+ *
+ * Matched as a pattern, not as a literal tag, because the literal is what broke: #643
+ * added a `disabled` prop and `indexOf` started returning -1, which quietly turned the
+ * ordering guarantee below into an assertion about nothing (#648). The locator has to
+ * survive props being added to the button; the thing under test is where it sits.
+ */
+function submitAt(): number {
+  const match = /<s-button\s+type="submit"\s+variant="primary"[\s>]/.exec(editor);
+  return match ? match.index : -1;
+}
+
 describe("the form's sections", () => {
   it("asks about more than the rule and the scope", () => {
     // Two sections for nine subjects is the state this replaced.
@@ -57,9 +70,9 @@ describe("the form's sections", () => {
 
 describe("the submit", () => {
   it("comes after every section it submits", () => {
-    const submit = editor.indexOf('<s-button type="submit" variant="primary">');
+    const submit = submitAt();
 
-    expect(submit).toBeGreaterThan(-1);
+    expect(submit, "the primary submit button was not found at all").toBeGreaterThan(-1);
     for (const key of SECTIONS) {
       expect(
         submit,
@@ -72,7 +85,8 @@ describe("the submit", () => {
     // Inside one it reads as that section's action rather than as the form's. Matched on
     // `Card` rather than `s-section` since #578 — every titled section in the main column
     // is one, and the section element is now an implementation detail of that component.
-    const submit = editor.indexOf('<s-button type="submit" variant="primary">');
+    const submit = submitAt();
+    expect(submit, "the primary submit button was not found at all").toBeGreaterThan(-1);
     const lastOpen = editor.lastIndexOf("<Card", submit);
     const lastClose = editor.lastIndexOf("</Card>", submit);
 

@@ -35,7 +35,7 @@ function tsxFiles(dir: string): string[] {
 }
 
 /** Routes that deliberately render outside the embedded admin, with their own CSS. */
-const OUTSIDE_THE_ADMIN = ["routes/_index", "routes/help.$"];
+const OUTSIDE_THE_ADMIN = ["routes/_index", "routes/help.$", "routes/privacy"];
 
 const files = tsxFiles(APP)
   .filter((path) => !OUTSIDE_THE_ADMIN.some((skip) => path.includes(skip)))

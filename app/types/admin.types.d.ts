@@ -42742,8 +42742,8 @@ export type Mutation = {
   marketCreate?: Maybe<MarketCreatePayload>;
   /**
    * Updates currency settings of a market.
-   * @deprecated This will be removed in a future version. Use `marketCreate` and `marketUpdate` for creating and updating
-   * market currency settings, respectively.
+   * @deprecated Use `marketCreate` and `marketUpdate` for creating and updating
+   * market currency settings, respectively. Removed in API version 2027-01.
    *
    */
   marketCurrencySettingsUpdate?: Maybe<MarketCurrencySettingsUpdatePayload>;
@@ -71441,7 +71441,7 @@ export type ShopifyqlTableDataColumn = {
   name: Scalars['String']['output'];
   /** A shortened display name for the column, suitable for compact UI such as metric tiles. */
   shortDisplayName?: Maybe<Scalars['String']['output']>;
-  /** The sub type of an array column. */
+  /** The element type of an array column or DAY_DURATION for a range column. */
   subType?: Maybe<ColumnDataType>;
 };
 
