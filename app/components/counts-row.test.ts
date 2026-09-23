@@ -2,9 +2,10 @@
  * One implementation of the counts row, not two.
  *
  * The dashboard hand-rolled the same four tiles the shared component renders — an
- * `s-box` with a label and a figure, in an inline stack. When `CountsRow` gained borders,
- * padding and equal columns, the dashboard kept the old flat look, because it had never
- * been using it.
+ * `s-box` with a label and a figure, in an inline stack. When `CountsRow` gained equal
+ * columns, the dashboard kept the old flat look, because it had never been using it.
+ * (It gained borders and padding at the same time and has since lost them again; the
+ * columns were the part that mattered. `CountsRow` says why.)
  *
  * That is the first screen after installing, so it is the worst place in the app to be a
  * version behind. And the duplication is invisible: both render four numbers, and only a
@@ -29,13 +30,26 @@ function sources(dir: string): Array<{ path: string; text: string }> {
   });
 }
 
+/** A label in an `s-box` directly above a figure in an `s-heading`: a hand-rolled tile. */
+const HAND_ROLLED = /<s-box>\s*<s-text>[^<]+<\/s-text>\s*<s-heading>/;
+
 describe("the counts row", () => {
+  it("can still recognise a hand-rolled tile", () => {
+    // `CountsRow` used to be the positive control for the check below: it rendered this
+    // exact shape, so the pattern was known to match something real. It no longer does —
+    // the tile lost its box — and a pattern with nothing left to match is a guard that
+    // passes because it has stopped looking. So the control is written out here instead.
+    expect(HAND_ROLLED.test("<s-box><s-text>Scheduled</s-text><s-heading>2</s-heading>")).toBe(
+      true,
+    );
+    expect(HAND_ROLLED.test("<s-box><s-heading>2</s-heading></s-box>")).toBe(false);
+  });
+
   it("is rendered by the shared component wherever it appears", () => {
-    // A label in an `s-box` immediately above a figure in an `s-heading` is the shape of
-    // a stat tile. Anywhere but CountsRow itself, it is a second copy.
+    // Anywhere but CountsRow itself, this shape is a second copy of the component.
     const handRolled = sources(APP)
       .filter(({ path }) => path !== "components/CountsRow.tsx")
-      .filter(({ text }) => /<s-box>\s*<s-text>[^<]+<\/s-text>\s*<s-heading>/.test(text))
+      .filter(({ text }) => HAND_ROLLED.test(text))
       .map(({ path }) => path);
 
     expect(
