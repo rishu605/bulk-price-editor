@@ -39,6 +39,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { ActionRow } from "../components/ActionRow";
 import { PageShell } from "../components/PageShell";
+import { QueryContainer } from "../components/QueryContainer";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { HELP_ROUTE } from "../lib/errors/help-links";
 import { withGuard } from "../lib/errors/guard.server";
@@ -104,32 +105,40 @@ export default function HelpIndex() {
                 chosen between, so they take the room they need and the blurbs take what
                 is left. Below 700px the blurb wraps under its title instead, which is a
                 list rather than two cramped columns. */}
-            <s-grid
-              gridTemplateColumns="@container (inline-size <= 700px) 1fr, auto 1fr"
-              gap={SPACE.item}
-              alignItems="center"
-            >
-              {section.items.map((item) => (
-                <Fragment key={item.slug}>
-                  {/* Root-relative and a new tab. Relative because the app document is
-                      served from our own origin inside the frame as well as outside it,
-                      and a new tab because the destination is not an embedded page — see
-                      the note at the top of this file for what happens when it is not. */}
-                  {/* Links, not tertiary buttons. A reading list is content: the
-                      titles are what the merchant is scanning, and a list of them in
-                      plain dark text is a list of things that do not look like they go
-                      anywhere. */}
-                  <s-link href={`${HELP_ROUTE}/${item.slug}`} target="_blank">
-                    {item.title}
-                  </s-link>
-                  {/* Always rendered, even when there is no blurb: the grid places
-                      children in order, so a skipped cell would pull the next article's
-                      title into the blurb column and every row after it would be one
-                      cell out of step. */}
-                  <s-text color="subdued">{item.blurb ?? ""}</s-text>
-                </Fragment>
-              ))}
-            </s-grid>
+            {/* The container that query measures against. Without one it resolved
+                against nothing and the `auto 1fr` branch won at every width, so the
+                collapse this list was designed to do below 700px never happened and a
+                narrow admin got a cramped title column instead of a list. Safe here
+                because the parent is a `Card`'s block stack, which has already decided
+                the width -- see `QueryContainer` and #638. */}
+            <QueryContainer>
+              <s-grid
+                gridTemplateColumns="@container (inline-size <= 700px) 1fr, auto 1fr"
+                gap={SPACE.item}
+                alignItems="center"
+              >
+                {section.items.map((item) => (
+                  <Fragment key={item.slug}>
+                    {/* Root-relative and a new tab. Relative because the app document is
+                        served from our own origin inside the frame as well as outside it,
+                        and a new tab because the destination is not an embedded page — see
+                        the note at the top of this file for what happens when it is not. */}
+                    {/* Links, not tertiary buttons. A reading list is content: the
+                        titles are what the merchant is scanning, and a list of them in
+                        plain dark text is a list of things that do not look like they go
+                        anywhere. */}
+                    <s-link href={`${HELP_ROUTE}/${item.slug}`} target="_blank">
+                      {item.title}
+                    </s-link>
+                    {/* Always rendered, even when there is no blurb: the grid places
+                        children in order, so a skipped cell would pull the next article's
+                        title into the blurb column and every row after it would be one
+                        cell out of step. */}
+                    <s-text color="subdued">{item.blurb ?? ""}</s-text>
+                  </Fragment>
+                ))}
+              </s-grid>
+            </QueryContainer>
           </s-stack>
         </Card>
       ))}

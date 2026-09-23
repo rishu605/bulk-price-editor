@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { QueryContainer } from "./QueryContainer";
 import { SPACE } from "../lib/ui/spacing";
 
 /**
@@ -106,27 +107,51 @@ export function Field({
  * label plus a select needs enough room to avoid the label wrapping onto two lines,
  * which costs more than the space saved. Below 700px it becomes one column — a phone
  * showing two columns of half-width selects is worse than a stack.
+ *
+ * ## The collapse below 700px only started working in #638
+ *
+ * Until then the query measured against nothing, so the two-column branch was taken at
+ * every width: at a 420px admin this grid rendered two 202px columns, measured in a
+ * browser against the real components. That is the "no horizontal scrolling on mobile"
+ * Built for Shopify criterion, and it is also just bad — two columns of slivers is
+ * exactly what the rest of this file exists to prevent.
+ *
+ * `QueryContainer` carries the long version of why. The short version, and the reason
+ * #560 was reverted within the hour: `s-query-container` is `display: grid;
+ * container-type: inline-size`, so in a parent that sizes by content it takes its
+ * content's idea of the width and collapses — measured at 58px inside an inline stack,
+ * at every viewport width. In a parent that has already decided the width it is
+ * correct. All nine call sites were checked against that rule before this wrapper went
+ * in: every one is inside an `s-stack` in block direction or a `Card`, which is
+ * `s-section` → `s-box` → `s-stack`.
+ *
+ * The `maxInlineSize` below is *not* the hazard #638 suspected it was. Wrapping with the
+ * cap left in place and lifting the cap to a box outside the container were measured
+ * side by side and produce identical columns at 970, 800, 700, 600 and 420px, so the
+ * cap stays where it reads best.
  */
 export function FieldGrid({ children }: { children: ReactNode }) {
   return (
-    <s-grid
-      gap={SPACE.section}
-      // Capped, for the reason `FIELD` exists. Two equal columns of a 970px card are
-      // ~470px each, which is better than one 970px bar and still four times what a
-      // percentage needs. Capping the grid rather than each field keeps the two columns
-      // the same width, so the labels down each side stay in line -- fields sized
-      // individually inside a grid would be tidy on their own and ragged together.
-      // The card's measure, shared with its prose so the two have one right edge. See
-      // `MEASURE`: the flat number this replaces was arbitrary in both directions.
-      maxInlineSize={MEASURE}
-      // One comma. Polaris splits a responsive value on it to separate "when the query
-      // matches" from "otherwise", so `repeat(2, 1fr)` is unparseable and falls back to
-      // `none` — which stacks everything full width again, i.e. looks exactly like the
-      // bug this component exists to fix.
-      gridTemplateColumns="@container (inline-size <= 700px) 1fr, 1fr 1fr"
-    >
-      {children}
-    </s-grid>
+    <QueryContainer>
+      <s-grid
+        gap={SPACE.section}
+        // Capped, for the reason `FIELD` exists. Two equal columns of a 970px card are
+        // ~470px each, which is better than one 970px bar and still four times what a
+        // percentage needs. Capping the grid rather than each field keeps the two columns
+        // the same width, so the labels down each side stay in line -- fields sized
+        // individually inside a grid would be tidy on their own and ragged together.
+        // The card's measure, shared with its prose so the two have one right edge. See
+        // `MEASURE`: the flat number this replaces was arbitrary in both directions.
+        maxInlineSize={MEASURE}
+        // One comma. Polaris splits a responsive value on it to separate "when the query
+        // matches" from "otherwise", so `repeat(2, 1fr)` is unparseable and falls back to
+        // `none` — which stacks everything full width again, i.e. looks exactly like the
+        // bug this component exists to fix.
+        gridTemplateColumns="@container (inline-size <= 700px) 1fr, 1fr 1fr"
+      >
+        {children}
+      </s-grid>
+    </QueryContainer>
   );
 }
 

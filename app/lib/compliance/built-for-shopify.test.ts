@@ -490,6 +490,22 @@ describe("the pre-audit sheet names evidence that exists", () => {
       // A command rather than a test name is fine — those are cited as commands.
       if (name.startsWith("npm ")) continue;
 
+      // A whole test file is fine too, and has to be: not every criterion is proved by a
+      // test that belongs in this folder. The responsive-layout rows are proved by
+      // `app/components/query-container.test.tsx`, which sits next to the components it
+      // reads and should stay there — moving a guard so a document can cite it is the
+      // tail wagging the dog. The anti-rot property is the one that matters and it is
+      // kept: a cited path that no longer exists fails here, exactly as a renamed test
+      // does. This is the same widening the `declared` set above already went through
+      // when the WCAG criteria grew evidence of their own.
+      if (name.includes("/") && /\.tsx?$/.test(name)) {
+        expect(
+          existsSync(join(ROOT, name)),
+          `the sheet cites "${name}", which is not a file here`,
+        ).toBe(true);
+        continue;
+      }
+
       expect(declared.has(name), `the sheet cites "${name}", which is not a test here`).toBe(true);
     }
   });
