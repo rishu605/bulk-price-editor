@@ -37,7 +37,7 @@ import { SPACE } from "../lib/ui/spacing";
 import { planUsage } from "../services/plan-usage.server";
 import { usageLine } from "../lib/billing/usage-line";
 import { staleSync } from "../lib/dashboard/stale-sync";
-import { Secondary } from "../components/Type";
+import { Caption, Secondary } from "../components/Type";
 import { Card } from "../components/Card";
 import { Fact } from "../components/Fact";
 
@@ -635,12 +635,25 @@ export default function Dashboard() {
             ]}
           />
 
+          {/* A rule, not a border. The card has three parts — the figures, the last run,
+              and where to go next — and they were separated by nothing but the stack's
+              own gap, which is the same distance that separates a label from its figure.
+
+              The rule above the run matters most: without it, "Last run" sits directly
+              under "Need attention" in the same column, in the same subdued caption
+              style as the four labels above it, and reads as a fifth figure whose number
+              has gone missing. */}
           {lastRun ? (
-            <s-stack gap={SPACE.item}>
-              <s-text color="subdued">Last run</s-text>
-              <LastRunSummary run={lastRun} now={now} timeZone={timeZone} />
-            </s-stack>
+            <>
+              <s-divider />
+              <s-stack gap={SPACE.tight}>
+                <Caption>Last run</Caption>
+                <LastRunSummary run={lastRun} now={now} timeZone={timeZone} />
+              </s-stack>
+            </>
           ) : null}
+
+          <s-divider />
 
           {/* The page's forward action, and the only one that survives the checklist
               retiring itself. Black only once the checklist has gone: while it is still

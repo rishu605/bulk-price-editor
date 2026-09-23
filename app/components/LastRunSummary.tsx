@@ -1,6 +1,5 @@
-import { QueryContainer } from "./QueryContainer";
 import { formatAgo, formatCount } from "../lib/format/display";
-import { HAIRLINE, PAD, SPACE } from "../lib/ui/spacing";
+import { SPACE } from "../lib/ui/spacing";
 import { RUN_TONE, toneFor } from "./tone";
 
 /**
@@ -12,12 +11,31 @@ import { RUN_TONE, toneFor } from "./tone";
  * it, and the two things being looked for — did it go cleanly, and was that recently —
  * are the fifth and last words of a clause.
  *
- * As a row those two are the first and last things on it: the outcome as a toned badge on
- * the left, where a status belongs, and the time on the right in words. What is left in
- * the middle is the campaign's name, which is the only part that was ever prose.
+ * So the outcome is a toned badge on the left, where a status belongs, and what follows
+ * is the campaign and then the detail. `PARTIAL` is a warning and never a success, per
+ * `RUN_TONE` — a run that did not verify every row is the exact state this product exists
+ * to make visible.
  *
- * `PARTIAL` is a warning and never a success, per `RUN_TONE` — a run that did not verify
- * every row is the exact state this product exists to make visible.
+ * ## What the restructure changed
+ *
+ * It was a bordered, padded box holding a three-column grid, sitting inside a `Card` that
+ * is already a bordered surface. Two things were wrong with that.
+ *
+ * The box was the "boxes in boxes" shape `CountsRow` and `OnboardingCard` both carry a
+ * paragraph about. Inside a card, a second border does not add structure; it adds a
+ * frame around one of the card's three parts and makes that part look like a different
+ * kind of thing.
+ *
+ * And the grid had the `UpcomingCampaigns` defect: three cells per run flowing into a
+ * container query's two-column branch, so "View campaign" wrapped onto its own row
+ * underneath the badge, in the empty column. That is what it did on a real dashboard —
+ * correct at full width, wrong at the width the card actually renders at beside an aside.
+ *
+ * Both are gone, and so is the separate link. **The campaign's name is the link**, which
+ * is what `UpcomingCampaigns` already does two cards away, so the dashboard now has one
+ * way of offering a campaign rather than two. It also removes the third cell, which is
+ * what made the wrap possible at all — the layout is two columns at every width and has
+ * no narrow branch left to get wrong.
  */
 export function LastRunSummary({
   run,
@@ -37,38 +55,21 @@ export function LastRunSummary({
   timeZone: string;
 }) {
   return (
-    <s-box
-      padding={PAD.card}
-      borderWidth={HAIRLINE.borderWidth}
-      borderStyle={HAIRLINE.borderStyle}
-      borderColor={HAIRLINE.borderColor}
-      borderRadius="base"
-    >
-      {/* Measured against the bordered box around it, which has already decided the
-          width. See `QueryContainer`. */}
-      <QueryContainer>
-      <s-grid
-        // One comma only: Polaris reads the comma as the separator between the responsive
-        // value and the default, so a second one anywhere stops the value parsing.
-        gridTemplateColumns="@container (inline-size <= 560px) auto 1fr, auto 1fr auto"
-        gap={SPACE.item}
-        alignItems="center"
-      >
-        <s-badge tone={toneFor(RUN_TONE, run.status)}>{sentence(run.status)}</s-badge>
+    // `start`, not `center`: the badge belongs beside the campaign's name, which is the
+    // first line. Centred against a two-line block it floats between them, pointing at
+    // neither.
+    <s-grid gridTemplateColumns="auto 1fr" gap={SPACE.item} alignItems="start">
+      <s-badge tone={toneFor(RUN_TONE, run.status)}>{sentence(run.status)}</s-badge>
 
-        <s-stack gap={SPACE.tight}>
-          <s-text type="strong">{run.campaignName}</s-text>
-          <s-text color="subdued">
-            {run.kind.toLowerCase()} · {formatCount(run.verified)} verified
-            {run.failed > 0 ? `, ${formatCount(run.failed)} failed` : ""}
-            {run.finishedAt ? ` · ${formatAgo(run.finishedAt, now, timeZone)}` : " · still running"}
-          </s-text>
-        </s-stack>
-
-        <s-link href={`/app/campaigns/${run.campaignId}`}>View campaign</s-link>
-      </s-grid>
-      </QueryContainer>
-    </s-box>
+      <s-stack gap={SPACE.tight}>
+        <s-link href={`/app/campaigns/${run.campaignId}`}>{run.campaignName}</s-link>
+        <s-text color="subdued">
+          {run.kind.toLowerCase()} · {formatCount(run.verified)} verified
+          {run.failed > 0 ? `, ${formatCount(run.failed)} failed` : ""}
+          {run.finishedAt ? ` · ${formatAgo(run.finishedAt, now, timeZone)}` : " · still running"}
+        </s-text>
+      </s-stack>
+    </s-grid>
   );
 }
 
