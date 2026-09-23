@@ -148,17 +148,35 @@ Two campaigns on one calendar, how many products they share, and which one wins.
 
 ### The files
 
-| Order | Desktop 1600x900 | Mobile 900x1600 | What it shows |
-|---|---|---|---|
-| 1 | `desktop-01-hero.png` | `mobile-01-hero.png` | The baseline argument, with one product's numbers |
-| 2 | `desktop-02-capabilities.png` | `mobile-02-capabilities.png` | Six things the category does not do |
-| 3 | `desktop-03-whats-live.png` | `mobile-m05-whats-live.png` | Live price, baseline, controlling campaign, per surface |
-| 4 | `desktop-04-preview.png` | `mobile-m03-home.png` | The live preview recomputing as the rule is built |
-| 5 | `desktop-05-calendar.png` | `mobile-m04-campaigns.png` | Overlapping campaigns and the products they share |
-| 6 | `desktop-06-ledger.png` | | Spare. The ledger after a run, with per-variant rollback |
+Shopify wants 1600x900 for every screenshot, mobile ones included, so the phone captures go
+on the same landscape canvas as the desktop ones rather than a portrait one. The 900x1600
+`mobile-*.png` files are kept because the same panels are useful at that ratio elsewhere,
+but they are not what the listing carries.
 
-Images 1 and 2 are built by `scripts/../docs/listing/compose` equivalents kept in the
-scratch work; the screens in 3 to 6 are unretouched captures placed on the same canvas.
+Every capture is cropped to the app's own screen. The admin's left nav and top bar are not
+the app and reviewers see them on every listing, so they are gone; the app's title bar, which
+is the one piece of chrome the app controls, stays. The phone captures are taken at 400px
+wide against the live app, not scaled down from a desktop shot.
+
+| Slot | File | Alt text |
+|---|---|---|
+| Feature media | `desktop-01-hero.png` | Anchor computes every price from a baseline you control |
+| Desktop 1 | `desktop-02-capabilities.png` | Six ways Anchor differs from a bulk price editor |
+| Desktop 2 | `desktop-03-whats-live.png` | Live price, baseline and the campaign that set it |
+| Desktop 3 | `desktop-04-preview.png` | Campaign preview showing each baseline and the price it becomes |
+| Desktop 4 | `desktop-05-calendar.png` | Campaign calendar showing two overlapping sales |
+| Desktop 5 | `desktop-06-ledger.png` | Run ledger with before, intended and verified per variant |
+| Mobile 1 | `mobileview-01-home.png` | Campaigns running, scheduled and needing attention |
+| Mobile 2 | `mobileview-02-campaigns.png` | Campaign list showing each rule, scope, priority and last run |
+| Mobile 3 | `mobileview-03-whats-live.png` | Every written price checked back against Shopify |
+
+Alt text is capped at 64 characters, which is shorter than the caption limit and short enough
+that a sentence has to become a label. Say what the image shows, not what device it is on:
+the same screenshot is a phone screenshot and a narrow-window screenshot, and the reader with
+a screen reader does not care which.
+
+Images 1 and 2 are designed panels built by the compose script kept in the scratch work; the
+rest are unretouched captures placed on the same canvas.
 
 ### Not yet capturable
 
