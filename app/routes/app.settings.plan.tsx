@@ -17,6 +17,10 @@ import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
 import { billingFrom, campaignsAffectedBy } from "../services/billing.server";
+import { appHandle } from "../services/app-handle.server";
+import { toAdminClient } from "../services/admin-client.server";
+import { pricingPlansUrl } from "../lib/billing/pricing-plans";
+import { ActionRow } from "../components/ActionRow";
 import { PLAN_ORDER, PLANS } from "../lib/billing/plans";
 import { formatMinorUnits } from "../lib/money/format";
 import { RouteBoundary } from "../components/RouteBoundary";
@@ -25,7 +29,7 @@ import { PageShell } from "../components/PageShell";
 import { Card } from "../components/Card";
 
 export const loader = withGuard("/app/settings/plan", async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
 
   const record = await prisma.shop.findUniqueOrThrow({
@@ -53,6 +57,10 @@ export const loader = withGuard("/app/settings/plan", async ({ request }: Loader
     // What would stop being startable on the free plan, so the downgrade copy is about
     // this merchant's campaigns rather than about plans in the abstract.
     affected: await campaignsAffectedBy(shop.id, PLANS.free),
+    // Null on a development store, where nothing is charged and the picker would be a
+    // link to a decision the merchant cannot make, and null if the handle did not
+    // arrive. Both render no button rather than a dead one.
+    pricingUrl: billing.exempt ? null : pricingPlansUrl(await appHandle(toAdminClient(admin))),
     plans: PLAN_ORDER.map((id) => {
       const plan = PLANS[id];
       return {
@@ -74,7 +82,7 @@ export const loader = withGuard("/app/settings/plan", async ({ request }: Loader
 });
 
 export default function PlanPage() {
-  const { current, exempt, trialing, trialEndsAt, variants, plans, affected, timeZone } =
+  const { current, exempt, trialing, trialEndsAt, variants, plans, affected, timeZone, pricingUrl } =
     useLoaderData<typeof loader>();
 
   return (
@@ -162,6 +170,18 @@ export default function PlanPage() {
             ))}
           </s-table-body>
         </s-table>
+
+        {pricingUrl ? (
+          <ActionRow>
+            {/* Shopify hosts the page that actually takes the money; this is the only
+                thing standing between a merchant who has decided and the checkout. The
+                table above used to be the whole card, so "See plans" from Home led here
+                and stopped. */}
+            <s-button href={pricingUrl} variant="primary">
+              Change plan
+            </s-button>
+          </ActionRow>
+        ) : null}
       </Card>
 
       <Card
