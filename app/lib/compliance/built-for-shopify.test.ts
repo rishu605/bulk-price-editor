@@ -104,10 +104,15 @@ describe("performance — no storefront impact", () => {
    * stylesheet, is what Shopify's own instructions ask for and why.
    *
    * This was a real defect, not a hypothetical. `AppProvider` renders the script tag at
-   * its own position in the React tree, which is inside `<body>` — fine under React 19,
-   * which hoists `<script src>` into the head, and not fine under the React 18 this app
-   * is on, which does not. Nothing failed, nothing looked wrong, and the metrics the
-   * badge is graded on were being measured from halfway down the document.
+   * its own position in the React tree, which is inside `<body>`. Nothing failed, nothing
+   * looked wrong, and the metrics the badge is graded on were being measured from halfway
+   * down the document.
+   *
+   * No React version relocates it, which is why this assertion is permanent rather than a
+   * stopgap. React hoists a script only when it carries both `src` and `async` — 18 does
+   * not hoist at all, 19 added it for async scripts, because `async` is what makes a
+   * script safe to move. App Bridge must not be async: it initialises before the app
+   * renders, and Shopify's own snippet is a plain blocking tag in the head.
    */
   it("loads App Bridge from the document head", () => {
     const source = sourceOf("app/root.tsx");

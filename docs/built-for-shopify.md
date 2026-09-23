@@ -53,11 +53,19 @@ and a largest contentful paint it missed cannot be recovered afterwards.
 
 This was wrong until 2026-09-23, and wrong in a way nothing would have surfaced.
 `AppProvider` renders the script tag at its own position in the React tree, which is
-inside `<body>`. That is correct under React 19, which hoists `<script src>` into the
-head; this app is on React 18, which does not. So the app was fully instrumented, reported
-nothing broken, and measured the three metrics the badge is graded on from halfway down
-the document. `root.tsx` owns both script tags now and `AppBridgeNavigation` owns the
-`shopify:navigate` listener that came with them.
+inside `<body>`. So the app was fully instrumented, reported nothing broken, and measured
+the three metrics the badge is graded on from halfway down the document. `root.tsx` owns
+both script tags now and `AppBridgeNavigation` owns the `shopify:navigate` listener that
+came with them.
+
+**No React version fixes this for us**, and an earlier version of this page said one
+would. React hoists a script only when it carries both `src` and `async`: React 18 does
+not hoist at all, and React 19 added hoisting for async scripts, because `async` is
+exactly what makes a script safe to move. App Bridge must not be async — it has to
+initialise before the app renders, which is why Shopify's own snippet is a plain blocking
+tag in the head. The correction matters in one direction: it would have been reasonable to
+read the old wording as "a React upgrade makes the guard redundant" and delete the head
+placement, which would silently restore the defect.
 
 **Note on admin performance.** Measured against a real 102,132-variant store: the
 catalogue's first page is 26 ms, its last page 292 ms at offset 101,100, and reconciliation

@@ -16,12 +16,19 @@ import { useNavigate } from "react-router";
  * It is the body of `AppProvider`'s internal `AppBridge` component, which the library
  * does not export on its own. `AppProvider` couples the listener to rendering the
  * `app-bridge.js` script tag *at its own position in the tree* — which is inside
- * `<body>`, because React 18 does not hoist `<script src>` to `<head>` the way React 19
- * does. Built for Shopify asks for that script in the document head, and the reason is
- * not pedantry: App Bridge is what reports Largest Contentful Paint, Cumulative Layout
- * Shift and Interaction to Next Paint back to Shopify, and those three metrics at the
- * 75th percentile are the performance criteria. A reporter that loads after the content
- * it is supposed to be timing measures the wrong thing.
+ * `<body>`. Built for Shopify asks for that script in the document head, and the reason
+ * is not pedantry: App Bridge is what reports Largest Contentful Paint, Cumulative
+ * Layout Shift and Interaction to Next Paint back to Shopify, and those three metrics at
+ * the 75th percentile are the performance criteria. A reporter that loads after the
+ * content it is supposed to be timing measures the wrong thing.
+ *
+ * Nothing in React fixes this on its own, now or on a later version. React hoists a
+ * script only when it has both `src` and `async`: React 18 does not hoist at all, and
+ * React 19 added hoisting for async scripts because `async` is precisely what makes a
+ * script safe to move. App Bridge must not be async — it has to initialise before the
+ * app renders — so upgrading React would not relocate it. Worth stating because the
+ * opposite was believed here for a while, and acting on it would mean deleting the head
+ * placement in the belief that the framework had taken it over.
  *
  * So `root.tsx` owns the script tags and this owns the listener. The cost is that a
  * future version of `AppProvider` could grow a responsibility we would not pick up;

@@ -37,9 +37,15 @@ export default function App() {
             for `app-bridge.js` in the document head, and App Bridge is what reports LCP,
             CLS and INP — the three metrics the performance criteria are graded on — so it
             has to be running before the content it measures paints. It used to render
-            from `AppProvider` inside `<body>`: correct per the Shopify template, but
-            React 18 does not hoist `<script src>` into the head the way React 19 does, so
-            that is where it stayed. `AppBridgeNavigation` explains the split. */}
+            from `AppProvider` inside `<body>`, which is where React leaves it.
+
+            No React version moves it for us. React hoists a script only when it carries
+            both `src` and `async` — React 18 does not hoist at all, and React 19 added it
+            for async scripts specifically, because `async` is what makes a script safe to
+            move. App Bridge is deliberately not async: it has to initialise before the
+            app renders, which is why Shopify's own snippet is a plain blocking tag in the
+            head. So this placement is explicit and has to stay explicit.
+            `AppBridgeNavigation` explains the split. */}
         {embedded ? (
           <>
             <script
