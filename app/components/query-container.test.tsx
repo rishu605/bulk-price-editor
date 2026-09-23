@@ -31,17 +31,31 @@ import { sourceFiles, sourceOf } from "../lib/testing/source";
 /**
  * The ones still without a container, and why.
  *
- * `FieldGrid` is the landmine that caused #560 to be reverted: wrapped, the campaign
- * editor's fields came out as two columns of about 10px and 445px. Its symptom — three
- * truncated selects — was fixed another way in #562, so it is not urgent, and it wants
- * looking at on its own rather than riding along with Home's. The other two are on pages
- * this ticket did not open. Tracked as a follow-up.
+ * Empty since #638, which closed the last three — `FieldGrid`, `VariantSearch` and the
+ * help index. Keep the list rather than deleting it: a component added tomorrow with a
+ * query and no container needs somewhere to be recorded, and "the list is empty" is a
+ * stronger statement than "there is no list".
+ *
+ * ## What the last three turned out to need
+ *
+ * `FieldGrid` was the landmine that got #560 reverted, and the standing theory was its
+ * `maxInlineSize` — "a second thing arguing about the same axis". Measured against the
+ * real components in a browser, that theory was wrong. Wrapping with the cap in place and
+ * lifting the cap to a box outside the container give identical columns at 970, 800, 700,
+ * 600 and 420px. The cap was never the problem.
+ *
+ * What decides it is the *parent*. `s-query-container` is `display: grid; container-type:
+ * inline-size`, so it collapses to its content's idea of the width — measured at 58px —
+ * in any parent that sizes by content: a flex row, an `auto` grid track, or an
+ * `s-stack direction="inline"`. In a parent that has already decided the width — an
+ * `s-stack` in block direction, an `s-box`, an `s-section`, a definite grid track — it
+ * fills and the query resolves correctly. #560 did not break because of a cap; it broke
+ * because of where it was put.
+ *
+ * So the rule the guard below encodes is unchanged, and the rule a reviewer needs is:
+ * check the parent, not the wrapper.
  */
-const OUTSTANDING = [
-  "app/components/FieldGrid.tsx",
-  "app/components/prices/VariantSearch.tsx",
-  "app/routes/app.help.tsx",
-];
+const OUTSTANDING: string[] = [];
 
 /** A responsive value, not a comment mentioning one. */
 const ASKS_FOR_A_CONTAINER = /gridTemplateColumns=[^\n]*@container/;
