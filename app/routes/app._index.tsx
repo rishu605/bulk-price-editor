@@ -782,8 +782,22 @@ export default function Dashboard() {
               real one gained borders and equal columns -- and it is the first screen
               after installing, which is the worst place to be a version behind.
 
-              Three tiles, not four. "Campaigns" was the fourth and it is a fact about
-              campaigns, which the section above is entirely about. */}
+              "Campaigns" is not among them: it is a fact about campaigns, which the
+              section above is entirely about. */}
+          {/* Four cells, because three is the count that cannot survive this grid.
+
+              `CountsRow` goes two-up when the card is narrow, which is the width Home
+              renders at beside the aside. Three tiles in two columns leave the third
+              alone against an empty cell — the same stranded-cell defect as #638, #663
+              and #665, which #665 called the last one in the app. It was not; it was the
+              last one *it* touched, and this card was one below it on the same screen.
+
+              #665 fixed its instance by removing a cell. The opposite move is what is
+              available here: nothing in this card is spare, and "Oldest baseline
+              captured" was already a labelled fact in the identical shape a tile draws,
+              sitting below the row in a layout of its own. Bringing it in makes the count
+              even, so the row fills at two-up and at four-up and there is no branch left
+              to get wrong. */}
           <CountsRow
             items={[
               { label: "Variants", value: health.variants },
@@ -804,20 +818,16 @@ export default function Dashboard() {
                  two names. */
               { label: "Baselines captured", value: health.withBaseline },
               { label: "Not at baseline", value: health.drifted },
+              /* The date, as the fourth cell rather than as a stray fact underneath.
+                 Pre-formatted, because a tile formats counts and this is not one. */
+              {
+                label: "Oldest baseline captured",
+                value: health.oldestCapturedAt
+                  ? formatDay(health.oldestCapturedAt, timeZone)
+                  : "None captured",
+              },
             ]}
           />
-
-          {/* The coverage bar that used to sit here is gone. Every background token a
-              box can take is a near-white grey, so at 100% — which is where a healthy
-              shop lives — a full bar and an empty one were the same picture. The two
-              tiles above are the same fact, unambiguously. */}
-          <Fact label="Oldest baseline captured">
-            <s-text>
-              {health.oldestCapturedAt
-                ? formatDay(health.oldestCapturedAt, timeZone)
-                : "None captured"}
-            </s-text>
-          </Fact>
 
           {health.withBaseline > health.variants ? (
             <Secondary>
