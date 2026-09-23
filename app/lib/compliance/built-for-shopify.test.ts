@@ -16,19 +16,29 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { sourceOf } from "../testing/source";
+import { sourceOf, sourceFiles as trackedSources } from "../testing/source";
 
 import { API_VERSION_STRING, supportedUntil } from "../shopify/api-version";
 
 const ROOT = process.cwd();
 
+/**
+ * Every shipped source file under a directory — tests excluded.
+ *
+ * The exclusion is the same rule `app/lib/testing/source.ts` documents at length, and it
+ * was missing here. A test file is where the markup being grepped for is written out as
+ * a fixture on purpose: `campaign-header.test.tsx` builds an `<s-modal id="...">` string
+ * to assert against, and a criterion check that reads it finds a modal with no heading in
+ * a file that renders nothing. The criteria are about the admin surface, and eighteen
+ * component tests are not part of it.
+ */
 function sourceFiles(dir: string, match: RegExp): string[] {
   const out: string[] = [];
   const walk = (path: string) => {
     for (const entry of readdirSync(path, { withFileTypes: true })) {
       const full = join(path, entry.name);
       if (entry.isDirectory()) walk(full);
-      else if (match.test(entry.name)) out.push(full);
+      else if (match.test(entry.name) && !entry.name.includes(".test.")) out.push(full);
     }
   };
   walk(join(ROOT, dir));
@@ -80,6 +90,52 @@ describe("performance — no storefront impact", () => {
       );
     }
   });
+
+  /**
+   * The admin performance criteria are LCP ≤ 2.5s, CLS ≤ 0.1 and INP ≤ 200ms, each at the
+   * 75th percentile over at least 100 measurements in 28 days. None of those are numbers
+   * this repo can assert — Shopify collects them from real merchant sessions. What the
+   * repo *can* assert is the thing that makes them collectable at all, and correct.
+   *
+   * App Bridge is the reporter. It observes paint and layout-shift entries from the
+   * moment it runs, so a copy that loads late does not merely report late: it never sees
+   * the entries that happened before it, and the largest contentful paint on a page it
+   * missed is not recoverable afterwards. Loading it from `<head>`, ahead of the
+   * stylesheet, is what Shopify's own instructions ask for and why.
+   *
+   * This was a real defect, not a hypothetical. `AppProvider` renders the script tag at
+   * its own position in the React tree, which is inside `<body>` — fine under React 19,
+   * which hoists `<script src>` into the head, and not fine under the React 18 this app
+   * is on, which does not. Nothing failed, nothing looked wrong, and the metrics the
+   * badge is graded on were being measured from halfway down the document.
+   */
+  it("loads App Bridge from the document head", () => {
+    const source = sourceOf("app/root.tsx");
+    const head = source.slice(source.indexOf("<head>"), source.indexOf("</head>"));
+
+    expect(head, "App Bridge is not loaded from <head> in root.tsx").toContain(
+      "https://cdn.shopify.com/shopifycloud/app-bridge.js",
+    );
+    expect(head, "the App Bridge script tag carries no data-api-key").toMatch(/data-api-key=/);
+  });
+
+  it("loads App Bridge exactly once", () => {
+    // Two copies is the shape the fix above could regress into: somebody reaches for
+    // `AppProvider embedded` again — reasonably, it is what the Shopify template does —
+    // and the app ends up with the head copy plus a second one in the body. So this
+    // names the one file allowed to load it, and refuses the component that would add
+    // another. `embedded={false}` is untouched: that renders Polaris only, which is
+    // exactly right for `auth.login`, a page that renders outside the admin.
+    const offenders = trackedSources("app").filter((file) => {
+      const source = sourceOf(file);
+      return (
+        source.includes("shopifycloud/app-bridge.js") ||
+        /<AppProvider\s+embedded(?!=\{false\})/.test(source)
+      );
+    });
+
+    expect(offenders).toEqual(["app/root.tsx"]);
+  });
 });
 
 describe("design — Polaris and App Bridge", () => {
@@ -96,6 +152,74 @@ describe("design — Polaris and App Bridge", () => {
         /authenticate\.admin/,
       );
       expect(source, `${route} is excluded but mounts AppProvider`).not.toMatch(/AppProvider/);
+    }
+  });
+
+  /**
+   * The admin sidebar renders the app's name as a link to its home route. An `s-app-nav`
+   * item that goes to the same place is therefore the second one, and it is a named
+   * rejection reason: *"an app has a separate navigation item in addition to the app name
+   * that redirects to the app's homepage. Instead, the app name should point at the app's
+   * homepage."*
+   *
+   * `rel="home"` is the whole fix, and it does two things at once: it repoints the app
+   * name from the default `/` to `/app`, and it hides its own item from the rendered
+   * menu. Deleting the link instead would leave the app name pointing at `/`, which only
+   * works because `_index` redirects — an extra round trip on the most-clicked link in
+   * the app, to land where the attribute could have pointed directly.
+   */
+  it('renders the home item as rel="home" and not as a menu entry', () => {
+    const source = sourceOf("app/routes/app.tsx");
+    const nav = source.slice(source.indexOf("<s-app-nav>"), source.indexOf("</s-app-nav>"));
+
+    const links = [...nav.matchAll(/<s-link\b[^>]*>/g)].map((match) => match[0]);
+    expect(links.length, "the nav has no links").toBeGreaterThan(1);
+
+    // Written as a spread, because `@shopify/polaris-types` does not declare `rel` on
+    // `s-link` — App Bridge reads the attribute, Polaris ships the types. Both spellings
+    // are accepted so that a future version of the types can drop the workaround without
+    // this test having to be found and edited.
+    const home = links.filter((link) => /rel:\s*"home"|rel="home"/.test(link));
+
+    expect(home, 'exactly one nav link should carry rel="home"').toHaveLength(1);
+    expect(home[0], 'rel="home" is not on the app home route').toContain('href="/app"');
+
+    for (const link of links) {
+      if (link === home[0]) continue;
+      expect(link, "a second nav item points at the app home route").not.toMatch(
+        /href="\/app"[\s/>]/,
+      );
+    }
+  });
+
+  it("gives every modal a heading", () => {
+    // "Use the `heading` attribute for titles" — a modal that draws its own title in the
+    // body instead gets the admin's heading slot empty and two competing titles.
+    for (const file of ui) {
+      const source = sourceOf(file);
+
+      for (const match of source.matchAll(/<s-modal\b[^>]*>/gs)) {
+        expect(/\bheading=/.test(match[0]), `${file}: an <s-modal> has no heading`).toBe(true);
+      }
+    }
+  });
+
+  it("puts every modal's buttons in the action slots", () => {
+    // The other half of the modal criterion: "use `primary-action` and `secondary-actions`
+    // slots for buttons". A button left in the body scrolls with the content, so on a
+    // short window the confirm button on "Apply to storefront" — the one irreversible
+    // action in the app — can be below the fold with nothing to say it is there.
+    //
+    // Whole modals rather than opening tags, because the slots are on the buttons inside.
+    for (const file of ui) {
+      const source = sourceOf(file);
+
+      for (const [modal] of source.matchAll(/<s-modal\b[\s\S]*?<\/s-modal>/g)) {
+        expect(
+          modal.includes('slot="primary-action"'),
+          `${file}: an <s-modal> has no button in the primary-action slot`,
+        ).toBe(true);
+      }
     }
   });
 
@@ -310,6 +434,19 @@ describe("the pre-audit sheet names evidence that exists", () => {
   const sheet = readFileSync(join(ROOT, "docs/built-for-shopify.md"), "utf8");
 
   /**
+   * An `it(…)` or `describe(…)` and the name it declares, in either quote style.
+   *
+   * It used to require double quotes, which put a hole straight through the check below:
+   * a test whose *name contains a double quote* has to be declared with single ones, so
+   * it was invisible to this audit. It would prove a criterion, go uncited, and
+   * "nothing is proved but unlisted" would pass without ever having looked at it — and
+   * the first test to hit that was the one asserting `rel="home"`, whose name cannot
+   * avoid the character. A rule that silently exempts the cases it finds awkward to read
+   * is the failure this whole block exists to prevent.
+   */
+  const DECLARATION = /^\s*(?:it|describe)\(\s*(["'])((?:(?!\1).)+)\1/gm;
+
+  /**
    * Test and group names declared anywhere in the compliance suite.
    *
    * Widened from this one file when the WCAG criteria gained evidence of their own: a
@@ -322,7 +459,7 @@ describe("the pre-audit sheet names evidence that exists", () => {
       .filter((name) => name.endsWith(".test.ts"))
       .flatMap((name) => {
         const source = sourceOf("app/lib/compliance", name);
-        return [...source.matchAll(/^\s*(?:it|describe)\("([^"]+)"/gm)].map((match) => match[1]!);
+        return [...source.matchAll(DECLARATION)].map((match) => match[2]!);
       }),
   );
 
@@ -359,7 +496,9 @@ describe("the pre-audit sheet names evidence that exists", () => {
 
   it("cites every criterion test in this file, so nothing is proved but unlisted", () => {
     const suite = sourceOf("app/lib/compliance/built-for-shopify.test.ts");
-    const here = [...suite.matchAll(/^\s*it\("([^"]+)"/gm)].map((match) => match[1]!);
+    const here = [...suite.matchAll(DECLARATION)]
+      .filter((match) => match[0].trimStart().startsWith("it("))
+      .map((match) => match[2]!);
 
     const exempt = new Set([
       // Meta-tests about the sheet itself; listing them on the sheet would be circular.
