@@ -81,6 +81,7 @@ the server, and the criteria measure the browser.
 | No duplicate homepage nav item | `renders the home item as rel="home" and not as a menu entry` | met |
 | Modals titled through the admin's own slot | `gives every modal a heading` | met |
 | Modal buttons in the admin's action slots | `puts every modal's buttons in the action slots` | met |
+| Responsive: columns collapse on a narrow admin | `app/components/query-container.test.tsx` | met, see note |
 | Every form field labelled (WCAG AA) | `labels every form field` | met |
 | Colour is never the only signal (WCAG 1.4.1) | `every tone is accompanied by words` | met, see note |
 | Contrast ratios verified (WCAG 1.4.3, 1.4.11) | `light palette meets AA` / `dark palette meets AA` | met |
@@ -96,6 +97,34 @@ Deleting the link would also have removed the duplicate, and would have left the
 pointing at `/`, which only reaches the app because `_index` redirects. That is an extra
 round trip on the most-clicked link in the app, to arrive where one attribute could have
 pointed directly.
+
+**"No horizontal scrolling on mobile" was failing silently in three places.** Eleven
+layouts in this app pick their columns with a CSS container query. A container query
+resolves against the nearest ancestor that sets `container-type`, and Polaris sets it in
+exactly one component — `s-query-container`. Three of the eleven had no such ancestor, so
+the query matched nothing and the *wide* branch won at every width, on every screen.
+Measured in a browser against the real components: the campaign editor's field grid
+rendered two 202px columns in a 420px admin, where it was designed to become one.
+
+That is invisible from every direction. The unmatched branch is the correct layout for the
+widest place each component is used, so the page you would open looks right; the markup is
+identical either way; and the only difference is which branch a browser picks, which no
+unit test can see. The first attempt at fixing it (#560) passed 3,433 tests, typecheck,
+lint, build and CI, and was reverted within the hour.
+
+So this one was settled by measurement rather than argument, against real Polaris at
+970/800/700/600/420px. Two things came out of it. The standing theory — that `FieldGrid`'s
+`maxInlineSize` was "a second thing arguing about the same axis" — is wrong: with the cap
+and without it, the columns are identical at every width. What actually decides it is the
+*parent*. `s-query-container` is `display: grid; container-type: inline-size`, so it
+collapses to its content's width — measured at 58px — inside anything that sizes by
+content: a flex row, an `auto` grid track, an `s-stack direction="inline"`. Inside a parent
+that has already decided the width it fills and resolves correctly. #560 did not break
+because of a cap; it broke because of where it was put.
+
+All three are fixed and every call site was checked against that rule. The guard is a
+source check, because the failure is invisible to a render test: a component that asks for
+a container query has to have asked for a container too.
 
 **Contrast is computed, not eyeballed.** Polaris renders most of this app and its contrast
 is Shopify's responsibility; the help centre ships its own stylesheet and is ours. Both its

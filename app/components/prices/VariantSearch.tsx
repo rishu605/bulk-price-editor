@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { FilterForm } from "../FilterForm";
+import { QueryContainer } from "../QueryContainer";
 import { SPACE } from "../../lib/ui/spacing";
 
 /**
@@ -87,20 +88,27 @@ export function VariantSearch({
         // the comma to separate the two branches, so a comma inside a value makes the
         // whole thing unparseable and it silently falls back to `none`.
         <s-stack gap={SPACE.section}>
-          <s-grid
-            gap={SPACE.section}
-            gridTemplateColumns="@container (inline-size <= 700px) 1fr, 1fr 1fr 1fr"
-          >
-            <s-grid-item gridColumn="span 2">
-              <s-search-field
-                name="q"
-                label={label}
-                placeholder={placeholder}
-                value={query}
-              />
-            </s-grid-item>
-            {children}
-          </s-grid>
+          {/* The container the query above measures against. Without it the three-column
+              branch was taken at every width, so a phone-width admin got three slivers
+              instead of a stack -- see `QueryContainer`, and #638 for the measurements.
+              Safe here because the parent is a block stack, which has already decided the
+              width; in an inline stack this same wrapper collapses to 58px. */}
+          <QueryContainer>
+            <s-grid
+              gap={SPACE.section}
+              gridTemplateColumns="@container (inline-size <= 700px) 1fr, 1fr 1fr 1fr"
+            >
+              <s-grid-item gridColumn="span 2">
+                <s-search-field
+                  name="q"
+                  label={label}
+                  placeholder={placeholder}
+                  value={query}
+                />
+              </s-grid-item>
+              {children}
+            </s-grid>
+          </QueryContainer>
 
           {/* Its own row, so the button keeps its natural width. A block stack stretches
               its children, which is how this rendered as a full-width submit bar. */}
