@@ -1,11 +1,11 @@
 import { QueryContainer } from "./QueryContainer";
 import { formatCount } from "../lib/format/display";
-import { HAIRLINE, PAD, SPACE } from "../lib/ui/spacing";
+import { SPACE } from "../lib/ui/spacing";
 
 /**
  * A row of labelled figures, used for preview and catalogue summaries.
  *
- * ## Why these are tiles and not a row of text
+ * ## Why these are columns and not a row of text
  *
  * It used to be four unpadded boxes in an inline stack: a label, a number, a gap, repeat.
  * With no interior and no edge, "Will change 412 Already correct 9,081 Skipped 3" is one
@@ -13,9 +13,21 @@ import { HAIRLINE, PAD, SPACE } from "../lib/ui/spacing";
  * are the summary of what a campaign is about to do to a live storefront. They are the
  * most important thing on the preview page and they were the least legible.
  *
- * Each figure now sits in its own bounded tile: padding so the pair has room, a hairline
- * so the boundary between one figure and the next is a line rather than an inference, and
- * tight rhythm inside so the label and the number read as one phrase.
+ * The fix for that was two changes at once, and only one of them was load-bearing. The
+ * grid below is what pairs a label with its figure: each pair gets a column, the labels
+ * line up across the row, and the reader parses by column rather than by guessing where
+ * one pair ends. The other change — wrapping each pair in a padded, hairlined tile — was
+ * the part that looked like the fix and was not.
+ *
+ * It also cost: four bordered boxes inside a bordered card is the "boxes in boxes" shape
+ * `OnboardingCard` carries its own paragraph about, where three steps became "three tall
+ * cards inside a card". On Home this row was 172px to carry four numbers, over half of it
+ * padding and rules. Without the tiles it is 104px and reads the same — measured in a
+ * browser against the real components at the widths Home actually renders at, and looked
+ * at rather than reasoned about, because "reads the same" is not something a number
+ * settles.
+ *
+ * So: no tile. The columns do the work they were always doing.
  *
  * ## Equal columns, not an inline stack
  *
@@ -39,7 +51,12 @@ import { HAIRLINE, PAD, SPACE } from "../lib/ui/spacing";
  * catalogue card is a fact, not a queue, and giving it a destination invents one.
  *
  * `s-clickable` rather than `s-link`: `ActionRow`'s vocabulary reserves blue for a word
- * inside a sentence, and this is a whole box.
+ * inside a sentence, and this is a whole column.
+ *
+ * Losing the tile did not shrink that target. `alignItems="stretch"` is what makes the
+ * clickable fill its cell, not the padding — measured at 248×46 in a four-column row,
+ * against a 44px AAA target size. The padding was never what made the figure clickable
+ * from the place a merchant aims at.
  *
  * **One comma.** Polaris splits a responsive value on the comma to separate "when the
  * query matches" from "otherwise", so a `repeat(4, 1fr)` on either side of it takes its
@@ -103,20 +120,16 @@ export function CountsRow({ items }: { items: CountItem[] }) {
   );
 }
 
-/** The bounded figure itself, so the linking and non-linking cases cannot drift apart. */
+/** The figure itself, so the linking and non-linking cases cannot drift apart. */
 function Tile({ item }: { item: CountItem }) {
+  // Tight rhythm, so the label and the number read as one phrase rather than as two
+  // lines that happen to be near each other. It is the only spacing this needs: the
+  // grid's gap separates one figure from the next, and the column edges are what say
+  // where a pair begins.
   return (
-    <s-box
-      padding={PAD.card}
-      borderWidth={HAIRLINE.borderWidth}
-      borderStyle={HAIRLINE.borderStyle}
-      borderColor={HAIRLINE.borderColor}
-      borderRadius="base"
-    >
-      <s-stack gap={SPACE.tight}>
-        <s-text color="subdued">{item.label}</s-text>
-        <s-heading>{formatCount(item.value)}</s-heading>
-      </s-stack>
-    </s-box>
+    <s-stack gap={SPACE.tight}>
+      <s-text color="subdued">{item.label}</s-text>
+      <s-heading>{formatCount(item.value)}</s-heading>
+    </s-stack>
   );
 }
