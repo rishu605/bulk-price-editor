@@ -10,8 +10,8 @@ import { redirect } from "react-router";
  * `/app` owns authentication and knows how to recover a session through App Bridge.
  *
  * Only a top-level document request without a shop can be somebody typing the URL outside
- * the admin. They have to name their shop first, and that form already exists at
- * `/auth/login` — this route does not duplicate it.
+ * the admin. `/auth/login` owns that case: it does not ask them for a shop domain, which
+ * App Store requirement 2.3.1 forbids, it tells them to open the app from their admin.
  */
 export const loader = ({ request }: LoaderFunctionArgs) => {
   const { search, searchParams } = new URL(request.url);
