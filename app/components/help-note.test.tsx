@@ -172,11 +172,17 @@ describe("what stays in the aside", () => {
    * rule being typed, recomputed on every keystroke. It is not an explanation of how the
    * app works — it is the answer.
    *
+   * "Next up" earns it on the same rule. It is this shop's own scheduled campaigns and
+   * the dates they will change prices on — the answer to "is anything about to change my
+   * prices", not an account of how scheduling works. It reads down a narrow column better
+   * than it filled a wide row, which is why it moved, but that is not what qualifies it.
+   *
    * Checked rather than written down, because the next explanatory sidebar will be added
    * by someone who has not read `PageShell`.
    */
   const FACTS = [
     ["app._index.tsx", "Store"],
+    ["app._index.tsx", "Next up"],
     ["app._index.tsx", "Recent activity"],
     ["app.campaigns.new.tsx", "What this would do"],
   ] as const;

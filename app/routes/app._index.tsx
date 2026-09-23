@@ -735,18 +735,6 @@ export default function Dashboard() {
         </Card>
       ) : null}
 
-      {/* What is about to happen, which "Scheduled: 1" could not say. Only when there is
-          something ahead — an empty "nothing is scheduled" card is the same mistake as the
-          four zeroes this page used to open with. */}
-      {upcomingMoments.length > 0 ? (
-        <Card heading="Next up">      <UpcomingCampaigns
-            moments={upcomingMoments}
-            now={now}
-            timeZone={timeZone}
-          />
-        </Card>
-      ) : null}
-
       {/* The one case the checklist does not cover: everything on it is done, and the
           campaigns it was done with have since been deleted. */}
       {sections.emptyState ? (
@@ -893,6 +881,20 @@ export default function Dashboard() {
           ) : null}
         </s-stack>
       </s-section>
+
+      {/* What is about to happen, which "Scheduled: 1" could not say. Only when there is
+          something ahead — an empty "nothing is scheduled" card is the same mistake as the
+          four zeroes this page used to open with.
+
+          In the aside rather than the main column: it is a fact about this shop's next few
+          days, which is what this column is for, and it reads down a narrow list better
+          than it filled a wide row. `UpcomingCampaigns` carries what had to change for it
+          to survive 352px. */}
+      {upcomingMoments.length > 0 ? (
+        <s-section slot="aside" heading="Next up">
+          <UpcomingCampaigns moments={upcomingMoments} now={now} timeZone={timeZone} />
+        </s-section>
+      ) : null}
 
       {!neverSynced && recent.length > 0 ? (
         <s-section slot="aside" heading="Recent activity">
