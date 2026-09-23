@@ -13,7 +13,12 @@ import { loadCandidates, titleMapFor } from "./candidates.server";
 import { loadCampaignContext, importIdsOf} from "./model.server";
 import { guardrailsFor, readSettings } from "../settings.server";
 import { describeImpact, marginImpact } from "../../lib/pricing/margin";
-import { decideMarketPath, describePath, planMarket } from "./market-plan.server";
+import {
+  decideMarketPath,
+  describePath,
+  planMarket,
+  UnconvertedMarketError,
+} from "./market-plan.server";
 import { parseSurfaces } from "./market-surfaces.server";
 import type { AdminClient } from "../../lib/execution/sync-executor";
 import prisma from "../../db.server";
@@ -191,6 +196,7 @@ async function marketPathPreview(
       path: "unknown" as const,
       clamped: 0,
       skipped: 0,
+      refused: false,
       explanation:
         `${list.name} will be priced when the campaign runs, and how it is written ` +
         `depends on this market's settings at that moment.`,
@@ -201,10 +207,36 @@ async function marketPathPreview(
   const previews: MarketPreview[] = [];
 
   for (const list of lists) {
-    const plan = await planMarket(shopId, list, variantGids, resolvable, options.client);
-    if (!plan) continue;
+    // A market that answers in the wrong currency is refused, not priced, and the run
+    // refuses only that market (`market-surfaces.server.ts`). Catching it here is what
+    // makes the preview say the same thing: before #645 it escaped instead, and one
+    // misconfigured market returned the generic error screen for the whole campaign, so
+    // the page could not be opened at all.
+    let plan;
+    let decision;
+    try {
+      plan = await planMarket(shopId, list, variantGids, resolvable, options.client);
+      if (!plan) continue;
+      decision = await decideMarketPath(plan, options.client);
+    } catch (error) {
+      if (!(error instanceof UnconvertedMarketError)) throw error;
 
-    const decision = await decideMarketPath(plan, options.client);
+      // The error's own sentence, because it already names the market, the currency that
+      // arrived and the next action. Rewriting it here would be a second place for that
+      // wording to drift from the one the run reports.
+      previews.push({
+        priceListGid: list.priceListGid,
+        name: list.name,
+        currency: list.currency,
+        path: "unknown",
+        explanation: error.message,
+        clamped: 0,
+        skipped: 0,
+        refused: true,
+      });
+      continue;
+    }
+
     const counts = plan.outcome.kind === "ok" ? plan.outcome.counts : { clamped: 0, skipped: 0 };
 
     previews.push({
@@ -215,6 +247,7 @@ async function marketPathPreview(
       explanation: describePath(decision, list.name),
       clamped: counts.clamped,
       skipped: counts.skipped,
+      refused: false,
     });
   }
 
@@ -266,7 +299,18 @@ async function marketCellsFor(
   });
 
   for (const list of lists) {
-    const plan = await planMarket(shopId, list, variantGids, resolvable, options.client);
+    // Refused the same way, and for the same reason, as in `marketPathPreview` above.
+    // A refused market gets no column of its own: the Markets card says why it is
+    // missing, and a column of blanks beside priced ones would read as "no change here"
+    // rather than "not priced at all".
+    let plan;
+    try {
+      plan = await planMarket(shopId, list, variantGids, resolvable, options.client);
+    } catch (error) {
+      if (!(error instanceof UnconvertedMarketError)) throw error;
+      continue;
+    }
+
     if (!plan || plan.outcome.kind !== "ok") continue;
 
     for (const row of plan.outcome.rows) {
