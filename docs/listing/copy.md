@@ -197,11 +197,32 @@ a store where markets really answer in their own currency.
 
 ---
 
-## Still blocked
+## Submitted
 
-- Name availability check in the Partner Dashboard. Blocks decision D6.
+Submitted for review on 23 September 2026. The dashboard reads *Submitted, we're assigning
+a reviewer*, and issues come by email to the address on the listing.
+
+What closed the last of it:
+
+- **Name.** `Anchor: Bulk Price Editor`, 25 of 30 characters. The dashboard's own tip asks
+  to drop "price" as a pricing reference; it is a category word here, not a price, and
+  every app in this category carries it.
+- **Privacy policy.** Served from the app at [`/privacy`](../../app/routes/privacy.tsx)
+  rather than from a domain nobody owns, so the policy and the code it describes ship
+  together.
+- **Screencast.** Five minutes, on YouTube, public. Title cards carry the narration since
+  there is no audio track.
+- **Support inbox.** On the listing, and on the privacy page.
+- **Nav icon.** [`nav-icon.svg`](nav-icon.svg), the anchor reduced to one 16px mark with
+  no ring detail, no flukes and no stock highlight, because none of them survive at that
+  size. Filled paths rather than strokes: the admin recolours the icon by setting `fill`,
+  and a stroked icon would have ignored it and stayed black in a green nav.
+
+## Still open
+
 - The per-market screenshot, which needs a store whose markets answer in their own
   currency. See above.
-- The screencast: install, campaign, preview, apply, revert. Ninety seconds.
-- Privacy policy published at a stable URL.
-- Support inbox created.
+- The four plan display names in the Partner Dashboard have to keep their plan id in
+  them. `planFromName` maps a subscription back to a plan by looking for the id inside the
+  name Shopify echoes, and an unrecognised name resolves to free. That is the safe
+  direction and it is still a silent downgrade, and nothing in the repo can catch it.
