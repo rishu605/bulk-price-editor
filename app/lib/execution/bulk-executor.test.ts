@@ -20,6 +20,7 @@ import {
   type StagedTarget,
 } from "./bulk-executor";
 import type { AdminClient } from "./sync-executor";
+import { toAppError } from "../errors/app-error";
 
 const usd = (n: number) => money(n, "USD");
 const noSleep = async () => {};
@@ -234,16 +235,19 @@ describe("submission", () => {
     expect(JSON.parse(uploaded[0].trim())).toMatchObject({ productId: "gid://shopify/Product/A" });
   });
 
-  it("refuses to submit an empty payload", async () => {
+  it("refuses to submit an empty payload, and not as a Shopify rejection", async () => {
+    // It used to throw `BulkSubmissionError`, which now means "Shopify refused this".
+    // Shopify has refused nothing here — nothing was sent. `selectWritePath(0)` returns
+    // the sync path, so an empty run never chooses bulk, and arriving here means a
+    // caller forced it. That is our bug, and it must not be dressed up as Shopify's.
     const { client, upload } = submitClient();
-    await expect(
-      submitBulkMutation([row({ status: "skipped", intendedPrice: undefined })], {
-        client,
-        upload,
-        productOf,
-        sleep: noSleep,
-      }),
-    ).rejects.toBeInstanceOf(BulkSubmissionError);
+    const submitting = submitBulkMutation(
+      [row({ status: "skipped", intendedPrice: undefined })],
+      { client, upload, productOf, sleep: noSleep },
+    );
+
+    await expect(submitting).rejects.toThrow(/no writable rows/);
+    await expect(submitting).rejects.not.toBeInstanceOf(BulkSubmissionError);
   });
 
   it("surfaces userErrors from staging and from submission", async () => {
@@ -259,10 +263,69 @@ describe("submission", () => {
   });
 
   it("fails clearly when the staged target has no key", async () => {
+    // "Clearly" now means two different things for two different readers, which is the
+    // point of #649. The merchant is told what happened to their prices and what to do;
+    // `key` is a word from Shopify's upload protocol and means nothing to them. The
+    // technical detail is kept for whoever reads the log.
     const { client, upload } = submitClient({ noKey: true });
-    await expect(
-      submitBulkMutation([row()], { client, upload, productOf, sleep: noSleep }),
-    ).rejects.toThrow(/key/);
+
+    const error = await submitBulkMutation([row()], {
+      client,
+      upload,
+      productOf,
+      sleep: noSleep,
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(BulkSubmissionError);
+    expect((error as BulkSubmissionError).context.detail).toMatch(/key/);
+    expect((error as BulkSubmissionError).userMessage).toMatch(/No prices were changed/);
+  });
+
+  /**
+   * The defect #649 was filed for: the truth was in hand and thrown away one layer later.
+   *
+   * These rejections carry Shopify's own sentence. Before this, nothing caught them,
+   * `classify()` had no branch that matched their wording — it looks for the literal
+   * `usererrors`, which `bulkOperationRunMutation failed: …` does not contain — and the
+   * merchant was shown "Something went wrong on our side" instead.
+   */
+  it("reaches the merchant as a Shopify rejection, carrying Shopify's own reason", async () => {
+    const cases: Array<{ name: string; options: FakeSubmitOptions; reason: RegExp }> = [
+      {
+        name: "staging",
+        options: { stagedErrors: [{ message: "quota exceeded" }] },
+        reason: /quota exceeded/,
+      },
+      {
+        name: "submission",
+        options: { submitErrors: [{ message: "already running" }] },
+        reason: /already running/,
+      },
+    ];
+
+    for (const { name, options, reason } of cases) {
+      const { client, upload } = submitClient(options);
+
+      const error = await submitBulkMutation([row()], {
+        client,
+        upload,
+        productOf,
+        sleep: noSleep,
+      }).catch((caught: unknown) => caught);
+
+      const app = toAppError(error);
+
+      expect(app.code, `${name} should be a Shopify rejection`).toBe("SHOPIFY_REJECTED");
+      // Not retryable: Shopify refused the request as posed, so a worker resending it
+      // unchanged gets the same answer.
+      expect(app.retryable, `${name} should not be retried by the worker`).toBe(false);
+      // Shopify's own words, and never the generic sentence.
+      expect(app.userMessage).toMatch(reason);
+      expect(app.userMessage).not.toMatch(/Something went wrong on our side/);
+      // The object, and the next action — the shape RFC §11 asks for.
+      expect(app.userMessage).toMatch(/No prices were changed/);
+      expect(app.userMessage).toMatch(/Run the campaign again/);
+    }
   });
 });
 
