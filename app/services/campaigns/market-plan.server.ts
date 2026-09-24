@@ -12,6 +12,7 @@ import { Prisma } from "@prisma/client";
 import prisma from "../../db.server";
 import { readContextualPrices, readDerivedPrices } from "../../lib/execution/market-executor";
 import { unconvertedMessage } from "../../lib/markets/conversion-check";
+import { AppError } from "../../lib/errors/app-error";
 import { readLadders } from "../../lib/execution/quantity-executor";
 import { parseLadder, serialiseLadder, type LadderRung } from "../../lib/pricing/ladder-baseline";
 import {
@@ -260,9 +261,34 @@ async function captureLadders(
   }
 }
 
-export class UnconvertedMarketError extends Error {
+/**
+ * A market whose prices came back in a currency that is not its own.
+ *
+ * An `AppError`, and specifically not a bare `Error`, because the sentence it carries is
+ * already the one a merchant should read: `unconvertedMessage` names the market, says it
+ * answered in USD rather than CAD, and points at Settings → Markets. A bare `Error` has
+ * no code, so `classify` fell through every pattern it knows and reported this as
+ * `UNKNOWN` -- which replaces that sentence with "Something went wrong on our side" and
+ * files it on the diagnostics page under the one heading that says nothing.
+ *
+ * Four of those are on `dartmode-labs`, recorded on 2026-09-22 before #646 stopped this
+ * escaping the preview. #646 fixed where it was thrown; this fixes what it is worth when
+ * it is caught, so the next call site that forgets the try/catch degrades into a message
+ * a merchant can act on rather than into a shrug.
+ *
+ * `message` stays what it always was -- `AppError` sets `Error.message` from
+ * `userMessage` -- so the call sites that push `error.message` into a refusal list are
+ * unaffected.
+ */
+export class UnconvertedMarketError extends AppError {
   constructor(readonly priceListGid: string, readonly currency: string, message: string) {
-    super(message);
+    super({
+      code: "MARKET_MISCONFIGURED",
+      userMessage: message,
+      // The list and the currency it should have answered in. No price values: the
+      // telemetry rule in CLAUDE.md applies to error context too.
+      context: { priceListGid, currency },
+    });
     this.name = "UnconvertedMarketError";
   }
 }

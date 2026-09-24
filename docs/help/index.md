@@ -35,6 +35,7 @@ instead, find the symptom.
 - [Understanding a partial run](./failures/partial-runs.md)
 - [A run that seems stuck](./failures/stuck-runs.md)
 - [A guardrail stopped the run](./failures/guardrail-blocks.md)
+- [A market answered in the wrong currency](./failures/market-currency.md)
 - [When Shopify is unreachable](./failures/shopify-unreachable.md)
 - [This store is no longer connected](./failures/store-disconnected.md)
 - [Your session expired](./failures/session-expired.md)
