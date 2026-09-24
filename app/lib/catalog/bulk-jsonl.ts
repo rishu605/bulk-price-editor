@@ -30,6 +30,7 @@ export interface ProductLine {
   status?: string | null;
   tags?: string[] | null;
   updatedAt?: string | null;
+  isGiftCard?: boolean | null;
   __parentId?: undefined;
 }
 
@@ -66,6 +67,7 @@ export interface CatalogRow {
   collections: string[];
   remoteUpdatedAt: Date | null;
   imageUrl: string | null;
+  isGiftCard: boolean;
 }
 
 export interface ParseStats {
@@ -86,6 +88,7 @@ interface ProductState {
   tags: string[];
   collections: string[];
   updatedAt: Date | null;
+  isGiftCard: boolean;
 }
 
 /** True for a line that is a variant rather than a collection or other child. */
@@ -145,6 +148,10 @@ export async function* parseCatalogJsonl(
         tags: product.tags ?? [],
         collections: [],
         updatedAt: product.updatedAt ? new Date(product.updatedAt) : null,
+        // `=== true` rather than a truthy check: a line from a Shopify version that does
+        // not return the field must read as "not a gift card", never as undefined
+        // reaching a NOT NULL column.
+        isGiftCard: product.isGiftCard === true,
       });
       stats.products++;
 
@@ -227,6 +234,7 @@ function toRow(child: ChildLine, product: ProductState, currency: string): Catal
     tags: product.tags,
     collections: [...product.collections],
     remoteUpdatedAt: product.updatedAt,
+    isGiftCard: product.isGiftCard,
   };
 }
 
@@ -250,6 +258,7 @@ export const CATALOG_BULK_QUERY = `
           status
           tags
           updatedAt
+          isGiftCard
           featuredImage { url }
           collections {
             edges { node { id } }

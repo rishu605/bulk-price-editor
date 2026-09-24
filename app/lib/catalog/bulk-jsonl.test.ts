@@ -190,3 +190,51 @@ describe("parseCatalogJsonl", () => {
     expect(seen[1]).toBe(true);
   });
 });
+
+/**
+ * Gift cards.
+ *
+ * A gift card's price is its face value, so a percentage campaign sells store credit at
+ * a discount. The mirror can only exclude what it can see, and for a long time it could
+ * not see this at all: the query never asked, so every gift card read as an ordinary
+ * product and Home's one-click "put everything on sale" repriced them.
+ */
+describe("parseCatalogJsonl and gift cards", () => {
+  it("carries isGiftCard from the product line onto every one of its variants", async () => {
+    const rows = await collect(
+      lines(
+        product("1", { isGiftCard: true }),
+        variant("10", "1"),
+        variant("11", "1"),
+        product("2", { isGiftCard: false }),
+        variant("20", "2"),
+      ),
+    );
+
+    expect(rows.map((r) => [r.variantGid, r.isGiftCard])).toEqual([
+      ["gid://shopify/ProductVariant/10", true],
+      ["gid://shopify/ProductVariant/11", true],
+      ["gid://shopify/ProductVariant/20", false],
+    ]);
+  });
+
+  it("reads a missing isGiftCard as false rather than letting undefined reach the column", async () => {
+    // A Shopify version that stops returning the field, or a replayed older payload.
+    // The column is NOT NULL; undefined here is a write that throws mid-import.
+    const rows = await collect(lines(product("1"), variant("10", "1")));
+
+    expect(rows[0].isGiftCard).toBe(false);
+    expect(Object.hasOwn(rows[0], "isGiftCard")).toBe(true);
+  });
+
+  it("keeps the flag on a variant that arrived before its product", async () => {
+    // The held-back path builds its rows through a second call to toRow. It carried
+    // tags and collections correctly and could just as easily have dropped this.
+    const rows = await collect(
+      lines(variant("10", "1"), product("1", { isGiftCard: true })),
+    );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].isGiftCard).toBe(true);
+  });
+});

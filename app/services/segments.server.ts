@@ -124,9 +124,26 @@ function conditionToWhere(condition: Condition): Prisma.VariantIndexWhereInput |
  *
  * Tombstoned variants are always excluded: a deleted variant must never be enrolled
  * in a campaign, but its ledger rows still have to resolve on revert (edge case E4).
+ *
+ * Gift cards are excluded on the same terms, and for a blunter reason: a gift card's
+ * price *is* its face value, so a percentage campaign sells store credit at a discount.
+ * A 20% sale scoped to "all variants" -- Home's one-click default -- turns $100 of
+ * credit into $64, repeatably and without limit. There is no rule a merchant could
+ * write that makes that the intent, so this is a floor rather than a default they can
+ * switch off.
+ *
+ * Both live here rather than in the callers because this is the one place a campaign's
+ * scope becomes a query: `loadCandidates`, `previewMatches`, `draft-preview`, the plan
+ * meter in `run.server` and the approvals and calendar counts all compile through it.
+ * A caller that filtered for itself would be one more half of a contract to keep in
+ * step, which is how gift cards got priced in the first place.
  */
 export function astToWhere(shopId: string, ast: FilterAst): Prisma.VariantIndexWhereInput {
-  const base: Prisma.VariantIndexWhereInput = { shopId, deletedAt: null };
+  const base: Prisma.VariantIndexWhereInput = {
+    shopId,
+    deletedAt: null,
+    isGiftCard: false,
+  };
 
   const groups = (ast.groups ?? [])
     .map((group) => {

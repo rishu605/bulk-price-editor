@@ -66,6 +66,7 @@ const PRODUCTS_PAGE = `#graphql
         status
         tags
         updatedAt
+        isGiftCard
         featuredImage { url }
         collections(first: 20) { nodes { id } }
         variants(first: 100) {
@@ -95,6 +96,7 @@ interface ProductNode {
   status?: string | null;
   tags?: string[] | null;
   updatedAt?: string | null;
+  isGiftCard?: boolean | null;
   featuredImage?: { url?: string | null } | null;
   collections?: { nodes?: Array<{ id: string }> | null } | null;
   variants?: {
@@ -293,6 +295,7 @@ async function upsertVariant(
     productType: product.productType ?? null,
     tags: product.tags ?? [],
     collections,
+    isGiftCard: product.isGiftCard === true,
     remoteUpdatedAt: product.updatedAt ? new Date(product.updatedAt) : null,
     syncedAt: new Date(),
     deletedAt: null,
