@@ -134,6 +134,9 @@ export async function runCampaign(
   });
   const releaseTo = (options.claimedFrom ?? before?.status) as CampaignState | undefined;
 
+  // Set by `executeCampaignRun` as soon as the run row exists; read by the catch below.
+  const started: { runId?: string } = {};
+
   try {
     // Every line this run produces carries the shop and the campaign, and the run id
     // from the moment there is one. Bound here rather than in the worker because this is
@@ -144,9 +147,17 @@ export async function runCampaign(
     //
     // Merges with the job's context when there is one, so a queued run keeps its job id.
     return await withLogContext({ shopId, campaignId }, () =>
-      executeCampaignRun(shopId, campaignId, client, options),
+      executeCampaignRun(shopId, campaignId, client, options, started),
     );
   } catch (error) {
+    // The run row reaches a terminal state before anything else happens. Without this a
+    // throw between creating the row and the update at the end of `executeCampaignRun`
+    // left it EXECUTING for ever: `releaseClaim` below frees the *campaign*, so nothing
+    // looked stuck, and the run sat in the ledger claiming to be in progress with no
+    // process behind it. #649 found it on the bulk path, where a refused submission
+    // throws straight past the terminal update, but the gap was never specific to that
+    // path — every `await` after the row is created had it.
+    await failRun(started.runId, error);
     // Only release to a state that is not itself a claim. A campaign that was already
     // APPLYING when this was called -- a resume, a second worker -- has nowhere to be
     // put back to, and `releaseClaim` additionally refuses while any run is still live.
@@ -159,11 +170,56 @@ export async function runCampaign(
   }
 }
 
+/**
+ * Marks a run terminal after it threw, so the ledger never shows work that is not happening.
+ *
+ * Three things it deliberately does not do.
+ *
+ * It does not throw. This runs inside a catch whose job is to rethrow the *original*
+ * failure; a database hiccup here replacing a refused Shopify submission with a Prisma
+ * error would lose the only useful sentence the merchant was going to get.
+ *
+ * It does not touch a run that already reached a terminal state. The catch in
+ * `runCampaign` covers everything after the row is created, including the lines *after*
+ * the run is marked COMPLETED — `transitionCampaign`, the mirror refresh — and a throw
+ * there must not rewrite a finished run as FAILED. The `status` filter is what makes
+ * this safe to call unconditionally rather than only from the paths known to be early.
+ *
+ * It does not guess counts. A run that died mid-flight has whatever `variant_changes`
+ * recorded before it stopped, and that ledger is the truth; writing zeroes here would
+ * overwrite it with a tidier lie.
+ */
+async function failRun(runId: string | undefined, error: unknown): Promise<void> {
+  if (!runId) return;
+
+  try {
+    await prisma.campaignRun.updateMany({
+      where: { id: runId, status: { in: ["PLANNING", "QUEUED", "EXECUTING", "VERIFYING"] } },
+      data: { status: "FAILED", finishedAt: new Date() },
+    });
+  } catch (failure) {
+    // Imported here rather than at the top, matching the one other use in this file.
+    const { logger } = await import("../../lib/logging/logger");
+    logger.error("Could not mark run failed", {
+      runId,
+      cause: failure instanceof Error ? failure.message : String(failure),
+      original: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 async function executeCampaignRun(
   shopId: string,
   campaignId: string,
   client: AdminClient,
   options: RunOptions = {},
+  /**
+   * Filled in the moment the run row exists, so the caller's catch can finish it.
+   *
+   * An out-parameter rather than a return value because the thing that needs it is the
+   * failure path, which by definition never reaches a return. See `failRun`.
+   */
+  started: { runId?: string } = {},
 ): Promise<RunOutcome> {
   // Practice campaigns never write. Refused here, in the one function that writes
   // prices, rather than only in the UI that offers the button: the merchant was told
@@ -378,6 +434,7 @@ async function executeCampaignRun(
     // does. Everything after this point — planning results, execution, verification,
     // tags, markets — logs with the run it belongs to.
     addLogContext({ runId: run.id });
+    started.runId = run.id;
   } catch (error) {
     if (!isOccurrenceTaken(error)) throw error;
 

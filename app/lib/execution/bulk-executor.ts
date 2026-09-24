@@ -17,6 +17,7 @@
  * bar that never moves (edge case E13).
  */
 
+import { AppError } from "../errors/app-error";
 import type { PlannedRow } from "../planning/types";
 import { isThrottledError, withRetry } from "../shopify/budget";
 import type { AdminClient } from "./sync-executor";
@@ -78,9 +79,37 @@ export const CURRENT_BULK_OPERATION = `#graphql
   }
 `;
 
-export class BulkSubmissionError extends Error {
-  constructor(message: string) {
-    super(message);
+/**
+ * Shopify would not accept the submission, so nothing was written.
+ *
+ * An `AppError` rather than a bare `Error`, and that is the whole fix for #649. It used
+ * to extend `Error`, nothing caught it, and `classify()` has no branch matching any of
+ * the messages thrown below — it looks for the literal `usererrors`, which
+ * `bulkOperationRunMutation failed: …` does not contain. So every rejection on this path
+ * reached the merchant as `UNKNOWN`: *"Something went wrong on our side."* The truth was
+ * in hand and specific, and it was thrown away one layer later.
+ *
+ * It matters more here than anywhere else because `selectWritePath` sends a campaign
+ * down this path once it is large enough. This is the failure mode of exactly the
+ * merchants the app is pitched at, and of the runs too big to eyeball afterwards.
+ *
+ * Carrying its own `userMessage` rather than borrowing `SHOPIFY_REJECTED`'s is
+ * deliberate: the shared one says *"the ledger below shows exactly which variants were
+ * affected"*, and on a refused submission there is no ledger, because nothing was
+ * submitted. Each site below writes the object, the cause and the next action, per the
+ * error taxonomy in RFC §11.
+ */
+export class BulkSubmissionError extends AppError {
+  constructor(userMessage: string, detail: string) {
+    super({
+      code: "SHOPIFY_REJECTED",
+      userMessage,
+      // Not retryable by the worker. Shopify refused the request as posed; sending it
+      // again unchanged gets the same answer, and a merchant re-running deliberately is
+      // a different thing from a worker looping on it.
+      retryable: false,
+      context: { stage: "bulk-submission", detail: detail.slice(0, 500) },
+    });
     this.name = "BulkSubmissionError";
   }
 }
@@ -104,7 +133,16 @@ export async function submitBulkMutation(
 
   const body = [...serializeJsonl(buildMutationLines(rows, productOf))].join("");
   if (body.length === 0) {
-    throw new BulkSubmissionError("Nothing to submit: no writable rows.");
+    // Not a `BulkSubmissionError`, and not a sentence any merchant should ever read:
+    // Shopify has not refused anything here, because nothing has been sent. It is
+    // unreachable through the normal path — `selectWritePath(0)` returns `sync`, so a
+    // run with nothing to write never chooses bulk — which leaves `forcePath: "bulk"`,
+    // used by tests and diagnostics. That is a caller bug, and `UNKNOWN` ("something
+    // went wrong on our side") is the honest classification for one.
+    throw new Error(
+      "submitBulkMutation was called with no writable rows. selectWritePath sends an " +
+        "empty run down the sync path, so this means a caller forced the bulk path.",
+    );
   }
 
   const staged = await withRetry(
@@ -130,19 +168,35 @@ export async function submitBulkMutation(
 
   const stagedErrors = staged.data?.stagedUploadsCreate?.userErrors ?? [];
   if (stagedErrors.length > 0) {
+    const reason = stagedErrors.map((e) => e.message).join("; ");
     throw new BulkSubmissionError(
-      `stagedUploadsCreate failed: ${stagedErrors.map((e) => e.message).join("; ")}`,
+      `Shopify refused to start the bulk price update for this campaign: ${reason}. ` +
+        "No prices were changed. Run the campaign again once that is resolved.",
+      `stagedUploadsCreate failed: ${reason}`,
     );
   }
 
   const target = staged.data?.stagedUploadsCreate?.stagedTargets?.[0];
-  if (!target) throw new BulkSubmissionError("stagedUploadsCreate returned no target.");
+  if (!target) {
+    throw new BulkSubmissionError(
+      "Shopify accepted the request to start the bulk price update but returned nowhere " +
+        "to upload it to, so nothing was submitted. No prices were changed. Run the " +
+        "campaign again.",
+      "stagedUploadsCreate returned no target.",
+    );
+  }
 
   await upload(target, body);
 
   // The staged path is carried in the `key` parameter of the upload target.
   const key = target.parameters.find((p) => p.name === "key")?.value;
-  if (!key) throw new BulkSubmissionError("Staged target has no `key` parameter.");
+  if (!key) {
+    throw new BulkSubmissionError(
+      "Shopify's upload location for this bulk price update arrived incomplete, so " +
+        "nothing was submitted. No prices were changed. Run the campaign again.",
+      "Staged target has no `key` parameter.",
+    );
+  }
 
   const submitted = await withRetry(
     () =>
@@ -161,13 +215,23 @@ export async function submitBulkMutation(
 
   const submitErrors = submitted.data?.bulkOperationRunMutation?.userErrors ?? [];
   if (submitErrors.length > 0) {
+    const reason = submitErrors.map((e) => e.message).join("; ");
     throw new BulkSubmissionError(
-      `bulkOperationRunMutation failed: ${submitErrors.map((e) => e.message).join("; ")}`,
+      `Shopify rejected the bulk price update for this campaign: ${reason}. ` +
+        "No prices were changed. Run the campaign again once that is resolved.",
+      `bulkOperationRunMutation failed: ${reason}`,
     );
   }
 
   const operation = submitted.data?.bulkOperationRunMutation?.bulkOperation;
-  if (!operation) throw new BulkSubmissionError("Submission returned no bulkOperation.");
+  if (!operation) {
+    throw new BulkSubmissionError(
+      "Shopify accepted the bulk price update but did not report an operation to " +
+        "follow, so this run cannot be tracked. No prices were changed. Run the " +
+        "campaign again.",
+      "Submission returned no bulkOperation.",
+    );
+  }
 
   return operation;
 }
