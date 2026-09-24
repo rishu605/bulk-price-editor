@@ -19,7 +19,7 @@ import { describe, expect, it } from "vitest";
 
 import { sourceOf, withoutComments } from "../testing/source";
 
-import { LEGACY_ROUTES, routeFilesFor } from "./legacy-routes";
+import { LEGACY_ROUTES, routeFilesFor, withQuery } from "./legacy-routes";
 
 const ROUTES_DIR = join(process.cwd(), "app", "routes");
 const routeFiles = new Set(readdirSync(ROUTES_DIR).filter((f) => f.endsWith(".tsx")));
@@ -122,5 +122,50 @@ describe("nothing inside the app links through a redirect", () => {
 
   it("finds links at all, so the check cannot pass by matching nothing", () => {
     expect(internalLinks().length).toBeGreaterThan(20);
+  });
+});
+
+/**
+ * Carrying a query onto a destination that already has one.
+ *
+ * `/app/campaigns/calendar?view=week` produced
+ * `/app/campaigns?view=calendar&view=calendar&period=week`. Harmless in the sense that
+ * nothing read the second one, and not harmless at all in the sense that it is what the
+ * address bar showed and what every bookmark and shared link then carried.
+ */
+describe("withQuery", () => {
+  it("does not repeat a key the destination already defines", () => {
+    const carried = new URLSearchParams({ view: "calendar" });
+
+    expect(withQuery("/app/campaigns?view=calendar", carried)).toBe(
+      "/app/campaigns?view=calendar",
+    );
+  });
+
+  it("keeps the extra parameters the redirect exists to carry", () => {
+    // A link to a specific week still has to land on that week.
+    const carried = new URLSearchParams({ view: "calendar", period: "week" });
+
+    expect(withQuery("/app/campaigns?view=calendar", carried)).toBe(
+      "/app/campaigns?view=calendar&period=week",
+    );
+  });
+
+  it("lets the carried value win, so the redirect decides the view", () => {
+    const carried = new URLSearchParams({ view: "list" });
+
+    expect(withQuery("/app/campaigns?view=calendar", carried)).toBe(
+      "/app/campaigns?view=list",
+    );
+  });
+
+  it("returns a path, never an absolute URL", () => {
+    // The base used to parse a relative destination must not survive into a redirect --
+    // an open redirect to a host nobody owns would be a security bug, not a tidiness one.
+    const result = withQuery("/app/campaigns?view=calendar", new URLSearchParams());
+
+    expect(result.startsWith("/app/")).toBe(true);
+    expect(result).not.toContain("invalid");
+    expect(result).not.toContain("//");
   });
 });
