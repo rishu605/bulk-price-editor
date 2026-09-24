@@ -53,6 +53,25 @@ export const FIELD = {
  */
 const GRID_GAP = 16;
 
+/**
+ * The container width at or below which this grid is a single column.
+ *
+ * Named because **two** things depend on it and they must agree: the grid's own
+ * `gridTemplateColumns` below, and `FullRow`'s span at the foot of this file. A
+ * `FullRow` that spans two columns while the grid has one does not get a wide row --
+ * it manufactures an implicit second column, and implicit tracks are `auto`, so the
+ * whole grid re-sizes itself to its content and comes out lopsided.
+ *
+ * Measured against the real components, at the campaign editor's own page width:
+ *
+ *     with `span 2`   grid-template-columns: 409.742px 131.258px
+ *     with this       grid-template-columns: 557px
+ *
+ * That is the bug, and the two numbers are why it has to be one constant rather than
+ * `700px` written twice.
+ */
+const ONE_COLUMN_AT_OR_BELOW = "700px";
+
 const px = (value: string) => Number.parseInt(value, 10);
 
 export const MEASURE = `${px(FIELD.medium) * 2 + GRID_GAP}px` as const;
@@ -147,7 +166,7 @@ export function FieldGrid({ children }: { children: ReactNode }) {
         // matches" from "otherwise", so `repeat(2, 1fr)` is unparseable and falls back to
         // `none` — which stacks everything full width again, i.e. looks exactly like the
         // bug this component exists to fix.
-        gridTemplateColumns="@container (inline-size <= 700px) 1fr, 1fr 1fr"
+        gridTemplateColumns={`@container (inline-size <= ${ONE_COLUMN_AT_OR_BELOW}) 1fr, 1fr 1fr`}
       >
         {children}
       </s-grid>
@@ -161,7 +180,58 @@ export function FieldGrid({ children }: { children: ReactNode }) {
  * Checkboxes and anything with a sentence attached: a checkbox is a tick and a label,
  * not a field, so a column sized for a select leaves it stranded in white space with its
  * text wrapping under the box.
+ *
+ * ## Why the span is responsive, and not simply `span 2`
+ *
+ * It was `span 2`, and that is only true above the breakpoint. Below it the grid is one
+ * column, and CSS does not clamp a span to the tracks that exist -- it **creates** the
+ * missing one. An implicit track is `auto`, so the grid stops being two equal fractions
+ * and becomes two content-sized columns instead. Measured on the campaign editor at its
+ * real page width, with the container at 557px:
+ *
+ *     span 2      grid-template-columns: 409.742px 131.258px
+ *     responsive  grid-template-columns: 557px
+ *
+ * On the page that is the rule select squeezed to about 86px, clipped to "Perc...", with
+ * "How should prices change?" wrapping over three lines above it -- the one control that
+ * decides whether a campaign is a percentage, a fixed amount or an exact price, showing
+ * none of its value.
+ *
+ * `#638` did not cause this and did not miss it: before `QueryContainer`, the query
+ * matched nothing and the grid took its two-column branch at every width, where `span 2`
+ * is correct. Making the query work made the one-column branch reachable for the first
+ * time, and this was waiting in it. It is also the shape `#560` was reverted for --
+ * "two columns of about 10px and 445px" is the same lopsided pair, measured before
+ * anybody knew where it came from.
+ *
+ * Above the breakpoint the two forms are byte-identical in the computed style, at 742px
+ * and at 756px containers. The responsive one only differs where the old one was wrong.
  */
+/**
+ * Cast past the React prop types, which declare `gridColumn` as `"auto" | \`span ${number}\``
+ * and so refuse a responsive value.
+ *
+ * This is the same gap as `s-page`'s `subheading`: the pinned React wrapper picks a
+ * narrower type than the element accepts. `Type.tsx` carried a cast of exactly this shape
+ * for `type="small"` and it was **removed**, because the deployed page rendered
+ * byte-for-byte identically -- the runtime did not implement the attribute either, so the
+ * cast asserted something untrue.
+ *
+ * The difference here is that it was measured before it was written, against the real
+ * components in a browser:
+ *
+ *     container 557px   span 2 -> 409.742px 131.258px    responsive -> 557px
+ *     container 742px   span 2 -> 363px 363px            responsive -> 363px 363px
+ *     container 756px   span 2 -> 370px 370px            responsive -> 370px 370px
+ *
+ * The runtime parses it, applies the conditional branch, and agrees with the old value
+ * everywhere the old value was right. If a future Polaris stops honouring it, the symptom
+ * is the lopsided pair in the first row returning -- so check the campaign editor, not
+ * this file.
+ */
+const FULL_ROW_SPAN =
+  `@container (inline-size <= ${ONE_COLUMN_AT_OR_BELOW}) span 1, span 2` as `span ${number}`;
+
 export function FullRow({ children }: { children: ReactNode }) {
-  return <s-grid-item gridColumn="span 2">{children}</s-grid-item>;
+  return <s-grid-item gridColumn={FULL_ROW_SPAN}>{children}</s-grid-item>;
 }
