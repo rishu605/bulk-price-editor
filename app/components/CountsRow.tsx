@@ -66,9 +66,26 @@ import { SPACE } from "../lib/ui/spacing";
  */
 export interface CountItem {
   label: string;
-  value: number;
+  /**
+   * The figure, or an already-formatted string for a fact that is not a count.
+   *
+   * A number is formatted here so every caller gets the same thousands separator. A
+   * string is passed through, which is what lets a date share the row: "Oldest baseline
+   * captured" is a labelled fact in exactly the shape a tile already draws — a caption
+   * above a value — and it was rendering below the row instead, in its own layout, for
+   * no reason other than that this type could not hold it.
+   *
+   * That mattered because of the column count, not the typography. Three tiles in the
+   * two-column branch leave the third alone beside an empty cell; a fourth fills it.
+   */
+  value: number | string;
   /** Where this figure leads, when it leads anywhere. */
   href?: string;
+}
+
+/** A tile's value as it is read aloud and drawn. Numbers get separators; strings do not. */
+function display(value: number | string): string {
+  return typeof value === "number" ? formatCount(value) : value;
 }
 
 export function CountsRow({ items }: { items: CountItem[] }) {
@@ -103,11 +120,13 @@ export function CountsRow({ items }: { items: CountItem[] }) {
         // useful if the next click is the three. There is no three to be when the count
         // is nought, and the click landed on "No campaigns match those filters", which
         // is a dead end wearing the clothes of an answer.
-        item.href && item.value > 0 ? (
+        // A string value is never a queue, so it never links: the premise below is a
+        // count with rows behind it, and "27/08/2026" has none.
+        item.href && typeof item.value === "number" && item.value > 0 ? (
           <s-clickable
             key={item.label}
             href={item.href}
-            accessibilityLabel={`${item.label}: ${formatCount(item.value)}`}
+            accessibilityLabel={`${item.label}: ${display(item.value)}`}
           >
             <Tile item={item} />
           </s-clickable>
@@ -129,7 +148,7 @@ function Tile({ item }: { item: CountItem }) {
   return (
     <s-stack gap={SPACE.tight}>
       <s-text color="subdued">{item.label}</s-text>
-      <s-heading>{formatCount(item.value)}</s-heading>
+      <s-heading>{display(item.value)}</s-heading>
     </s-stack>
   );
 }

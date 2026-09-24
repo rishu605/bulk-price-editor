@@ -98,7 +98,7 @@ export function Secondary({ children }: { children: ReactNode }) {
 }
 
 /**
- * The label half of a labelled fact — "Last synced", "Plan", "Oldest baseline captured".
+ * The label half of a labelled fact — "Last synced", "Last run", "Applies to".
  *
  * Inline rather than a paragraph, because it sits directly above the value it names and a
  * paragraph's own leading would push the two apart. Subdued for the same reason
