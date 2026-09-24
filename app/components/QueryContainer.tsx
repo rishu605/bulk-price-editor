@@ -21,6 +21,20 @@ import type { ReactNode } from "react";
  * the campaign editor's field grid came out as two columns of about 10px and 445px, with
  * "How should prices change?" wrapping to one character per line.
  *
+ * **That symptom was not this component, and saying so here sent #638 looking in the
+ * wrong place.** A lopsided pair of columns in the field grid is `FullRow` asking for
+ * `grid-column: span 2` in a grid that the query has just correctly collapsed to one
+ * column -- CSS creates the missing track rather than clamping the span, and an implicit
+ * track is `auto`, so the whole grid re-sizes to its content. Measured in #681 at the
+ * editor's real width, container 557px: `409.742px 131.258px` with the bare span against
+ * `557px` with a responsive one. Wrapping the grids was right; it just made the
+ * one-column branch reachable for the first time, and `FullRow` was broken in it.
+ *
+ * So the two failures this file has been blamed for are different: a *collapsed* wrapper
+ * is narrow overall (58px inside an inline stack, at every viewport), while a *lopsided
+ * pair* inside a correctly-sized wrapper is the span. Check which one you have before
+ * moving anything -- `FieldGrid.tsx` carries the measurements for the second.
+ *
  * The cause is in `polaris.js`, and it is one line:
  *
  *     s-query-container :host { display: grid; container-type: inline-size }
