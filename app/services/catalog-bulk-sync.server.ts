@@ -275,6 +275,7 @@ async function writeBatch(shopId: string, currency: string, rows: CatalogRow[]):
           collections: row.collections,
           imageUrl: row.imageUrl,
           remoteUpdatedAt: row.remoteUpdatedAt,
+          isGiftCard: row.isGiftCard,
         },
         update: {
           productGid: row.productGid,
@@ -293,6 +294,7 @@ async function writeBatch(shopId: string, currency: string, rows: CatalogRow[]):
           collections: row.collections,
           imageUrl: row.imageUrl,
           remoteUpdatedAt: row.remoteUpdatedAt,
+          isGiftCard: row.isGiftCard,
           // A variant reappearing after deletion clears its tombstone.
           deletedAt: null,
           syncedAt: new Date(),

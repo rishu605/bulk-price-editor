@@ -1,0 +1,22 @@
+-- Mirror Shopify's `Product.isGiftCard`, so campaigns can stop repricing gift cards.
+--
+-- A gift card's price is its face value. A percentage campaign scoped to "all variants"
+-- -- which is what Home's one-click "Put everything on sale" creates -- therefore sells
+-- store credit at a discount: $100 of credit for $64 under a 20% sale, repeatably and
+-- without limit. The catalogue mirror had no way to tell a gift card from a product,
+-- because `CATALOG_BULK_QUERY` never asked, so no scope rule could exclude one.
+--
+-- NOT NULL DEFAULT false rather than nullable-for-unknown. A nullable column would make
+-- "unknown" the value every existing row carries, and the only safe reading of unknown
+-- is "might be a gift card" -- which would empty every campaign's scope on this store
+-- until a full catalogue sync finished. False is both the honest default (it is the
+-- answer for all but a handful of variants on any shop) and the non-breaking one.
+--
+-- Existing gift cards read false until they are corrected. `scripts/backfill-gift-cards.ts`
+-- does that with a targeted `products(query: "gift_card:true")` -- a few rows per shop,
+-- not a re-read of the catalogue. Run it once per installed shop after this deploys.
+--
+-- Expand only: the previous release neither writes nor reads this column, and a column
+-- with a default adds no rows and rewrites none on Postgres 11+.
+ALTER TABLE "variant_index"
+  ADD COLUMN "isGiftCard" BOOLEAN NOT NULL DEFAULT false;

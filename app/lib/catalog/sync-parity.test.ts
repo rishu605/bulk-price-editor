@@ -67,6 +67,7 @@ const CATALOGUE_COLUMNS = [
   "collections",
   "imageUrl",
   "remoteUpdatedAt",
+  "isGiftCard",
 ];
 
 /**
@@ -105,6 +106,19 @@ describe("the bulk path writes everything the paginated path does", () => {
       `the bulk path does not write ${column} when it re-syncs a variant — so it is ` +
         `right once and wrong from the second sync onwards, which looks like it worked`,
     ).toBe(true);
+  });
+
+  it("asks Shopify for isGiftCard on both paths, not just one", () => {
+    // The column that stops gift cards being repriced is worth nothing if the query
+    // never asks for it -- which is precisely how they came to be repriced. The writer
+    // would happily persist `false` forever and every parity check above would pass.
+    expect(paginated, "the paginated query does not select isGiftCard").toContain(
+      "isGiftCard",
+    );
+    expect(
+      sourceOf(process.cwd(), "app", "lib", "catalog", "bulk-jsonl.ts"),
+      "CATALOG_BULK_QUERY does not select isGiftCard",
+    ).toContain("isGiftCard");
   });
 
   it("fetches the image on both paths, not just one", () => {

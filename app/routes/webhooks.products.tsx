@@ -124,6 +124,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       deletedAt: null,
     };
 
+    // `isGiftCard` is deliberately absent from `data`, so this upsert never writes it.
+    //
+    // The product webhook payload carries no gift-card field -- only the GraphQL
+    // `Product.isGiftCard` does -- so there is nothing here to write that would not be
+    // a guess, and guessing false on a gift card is the bug this column exists to stop.
+    // Omitting it means an update preserves whatever the last catalogue sync established,
+    // which is correct: gift-card-ness is fixed for the life of a product.
+    //
+    // A product Anchor has never seen before is created with the schema default, false.
+    // That window closes at the next catalogue sync, or immediately via
+    // `scripts/backfill-gift-cards.ts`. Do not "fix" this by inferring from
+    // `product_type` or `requires_shipping` -- both are merchant-editable and neither
+    // identifies a gift card.
+
     // Before overwriting the mirror, ask whether this change was ours. A price that
     // moved under an active campaign and is not our echo is a merchant edit, and
     // silently adopting it would hide exactly what they need to know about.

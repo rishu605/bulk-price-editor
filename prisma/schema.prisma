@@ -150,6 +150,19 @@ model VariantIndex {
   tags         String[]      @default([])
   collections  String[]      @default([])
 
+  /// Shopify's `Product.isGiftCard`, mirrored so campaigns can exclude gift cards.
+  ///
+  /// A gift card's price *is* its face value, so a percentage campaign sells store
+  /// credit at a discount -- $100 of credit for $64 under a 20% sale, repeatably and
+  /// without limit. `astToWhere` therefore drops these from every campaign scope.
+  ///
+  /// Defaults to false because that is what every row predating this column reads as,
+  /// and false is the answer for all but a handful of variants on any shop. Rows
+  /// written before the next catalogue sync are corrected by
+  /// `scripts/backfill-gift-cards.ts`, which asks Shopify for `gift_card:true`
+  /// directly rather than re-reading the whole catalogue.
+  isGiftCard Boolean @default(false)
+
   /// Shopify's updated_at. Compared against incoming webhooks so out-of-order
   /// deliveries are ignored rather than applied (P1.3).
   remoteUpdatedAt DateTime?
