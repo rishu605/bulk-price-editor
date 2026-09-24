@@ -19,6 +19,7 @@ export type ErrorCode =
   | "SHOPIFY_UNAVAILABLE"
   | "SHOPIFY_REJECTED"
   | "GUARDRAIL_BLOCKED"
+  | "MARKET_MISCONFIGURED"
   | "NOT_FOUND"
   | "VALIDATION"
   | "DB_UNAVAILABLE"
@@ -48,6 +49,7 @@ const STATUS: Record<ErrorCode, number> = {
   SHOPIFY_UNAVAILABLE: 502,
   SHOPIFY_REJECTED: 422,
   GUARDRAIL_BLOCKED: 422,
+  MARKET_MISCONFIGURED: 422,
   NOT_FOUND: 404,
   VALIDATION: 400,
   DB_UNAVAILABLE: 503,
@@ -109,6 +111,12 @@ const USER_MESSAGE: Record<ErrorCode, string> = {
     "Shopify rejected part of this change. The ledger below shows exactly which variants were affected and why.",
   GUARDRAIL_BLOCKED:
     "A guardrail stopped this run before anything was written. Lower the floor in Settings, or exclude the variant, then try again.",
+  // Every throw of this carries its own message naming the market, the currency it
+  // answered in and where to change it -- see `unconvertedMessage`. This generic form is
+  // the fallback the `Record` demands, and reaching it means something threw the code
+  // without that sentence, which is itself worth noticing.
+  MARKET_MISCONFIGURED:
+    "A market is returning its prices in the wrong currency, so this campaign will not price that market. Check the market's currency in Shopify under Settings → Markets. Every other surface was priced.",
   NOT_FOUND: "That campaign or record no longer exists. It may have been deleted.",
   VALIDATION: "Some of the values on this form need fixing before it can be saved.",
   DB_UNAVAILABLE:
