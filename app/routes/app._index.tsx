@@ -398,7 +398,7 @@ export default function Dashboard() {
       tone: "warning",
       body: (
         <>
-          <s-paragraph>
+              <s-paragraph>
             {formatCount(needsAttention)} campaign{needsAttention === 1 ? "" : "s"} stopped part
             way. Every row that did not complete has a reason recorded, and resuming retries only
             those.
@@ -418,7 +418,7 @@ export default function Dashboard() {
       tone: "info",
       body: (
         <>
-          <s-paragraph>
+              <s-paragraph>
             {formatCount(driftOpen)} price{driftOpen === 1 ? " was" : "s were"} changed somewhere
             else while a campaign was running. Those edits were deliberate, so nothing has been
             overwritten — each is waiting on your decision.
@@ -438,7 +438,7 @@ export default function Dashboard() {
       tone: "warning",
       body: (
         <>
-          <s-paragraph>{notice.detail}</s-paragraph>
+              <s-paragraph>{notice.detail}</s-paragraph>
           <ActionRow>
             {notice.kind === "added" ? (
               <fetcher.Form method="post">
@@ -481,7 +481,7 @@ export default function Dashboard() {
       tone: "warning",
       body: (
         <>
-          <s-paragraph>
+              <s-paragraph>
             {formatCount(health.missing)} variants cannot be included in a campaign until they have
             one. Re-syncing captures them.
           </s-paragraph>
@@ -505,7 +505,31 @@ export default function Dashboard() {
   }
 
   return (
-    <PageShell heading="Home">
+    <PageShell
+      heading="Home"
+      /* In the title bar, because they are properties of the page and not of the
+         campaigns on it. All four used to sit in a row inside "What is live right now",
+         which meant they rendered only when something was live: a shop with no campaigns
+         could not reach the drift queue or the activity log from its own home page at
+         all. Navigation nested inside a status card disappears exactly when the status
+         it is nested in does.
+
+         "Campaigns" is not among them any more. It is a nav-menu item, and a second
+         control to the same place is the duplicate #655 removed one of. */
+      primaryAction={
+        /* Black only once the checklist has retired and quick create is not on the page.
+           That is `createIsPrimary`, unchanged — while either of those is up, its own
+           button is what the page is pointing at, and two black buttons point at
+           nothing. */
+        sections.createIsPrimary
+          ? { label: "Create campaign", href: "/app/campaigns/new" }
+          : undefined
+      }
+      secondaryActions={[
+        { label: "Price drift", href: "/app/prices/drift" },
+        { label: "Activity log", href: "/app/activity" },
+      ]}
+    >
       {/* Through `resultBanner`, which is the one place that knows a path returning no
           detail returns no detail. Mapping `result.errors` straight took the page down
           on two of the four things a merchant can do from here. */}
@@ -601,79 +625,122 @@ export default function Dashboard() {
           nothing had happened — the largest block on the page, spent saying "nothing".
           The checklist above is already answering "what now", and answering it with an
           action rather than with four zeroes. */}
-      {sections.live ? (
-        <Card heading="What is live right now">      {/* Each figure is a question, so each tile is the answer's front door. The
-              status values are the campaigns index's own filter vocabulary — `attention`
-              spans PARTIAL and HELD there, which is exactly what "Need attention"
-              counts — so the number a merchant clicks and the list they land on are the
-              same query rather than two that happen to agree today. */}
-          <CountsRow
-            items={[
-              { label: "Campaigns running", value: live, href: "/app/campaigns?status=ACTIVE" },
-              { label: "Scheduled", value: upcoming, href: "/app/campaigns?status=SCHEDULED" },
-              {
-                label: "Need attention",
-                value: needsAttention,
-                href: "/app/campaigns?status=attention",
-              },
-              /* "Edits to review", not "Changed elsewhere".
-              
-                 Beside the Catalogue card's "Not at baseline", the old label was the
-                 second of two similar-sounding numbers with nothing saying they measure
-                 different things — and on a live shop they disagreed: 0 here, 1 there.
-                 They are not the same axis. This counts *decisions waiting on you*, one
-                 per edit somebody made outside the app while a campaign was running;
-                 that one counts variants whose storefront price has moved away from
-                 their baseline, whether or not anybody has to do anything about it.
-              
-                 Naming this one as a queue is what separates them, and it is the word
-                 the destination already uses — the drift page asks for a decision per
-                 row. Still three words at most, for the reason the old label was two:
-                 anything longer wrapped to three lines and made this tile taller than
-                 the three beside it. */
-              { label: "Edits to review", value: driftOpen, href: "/app/prices/drift" },
-            ]}
-          />
+      {/* One card for one question, in three states that cannot occur together.
 
-          {/* A rule, not a border. The card has three parts — the figures, the last run,
-              and where to go next — and they were separated by nothing but the stack's
-              own gap, which is the same distance that separates a label from its figure.
+          It was three cards, and two of them carried the same heading: `live` and
+          `emptyState` were both "What is live right now", with "Not running yet" and the
+          quick-create card in between them in the source. Three headings for one
+          question, one of them printed twice, and which you got depended on a condition
+          nothing on screen explained.
 
-              The rule above the run matters most: without it, "Last run" sits directly
-              under "Need attention" in the same column, in the same subdued caption
-              style as the four labels above it, and reads as a fifth figure whose number
-              has gone missing. */}
-          {lastRun ? (
+          `homeSections` already guarantees they are mutually exclusive — `drafts` is
+          `!live && drafts > 0`, `emptyState` is `!live && !drafts` — so this renders at
+          most one body and the card is the question the page opens with either way. */}
+      {sections.live || sections.drafts || sections.emptyState ? (
+        <Card heading="What is live right now">
+          {sections.live ? (
             <>
-              <s-divider />
-              <s-stack gap={SPACE.tight}>
-                <Caption>Last run</Caption>
-                <LastRunSummary run={lastRun} now={now} timeZone={timeZone} />
-              </s-stack>
+              {/* Each figure is a question, so each tile is the answer's front door. The
+                  status values are the campaigns index's own filter vocabulary — `attention`
+                  spans PARTIAL and HELD there, which is exactly what "Need attention"
+                  counts — so the number a merchant clicks and the list they land on are the
+                  same query rather than two that happen to agree today. */}
+              <CountsRow
+                items={[
+                  { label: "Campaigns running", value: live, href: "/app/campaigns?status=ACTIVE" },
+                  { label: "Scheduled", value: upcoming, href: "/app/campaigns?status=SCHEDULED" },
+                  {
+                    label: "Need attention",
+                    value: needsAttention,
+                    href: "/app/campaigns?status=attention",
+                  },
+                  /* "Edits to review", not "Changed elsewhere".
+
+                     Beside the Catalogue card's "Not at baseline", the old label was the
+                     second of two similar-sounding numbers with nothing saying they measure
+                     different things — and on a live shop they disagreed: 0 here, 1 there.
+                     They are not the same axis. This counts *decisions waiting on you*, one
+                     per edit somebody made outside the app while a campaign was running;
+                     that one counts variants whose storefront price has moved away from
+                     their baseline, whether or not anybody has to do anything about it.
+
+                     Naming this one as a queue is what separates them, and it is the word
+                     the destination already uses — the drift page asks for a decision per
+                     row. Still three words at most, for the reason the old label was two:
+                     anything longer wrapped to three lines and made this tile taller than
+                     the three beside it. */
+                  { label: "Edits to review", value: driftOpen, href: "/app/prices/drift" },
+                ]}
+              />
+
+              {/* A rule, not a border. The card has three parts — the figures, the last run,
+                  and where to go next — and they were separated by nothing but the stack's
+                  own gap, which is the same distance that separates a label from its figure.
+
+                  The rule above the run matters most: without it, "Last run" sits directly
+                  under "Need attention" in the same column, in the same subdued caption
+                  style as the four labels above it, and reads as a fifth figure whose number
+                  has gone missing. */}
+              {lastRun ? (
+                <>
+                  <s-divider />
+                  <s-stack gap={SPACE.tight}>
+                    <Caption>Last run</Caption>
+                    <LastRunSummary run={lastRun} now={now} timeZone={timeZone} />
+                  </s-stack>
+              </>
+            ) : null}
             </>
           ) : null}
 
-          <s-divider />
+          {/* Nothing live, but something half-made. A draft is not a small amount of
+              live; it is the thing left undone, and it answers "what is live right now"
+              with the only honest answer plus the reason. */}
+          {sections.drafts ? (
+            <>
+              <s-paragraph>
+                <s-text>
+                  {formatCount(drafts)} draft campaign{drafts === 1 ? "" : "s"}, waiting to be
+                  applied. Nothing has been written to your storefront, and nothing will be
+                  until you apply {drafts === 1 ? "it" : "one"}.
+                </s-text>
+              </s-paragraph>
+              <ActionRow>
+                <s-button variant="secondary" href="/app/campaigns?status=DRAFT">
+                  {drafts === 1 ? "Open the draft" : "Review drafts"}
+                </s-button>
+              </ActionRow>
+            </>
+          ) : null}
 
-          {/* The page's forward action, and the only one that survives the checklist
-              retiring itself. Black only once the checklist has gone: while it is still
-              up, its own next step is what the page is pointing at, and two black buttons
-              point at nothing. */}
-          <ActionRow>
-            <s-button
-              variant={sections.createIsPrimary ? "primary" : "secondary"}
-              href="/app/campaigns/new"
-            >
-              Create campaign
-            </s-button>
-            {/* Secondary, not tertiary. These are three destinations in a row of
-                actions — looked for, then clicked — and as tertiary they rendered as
-                three pieces of plain text beside a real button, which reads as a caption
-                under it rather than as three places to go. */}
-            <s-button variant="secondary" href="/app/campaigns">Campaigns</s-button>
-            <s-button variant="secondary" href="/app/prices/drift">Price drift</s-button>
-            <s-button variant="secondary" href="/app/activity">Activity log</s-button>
-          </ActionRow>
+          {/* Nothing live and nothing drafted: the teaching, for the one case the
+              checklist does not cover. */}
+          {sections.emptyState ? (
+            <>
+              <s-paragraph>
+                <s-text>
+                  Nothing is running. A <strong>campaign</strong> is a rule — “20% off
+                  everything tagged Summer” — plus when it should run. Anchor computes each
+                  price from that variant&rsquo;s baseline, so running it twice changes
+                  nothing the second time, and ending it puts prices back exactly.
+                </s-text>
+              </s-paragraph>
+              {/* Secondary, not black. This card and the quick-create card below it always
+                  render together — `emptyState` is a strict subset of `quickCreate` — so a
+                  black button here is the second one on the page, pointing at the long way
+                  round to what the card underneath does in one number.
+
+                  `home.test` already made the same call for the live section's Create
+                  campaign, in the same words: quick create *is* creating a campaign, for
+                  the case that covers most of them. This card is the teaching, not the
+                  action. */}
+              <ActionRow>
+                <s-button variant="secondary" href="/app/campaigns/new">
+                  Create a campaign
+                </s-button>
+              </ActionRow>
+            </>
+          ) : null}
         </Card>
       ) : null}
 
@@ -689,21 +756,6 @@ export default function Dashboard() {
           the thing left half-done, and on a page that would otherwise say nothing it is
           the answer to "what now". Secondary, because quick create below is the black
           button whenever both are up. */}
-      {sections.drafts ? (
-        <Card heading="Not running yet">      <s-paragraph>
-            <s-text>
-              {formatCount(drafts)} draft campaign{drafts === 1 ? "" : "s"}, waiting to be
-              applied. Nothing has been written to your storefront, and nothing will be
-              until you apply {drafts === 1 ? "it" : "one"}.
-            </s-text>
-          </s-paragraph>
-          <ActionRow>
-            <s-button variant="secondary" href="/app/campaigns?status=DRAFT">
-              {drafts === 1 ? "Open the draft" : "Review drafts"}
-            </s-button>
-          </ActionRow>
-        </Card>
-      ) : null}
 
       {/* The commonest job in the category, as one number.
       
@@ -750,31 +802,6 @@ export default function Dashboard() {
 
       {/* The one case the checklist does not cover: everything on it is done, and the
           campaigns it was done with have since been deleted. */}
-      {sections.emptyState ? (
-        <Card heading="What is live right now">      <s-paragraph>
-            <s-text>
-              Nothing is running. A <strong>campaign</strong> is a rule — “20% off
-              everything tagged Summer” — plus when it should run. Anchor computes each
-              price from that variant&rsquo;s baseline, so running it twice changes
-              nothing the second time, and ending it puts prices back exactly.
-            </s-text>
-          </s-paragraph>
-          {/* Secondary, not black. This card and the quick-create card below it always
-              render together — `emptyState` is a strict subset of `quickCreate` — so a
-              black button here is the second one on the page, pointing at the long way
-              round to what the card underneath does in one number.
-
-              `home.test` already made the same call for the live section's Create
-              campaign, in the same words: quick create *is* creating a campaign, for
-              the case that covers most of them. This card is the teaching, not the
-              action. */}
-          <ActionRow>
-            <s-button variant="secondary" href="/app/campaigns/new">
-              Create a campaign
-            </s-button>
-          </ActionRow>
-        </Card>
-      ) : null}
 
       {sections.catalogue ? (
         <Card heading="Catalogue">      {/* The shared component, not a second copy of its markup. This page had
