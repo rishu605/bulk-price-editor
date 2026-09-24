@@ -53,6 +53,8 @@ const READS_SOMETHING_ELSE: Record<string, string> = {
   "app/lib/ui/settings-form.test.ts": "the settings schema, which is JSON",
   "app/lib/catalog/sync-parity.test.ts": "the GraphQL documents",
   "app/lib/shopify/scope-probe.test.ts": "shopify.app.toml",
+  "app/lib/shopify/pinned-schema.test.ts":
+    ".gitignore, and the pinned Admin schema, which is 7MB of introspected JSON",
   "app/components/campaign/sections.test.ts": "measures the route as written, comments included",
   "app/worker/queue-runtime.test.ts": "the Dockerfile and the process manifest",
 };
