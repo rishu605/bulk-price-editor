@@ -95,3 +95,27 @@ export function routeFilesFor(url: string): [string, string] {
   const dotted = url.split("?")[0].replace(/^\//, "").split("/").join(".");
   return [`${dotted}.tsx`, `${dotted}._index.tsx`];
 }
+
+/**
+ * A legacy destination with a query carried onto it.
+ *
+ * Only one redirect in the map needs this -- `/app/campaigns/calendar`, which keeps the
+ * week a link pointed at -- and its destination already carries `?view=calendar`. The
+ * obvious `${destination}&${params}` therefore produced
+ * `/app/campaigns?view=calendar&view=calendar`, because `params` sets `view` too.
+ *
+ * Nothing broke, which is why it survived: `URLSearchParams.get` returns the first of a
+ * repeated key, so the page read `calendar` and rendered correctly. The duplicate simply
+ * rode along into the address bar, and from there into every bookmark, shared link and
+ * support screenshot.
+ *
+ * Merging by `set` rather than concatenating is what makes that impossible: a key the
+ * destination already defines is replaced, not repeated, whichever side supplies it.
+ */
+export function withQuery(destination: string, params: URLSearchParams): string {
+  // A base is required to parse a relative URL, and is discarded below. It is
+  // deliberately not a real host: nothing here should ever be resolved against one.
+  const url = new URL(destination, "https://legacy-routes.invalid");
+  for (const [key, value] of params) url.searchParams.set(key, value);
+  return `${url.pathname}${url.search}`;
+}

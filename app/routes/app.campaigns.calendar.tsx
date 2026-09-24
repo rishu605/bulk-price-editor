@@ -1,7 +1,7 @@
 import { redirect, type LoaderFunctionArgs } from "react-router";
 
 import { authenticate } from "../shopify.server";
-import { LEGACY_ROUTES } from "../lib/routing/legacy-routes";
+import { LEGACY_ROUTES, withQuery } from "../lib/routing/legacy-routes";
 
 /**
  * `/app/campaigns/calendar` moved into `/app/campaigns?view=calendar`.
@@ -22,5 +22,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const period = from.get("view");
   if (period === "week" || period === "month") to.set("period", period);
 
-  return redirect(`${LEGACY_ROUTES["/app/campaigns/calendar"]}&${to}`);
+  // Merged rather than appended: the destination already carries `view=calendar`, so
+  // concatenating produced `?view=calendar&view=calendar` on every one of these links.
+  return redirect(withQuery(LEGACY_ROUTES["/app/campaigns/calendar"], to));
 };
