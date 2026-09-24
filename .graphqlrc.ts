@@ -19,15 +19,29 @@ import { API_VERSION_STRING } from "./app/lib/shopify/api-version";
  * constant the app speaks, so the schema these types are generated from is the schema
  * the requests actually hit.
  *
- * ## Running this and getting "no changes" while CI disagrees
+ * ## The schema is committed, and that is the point
  *
- * `app/types/admin-<version>.schema.json` is a 7MB download and is gitignored, so it is
- * cached on a developer machine and fetched fresh on every CI run. Codegen reuses the
- * cache without checking it, which means a schema that has moved upstream produces a
- * clean local run and a failing pipeline — with the error pointing at the generated
- * types, which look correct on the machine that generated them.
+ * `app/types/admin-<version>.schema.json` used to be gitignored: cached on a developer
+ * machine, downloaded fresh on every CI run. Codegen reuses the cache without checking
+ * it, so the two ran against different schemas. Shopify edits a doc comment — fulfillment
+ * wording, a moved validation URL, a deprecation notice on a mutation this app does not
+ * call — and the next PR goes red with a diff its author cannot reproduce and did not
+ * cause. #591 has the case that made it worth fixing: a red check was assumed to be the
+ * npm-audit flake, merged through, and `main` stayed red.
  *
- * Delete the schema file before regenerating to reproduce what CI does.
+ * So the schema is pinned the same way the API version is, and for the same reason. A
+ * schema is not a thing to re-download per run; it is the contract these types and every
+ * query are written against together, and the build should only change when somebody
+ * decides it does.
+ *
+ * `npm run graphql-codegen:refresh` is that decision: it deletes the cached schema, pulls
+ * the current one and regenerates. The diff it produces is Shopify's changes, reviewed as
+ * a change rather than discovered as a failure.
+ *
+ * What this does **not** weaken: a query that disagrees with the pinned schema still
+ * fails the build. Codegen validates every document and exits non-zero — *"Cannot query
+ * field X on type Y"* — writing no output. That check got stronger, not weaker, because
+ * it now runs against a schema that cannot shift underneath it.
  */
 function getConfig() {
   const config: IGraphQLConfig = {

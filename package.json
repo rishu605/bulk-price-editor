@@ -16,6 +16,7 @@
     "shopify": "shopify",
     "prisma": "prisma",
     "graphql-codegen": "graphql-codegen",
+    "graphql-codegen:refresh": "rm -f app/types/admin-*.schema.json && graphql-codegen",
     "vite": "vite",
     "typecheck": "rm -rf .react-router/types && react-router typegen && tsc --noEmit",
     "test": "vitest run",

@@ -56,8 +56,20 @@ jobs:
       # Regenerated and diffed rather than trusted. A hand-written response type agrees
       # with the schema exactly as far as whoever wrote it remembered — a field that
       # returns null, a connection that grew a level, a rename between API versions all
-      # typecheck perfectly and fail at runtime, in code that writes prices. This is
-      # also what catches a query that no longer compiles against the pinned version.
+      # typecheck perfectly and fail at runtime, in code that writes prices.
+      #
+      # Two failures, and they are worth telling apart when this goes red.
+      #
+      #   1. `graphql-codegen` exits non-zero — a document disagrees with the schema.
+      #      "Cannot query field X on type Y". Somebody changed a query, or bumped the
+      #      API version into a breaking change. This is the check that matters.
+      #   2. The diff is non-empty — a query changed and the regenerated types were not
+      #      committed with it.
+      #
+      # Neither can any longer be caused by Shopify. The schema is committed
+      # (`app/types/admin-<version>.schema.json`, #591), so this step downloads nothing
+      # and an upstream doc-comment edit cannot turn an unrelated PR red. Refreshing it
+      # is `npm run graphql-codegen:refresh`, deliberately, as its own reviewable diff.
       - name: GraphQL types match the pinned schema
         run: |
           npm run graphql-codegen
