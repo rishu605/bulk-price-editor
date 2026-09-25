@@ -55,6 +55,25 @@ npm run build
   error taxonomy in RFC §11.
 - **Telemetry never carries price values** — shop id, plan, counts and durations only.
 
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues on `rishu605/bulk-price-editor`, in the house style: a type label plus one
+`area:*` and one `prio:*`, a problem → cause → acceptance-criteria body, and
+issue → PR → merge. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+`needs-triage`, `question` (needs info), `ready-for-agent`, `ready-for-human`, `wontfix`.
+They sit beside the type / `area:*` / `prio:*` labels and never replace them. See
+`docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context. Decisions live only in `docs/decisions.md` (never `docs/adr/`); vocabulary
+in the RFC, PRD and help concepts. See `docs/agents/domain.md`.
+
 ## State
 
 Two development stores, documented in [`docs/environments.md`](docs/environments.md):
