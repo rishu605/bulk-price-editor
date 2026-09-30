@@ -68,6 +68,47 @@ export interface BulkSyncOptions {
   fetchResult?: (url: string) => AsyncIterable<string>;
 }
 
+/** How long this process polls a catalogue operation before giving up on it. */
+export const BULK_POLL_BUDGET_MS = 30 * 60_000;
+
+/**
+ * How long a record may say CREATED or RUNNING before it is treated as stranded (#733).
+ *
+ * The process that submits an operation polls it for `BULK_POLL_BUDGET_MS` and always
+ * records how it ended -- so a record still "running" well past that was left by a process
+ * that stopped mid-poll: a dyno restart, a request that outlived its host. Shopify's own
+ * ceiling is ten days, which is how long every market sync for the shop would otherwise
+ * refuse. If Shopify really is still building the file, it refuses the next submission
+ * itself, and that is reported like any other refusal.
+ */
+export const BULK_STRANDED_AFTER_MS = BULK_POLL_BUDGET_MS + 10 * 60_000;
+
+/**
+ * The bulk operation this shop has in flight, if any, after retiring stranded records.
+ *
+ * Shopify runs one bulk operation per shop at a time, so the catalogue sync and the
+ * market sync both ask this before starting. A record that is only stale, rather than
+ * running, is marked FAILED with `STRANDED` instead of blocking both for ten days.
+ */
+export async function bulkOperationInFlight(shopId: string): Promise<{ shopifyGid: string } | null> {
+  const stranded = await prisma.bulkOperationRecord.updateMany({
+    where: {
+      shopId,
+      status: { in: ["CREATED", "RUNNING"] },
+      submittedAt: { lt: new Date(Date.now() - BULK_STRANDED_AFTER_MS) },
+    },
+    data: { status: "FAILED", errorCode: "STRANDED", finishedAt: new Date() },
+  });
+  if (stranded.count > 0) {
+    logger.warn("retired stranded bulk operation records", { shopId, count: stranded.count });
+  }
+
+  return prisma.bulkOperationRecord.findFirst({
+    where: { shopId, status: { in: ["CREATED", "RUNNING"] } },
+    select: { shopifyGid: true },
+  });
+}
+
 export async function syncCatalogViaBulk(
   client: AdminClient,
   shopId: string,
@@ -89,10 +130,7 @@ export async function syncCatalogViaBulk(
   // Shopify runs one bulk operation per shop at a time. Claimed in our own table too,
   // so a second tab or a scheduler tick finds out here rather than from a Shopify
   // error that names neither operation.
-  const inFlight = await prisma.bulkOperationRecord.findFirst({
-    where: { shopId, kind: "QUERY", status: { in: ["CREATED", "RUNNING"] } },
-    select: { shopifyGid: true },
-  });
+  const inFlight = await bulkOperationInFlight(shopId);
   if (inFlight) {
     result.errors.push(
       "A catalogue import is already running for this shop. It will finish on its own; " +
@@ -132,7 +170,27 @@ export async function syncCatalogViaBulk(
     update: { status: "CREATED", submittedAt: new Date() },
   });
 
-  const finished = await pollUntilReady(client, options, sleep);
+  // A poll that throws -- a dropped connection, a Shopify 5xx -- must still close the
+  // record. Left CREATED, it made every later catalogue and market sync refuse as
+  // "already running", for good (#733). Reported rather than thrown, so the caller falls
+  // back to the paginated sync as it does for any other failed bulk import.
+  let finished: BulkState | null;
+  try {
+    finished = await pollUntilReady(client, options, sleep);
+  } catch (error) {
+    await prisma.bulkOperationRecord.update({
+      where: { shopifyGid: operation.id },
+      data: { status: "FAILED", errorCode: "POLL_FAILED", finishedAt: new Date() },
+    });
+    logger.warn("lost contact with a catalogue bulk operation while polling", {
+      shopId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    result.errors.push(
+      "Lost contact with Shopify while it was building the catalogue file, so nothing was imported from it. Try the sync again in a few minutes.",
+    );
+    return result;
+  }
 
   await prisma.bulkOperationRecord.update({
     where: { shopifyGid: operation.id },
@@ -187,7 +245,7 @@ async function pollUntilReady(
 ): Promise<BulkState | null> {
   // Half an hour by default. A hundred-thousand-variant catalogue takes Shopify a few
   // minutes; the generous ceiling is for the store that is an order larger than that.
-  const deadline = Date.now() + (options.timeoutMs ?? 30 * 60_000);
+  const deadline = Date.now() + (options.timeoutMs ?? BULK_POLL_BUDGET_MS);
   const interval = options.pollIntervalMs ?? 5_000;
   let last: BulkState | null = null;
 
