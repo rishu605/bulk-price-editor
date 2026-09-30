@@ -212,6 +212,38 @@ describe("userErrors mapping", () => {
 });
 
 describe("read-back verification", () => {
+  it("reads back past Shopify's 250-id input limit in batches, and verifies every row (#698)", async () => {
+    const rows = Array.from({ length: 600 }, (_, i) =>
+      row({ ref: ref(`gid://shopify/ProductVariant/${1_000 + i}`) }),
+    );
+    const { client: inner, calls } = fakeClient();
+    // Shopify refuses any input array over 250 at the top level.
+    const client: AdminClient = {
+      request: (query, variables) => {
+        const ids = variables.ids as string[] | undefined;
+        if (ids && ids.length > 250) {
+          return Promise.reject(new Error(`The input array size of ${ids.length} is greater than the maximum allowed of 250.`));
+        }
+        return inner.request(query, variables);
+      },
+    };
+
+    const result = await executeSync(rows, {
+      client,
+      budget: budget(),
+      productOf,
+      verifySampleRate: 1,
+      random: () => 0,
+      sleep: noSleep,
+    });
+
+    expect(result.verified).toBe(600);
+    expect(result.unverified).toBe(0);
+    expect(result.clean).toBe(true);
+    const readBacks = calls.filter((call) => Array.isArray(call.variables.ids));
+    expect(readBacks.map((call) => (call.variables.ids as string[]).length)).toEqual([250, 250, 100]);
+  });
+
   it("marks rows verified when the storefront matches", async () => {
     const { client } = fakeClient();
     const result = await executeSync([row()], {

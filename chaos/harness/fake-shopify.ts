@@ -384,6 +384,20 @@ export class FakeShopify {
   private nodes(variables: Record<string, unknown>, query = "") {
     const ids = (variables.ids ?? []) as string[];
 
+    // "Input arguments that accept an array have a maximum size of 250, on every Shopify
+    // API." Refused at the top level, as the real API does. Without this the fake read
+    // back 300 ids in one call and the suite could not see #698.
+    if (ids.length > 250) {
+      return {
+        errors: [
+          {
+            message: `The input array size of ${ids.length} is greater than the maximum allowed of 250.`,
+            extensions: { code: "MAX_INPUT_SIZE_EXCEEDED" },
+          },
+        ],
+      };
+    }
+
     // The same `nodes` field serves products and variants; the requested fragment is
     // what distinguishes them, exactly as it does against the real API.
     //

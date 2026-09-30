@@ -329,6 +329,28 @@ async function verifyRows(
     Math.max(1, Math.ceil(applied.length * options.verifySampleRate)),
   );
   const sample = pickSample(applied, sampleSize, options.random);
+
+  // In batches Shopify accepts. Every array argument is capped at 250 ids, and a single
+  // `nodes` call for a 300-row sync run was refused outright -- so every campaign of
+  // 251 to 1,000 variants wrote its prices correctly and then ended PARTIAL with no row
+  // verified (#698).
+  for (let i = 0; i < sample.length; i += READ_BACK_BATCH) {
+    await verifyBatch(sample.slice(i, i + READ_BACK_BATCH), options);
+  }
+}
+
+/** Shopify's cap on any input array: "a maximum size of 250, on every Shopify API". */
+export const READ_BACK_BATCH = 250;
+
+async function verifyBatch(
+  sample: ExecutedRow[],
+  options: {
+    client: AdminClient;
+    budget: RateLimitBudget;
+    sleep?: (ms: number) => Promise<void>;
+    maxAttempts: number;
+  },
+): Promise<void> {
   const ids = sample.map((r) => r.row.ref.variantGid);
 
   await options.budget.reserve(10 * ids.length);
@@ -345,7 +367,8 @@ async function verifyRows(
   } catch (error) {
     // A failed read-back is not a failed write. Leaving the rows unverified is
     // honest: we changed something and could not confirm it, which the run reports
-    // as not-clean rather than pretending either way.
+    // as not-clean rather than pretending either way. Only this batch's rows: one
+    // failed read says nothing about the others.
     const reason = error instanceof Error ? error.message : String(error);
     for (const entry of sample) {
       entry.failureReason = `Applied but verification read failed: ${reason}`;
