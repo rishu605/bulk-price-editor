@@ -995,13 +995,35 @@ type ExecutedRows = Awaited<ReturnType<typeof executeRows>>["rows"];
  * attempt achieved, and merging older ones would resurrect rows that a later attempt
  * has since settled.
  */
-async function priorLedger(campaignId: string, kind: "APPLY" | "REVERT") {
-  const previous = await prisma.campaignRun.findFirst({
-    where: { campaignId, kind },
+/**
+ * The whole-campaign run a Resume continues: the latest one that is not a single-variant
+ * revert or reinstate, which never change the campaign's state.
+ *
+ * A Resume continues *that* run, in its own direction (#702). After a partial revert the
+ * page offered Resume, the route ran an apply, and the apply read the ledger of the last
+ * *apply* -- every row VERIFIED, from before the revert undid them -- so it wrote nothing,
+ * called the campaign ACTIVE and verified, and left the storefront mostly at full price.
+ */
+export async function runToResume(
+  campaignId: string,
+): Promise<{ id: string; kind: "APPLY" | "REVERT" } | null> {
+  const run = await prisma.campaignRun.findFirst({
+    where: {
+      campaignId,
+      kind: { in: ["APPLY", "REVERT"] },
+      NOT: { occurrenceKey: { startsWith: "VARIANT-" } },
+    },
     orderBy: { createdAt: "desc" },
-    select: { id: true },
+    select: { id: true, kind: true },
   });
-  if (!previous) return [];
+  return run ? { id: run.id, kind: run.kind as "APPLY" | "REVERT" } : null;
+}
+
+async function priorLedger(campaignId: string, kind: "APPLY" | "REVERT") {
+  // The run being resumed, not the latest run of this kind. When the last whole run went
+  // the other way, nothing it verified is evidence for this one: plan everything.
+  const previous = await runToResume(campaignId);
+  if (!previous || previous.kind !== kind) return [];
 
   const changes = await prisma.variantChange.findMany({
     where: { runId: previous.id },

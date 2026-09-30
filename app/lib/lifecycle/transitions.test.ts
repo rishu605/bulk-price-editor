@@ -108,6 +108,14 @@ describe("what the merchant is told", () => {
     expect(describeState("HELD").nextAction?.intent).toBe("drift");
   });
 
+  it("says which way a Resume goes (#702)", () => {
+    // A partial revert resumed as an apply re-applied the sale; the button must name it.
+    expect(describeState("PARTIAL", { resumes: "REVERT" }).nextAction?.label).toBe("Resume revert");
+    expect(describeState("PARTIAL", { resumes: "APPLY" }).nextAction?.label).toBe("Resume apply");
+    expect(describeState("PARTIAL", { resumes: "REVERT" }).explanation).toMatch(/finishes the revert/);
+    expect(describeState("PARTIAL").nextAction?.label).toBe("Resume");
+  });
+
   it("does not dress up partial or held as success", () => {
     expect(describeState("PARTIAL").tone).toBe("critical");
     expect(describeState("HELD").tone).toBe("warning");

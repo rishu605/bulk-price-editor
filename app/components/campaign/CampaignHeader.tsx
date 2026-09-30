@@ -111,7 +111,7 @@ export function CampaignHeader({
                 which is the loudest possible way to offer something that cannot be
                 done. */}
             <s-button type="submit" variant="primary" loading={busy || undefined}>
-              Resume
+              {lifecycle.nextAction.label}
             </s-button>
           </fetcher.Form>
         ) : null}

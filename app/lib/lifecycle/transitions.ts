@@ -107,7 +107,14 @@ export interface StateDescription {
   nextAction?: { label: string; intent: "resume" | "revert" | "apply" | "drift" };
 }
 
-export function describeState(state: CampaignState): StateDescription {
+export function describeState(
+  state: CampaignState,
+  /**
+   * Which kind of run a Resume would continue: the one that left the campaign PARTIAL. A
+   * partial revert resumes as a revert, and the button has to say so (#702).
+   */
+  context: { resumes?: "APPLY" | "REVERT" } = {},
+): StateDescription {
   switch (state) {
     case "DRAFT":
       return {
@@ -158,8 +165,18 @@ export function describeState(state: CampaignState): StateDescription {
         label: "Partial — some rows did not complete",
         tone: "critical",
         explanation:
-          "Some prices were written and verified; others were not. The ledger names every row and why it stopped. Resuming retries only what is outstanding — rows already correct are left alone.",
-        nextAction: { label: "Resume", intent: "resume" },
+          context.resumes === "REVERT"
+            ? "Some prices were put back and verified; others were not, so parts of the sale may still be live. The ledger names every row and why it stopped. Resuming finishes the revert."
+            : "Some prices were written and verified; others were not. The ledger names every row and why it stopped. Resuming retries only what is outstanding — rows already correct are left alone.",
+        nextAction: {
+          label:
+            context.resumes === "REVERT"
+              ? "Resume revert"
+              : context.resumes === "APPLY"
+                ? "Resume apply"
+                : "Resume",
+          intent: "resume",
+        },
       };
     case "COMPLETED":
       return {
