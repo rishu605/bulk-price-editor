@@ -118,16 +118,23 @@ function stackOf(error: AppError): string | undefined {
   return stack ? redactText(stack) : undefined;
 }
 
-/** Recent failures for the debug page, newest first. */
+/**
+ * This shop's recent failures, for its Diagnostics page, newest first.
+ *
+ * Its own rows only (#717). Unattributed rows -- a failure before a shop was known --
+ * used to be included, and since route errors were all stored unattributed, every
+ * merchant was shown every other merchant's messages, context and stack traces. They are
+ * for operators, who read the table directly.
+ */
 export async function recentErrors(shopId: string, limit = ROWS_PER_VIEW) {
   return prisma.errorEvent.findMany({
-    where: { OR: [{ shopId }, { shopId: null }] },
+    where: { shopId },
     orderBy: { createdAt: "desc" },
     take: limit,
   });
 }
 
-/** One failure by the id a merchant quoted. */
-export async function errorByPublicId(errorId: string) {
-  return prisma.errorEvent.findUnique({ where: { errorId: errorId.trim().toUpperCase() } });
+/** One of this shop's failures, by the id its merchant quoted. Another shop's is not found. */
+export async function errorByPublicId(shopId: string, errorId: string) {
+  return prisma.errorEvent.findFirst({ where: { shopId, errorId: errorId.trim().toUpperCase() } });
 }

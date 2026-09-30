@@ -9,6 +9,7 @@
  */
 
 import prisma from "../db.server";
+import { addLogContext } from "../lib/logging/context.server";
 
 export interface ShopRecord {
   id: string;
@@ -18,6 +19,15 @@ export interface ShopRecord {
 }
 
 export async function ensureShop(domain: string): Promise<ShopRecord> {
+  const shop = await findOrCreateShop(domain);
+  // Every caller passes the domain of a session Shopify authenticated, which makes this
+  // the one place a request's shop is known for certain. Bound for the rest of the unit
+  // of work, so the log lines and any error report carry it (#717).
+  addLogContext({ shop: domain, shopId: shop.id });
+  return shop;
+}
+
+async function findOrCreateShop(domain: string): Promise<ShopRecord> {
   const existing = await prisma.shop.findUnique({ where: { domain } });
 
   if (existing) {
