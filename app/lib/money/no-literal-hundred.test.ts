@@ -35,10 +35,7 @@ const HUNDRED_ON_MONEY = [
  * Listed rather than tolerated: the test below fails if a listed file stops matching, so
  * fixing #694 has to delete its line here too, and this list can only shrink.
  */
-const KNOWN: Record<string, string> = {
-  "app/routes/app.prices.costs.tsx": "#694",
-  "app/lib/pricing/cost-rules.ts": "#694",
-};
+const KNOWN: Record<string, string> = {};
 
 const offences = (source: string) =>
   HUNDRED_ON_MONEY.filter((pattern) => pattern.test(source)).map(String);
