@@ -14,6 +14,7 @@
 import { describe, expect, it } from "vitest";
 
 import prisma from "../../app/db.server";
+import { formatMoney, money } from "../../app/lib/money/money";
 import { auditMirror } from "../../app/services/mirror-audit.server";
 import { chaosAdminClient } from "../harness/http-client";
 import { withChaos } from "../harness/scenario";
@@ -216,6 +217,77 @@ describe("chaos: the nightly mirror audit", () => {
           where: { shopId, variantGid: orphaned, surfaceKind: "BASE", priceListGid: "" },
         });
         expect(still, "wrote a surface row with no price to clear the symptom").toBeNull();
+      },
+    );
+  });
+
+  it.each(["JPY", "KWD"])(
+    "leaves a correct %s mirror alone instead of healing it by a factor of 100 (#693)",
+    async (currency) => {
+      await withChaos(
+        `mirror-audit-${currency.toLowerCase()}`,
+        { catalog: { products: 3, variantsPerProduct: 1, currency }, percent: -10 },
+        async (chaos) => {
+          const { shopId, variantGids } = chaos.fixture;
+          const client = chaosAdminClient(chaos.server.endpoint());
+
+          // Shopify answers in the shop's currency, in that currency's own decimals:
+          // ¥1,980 is "1980.0", 12.500 KWD is "12.500". The mirror already holds the
+          // right minor units; the fixture's two-decimal strings are replaced to match.
+          chaos.fake.shopCurrency = currency;
+          const mirrored = new Map<string, bigint>();
+          for (const gid of variantGids) {
+            const row = await prisma.variantIndex.findUniqueOrThrow({
+              where: { shopId_variantGid: { shopId, variantGid: gid } },
+            });
+            mirrored.set(gid, row.price!);
+            chaos.fake.variants.get(gid)!.price = formatMoney(money(Number(row.price), currency));
+          }
+
+          const audit = await auditMirror(client, shopId);
+
+          expect(audit.checked).toBe(variantGids.length);
+          expect(
+            audit.diverged,
+            JSON.stringify(audit.divergences, (_, v) => (typeof v === "bigint" ? String(v) : v)),
+          ).toBe(0);
+          expect(audit.healed).toBe(0);
+          expect(audit.alert).toBe(false);
+
+          // And the mirror is exactly what it was: nothing rewritten a hundredfold.
+          for (const gid of variantGids) {
+            const row = await prisma.variantIndex.findUniqueOrThrow({
+              where: { shopId_variantGid: { shopId, variantGid: gid } },
+            });
+            expect(row.price).toBe(mirrored.get(gid));
+          }
+        },
+      );
+    },
+  );
+
+  it("does not heal a price it cannot read, and does not tombstone it either", async () => {
+    await withChaos(
+      "mirror-audit-unreadable",
+      { catalog: { products: 2, variantsPerProduct: 1 }, percent: -10 },
+      async (chaos) => {
+        const { shopId, variantGids } = chaos.fixture;
+        const before = await prisma.variantIndex.findUniqueOrThrow({
+          where: { shopId_variantGid: { shopId, variantGid: variantGids[0] } },
+        });
+
+        // Three decimals in a two-decimal currency: not a price in USD at all.
+        chaos.fake.variants.get(variantGids[0])!.price = "19.999";
+        const audit = await auditMirror(chaosAdminClient(chaos.server.endpoint()), shopId);
+
+        expect(audit.checked).toBe(variantGids.length - 1);
+        expect(audit.healed).toBe(0);
+        expect(audit.tombstoned).toBe(0);
+        const after = await prisma.variantIndex.findUniqueOrThrow({
+          where: { shopId_variantGid: { shopId, variantGid: variantGids[0] } },
+        });
+        expect(after.price).toBe(before.price);
+        expect(after.deletedAt).toBeNull();
       },
     );
   });

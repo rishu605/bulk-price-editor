@@ -18,6 +18,8 @@
  */
 
 import prisma from "../db.server";
+import { parseMoney } from "../lib/money/money";
+import { shopCurrency } from "./settings.server";
 import {
   ALERT_THRESHOLD,
   auditSample,
@@ -78,16 +80,25 @@ export async function auditMirror(
   // every night and leave the rest of the catalogue permanently unexamined — which is
   // where drift would then live.
   const sample = await prisma.$queryRaw<
-    Array<{ variantGid: string; price: bigint | null; compareAt: bigint | null }>
+    Array<{ variantGid: string; price: bigint | null; compareAt: bigint | null; currency: string | null }>
   >`
-    SELECT "variantGid", "price", "compareAt"
+    SELECT "variantGid", "price", "compareAt", "currency"
     FROM "variant_index"
     WHERE "shopId" = ${shopId} AND "deletedAt" IS NULL
     ORDER BY random()
     LIMIT ${size}
   `;
 
+  // Shopify's decimal strings, read in each row's own currency by the same parser the
+  // sync and the webhook use. A literal `* 100` here read ¥1,980 as 198000 and then healed
+  // the mirror to it, every night, on every shop whose currency is not two-decimal (#693).
+  const fallbackCurrency = await shopCurrency(shopId);
+  const currencyOf = new Map(sample.map((row) => [row.variantGid, row.currency || fallbackCurrency]));
   const live: LiveRow[] = [];
+  // A price Shopify returned that cannot be read in the row's currency. Left out of the
+  // comparison rather than healed: healing would write null over a real price, and
+  // leaving the live row out would read as "Shopify has never heard of it" and tombstone it.
+  const unreadable = new Set<string>();
 
   for (let i = 0; i < sample.length; i += BATCH) {
     const ids = sample.slice(i, i + BATCH).map((row) => row.variantGid);
@@ -109,17 +120,28 @@ export async function auditMirror(
         live.push({ variantGid, price: null, compareAt: null, missing: true });
         return;
       }
-      live.push({
-        variantGid: node.id,
-        price: node.price ? BigInt(Math.round(Number(node.price) * 100)) : null,
-        compareAt: node.compareAtPrice
-          ? BigInt(Math.round(Number(node.compareAtPrice) * 100))
-          : null,
-      });
+      const currency = currencyOf.get(variantGid) ?? fallbackCurrency;
+      const price = minorUnits(node.price, currency);
+      const compareAt = minorUnits(node.compareAtPrice, currency);
+      if (price === undefined || compareAt === undefined) {
+        unreadable.add(variantGid);
+        return;
+      }
+      live.push({ variantGid: node.id, price, compareAt });
     });
   }
 
-  const verdict = auditSample(sample, live, threshold);
+  if (unreadable.size > 0) {
+    logger.warn("mirror audit: prices Shopify returned could not be read; rows not checked", {
+      shopId,
+      unreadable: unreadable.size,
+    });
+  }
+  const verdict = auditSample(
+    sample.filter((row) => !unreadable.has(row.variantGid)),
+    live,
+    threshold,
+  );
   const result: AuditResult = {
     shopId, ...verdict, healed: 0, tombstoned: 0, unpriceable: 0, unpriceableHealed: 0,
   };
@@ -295,4 +317,17 @@ async function healUnpriceable(shopId: string): Promise<{ found: number; healed:
   }
 
   return { found: orphans.length, healed };
+}
+
+/**
+ * Shopify's decimal string in minor units of `currency`: null when Shopify has no value,
+ * undefined when it sent one that cannot be read in that currency.
+ */
+function minorUnits(value: string | null | undefined, currency: string): bigint | null | undefined {
+  if (!value) return null;
+  try {
+    return BigInt(parseMoney(value, currency).amount);
+  } catch {
+    return undefined;
+  }
 }
