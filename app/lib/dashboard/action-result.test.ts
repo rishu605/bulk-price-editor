@@ -20,7 +20,7 @@ describe("a reply with no errors field", () => {
     const banner = resultBanner({ ok: true, message: "Thanks — that market question is settled." });
 
     expect(banner).not.toBeNull();
-    expect(banner?.errors, "mapping over undefined is what took the page down").toEqual([]);
+    expect(banner?.lines, "mapping over undefined is what took the page down").toEqual([]);
     expect(banner?.tone).toBe("success");
   });
 
@@ -28,7 +28,7 @@ describe("a reply with no errors field", () => {
     // `{ ok: false, message }` — the quick-campaign path.
     const banner = resultBanner({ ok: false, message: "Enter a percentage between 1 and 99." });
 
-    expect(banner?.errors).toEqual([]);
+    expect(banner?.lines).toEqual([]);
     expect(banner?.tone).toBe("critical");
   });
 });
@@ -41,7 +41,7 @@ describe("a reply that carries detail", () => {
       errors: ["Product 12 has no price", "Product 44 has no price"],
     });
 
-    expect(banner?.errors).toHaveLength(2);
+    expect(banner?.lines).toHaveLength(2);
     expect(banner?.tone).toBe("critical");
   });
 
@@ -54,5 +54,30 @@ describe("no reply at all", () => {
   it("renders nothing rather than an empty banner", () => {
     // The page's first load, and every load after one that did not submit anything.
     expect(resultBanner(undefined)).toBeNull();
+  });
+});
+
+describe("the campaign page's replies (#714)", () => {
+  it("keeps a run's detail lines, which the campaign page calls `details`", () => {
+    // `runResponse` and the error path: `{ ok, message, details }`.
+    const banner = resultBanner({
+      ok: false,
+      message: "Nothing was written. Your prices are as they were.",
+      details: ["Reference err_7f3a"],
+    });
+
+    expect(banner?.lines).toEqual(["Reference err_7f3a"]);
+    expect(banner?.tone).toBe("critical");
+  });
+
+  it("shows a deferred run as a warning, not a failure", () => {
+    const banner = resultBanner({ ok: false, tone: "warning", message: "Queued for the worker.", details: [] });
+
+    expect(banner?.tone).toBe("warning");
+  });
+
+  it("survives a saved note and an approval, which carry no details", () => {
+    expect(resultBanner({ ok: true, message: "Note saved." })?.lines).toEqual([]);
+    expect(resultBanner({ ok: false, message: "You can't approve your own campaign." })?.lines).toEqual([]);
   });
 });
