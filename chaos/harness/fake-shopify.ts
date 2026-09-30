@@ -159,6 +159,13 @@ export class FakeShopify {
   private bulk?: BulkOperationState;
   private bulkBody?: string;
   private bulkPolls = 0;
+
+  /**
+   * Fault injection: the next bulk operation applies only its first N lines, then ends
+   * FAILED with the partial result file Shopify publishes as `partialDataUrl`. The rows
+   * past N were never written, and the result file does not mention them (#699).
+   */
+  bulkFailsAfterLines?: number;
   private stagedSeq = 0;
 
   constructor(options: FakeOptions) {
@@ -1086,7 +1093,10 @@ export class FakeShopify {
 
   /** Applies the uploaded JSONL and publishes a Shopify-shaped result file. */
   private finishBulk(): BulkOperationState {
-    const lines = (this.bulkBody ?? "").split("\n").filter((line) => line.trim().length > 0);
+    const all = (this.bulkBody ?? "").split("\n").filter((line) => line.trim().length > 0);
+    const failAfter = this.bulkFailsAfterLines;
+    this.bulkFailsAfterLines = undefined;
+    const lines = failAfter === undefined ? all : all.slice(0, failAfter);
     const results: string[] = [];
 
     lines.forEach((raw, index) => {
@@ -1103,6 +1113,16 @@ export class FakeShopify {
     });
 
     const url = this.blobs.put(`results/${this.stagedSeq}`, `${results.join("\n")}\n`);
+    if (failAfter !== undefined) {
+      return {
+        id: this.bulk!.id,
+        status: "FAILED",
+        errorCode: "INTERNAL_SERVER_ERROR",
+        url: null,
+        partialDataUrl: url,
+        objectCount: String(lines.length),
+      };
+    }
     return {
       id: this.bulk!.id,
       status: "COMPLETED",
