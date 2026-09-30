@@ -13,6 +13,7 @@ import {
   revertVariant,
   rollbackReport,
   runCampaign,
+  runToResume,
 } from "../services/campaigns/index.server";
 import { MAX_INLINE_ROWS } from "../lib/execution/inline-budget";
 import { runResponse, type RunResponse } from "../lib/campaigns/run-response";
@@ -78,7 +79,9 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
   const approval = await approvalFor(shop.id, campaignId);
   const state = record.status as CampaignState;
   const practice = isPractice(record);
-  const lifecycle = describeState(state);
+  const lifecycle = describeState(state, {
+    resumes: state === "PARTIAL" ? (await runToResume(campaignId))?.kind : undefined,
+  });
   const history = await transitionHistory(shop.id, campaignId, 8);
 
   const schedule = parseSchedule(record.schedule);
@@ -173,7 +176,11 @@ export const action = withGuard("/app/campaigns/$id", async ({ request, params }
       throw error;
     }
   }
-  const reverting = intent === "revert";
+  // Resume continues the run that left the campaign PARTIAL, in its own direction: after
+  // a partial revert it finishes the revert, it does not re-apply the sale (#702).
+  const reverting =
+    intent === "revert" ||
+    (intent === "resume" && (await runToResume(String(params.id)))?.kind === "REVERT");
 
   // A-3.11: over the blast-radius threshold a merchant types the word first, and the
   // check is here rather than only in the modal. See `blastRadiusRefusal`.

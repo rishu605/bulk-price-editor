@@ -8,7 +8,7 @@
 export { createCampaign, toResolvable, astOf } from "./model.server";
 export { loadCandidates, productMapFor, titleMapFor } from "./candidates.server";
 export { previewCampaign, type PreviewOptions } from "./preview.server";
-export { runCampaign, type RunOptions } from "./run.server";
+export { runCampaign, runToResume, type RunOptions } from "./run.server";
 export { campaignRuns, runLedger } from "./history.server";
 export { revertVariant, reinstateVariant } from "./variant-revert.server";
 export {
