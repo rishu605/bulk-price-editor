@@ -494,8 +494,11 @@ async function executeCampaignRun(
     writable.map((row) => ({
       variantGid: row.ref.variantGid,
       price: row.intendedPrice ? BigInt(row.intendedPrice.amount) : null,
-      compareAt:
-        row.intendedCompareAtSet && row.intendedCompareAt
+      // A row that leaves compare-at alone did not decide it, so its echo is matched on
+      // price alone (#731). A row that clears it intends `null`, and says so.
+      compareAt: !row.intendedCompareAtSet
+        ? ("leave" as const)
+        : row.intendedCompareAt
           ? BigInt(row.intendedCompareAt.amount)
           : null,
     })),

@@ -28,7 +28,18 @@ import { holdForDrift } from "./campaigns/lifecycle.server";
 /** How long a write intent stays valid. Generous: webhook delivery is not instant. */
 const INTENT_TTL_MS = 15 * 60 * 1000;
 
-function hashValue(price: bigint | null, compareAt: bigint | null): string {
+/**
+ * Stands in for the compare-at of a write that left it alone (#731).
+ *
+ * A campaign whose compare-at policy is "leave" does not send one, so the echo carries
+ * whatever the variant already had -- a value the run never decided and the intent could
+ * not know. Hashing `null` for it meant Anchor's own write on any variant with a
+ * compare-at failed to match its own intent, was taken for a merchant edit, and held the
+ * campaign that had priced the variant before.
+ */
+const ANY_COMPARE_AT = "any";
+
+function hashValue(price: bigint | null, compareAt: bigint | null | typeof ANY_COMPARE_AT): string {
   return createHash("sha256")
     .update(`${price ?? "null"}|${compareAt ?? "null"}`)
     .digest("hex")
@@ -45,7 +56,8 @@ export async function recordWriteIntents(
     variantGid: string;
     priceListGid?: string;
     price: bigint | null;
-    compareAt: bigint | null;
+    /** What this write sets it to, or `"leave"` when the write does not touch it. */
+    compareAt: bigint | null | "leave";
   }>,
 ): Promise<void> {
   if (intents.length === 0) return;
@@ -56,7 +68,7 @@ export async function recordWriteIntents(
       variantGid: intent.variantGid,
       surfaceKind: "BASE" as const,
       priceListGid: intent.priceListGid ?? "",
-      valueHash: hashValue(intent.price, intent.compareAt),
+      valueHash: hashValue(intent.price, intent.compareAt === "leave" ? ANY_COMPARE_AT : intent.compareAt),
     })),
   });
 }
@@ -72,7 +84,8 @@ export async function isOurEcho(
     where: {
       shopId,
       variantGid,
-      valueHash: hashValue(price, compareAt),
+      // This exact value, or this price from a write that left compare-at alone.
+      valueHash: { in: [hashValue(price, compareAt), hashValue(price, ANY_COMPARE_AT)] },
       writtenAt: { gte: new Date(Date.now() - INTENT_TTL_MS) },
     },
     select: { id: true },
