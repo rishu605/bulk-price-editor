@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 
 import { money } from "../money/money";
-import { applyCostRule, describeCostRule } from "./cost-rules";
+import { applyCostRule, costRuleFrom, describeCostRule } from "./cost-rules";
 
 const input = (cost?: number) => ({
   cost: cost === undefined ? undefined : money(cost, "USD"),
@@ -94,6 +94,49 @@ describe("describing a rule", () => {
     expect(describeCostRule({ kind: "fixed-change", amount: money(250, "USD") })).toContain("Add");
     expect(describeCostRule({ kind: "fixed-change", amount: money(-250, "USD") })).toContain(
       "Subtract",
+    );
+  });
+});
+
+describe("reading the cost form in the store's currency (#694)", () => {
+  it("stores ¥1,500 as 1500 yen, not 150000", () => {
+    // A literal 100 made the never-below-cost floor on a ¥3,000 product ¥150,000.
+    expect(costRuleFrom("set-exact", 1500, "JPY")).toEqual({
+      kind: "set-exact",
+      amount: money(1_500, "JPY"),
+    });
+  });
+
+  it("stores 1.5 KWD as 1500 fils, not 150", () => {
+    expect(costRuleFrom("set-exact", 1.5, "KWD")).toEqual({
+      kind: "set-exact",
+      amount: money(1_500, "KWD"),
+    });
+  });
+
+  it("keeps two-decimal currencies as they were", () => {
+    expect(costRuleFrom("fixed-change", -2.5, "USD")).toEqual({
+      kind: "fixed-change",
+      amount: money(-250, "USD"),
+    });
+  });
+
+  it("passes percentages through untouched", () => {
+    expect(costRuleFrom("share-of-price", 40, "JPY")).toEqual({ kind: "share-of-price", percent: 40 });
+    expect(costRuleFrom("percent-change", -5, "KWD")).toEqual({ kind: "percent-change", percent: -5 });
+  });
+
+  it("says the amount that will be stored, in that currency's own decimals", () => {
+    // Dividing by a literal 100 here cancelled the form's mistake: the dry run showed
+    // "1500.00" while ¥150,000 was written.
+    expect(describeCostRule(costRuleFrom("set-exact", 1500, "JPY"))).toBe(
+      "Set every matching cost to 1500",
+    );
+    expect(describeCostRule(costRuleFrom("set-exact", 1.5, "KWD"))).toBe(
+      "Set every matching cost to 1.500",
+    );
+    expect(describeCostRule(costRuleFrom("fixed-change", -2.5, "USD"))).toBe(
+      "Subtract 2.50 from every matching cost",
     );
   });
 });

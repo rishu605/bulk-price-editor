@@ -21,8 +21,7 @@ import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
 import { shopCurrency } from "../services/settings.server";
 import { editCosts, newlyViolating, type CostEditResult } from "../services/cost-edit.server";
-import { describeCostRule, type CostRule } from "../lib/pricing/cost-rules";
-import { money } from "../lib/money/money";
+import { costRuleFrom, describeCostRule } from "../lib/pricing/cost-rules";
 import { format } from "../lib/money/format";
 import { facetDetails } from "../lib/segments/facets";
 import { facets, type FilterAst } from "../services/segments.server";
@@ -134,15 +133,7 @@ export const action = withGuard("/app/prices/costs", async ({ request }: ActionF
 
   const amount = Number(form.get("value") ?? 0);
   const kind = String(form.get("ruleKind") ?? "percent-change");
-
-  const rule: CostRule =
-    kind === "set-exact"
-      ? { kind: "set-exact", amount: money(Math.round(amount * 100), currency) }
-      : kind === "fixed-change"
-        ? { kind: "fixed-change", amount: money(Math.round(amount * 100), currency) }
-        : kind === "share-of-price"
-          ? { kind: "share-of-price", percent: amount }
-          : { kind: "percent-change", percent: amount };
+  const rule = costRuleFrom(kind, amount, currency);
 
   const vendor = String(form.get("vendor") ?? "").trim();
   const ast: FilterAst = vendor ? { groups: [{ conditions: [{ field: "vendor", value: vendor }] }] } : { groups: [] };

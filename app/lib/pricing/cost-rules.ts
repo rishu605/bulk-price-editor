@@ -12,7 +12,8 @@
  * change and is not after it.
  */
 
-import { money, type Money } from "../money/money";
+import { decimalsFor, format } from "../money/format";
+import { abs, money, type Money } from "../money/money";
 
 export type CostRule =
   | { kind: "set-exact"; amount: Money }
@@ -76,19 +77,47 @@ function positive(cost: Money): CostOutcome {
   return cost.amount < 0 ? { kind: "skipped", reason: "not-positive" } : { kind: "set", cost };
 }
 
-/** What the rule does, for the confirmation screen. */
+/**
+ * The rule the merchant typed on the cost form, in the store's currency.
+ *
+ * `10 ** decimalsFor(currency)`, as `ruleFrom` does for campaigns since #343, and not a
+ * literal 100: that stored a ¥1,500 cost as ¥150,000 and a 1.5 KWD cost as 0.150 (#694).
+ * Costs set the never-below-cost floor, so the yen mistake priced a ¥3,000 product at
+ * ¥150,000 on the next run, and the dinar one took the floor away.
+ */
+export function costRuleFrom(kind: string, value: number, currency: string): CostRule {
+  const perMajor = 10 ** decimalsFor(currency);
+  switch (kind) {
+    case "set-exact":
+      return { kind: "set-exact", amount: money(Math.round(value * perMajor), currency) };
+    case "fixed-change":
+      return { kind: "fixed-change", amount: money(Math.round(value * perMajor), currency) };
+    case "share-of-price":
+      return { kind: "share-of-price", percent: value };
+    default:
+      return { kind: "percent-change", percent: value };
+  }
+}
+
+/**
+ * What the rule does, for the confirmation screen.
+ *
+ * Through the money formatter, so the text shows what will be stored. It used to divide by
+ * a literal 100 as well, which cancelled the form's mistake: the dry run read "1500.00"
+ * while ¥150,000 was written.
+ */
 export function describeCostRule(rule: CostRule): string {
   switch (rule.kind) {
     case "set-exact":
-      return `Set every matching cost to ${(rule.amount.amount / 100).toFixed(2)}`;
+      return `Set every matching cost to ${format(rule.amount)}`;
     case "percent-change":
       return rule.percent >= 0
         ? `Raise every matching cost by ${rule.percent}%`
         : `Lower every matching cost by ${Math.abs(rule.percent)}%`;
     case "fixed-change":
       return rule.amount.amount >= 0
-        ? `Add ${(rule.amount.amount / 100).toFixed(2)} to every matching cost`
-        : `Subtract ${(Math.abs(rule.amount.amount) / 100).toFixed(2)} from every matching cost`;
+        ? `Add ${format(rule.amount)} to every matching cost`
+        : `Subtract ${format(abs(rule.amount))} from every matching cost`;
     case "share-of-price":
       return `Set every matching cost to ${rule.percent}% of its normal price`;
   }
