@@ -72,10 +72,22 @@ describe("validateRow", () => {
     expect(yen.parsedPrice).toEqual(money(1_200, "JPY"));
   });
 
-  it("takes the currency from the row when the file names one", () => {
-    const result = check({ price: "1200", currency: "jpy" }, "USD");
-    if (!isValid(result)) throw new Error("expected valid");
-    expect(result.parsedPrice.currency).toBe("JPY");
+  it("refuses a row in another currency rather than writing it unconverted (#734)", () => {
+    // `TEE-S,2500,,JPY` on a USD shop was a JPY 2,500 baseline on a USD variant, and a
+    // 20%-off campaign wrote $2,000.00 on a $20 T-shirt.
+    const result = check({ price: "2500", currency: "JPY" }, "USD");
+    expect(isValid(result)).toBe(false);
+    if (!isValid(result)) {
+      expect(result.problem).toBe("currency-not-shop");
+      expect(result.reason).toMatch(/in JPY, but base prices on this store are in USD/);
+      expect(result.reason).toMatch(/leave the currency column empty/);
+    }
+  });
+
+  it("accepts a currency column that agrees with the store, and reads precision from it", () => {
+    const yen = check({ price: "1200", currency: "jpy" }, "JPY");
+    if (!isValid(yen)) throw new Error("expected valid");
+    expect(yen.parsedPrice).toEqual({ amount: 1200, currency: "JPY" });
   });
 
   it("names the row and the next action for every problem", () => {

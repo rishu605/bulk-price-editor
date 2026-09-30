@@ -313,8 +313,9 @@ export default function Costs() {
           <s-paragraph>
             <s-text>
               One row per variant: a SKU, barcode or variant ID, then the cost. Costs are
-              read in {currency} unless a row says otherwise, and must be plain numbers —
-              12.50, not $12.50. A file exported from Matrixify works as it is.
+              in {currency} and must be plain numbers — 12.50, not $12.50. A row in another
+              currency is refused rather than converted. A file exported from Matrixify
+              works as it is.
             </s-text>
           </s-paragraph>
         }

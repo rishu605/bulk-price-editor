@@ -321,9 +321,9 @@ export default function Baselines() {
             <s-paragraph>
               <s-text>
                 One row per variant: a SKU, barcode or variant ID, then the price. A
-                compare-at and a currency column are optional. Prices are read in your
-                store&rsquo;s currency unless a row says otherwise, and must be plain
-                numbers — 1299.00, not $1,299.00.
+                compare-at column is optional. Prices are in your store&rsquo;s currency
+                and must be plain numbers — 1299.00, not $1,299.00. A row in another
+                currency is refused rather than converted.
               </s-text>
             </s-paragraph>
           </>
