@@ -463,7 +463,9 @@ export default function NewCampaign() {
    * whenever the preview fetcher changes state.
    */
   const latestFormChanged = useRef(formChanged);
-  latestFormChanged.current = formChanged;
+  useEffect(() => {
+    latestFormChanged.current = formChanged;
+  }, [formChanged]);
   useEffect(() => {
     const form = formRef.current;
     if (!form) return;

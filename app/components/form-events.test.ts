@@ -10,8 +10,7 @@
  * onChange=0.
  *
  * A form that needs to hear its fields listens natively, as `SettingsSaveBar` and the
- * campaign editor do. `onChange` on a single `s-select` is fine: React 19 binds that one
- * directly to the element.
+ * campaign editor do.
  */
 
 import { describe, expect, it } from "vitest";
