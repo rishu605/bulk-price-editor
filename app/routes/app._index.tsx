@@ -28,7 +28,7 @@ import { UpcomingCampaigns } from "../components/UpcomingCampaigns";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { onboarding } from "../lib/onboarding/steps";
 import { homeSections } from "../lib/dashboard/home";
-import { resultBanner } from "../lib/dashboard/action-result";
+import { ResultBanner } from "../components/ResultBanner";
 import { syncMessage } from "../lib/dashboard/sync-message";
 import { nextMoments } from "../lib/scheduling/upcoming";
 import { withGuard } from "../lib/errors/guard.server";
@@ -355,7 +355,6 @@ export default function Dashboard() {
   // loading state at once: resolving a market notice spun the Re-sync button too.
   const submitting = fetcher.state !== "idle" ? String(fetcher.formData?.get("intent") ?? "") : "";
   const busy = (intent: string) => submitting === intent;
-  const banner = resultBanner(fetcher.data);
 
   const neverSynced = syncedAt === null;
   // Which sections this page shows, decided in one tested place rather than in four
@@ -530,17 +529,10 @@ export default function Dashboard() {
         { label: "Activity log", href: "/app/activity" },
       ]}
     >
-      {/* Through `resultBanner`, which is the one place that knows a path returning no
+      {/* Through `ResultBanner`, which is the one place that knows a path returning no
           detail returns no detail. Mapping `result.errors` straight took the page down
           on two of the four things a merchant can do from here. */}
-      {banner ? (
-        <s-banner tone={banner.tone}>
-          <s-paragraph>{banner.message}</s-paragraph>
-          {banner.errors.map((error) => (
-            <s-paragraph key={error}>{error}</s-paragraph>
-          ))}
-        </s-banner>
-      ) : null}
+      <ResultBanner result={fetcher.data} />
 
       {/* One block, however many things want the merchant.
 

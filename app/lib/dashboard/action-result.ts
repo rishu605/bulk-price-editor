@@ -1,5 +1,6 @@
 /**
- * What Home's result banner renders, from whatever the action handed back.
+ * What a result banner renders, from whatever the action handed back. Home and the
+ * campaign page both go through it.
  *
  * ## The bug this exists to stop
  *
@@ -32,15 +33,23 @@
 export interface ActionOutcome {
   ok: boolean;
   message: string;
-  /** Present on the paths that have detail to add. Absent on the ones that do not. */
+  /** A failure that is not an error: deferred to the worker, or waiting on somebody. */
+  tone?: "warning";
+  /** Home's name for the lines under the message. Absent on the paths with nothing to add. */
   errors?: string[];
+  /**
+   * The campaign page's name for the same thing. Absent on saving a note, asking for
+   * approval and deciding it -- which took the campaign page down the way `errors` took
+   * Home down (#714).
+   */
+  details?: string[];
 }
 
 export interface ResultBanner {
-  tone: "success" | "critical";
+  tone: "success" | "critical" | "warning";
   message: string;
   /** Always an array, so the caller maps without asking. */
-  errors: string[];
+  lines: string[];
 }
 
 /** The banner for an action's reply, or null when there is nothing to report. */
@@ -48,10 +57,10 @@ export function resultBanner(result: ActionOutcome | undefined): ResultBanner | 
   if (!result) return null;
 
   return {
-    tone: result.ok ? "success" : "critical",
+    tone: result.ok ? "success" : (result.tone ?? "critical"),
     message: result.message,
     // The whole point: a path that returns no detail returns no detail, rather than
     // taking the page down for not having any.
-    errors: result.errors ?? [],
+    lines: result.errors ?? result.details ?? [],
   };
 }

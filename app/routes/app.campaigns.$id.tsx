@@ -16,7 +16,8 @@ import {
   runToResume,
 } from "../services/campaigns/index.server";
 import { MAX_INLINE_ROWS } from "../lib/execution/inline-budget";
-import { runResponse, type RunResponse } from "../lib/campaigns/run-response";
+import { runResponse } from "../lib/campaigns/run-response";
+import { ResultBanner } from "../components/ResultBanner";
 import { describeSchedule, parseSchedule, scheduleWarnings } from "../lib/scheduling/window";
 import { RunHistoryTable } from "../components/RunHistoryTable";
 import { RunResultSection } from "../components/RunResultSection";
@@ -250,10 +251,6 @@ export const action = withGuard("/app/campaigns/$id", async ({ request, params }
   }
 });
 
-type ActionData = RunResponse & {
-  errorId?: string;
-};
-
 export default function CampaignDetail() {
   // The whole payload, not only the fields read here: `detail` spreads it. See #611.
   const data = useLoaderData<typeof loader>();
@@ -265,8 +262,9 @@ export default function CampaignDetail() {
     preview,
     runs,
     ledger,
-    // Renamed: `result` in this component is the fetcher's reply to the last action,
-    // and two different "results" on one page is how the wrong one gets rendered.
+    // Renamed so it cannot be mistaken for the fetcher's reply to the last action, which
+    // the banner shows. Two different "results" on one page is how the wrong one gets
+    // rendered.
     result: runResult,
     selectedRunId,
     timeZone,
@@ -274,9 +272,11 @@ export default function CampaignDetail() {
     state,
     needsAttention: attention,
   } = data;
-  const fetcher = useFetcher<ActionData>();
+  // Typed from the action itself, not asserted. `ActionData = RunResponse & …` told the
+  // compiler every reply carried `details`, and saving a note, asking for approval and
+  // deciding it do not -- so the banner mapped undefined and took the page down (#714).
+  const fetcher = useFetcher<typeof action>();
   const busy = fetcher.state !== "idle";
-  const result = fetcher.data;
 
   // Gated on the lifecycle and on guardrails, deliberately not on "would this write
   // anything". A campaign whose prices already match -- because a merchant set them by
@@ -313,14 +313,7 @@ export default function CampaignDetail() {
 
   return (
     <PageShell heading={preview.name} backTo={{ href: "/app/campaigns", label: "Campaigns" }}>
-      {result ? (
-        <s-banner tone={result.ok ? "success" : (result.tone ?? "critical")}>
-          <s-paragraph>{result.message}</s-paragraph>
-          {result.details.map((detail) => (
-            <s-paragraph key={detail}>{detail}</s-paragraph>
-          ))}
-        </s-banner>
-      ) : null}
+      <ResultBanner result={fetcher.data} />
 
       {attention ? (
         <s-banner tone={lifecycle.tone === "critical" ? "critical" : "warning"}>
