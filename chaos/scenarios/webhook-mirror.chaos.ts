@@ -4,9 +4,10 @@
  * Webhooks are how the mirror stays right, and the interesting cases are the ones where
  * a straightforward consumer quietly leaves it wrong:
  *
- *   A variant removed from a product. `products/update` carries the product's full
- *   variant list, so anything missing has been deleted — and a consumer that only
- *   upserts what it is given keeps the removed one alive forever. A campaign then
+ *   A variant removed from a product. `products/update` lists the product's variants --
+ *   in full for the first 100, by id in `variant_gids` for all of them -- so anything
+ *   missing has been deleted, and a consumer that only upserts what it is given keeps
+ *   the removed one alive forever. (Past 100 variants, see `webhook-large-product`.) A campaign then
  *   enrolls a variant that does not exist, every write for it fails, and the run
  *   reports failures nobody can act on (E4).
  *

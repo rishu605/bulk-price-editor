@@ -31,6 +31,7 @@ import { checkForDrift } from "../services/drift.server";
 import { enrollNewVariants } from "../services/auto-enroll.server";
 import { toAdminClient } from "../services/admin-client.server";
 import { giftCardFlagFor } from "../services/gift-card.server";
+import { variantsStillOnProduct } from "../lib/catalog/webhook-variants";
 
 interface WebhookVariant {
   id: number | string;
@@ -52,7 +53,10 @@ interface WebhookProduct {
   status?: string | null;
   tags?: string | string[] | null;
   updated_at?: string | null;
+  /** Full details for the first 100 variants only. See `variantsStillOnProduct`. */
   variants?: WebhookVariant[];
+  /** Every variant's id, including the ones `variants` leaves out (#729). */
+  variant_gids?: Array<{ admin_graphql_api_id?: string } | string> | null;
 }
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -171,23 +175,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     seenVariantGids.push(variantGid);
   }
 
-  // Variants that used to be on this product and are not in the payload.
+  // Variants that used to be on this product and are no longer on it.
   //
-  // `products/update` carries the product's full variant list, so anything of ours
-  // missing from it has been removed. Without this the mirror keeps a variant that no
-  // longer exists: a campaign enrolls it, every write for it fails, and the run reports
-  // failures nobody can act on — which is how a run full of noise trains people to stop
-  // reading them (E4).
+  // Without this the mirror keeps a variant that no longer exists: a campaign enrolls it,
+  // every write for it fails, and the run reports failures nobody can act on — which is
+  // how a run full of noise trains people to stop reading them (E4).
   //
-  // Guarded on a non-empty payload. A malformed or partial delivery listing no variants
-  // must not be read as "the merchant deleted all of them".
-  if (seenVariantGids.length > 0) {
+  // "No longer on it" comes from `variantsStillOnProduct`, not from `variants`: a product
+  // webhook describes only the first 100 variants there, and reading it as the whole list
+  // tombstoned variant 101 onward on every update to a large product (#729). When the
+  // payload cannot say -- no `variant_gids`, and a `variants` list at the detail limit or
+  // empty -- nothing is tombstoned. A missed removal costs a failed write that says
+  // "deleted"; a wrong one leaves prices on sale that no revert will touch.
+  const stillThere = variantsStillOnProduct(product);
+  if (stillThere) {
     const removed = await prisma.variantIndex.updateMany({
       where: {
         shopId: shop.id,
         productGid,
         deletedAt: null,
-        variantGid: { notIn: seenVariantGids },
+        variantGid: { notIn: [...stillThere] },
       },
       // Tombstoned, never deleted: ledger rows still reference these variants and have
       // to stay resolvable when a campaign reverts.
@@ -201,6 +208,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         tombstoned: removed.count,
       });
     }
+  } else if (seenVariantGids.length > 0) {
+    logger.info("product webhook does not list every variant; tombstoning skipped", {
+      shop: shop.domain,
+      productGid,
+      described: seenVariantGids.length,
+    });
   }
 
   // Only after the mirror is current: enrollment captures baselines from these very
