@@ -1073,7 +1073,12 @@ async function refreshMirror(shopId: string, rows: ExecutedRows): Promise<void> 
   for (const executed of rows) {
     if (!executed.row.intendedPrice) continue;
 
-    // A failed row leaves the mirror saying "unknown", not saying the old price.
+    // Nothing was written: the variant was deleted mid-run. Its mirror row is the
+    // tombstone's business, not a price to record.
+    if (executed.status === "skipped-deleted") continue;
+
+    // Only a row read back from Shopify may say its price is live. Any other row leaves
+    // the mirror saying "unknown", not saying the old price, and not the new one either.
     //
     // Read-back failed, so we genuinely do not know what is live: the write may have
     // landed and been misreported, or not landed at all. Skipping the update left the
@@ -1086,7 +1091,12 @@ async function refreshMirror(shopId: string, rows: ExecutedRows): Promise<void> 
     // never treats an absent live price as already-correct, so the row is written. Drift
     // detection already reads null as "we have not looked" and stays quiet, and the
     // nightly audit heals it from Shopify.
-    if (executed.status === "failed") {
+    //
+    // Unverified rows too (#699). A bulk operation that ends FAILED leaves every row
+    // missing from its result file unverified, and recording the intended price for them
+    // made Resume find them "already correct", write nothing and call the campaign clean
+    // with the old price still live wherever the operation never reached.
+    if (executed.status !== "verified") {
       await prisma.priceSurfaceEntry.updateMany({
         where: {
           shopId,
