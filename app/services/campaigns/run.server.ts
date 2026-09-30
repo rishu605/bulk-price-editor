@@ -146,9 +146,25 @@ export async function runCampaign(
     // half a merchant is watching — with no ids at all.
     //
     // Merges with the job's context when there is one, so a queued run keeps its job id.
-    return await withLogContext({ shopId, campaignId }, () =>
+    const outcome = await withLogContext({ shopId, campaignId }, () =>
       executeCampaignRun(shopId, campaignId, client, options, started),
     );
+
+    // A refusal -- waiting for approval, over the inline limit, refused by the plan -- is
+    // a return, not a throw, so the catch below never saw it. When the scheduler had
+    // claimed the campaign, it stayed APPLYING with nothing behind it: the sale never
+    // started, approving it later changed nothing, and nothing ever reverted it (#701).
+    // Released back to where the scheduler took it from, so the next tick asks again.
+    if (outcome.refused && options.claimedFrom && releaseTo !== "APPLYING" && releaseTo !== "REVERTING") {
+      await releaseClaim(shopId, campaignId, options.claimedFrom, {
+        reason: outcome.refused,
+        // The scheduler asks every tick while the reason stands. One activity entry
+        // says why; a new one every thirty seconds would bury it.
+        quietIfRepeated: true,
+      });
+    }
+
+    return outcome;
   } catch (error) {
     // The run row reaches a terminal state before anything else happens. Without this a
     // throw between creating the row and the update at the end of `executeCampaignRun`
@@ -282,6 +298,7 @@ async function executeCampaignRun(
         unverified: 0,
         clean: true,
         messages: [unapproved],
+        refused: unapproved,
       };
     }
 

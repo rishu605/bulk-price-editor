@@ -42,8 +42,10 @@ describe("a failed run reaches a terminal state", () => {
     // so the row has to be settled first. And both have to happen before the rethrow,
     // which is what leaves the function.
     const fail = RUN.indexOf("await failRun(");
-    const release = RUN.indexOf("await releaseClaim(");
-    const rethrow = RUN.indexOf("    throw error;");
+    // The release in the catch, after `failRun`. A refusal releases the scheduler's claim
+    // on the success path too (#701), earlier in the file and with no run row to settle.
+    const release = RUN.indexOf("await releaseClaim(", fail);
+    const rethrow = RUN.indexOf("    throw error;", release);
 
     expect(fail, "the catch must finish the run row").toBeGreaterThan(-1);
     expect(fail, "the run row is settled before the campaign is released").toBeLessThan(
