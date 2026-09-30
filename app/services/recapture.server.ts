@@ -21,6 +21,7 @@ import {
   type ActiveOverlap,
   type RecaptureAssessment,
 } from "../lib/baselines/recapture";
+import { PRICES_MAY_BE_LIVE } from "../lib/lifecycle/transitions";
 import { captureBaselines } from "./baselines.server";
 import { astToWhere, type FilterAst } from "./segments.server";
 import { scopeOf } from "./campaigns/model.server";
@@ -152,8 +153,11 @@ function astOf(stored: unknown): FilterAst {
 async function activeOverlaps(shopId: string, variantGids: string[]): Promise<ActiveOverlap[]> {
   if (variantGids.length === 0) return [];
 
+  // Every state whose prices may be on the storefront, from the one definition of that
+  // (#708). A hand-written list here left out HELD -- drift holds a campaign *with its
+  // prices still live* -- so recapturing then read "safe" and made the sale permanent.
   const campaigns = await prisma.campaign.findMany({
-    where: { shopId, status: { in: ["ACTIVE", "APPLYING", "PARTIAL"] } },
+    where: { shopId, status: { in: [...PRICES_MAY_BE_LIVE] } },
     select: { id: true, name: true, schedule: true },
   });
 
