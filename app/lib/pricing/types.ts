@@ -205,7 +205,13 @@ export type ResolutionReason =
    * Its own reason rather than folding into "missing-cost", because the fix is entirely
    * different: add the row to the file, or narrow the campaign's scope to match it.
    */
-  | "missing-import";
+  | "missing-import"
+  /**
+   * A fixed amount (set an exact price, fixed change) in one currency met a surface priced
+   * in another -- a $20 rule on a Japan market. Never converted and never relabelled: that
+   * wrote ¥20 on a ¥3,000 product and verified it clean (#692). The row is left alone.
+   */
+  | "currency-mismatch";
 
 export interface Resolution {
   /** The price to write. Absent when nothing should be written. */
