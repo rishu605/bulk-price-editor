@@ -72,14 +72,31 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     product.admin_graphql_api_id ?? `gid://shopify/Product/${product.id}`;
 
   if (topic === "PRODUCTS_DELETE") {
+    // Stamped with when, as well as that. The delete payload carries no `updated_at`, and
+    // without a time on the tombstone the per-variant guard below let any late
+    // `products/update` -- older than the deletion, delivered after it -- bring the whole
+    // product back (#730).
+    const now = new Date();
     await prisma.variantIndex.updateMany({
       where: { shopId: shop.id, productGid },
-      data: { deletedAt: new Date() },
+      data: { deletedAt: now, remoteUpdatedAt: now },
     });
     return new Response();
   }
 
   const remoteUpdatedAt = product.updated_at ? new Date(product.updated_at) : null;
+
+  // The newest version of this product the mirror has applied, tombstones included,
+  // read before this delivery changes anything. Webhooks are not ordered: a delivery
+  // older than this describes a product that has since changed, and must not decide
+  // which variants are gone (#730).
+  const newestApplied = (
+    await prisma.variantIndex.aggregate({
+      where: { shopId: shop.id, productGid },
+      _max: { remoteUpdatedAt: true },
+    })
+  )._max.remoteUpdatedAt;
+  const staleDelivery = !!(remoteUpdatedAt && newestApplied && newestApplied > remoteUpdatedAt);
   const currency = await currencyFor(shop.id);
 
   // Asked of Shopify before any variant is mirrored, so the enrolment below never sees
@@ -187,7 +204,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // payload cannot say -- no `variant_gids`, and a `variants` list at the detail limit or
   // empty -- nothing is tombstoned. A missed removal costs a failed write that says
   // "deleted"; a wrong one leaves prices on sale that no revert will touch.
-  const stillThere = variantsStillOnProduct(product);
+  //
+  // Nor does a delivery older than what the mirror already holds: it lists the product as
+  // it was, so a variant added since is "missing" from it and a variant deleted since is
+  // "present" (#730).
+  const stillThere = staleDelivery ? null : variantsStillOnProduct(product);
   if (stillThere) {
     const removed = await prisma.variantIndex.updateMany({
       where: {
@@ -197,8 +218,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         variantGid: { notIn: [...stillThere] },
       },
       // Tombstoned, never deleted: ledger rows still reference these variants and have
-      // to stay resolvable when a campaign reverts.
-      data: { deletedAt: new Date(), syncedAt: new Date() },
+      // to stay resolvable when a campaign reverts. Stamped with the version that removed
+      // them, so the per-variant guard keeps an older delivery from reviving them.
+      data: { deletedAt: new Date(), syncedAt: new Date(), ...(remoteUpdatedAt ? { remoteUpdatedAt } : {}) },
     });
 
     if (removed.count > 0) {
@@ -208,6 +230,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         tombstoned: removed.count,
       });
     }
+  } else if (staleDelivery) {
+    logger.info("product webhook older than the mirror; tombstoning skipped", {
+      shop: shop.domain,
+      productGid,
+    });
   } else if (seenVariantGids.length > 0) {
     logger.info("product webhook does not list every variant; tombstoning skipped", {
       shop: shop.domain,
