@@ -15,6 +15,7 @@ import {
   type Transition,
 } from "../lib/scheduling/window";
 import { runCampaign } from "./campaigns/run.server";
+import type { RunOutcome } from "./campaigns/types";
 import { nextAttemptKey } from "../lib/scheduling/attempts";
 import type { CampaignState } from "../lib/lifecycle/transitions";
 import { adminClientForShop } from "./admin-client.server";
@@ -41,6 +42,8 @@ export interface TickResult {
   audited: number;
   /** Operator alerts delivered this tick. Not merchant notifications. */
   alerts: number;
+  /** Due transitions refused before they started: awaiting approval, over a limit. */
+  refused: number;
   failures: Array<{ campaignId: string; error: string }>;
 }
 
@@ -60,6 +63,7 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
     digests: 0,
     audited: 0,
     alerts: 0,
+    refused: 0,
     failures: [],
   };
 
@@ -124,7 +128,7 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
     await beat(new Date());
 
     try {
-      await runTransition(
+      const outcome = await runTransition(
         campaign.shop.id,
         campaign.shop.domain,
         campaign.id,
@@ -134,7 +138,11 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
         // index turns the second into a no-op rather than a second apply.
         occurrenceKey,
       );
-      if (transition === "apply") {
+      // Refused before it started, and released back to SCHEDULED: nothing was applied,
+      // and counting it as applied made a stuck campaign look like a working tick.
+      if (outcome?.refused) {
+        result.refused++;
+      } else if (transition === "apply") {
         result.applied++;
         transitioned.add(campaign.id);
       } else {
@@ -282,7 +290,7 @@ async function runTransition(
   campaignId: string,
   transition: Transition,
   occurrenceKey: string,
-): Promise<void> {
+): Promise<RunOutcome | null> {
   const client = await adminClientForShop(shopDomain);
   if (!client) throw new Error(`No usable session for ${shopDomain}`);
 
@@ -305,9 +313,9 @@ async function runTransition(
     data: { status: transition === "apply" ? "APPLYING" : "REVERTING" },
   });
 
-  if (claimed.count === 0) return; // someone else took it
+  if (claimed.count === 0) return null; // someone else took it
 
-  await runCampaign(shopId, campaignId, client, {
+  return runCampaign(shopId, campaignId, client, {
     revert: transition === "revert",
     occurrenceKey,
     claimedFrom: before?.status as CampaignState | undefined,

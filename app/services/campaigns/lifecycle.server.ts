@@ -36,6 +36,8 @@ export interface TransitionOptions {
   reason: string;
   actor?: string;
   runId?: string;
+  /** Skip the audit entry when the last one gave this same reason (`releaseClaim` only). */
+  quietIfRepeated?: boolean;
 }
 
 /**
@@ -153,12 +155,22 @@ export async function releaseClaim(
 
   if (updated.count === 0) return { changed: false, from, to };
 
-  await recordTransition(shopId, campaignId, from, to, {
-    ...options,
-    reason: `claim released without running: ${options.reason}`,
-  });
+  const reason = `claim released without running: ${options.reason}`;
+  if (!(options.quietIfRepeated && (await lastTransitionReason(shopId, campaignId)) === reason)) {
+    await recordTransition(shopId, campaignId, from, to, { ...options, reason });
+  }
 
   return { changed: true, from, to };
+}
+
+/** The reason on this campaign's most recent recorded transition. */
+async function lastTransitionReason(shopId: string, campaignId: string): Promise<string | undefined> {
+  const last = await prisma.auditLogEntry.findFirst({
+    where: { shopId, entity: "Campaign", entityId: campaignId, action: "campaign.transition" },
+    orderBy: { createdAt: "desc" },
+    select: { after: true },
+  });
+  return (last?.after as { reason?: string } | null)?.reason;
 }
 
 /**
