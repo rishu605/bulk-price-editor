@@ -19,6 +19,10 @@
  *   With no key configured it does nothing at all, visibly. Local development and a
  *   first deploy have no key, and an app that refused to start would be worse than one
  *   that says plainly it is storing tokens in the clear.
+ *
+ * Both tokens, not only the access token (#707). With expiring offline tokens the
+ * refresh token is the longer-lived credential of the two: a dump holding it in the clear
+ * could mint fresh access tokens long after every access token in it had expired.
  */
 
 import type { Session } from "@shopify/shopify-api";
@@ -44,7 +48,7 @@ export class EncryptedSessionStorage implements SessionStorage {
     // Encrypted on a copy. Mutating the caller's session would leave the running
     // request holding ciphertext where it expects a token, and the failure would
     // surface as an authentication error a long way from here.
-    return this.inner.storeSession(this.mapToken(session, (token) => encryptToken(token, this.secret!)));
+    return this.inner.storeSession(this.mapTokens(session, (token) => encryptToken(token, this.secret!)));
   }
 
   async loadSession(id: string): Promise<Session | undefined> {
@@ -66,36 +70,39 @@ export class EncryptedSessionStorage implements SessionStorage {
   }
 
   private decrypt(session: Session): Session {
-    if (!session.accessToken) return session;
+    return this.mapTokens(session, (token) => this.open(token, session.shop));
+  }
 
+  /** One stored token, as plaintext. */
+  private open(token: string, shop: string): string {
     // A row written before encryption was switched on. Read as-is and re-encrypted the
     // next time the library saves it, so the table converts itself without a migration
     // window.
-    if (!isEncrypted(session.accessToken)) return session;
+    if (!isEncrypted(token)) return token;
 
     if (!this.secret) {
       this.warnOnce();
-      // Encrypted rows and no key: the token cannot be recovered here. Returning the
-      // session with no token surfaces as NO_SESSION — "reinstall the app" — rather
-      // than as ciphertext being sent to Shopify and rejected as an invalid key, which
-      // reads like a misconfigured app and sends you looking in the wrong place.
-      return this.mapToken(session, () => "");
+      // Encrypted rows and no key: the token cannot be recovered here. Returning no token
+      // surfaces as NO_SESSION — "reinstall the app" — rather than as ciphertext being
+      // sent to Shopify and rejected as an invalid key, which reads like a misconfigured
+      // app and sends you looking in the wrong place.
+      return "";
     }
 
-    const plaintext = decryptToken(session.accessToken, this.secret);
+    const plaintext = decryptToken(token, this.secret);
     if (plaintext === null) {
-      logger.warn("session token could not be decrypted", { shop: session.shop });
-      return this.mapToken(session, () => "");
+      logger.warn("session token could not be decrypted", { shop });
+      return "";
     }
-
-    return this.mapToken(session, () => plaintext);
+    return plaintext;
   }
 
-  /** Returns a copy of the session with its token replaced. */
-  private mapToken(session: Session, map: (token: string) => string): Session {
+  /** Returns a copy of the session with each token it carries replaced. */
+  private mapTokens(session: Session, map: (token: string) => string): Session {
     const copy = Object.create(Object.getPrototypeOf(session)) as Session;
     Object.assign(copy, session);
-    copy.accessToken = map(session.accessToken ?? "");
+    if (session.accessToken) copy.accessToken = map(session.accessToken);
+    if (session.refreshToken) copy.refreshToken = map(session.refreshToken);
     return copy;
   }
 

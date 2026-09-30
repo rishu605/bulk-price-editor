@@ -12,7 +12,6 @@
  */
 
 import prisma from "../db.server";
-import { logger } from "../lib/logging/logger";
 import { adminClientForShop } from "../services/admin-client.server";
 import type { JobRef, QueueName } from "./queues";
 
@@ -54,11 +53,11 @@ async function runCampaignJob(ref: JobRef): Promise<void> {
   // are gone and writing to it would fail in a way that reads like an outage.
   if (!shop || shop.uninstalledAt) return;
 
+  // Thrown, not logged and returned: a job that returns has succeeded as far as the queue
+  // is concerned, so a queued apply or revert with no client used to vanish with its
+  // job marked done (#707). Now it fails where the queue's own failure handling sees it.
   const client = await adminClientForShop(shop.domain);
-  if (!client) {
-    logger.warn("no usable session for queued run", { shopId: ref.shopId });
-    return;
-  }
+  if (!client) throw new Error(`No usable session for ${shop.domain}; the run did not start.`);
 
   const { runCampaign } = await import("../services/campaigns/run.server");
   await runCampaign(ref.shopId, ref.campaignId, client, { revert: ref.revert === true });

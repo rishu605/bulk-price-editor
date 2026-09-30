@@ -21,6 +21,7 @@ import type { CampaignState } from "../lib/lifecycle/transitions";
 import { adminClientForShop } from "./admin-client.server";
 import { claimEnrollment, pendingEnrollments } from "./auto-enroll.server";
 import { reclaimStaleRuns } from "./campaigns/reaper.server";
+import { noteCampaign } from "./campaigns/lifecycle.server";
 import { beat } from "./scheduler-heartbeat.server";
 import { checkAlerts } from "./alerting.server";
 import { sendDueDigests } from "./digest.server";
@@ -260,18 +261,28 @@ async function drainEnrollments(
   const pending = await pendingEnrollments();
 
   for (const entry of pending) {
-    // Claiming clears the mark. Another worker that got there first returns false,
-    // which is the whole point -- two workers must not re-apply the same campaign.
-    if (!(await claimEnrollment(entry.id))) continue;
-
     // A campaign whose window transition already ran in this same tick has just been
     // priced from scratch, and that run covered the new variants too. Clearing the
     // mark without a second run is correct, not a shortcut.
-    if (alreadyRun.has(entry.id)) continue;
+    if (alreadyRun.has(entry.id)) {
+      await claimEnrollment(entry.id);
+      continue;
+    }
+
+    // The client before the claim. Claiming clears the mark, and clearing it for a run
+    // that then could not start -- no session -- dropped the newly enrolled variants for
+    // good (#707). Without a client the mark stays, and the next tick asks again.
+    const client = await adminClientForShop(entry.shopDomain);
+    if (!client) {
+      result.failures.push({ campaignId: entry.id, error: `No usable session for ${entry.shopDomain}` });
+      continue;
+    }
+
+    // Another worker that got there first returns false, which is the whole point --
+    // two workers must not re-apply the same campaign.
+    if (!(await claimEnrollment(entry.id))) continue;
 
     try {
-      const client = await adminClientForShop(entry.shopDomain);
-      if (!client) throw new Error(`No usable session for ${entry.shopDomain}`);
 
       await runCampaign(entry.shopId, entry.id, client, {});
       result.enrolled++;
@@ -292,7 +303,17 @@ async function runTransition(
   occurrenceKey: string,
 ): Promise<RunOutcome | null> {
   const client = await adminClientForShop(shopDomain);
-  if (!client) throw new Error(`No usable session for ${shopDomain}`);
+  if (!client) {
+    // Before any claim, so the campaign keeps its state and the next tick tries again --
+    // but said on the campaign, once, rather than only in a tick log.
+    await noteCampaign(
+      shopId,
+      campaignId,
+      `Couldn't ${transition === "apply" ? "start" : "end"} on schedule: Anchor lost access to ` +
+        `your store. Open Anchor in your Shopify admin to reconnect; the schedule resumes on its own.`,
+    );
+    throw new Error(`No usable session for ${shopDomain}`);
+  }
 
   // Claim the campaign before running. Two ticks overlapping — a slow run, a second
   // worker that briefly held the lock — would otherwise both start the same
