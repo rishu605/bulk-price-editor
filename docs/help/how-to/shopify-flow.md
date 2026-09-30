@@ -30,10 +30,11 @@ Flow asks Anchor to do something.
 Each action does exactly what the equivalent button does. An action that could start a
 campaign the app would have refused would be a way round every safety feature in it.
 
-**Capturing baselines is refused while a campaign is running.** In the app you have to
-type a confirmation to do that, because it records sale prices as normal prices and every
-future discount then comes off the discounted number. An automation cannot read a warning,
-so it is refused rather than confirmed on your behalf.
+**Capturing baselines is refused while any campaign's prices may be on your store** —
+running, on hold after a price was edited elsewhere, part-applied, or part-way through
+ending. In the app you have to type a confirmation to do that, because it records sale
+prices as normal prices and every future discount then comes off the discounted number. An
+automation cannot read a warning, so it is refused rather than confirmed on your behalf.
 
 ## A worked example
 

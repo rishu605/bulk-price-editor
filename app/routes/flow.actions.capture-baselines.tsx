@@ -15,6 +15,7 @@ import type { ActionFunctionArgs } from "react-router";
 
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
+import { PRICES_MAY_BE_LIVE } from "../lib/lifecycle/transitions";
 import { planRecapture, recapture } from "../services/recapture.server";
 import { logger } from "../lib/logging/logger";
 
@@ -27,8 +28,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   });
   if (!shop) return new Response("Unknown shop", { status: 404 });
 
+  // HELD and REVERTING count (#708): drift holds a campaign with its sale prices still
+  // live, and a revert in progress has not taken them all down yet.
   const running = await prisma.campaign.count({
-    where: { shopId: shop.id, status: { in: ["ACTIVE", "APPLYING", "PARTIAL"] } },
+    where: { shopId: shop.id, status: { in: [...PRICES_MAY_BE_LIVE] } },
   });
 
   if (running > 0) {
