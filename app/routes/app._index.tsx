@@ -293,8 +293,11 @@ export const action = withGuard("/app", async ({ request }: ActionFunctionArgs) 
       },
     });
 
+    // The market sync's refusals too: it was the one that went silent when a stranded
+    // bulk record blocked it, while the banner said the sync had worked (#733).
+    const problems = [...sync.errors, ...markets.errors];
     return {
-      ok: sync.errors.length === 0,
+      ok: problems.length === 0,
       // Built in `sync-message`, which is where the grouping and the units live. This
       // was the one place on Home that interpolated raw numbers, so the banner said
       // "3669" two inches above a tile saying "3,669". See #617.
@@ -307,7 +310,7 @@ export const action = withGuard("/app", async ({ request }: ActionFunctionArgs) 
         relative: markets.relative,
         entries: markets.entries,
       }),
-      errors: sync.errors.slice(0, 5),
+      errors: problems.slice(0, 5),
     };
   }
 

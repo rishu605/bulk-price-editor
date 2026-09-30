@@ -30,6 +30,7 @@ import { isFixedOrigin, toBasisPoints } from "../lib/markets/adjustment";
 import { parseMoney } from "../lib/money/money";
 import { isThrottledError, withRetry } from "../lib/shopify/budget";
 import { currentTopology, recordTopologyChanges } from "./markets-topology.server";
+import { bulkOperationInFlight } from "./catalog-bulk-sync.server";
 
 export const PRICE_LISTS_QUERY = `#graphql
   query AnchorPriceLists($cursor: String) {
@@ -176,10 +177,9 @@ export async function syncMarkets(
   // because a caller that forgot would silently get "nothing changed" for ever.
   const before = await currentTopology(shopId);
 
-  const running = await prisma.bulkOperationRecord.findFirst({
-    where: { shopId, status: { in: ["CREATED", "RUNNING"] } },
-    select: { shopifyGid: true },
-  });
+  // The same question the catalogue sync asks, including retiring a record a crashed
+  // poll left "running" -- which otherwise stopped market mirroring for good (#733).
+  const running = await bulkOperationInFlight(shopId);
   if (running) {
     result.errors.push(
       "A catalogue sync is already running for this shop. Market prices are mirrored " +
