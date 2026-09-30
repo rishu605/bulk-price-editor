@@ -15,13 +15,13 @@
  */
 
 import { parseMoney, type Money } from "../money/money";
-import type { RawRow } from "./csv-rows";
+import { inAnotherCurrency, type RawRow } from "./csv-rows";
 
 export interface ValidCostRow extends RawRow {
   parsedCost: Money;
 }
 
-export type CostProblem = "no-identifier" | "no-cost" | "cost-unparseable" | "cost-negative";
+export type CostProblem = "no-identifier" | "no-cost" | "cost-unparseable" | "cost-negative" | "currency-not-shop";
 
 export interface InvalidCostRow extends RawRow {
   problem: CostProblem;
@@ -34,6 +34,8 @@ const REASONS: Record<CostProblem, string> = {
   "cost-unparseable":
     "Cost is not a plain number. Remove currency symbols and thousands separators — 12.50, not $12.50.",
   "cost-negative": "Cost cannot be negative.",
+  // Replaced by `inAnotherCurrency`, which names both currencies.
+  "currency-not-shop": "This row is in a currency other than your store's.",
 };
 
 export function validateCostRow(
@@ -51,7 +53,13 @@ export function validateCostRow(
   const raw = (row.cost ?? "").trim();
   if (!raw) return fail("no-cost");
 
-  const currency = (row.currency || shopCurrency).toUpperCase();
+  // A cost is stored as an amount in the store's currency, with no currency of its own,
+  // so a row in another currency became that many minor units of the store's: JPY 2,500
+  // recorded as $25.00 (#734).
+  const currency = (row.currency?.trim() || shopCurrency).toUpperCase();
+  if (currency !== shopCurrency.toUpperCase()) {
+    return { ...row, problem: "currency-not-shop", reason: inAnotherCurrency(currency, shopCurrency.toUpperCase(), "costs") };
+  }
 
   let parsedCost: Money;
   try {

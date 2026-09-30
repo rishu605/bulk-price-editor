@@ -211,7 +211,9 @@ export type ResolutionReason =
    * in another -- a $20 rule on a Japan market. Never converted and never relabelled: that
    * wrote ¥20 on a ¥3,000 product and verified it clean (#692). The row is left alone.
    */
-  | "currency-mismatch";
+  | "currency-mismatch"
+  /** The stored baseline is in another currency than the price it would replace (#734). */
+  | "baseline-currency";
 
 export interface Resolution {
   /** The price to write. Absent when nothing should be written. */

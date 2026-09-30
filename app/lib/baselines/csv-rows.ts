@@ -40,7 +40,8 @@ export type RowProblem =
   | "price-unparseable"
   | "price-not-positive"
   | "compare-at-unparseable"
-  | "compare-at-not-above-price";
+  | "compare-at-not-above-price"
+  | "currency-not-shop";
 
 export interface InvalidRow extends RawRow {
   problem: RowProblem;
@@ -58,14 +59,32 @@ const REASONS: Record<RowProblem, string> = {
   "compare-at-unparseable": "Compare-at price is not a plain number.",
   "compare-at-not-above-price":
     "Compare-at must be higher than the price, or the storefront shows a strike-through that reads as a price increase.",
+  // Replaced by `inAnotherCurrency`, which names both currencies.
+  "currency-not-shop": "This row is in a currency other than your store's.",
 };
+
+/**
+ * Why a row in another currency is refused, naming both (#734).
+ *
+ * A baseline is the variant's base price, which is in the store's currency. A row in
+ * another one was parsed in that currency and written unconverted -- JPY 2,500 became
+ * $2,500.00 on a $20 T-shirt -- and there is no market here for it to belong to instead.
+ * Converting would be a guess at an exchange rate the merchant never chose.
+ */
+export function inAnotherCurrency(rowCurrency: string, shopCurrency: string, what: string): string {
+  return (
+    `This row is in ${rowCurrency}, but ${what} on this store are in ${shopCurrency}, and nothing is converted. ` +
+    `Give the ${shopCurrency} amount, or leave the currency column empty. A market's own prices are set on that market in Shopify.`
+  );
+}
 
 /**
  * Validates one row.
  *
- * Currency comes from the row where given and from the shop otherwise, because
- * precision is currency-specific: "1200.50" is three decimals too many for JPY and
- * exactly right for USD, and getting that wrong writes a baseline a hundred times off.
+ * Prices are in the shop's currency. A currency column is accepted only when it agrees
+ * with the shop's (#734); precision still comes from that currency, because "1200.50" is
+ * three decimals too many for JPY and exactly right for USD, and getting that wrong
+ * writes a baseline a hundred times off.
  */
 export function validateRow(row: RawRow, shopCurrency: string): ValidRow | InvalidRow {
   const fail = (problem: RowProblem): InvalidRow => ({ ...row, problem, reason: REASONS[problem] });
@@ -74,6 +93,9 @@ export function validateRow(row: RawRow, shopCurrency: string): ValidRow | Inval
   if (!row.price?.trim()) return fail("no-price");
 
   const currency = (row.currency?.trim() || shopCurrency).toUpperCase();
+  if (currency !== shopCurrency.toUpperCase()) {
+    return { ...row, problem: "currency-not-shop", reason: inAnotherCurrency(currency, shopCurrency.toUpperCase(), "base prices") };
+  }
 
   let parsedPrice: Money;
   try {

@@ -145,15 +145,25 @@ export async function loadCandidates(
     const baseline = baselineBy.get(variant.variantGid);
     if (!baseline) continue;
 
-    const currency = baseline.currency || variant.currency || "USD";
+    // The surface's currency is the variant's; the baseline keeps its own. They used to be
+    // one value taken from the baseline first, so a baseline recorded in another currency
+    // relabelled the surface to match and the planner's currency backstop never fired:
+    // a JPY 2,500 baseline was discounted and written to a USD price as $2,000 (#734). Kept
+    // apart, such a row resolves in the baseline's currency, which is not the surface's,
+    // and the planner leaves it alone, visibly.
+    const currency = variant.currency || baseline.currency || "USD";
+    const baselineCurrency = baseline.currency || currency;
     const entry = entryBy.get(variant.variantGid);
 
     const asMoney = (value: bigint | null | undefined): Money | undefined =>
       value === null || value === undefined ? undefined : money(Number(value), currency);
+    const inBaselineCurrency = (value: bigint | null | undefined): Money | undefined =>
+      value === null || value === undefined ? undefined : money(Number(value), baselineCurrency);
 
     const base: Baseline = {
-      price: money(Number(baseline.basePrice), currency),
-      compareAtPrice: asMoney(baseline.baseCompareAt),
+      price: money(Number(baseline.basePrice), baselineCurrency),
+      compareAtPrice: inBaselineCurrency(baseline.baseCompareAt),
+      // Costs are recorded in the store's currency, which is the surface's.
       cost: asMoney(baseline.cost ?? variant.cost),
     };
 

@@ -139,7 +139,10 @@ export function planRun(input: PlanInput): PlanOutcome {
         beforeCompareAt: candidate.liveCompareAt,
         intendedCompareAtSet: false,
         status: "skipped",
-        reason: "currency-mismatch",
+        // Said the way the merchant can act on it: a baseline stored in another currency
+        // is fixed by importing it again, not by changing the rule (#734).
+        reason:
+          candidate.baseline.price.currency !== candidate.ref.currency ? "baseline-currency" : "currency-mismatch",
         campaignId: resolution.meta.controlledBy,
       });
       continue;

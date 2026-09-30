@@ -26,11 +26,20 @@ describe("reading a cost from a row", () => {
     if (isValidCost(result)) expect(result.parsedCost.amount).toBe(1250);
   });
 
-  it("uses the row's own currency when it names one", () => {
-    // Precision is currency-specific. "1250" is ¥1,250 and $12.50, and taking the
-    // shop's currency for a row that named another is off by a factor of a hundred.
-    const result = validateCostRow(row({ cost: "1250", currency: "JPY" }), "USD");
+  it("refuses a row in another currency, naming both (#734)", () => {
+    // A cost is stored as an amount in the store's currency. "2500" read as yen and stored
+    // as an amount became $25.00 -- a cost off by the exchange rate, silently.
+    const result = validateCostRow(row({ cost: "2500", currency: "JPY" }), "USD");
 
+    expect(isValidCost(result)).toBe(false);
+    if (!isValidCost(result)) {
+      expect(result.problem).toBe("currency-not-shop");
+      expect(result.reason).toMatch(/in JPY, but costs on this store are in USD/);
+    }
+  });
+
+  it("accepts a currency column that agrees with the store, in any case", () => {
+    const result = validateCostRow(row({ cost: "12.50", currency: "usd" }), "USD");
     expect(isValidCost(result) && result.parsedCost.amount).toBe(1250);
   });
 
