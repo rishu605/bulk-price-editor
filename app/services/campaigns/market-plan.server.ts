@@ -25,7 +25,9 @@ import { uniformAdjustment } from "../../lib/markets/uniform";
 import { money, parseMoney, type Money } from "../../lib/money/money";
 import { planRun } from "../../lib/planning/plan";
 import type { PlanOutcome } from "../../lib/planning/types";
-import type { Guardrails, ResolvableCampaign } from "../../lib/pricing/types";
+import type { ResolvableCampaign } from "../../lib/pricing/types";
+import { marketGuardrails } from "../../lib/markets/guardrails";
+import { guardrailsFor, shopCurrency } from "../settings.server";
 import { inChunks } from "../../lib/db/chunk";
 
 export interface MarketList {
@@ -48,6 +50,12 @@ export interface MarketPlan {
   list: MarketList;
   baselines: Map<string, Money>;
   outcome: PlanOutcome;
+  /**
+   * The market is priced in the store's own currency, so recorded costs and the store's
+   * minimum price apply to it as they do to the base price. In any other currency they
+   * cannot be checked, and a cost-based guardrail leaves the market's rows alone.
+   */
+  inStoreCurrency: boolean;
 }
 
 /**
@@ -84,14 +92,19 @@ export async function planMarket(
   variantGids: readonly string[],
   campaigns: readonly ResolvableCampaign[],
   client: AdminClient,
-  storeGuardrails?: Guardrails,
 ): Promise<MarketPlan | null> {
   const baselines = await marketBaselines(shopId, list, [...variantGids], client);
   if (baselines.size === 0) return null;
 
+  const inStoreCurrency = list.currency === (await shopCurrency(shopId));
+  const costs = inStoreCurrency ? await recordedCosts(shopId, list.currency, [...baselines.keys()]) : new Map();
+
   const outcome = planRun({
     campaigns: [...campaigns],
-    storeGuardrails,
+    // Read here rather than handed in, so no caller can plan a market without them. The
+    // run passed them and the preview did not, and a preview that shows a market priced
+    // while the run skips it breaks rule 4 (#691).
+    storeGuardrails: marketGuardrails(await guardrailsFor(shopId), list.currency),
     candidates: [...baselines].map(([variantGid, baseline]) => ({
       ref: {
         variantGid,
@@ -99,7 +112,10 @@ export async function planMarket(
         priceListGid: list.priceListGid,
         currency: baseline.currency,
       },
-      baseline: { price: baseline },
+      // A cost is recorded in the store's currency only. A market in that currency can
+      // be checked against it like the base price; in any other, a cost-based guardrail
+      // has nothing to compare with and leaves the row alone (#691).
+      baseline: { price: baseline, cost: costs.get(variantGid) },
       // No mirrored live value for a relative list, and for a fixed one the stored
       // price is the baseline. Leaving it undefined means the planner writes rather
       // than deciding a row is already correct on evidence it does not have.
@@ -107,7 +123,37 @@ export async function planMarket(
     })),
   });
 
-  return { shopId, list, baselines, outcome };
+  return { shopId, list, baselines, outcome, inStoreCurrency };
+}
+
+/** Each variant's recorded cost, the way the base surface reads it: baseline first, then mirror. */
+async function recordedCosts(
+  shopId: string,
+  currency: string,
+  variantGids: string[],
+): Promise<Map<string, Money>> {
+  const [baselines, variants] = await Promise.all([
+    inChunks(variantGids, (batch) =>
+      prisma.baseline.findMany({
+        where: { shopId, supersededAt: null, surfaceKind: "BASE", variantGid: { in: batch } },
+        select: { variantGid: true, cost: true, currency: true },
+      }),
+    ),
+    inChunks(variantGids, (batch) =>
+      prisma.variantIndex.findMany({
+        where: { shopId, variantGid: { in: batch } },
+        select: { variantGid: true, cost: true, currency: true },
+      }),
+    ),
+  ]);
+
+  const out = new Map<string, Money>();
+  for (const row of [...variants, ...baselines]) {
+    if (row.cost === null || (row.currency && row.currency !== currency)) continue;
+    // Baselines last, so a baseline's cost wins over the mirror's, as it does on the base.
+    out.set(row.variantGid, money(Number(row.cost), currency));
+  }
+  return out;
 }
 
 export type MarketPathDecision =
