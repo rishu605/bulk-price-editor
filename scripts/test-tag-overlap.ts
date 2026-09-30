@@ -1,11 +1,14 @@
 #!/usr/bin/env tsx
 /**
- * Two overlapping sales sharing a kit tag, against the real store (#686).
+ * Overlapping sales and their storefront tags, against the real store.
  *
- * The ordinary order is first on, first off. The second sale finds the tag already on
- * the product because the first sale put it there; ending the first must leave the
- * badge on a product the second is still discounting, and ending the second must take
- * it off. A tag the merchant had before either sale must survive both.
+ * #686 — first on, first off. The second sale finds the tag already on the product
+ * because the first sale put it there; ending the first must leave the badge on a
+ * product the second is still discounting, and ending the second must take it off. A
+ * tag the merchant had before either sale must survive both.
+ *
+ * #687 — a sale underneath a higher one wins no variants, so it tags nothing. Ending the
+ * higher one hands its prices over, and the lower sale's badge must come with them.
  *
  *   npx tsx scripts/test-tag-overlap.ts --shop boltify-apps.myshopify.com
  */
@@ -18,6 +21,8 @@ import { runCampaign } from "../app/services/campaigns/run.server";
 
 const SCOPE = "anchor-tag-overlap-test";
 const KIT = "QA686";
+const HIGH_KIT = "QA687-FLASH";
+const LOW_KIT = "QA687-CLEARANCE";
 let failures = 0;
 
 type Client = NonNullable<Awaited<ReturnType<typeof adminClientForShop>>>;
@@ -47,7 +52,7 @@ async function main() {
   for (const probe of [plain, merchants]) await mirror(shop.id, probe);
 
   const campaigns: string[] = [];
-  const make = async (name: string, priority: number, percent: number) => {
+  const make = async (name: string, priority: number, percent: number, kit = KIT) => {
     const created = await createCampaign(shop.id, {
       name: `${name} ${Date.now()}`,
       priority,
@@ -56,7 +61,7 @@ async function main() {
       rounding: { default: "none", byCurrency: {} },
       ast: { groups: [{ conditions: [{ field: "tag", value: SCOPE }] }] },
       schedule: { kind: "manual" },
-      tagKit: [KIT],
+      tagKit: [kit],
     });
     campaigns.push(created.id);
     return created.id;
@@ -83,6 +88,26 @@ async function main() {
     await runCampaign(shop.id, second, client, { revert: true, verifySampleRate: 1 });
     check("plain product loses QA686", await hasTag(client, plain.productGid), false);
     check("merchant's QA686 still kept", await hasTag(client, merchants.productGid), true);
+
+    console.log("4. a higher sale over a lower one, then the higher one ends");
+    const high = await make("Tag takeover high", 970, -30, HIGH_KIT);
+    const low = await make("Tag takeover low", 940, -10, LOW_KIT);
+    await runCampaign(shop.id, high, client, { verifySampleRate: 1 });
+    await runCampaign(shop.id, low, client, { verifySampleRate: 1 });
+    check("high sale's badge on", await hasTag(client, plain.productGid, HIGH_KIT), true);
+    check("low sale wins nothing yet", await hasTag(client, plain.productGid, LOW_KIT), false);
+    check("price is the high sale's", await priceOf(client, plain.variantGid), "140.00");
+
+    await runCampaign(shop.id, high, client, { revert: true, verifySampleRate: 1 });
+    check("price handed to the low sale", await priceOf(client, plain.variantGid), "180.00");
+    check("high sale's badge off", await hasTag(client, plain.productGid, HIGH_KIT), false);
+    check("low sale's badge on", await hasTag(client, plain.productGid, LOW_KIT), true);
+
+    await runCampaign(shop.id, low, client, { revert: true, verifySampleRate: 1 });
+    // Not "back to 200.00": another live campaign on the store can still leak onto the
+    // probe (#752). What this step owns is that the low sale's own price is gone.
+    check("low sale's price gone", (await priceOf(client, plain.variantGid)) !== "180.00", true);
+    check("low sale's badge off", await hasTag(client, plain.productGid, LOW_KIT), false);
   } finally {
     for (const id of campaigns) await prisma.campaign.delete({ where: { id } }).catch(() => {});
     for (const probe of [plain, merchants]) {
@@ -154,12 +179,20 @@ async function mirror(shopId: string, probe: { productGid: string; variantGid: s
   });
 }
 
-async function hasTag(client: Client, productGid: string): Promise<boolean> {
+async function hasTag(client: Client, productGid: string, tag = KIT): Promise<boolean> {
   const result = (await client.request(
     `query TagOverlapTags($id: ID!) { product(id: $id) { tags } }`,
     { id: productGid },
   )) as { data: { product: { tags: string[] } | null } };
-  return (result.data.product?.tags ?? []).some((tag) => tag.toLowerCase() === KIT.toLowerCase());
+  return (result.data.product?.tags ?? []).some((t) => t.toLowerCase() === tag.toLowerCase());
+}
+
+async function priceOf(client: Client, variantGid: string): Promise<string | null> {
+  const result = (await client.request(
+    `query TagOverlapPrice($id: ID!) { productVariant(id: $id) { price } }`,
+    { id: variantGid },
+  )) as { data: { productVariant: { price: string } | null } };
+  return result.data.productVariant?.price ?? null;
 }
 
 async function stateOf(campaignId: string): Promise<string> {

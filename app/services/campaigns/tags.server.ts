@@ -111,6 +111,8 @@ export async function applyCampaignTags(
   productGids: string[],
   tagKit: string[],
   client: AdminClient,
+  /** A campaign that is ending, whose tags still count as another campaign's, not the merchant's. */
+  sharedWith?: string,
 ): Promise<TagOutcome> {
   const kit = tagKit.map((t) => t.trim()).filter(Boolean);
   if (kit.length === 0 || productGids.length === 0) {
@@ -118,7 +120,7 @@ export async function applyCampaignTags(
   }
 
   const current = await liveTags(client, productGids);
-  const claimedByOthers = await tagsOwedByOthers(shopId, campaignId);
+  const claimedByOthers = await tagsOwedByOthers(shopId, campaignId, sharedWith);
   const messages: string[] = [];
   let tagged = 0;
   let failed = 0;
@@ -244,6 +246,76 @@ async function verifyTags(client: AdminClient, runId: string): Promise<number> {
 }
 
 /**
+ * Applies the tag kit of each campaign a revert handed prices to.
+ *
+ * A campaign underneath a higher-priority one wins no variants while that one runs, so
+ * its apply tags nothing. When the higher one ends, the revert recomputes and writes the
+ * lower campaign's prices (rule 6) -- and without this, the lower sale runs the rest of
+ * its life at its own price with none of its badges (#687).
+ *
+ * Runs before the ending campaign's tags come off, and counts that campaign's tags as
+ * another campaign's rather than the merchant's. A kit tag both share is then claimed by
+ * the campaign taking over, owed, and left on: the badge never flickers off a product
+ * that is still on sale.
+ *
+ * Ledgered against the taking-over campaign's latest apply run, so its own revert takes
+ * the tags back. Products it already has tag rows for are left alone: it tagged them
+ * when it applied, and re-planning them would record its own tags as the merchant's.
+ */
+export async function applyTakeoverTags(
+  shopId: string,
+  endingCampaignId: string,
+  productsByWinner: ReadonlyMap<string, string[]>,
+  client: AdminClient,
+): Promise<TagOutcome> {
+  const total: TagOutcome = { products: 0, tagged: 0, failed: 0, leftAlone: 0, messages: [] };
+
+  for (const [winnerId, productGids] of productsByWinner) {
+    if (winnerId === endingCampaignId || productGids.length === 0) continue;
+
+    const winner = await prisma.campaign.findFirst({
+      where: { id: winnerId, shopId },
+      select: { tagKit: true },
+    });
+    if (!winner?.tagKit.length) continue;
+
+    const run = await prisma.campaignRun.findFirst({
+      where: { campaignId: winnerId, kind: "APPLY" },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    });
+    if (!run) continue;
+
+    const alreadyTagged = new Set(
+      (
+        await prisma.tagChange.findMany({
+          where: { shopId, campaignId: winnerId, status: { not: "REVERTED" } },
+          select: { productGid: true },
+        })
+      ).map((row) => row.productGid),
+    );
+    const untagged = productGids.filter((gid) => !alreadyTagged.has(gid));
+
+    const outcome = await applyCampaignTags(
+      shopId,
+      winnerId,
+      run.id,
+      untagged,
+      winner.tagKit,
+      client,
+      endingCampaignId,
+    );
+    total.products += outcome.products;
+    total.tagged += outcome.tagged;
+    total.failed += outcome.failed;
+    total.leftAlone += outcome.leftAlone;
+    total.messages.push(...outcome.messages);
+  }
+
+  return total;
+}
+
+/**
  * Removes every tag this campaign added, across all of its runs.
  *
  * Driven entirely by the ledger, never by the current tag kit. A merchant who edited
@@ -313,13 +385,18 @@ const LIVE_STATUSES: CampaignStatus[] = ["ACTIVE", "APPLYING", "PARTIAL", "HELD"
 async function tagsOwedByOthers(
   shopId: string,
   campaignId: string,
+  /** Counted whatever its status: a campaign mid-revert whose tags are being handed over. */
+  alsoCampaignId?: string,
 ): Promise<Map<string, Set<string>>> {
   const rows = await prisma.tagChange.findMany({
     where: {
       shopId,
       campaignId: { not: campaignId },
       status: { in: ["APPLIED", "VERIFIED"] },
-      run: { campaign: { status: { in: LIVE_STATUSES } } },
+      OR: [
+        { run: { campaign: { status: { in: LIVE_STATUSES } } } },
+        ...(alsoCampaignId ? [{ campaignId: alsoCampaignId }] : []),
+      ],
     },
     select: { productGid: true, addedTags: true },
   });
