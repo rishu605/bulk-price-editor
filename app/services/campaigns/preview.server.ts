@@ -19,6 +19,7 @@ import {
   planMarket,
   UnconvertedMarketError,
 } from "./market-plan.server";
+import { describeMarketSkips } from "../../lib/markets/guardrails";
 import { parseSurfaces } from "./market-surfaces.server";
 import type { AdminClient } from "../../lib/execution/sync-executor";
 import prisma from "../../db.server";
@@ -238,13 +239,19 @@ async function marketPathPreview(
     }
 
     const counts = plan.outcome.kind === "ok" ? plan.outcome.counts : { clamped: 0, skipped: 0 };
+    // The run's own sentences for what this market leaves at full price, so the review
+    // step names the reason the run will report rather than only a count (#691).
+    const skipNotes =
+      plan.outcome.kind === "ok"
+        ? describeMarketSkips(list.name, list.currency, plan.outcome.rows, plan.inStoreCurrency)
+        : [];
 
     previews.push({
       priceListGid: list.priceListGid,
       name: list.name,
       currency: list.currency,
       path: decision.path,
-      explanation: describePath(decision, list.name),
+      explanation: [describePath(decision, list.name), ...skipNotes].join(" "),
       clamped: counts.clamped,
       skipped: counts.skipped,
       refused: false,

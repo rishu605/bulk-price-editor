@@ -549,7 +549,6 @@ async function executeCampaignRun(
             resolvable,
             writable.map((row) => row.ref.variantGid),
             client,
-            storeGuardrails,
             refusedMarkets,
           );
 

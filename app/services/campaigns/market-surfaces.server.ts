@@ -43,7 +43,8 @@ import {
 } from "../../lib/execution/market-executor";
 import type { AdminClient } from "../../lib/execution/sync-executor";
 import type { QuantityTier } from "../../lib/pricing/quantity-breaks";
-import type { Guardrails, ResolvableCampaign } from "../../lib/pricing/types";
+import type { ResolvableCampaign } from "../../lib/pricing/types";
+import { describeMarketSkips } from "../../lib/markets/guardrails";
 import { logger } from "../../lib/logging/logger";
 import { metric } from "../../lib/telemetry/metrics";
 
@@ -215,7 +216,6 @@ export async function applyMarketSurfaces(
   campaigns: readonly ResolvableCampaign[],
   variantGids: readonly string[],
   client: AdminClient,
-  storeGuardrails?: Guardrails,
   refusedPriceListGids: readonly string[] = [],
 ): Promise<MarketSurfaceOutcome[]> {
   const campaign = await prisma.campaign.findUnique({
@@ -297,7 +297,7 @@ export async function applyMarketSurfaces(
     // on, and the merchant is told which market was skipped and why.
     let plan;
     try {
-      plan = await planMarket(shopId, list, variantGids, campaigns, client, storeGuardrails);
+      plan = await planMarket(shopId, list, variantGids, campaigns, client);
     } catch (error) {
       if (!(error instanceof UnconvertedMarketError)) throw error;
 
@@ -346,7 +346,33 @@ export async function applyMarketSurfaces(
         compareAt: row.intendedCompareAtSet ? (row.intendedCompareAt ?? null) : null,
       }));
 
-    if (rows.length === 0) continue;
+    // Said out loud, and recorded even when nothing is left to write. Filtering skipped
+    // rows out and moving on meant a store guardrail could take every row of a market
+    // out of the sale with no outcome and no message, and the run still read as clean
+    // (#691).
+    const skipNotes = describeMarketSkips(
+      priceListLabel(list),
+      list.currency,
+      outcome.rows,
+      plan.inStoreCurrency,
+    );
+
+    if (rows.length === 0) {
+      if (skipNotes.length > 0) {
+        outcomes.push({
+          priceListGid: list.priceListGid,
+          name: priceListLabel(list),
+          currency: list.currency,
+          verified: 0,
+          failed: 0,
+          chunks: 0,
+          messages: skipNotes,
+          path: "per-product",
+          pathReason: "every variant in this market was left at full price",
+        });
+      }
+      continue;
+    }
 
     // What this market already shows, before deciding to write anything.
     //
@@ -399,6 +425,7 @@ export async function applyMarketSurfaces(
         messages: [
           `${list.name}: already at the campaign's prices, because this market follows ` +
             `the base price. ${settled.size} verified, nothing written.`,
+          ...skipNotes,
         ],
         path: "market-wide",
         pathReason: "this market follows the base price and was already correct",
@@ -462,7 +489,7 @@ export async function applyMarketSurfaces(
         verified: wide.verified,
         failed: wide.failed,
         chunks: wide.corrected > 0 ? 2 : 1,
-        messages: wide.messages,
+        messages: [...wide.messages, ...skipNotes],
         path: "market-wide",
       });
       continue;
@@ -484,6 +511,7 @@ export async function applyMarketSurfaces(
     const summary = summarise(list, result);
     outcomes.push({
       ...summary,
+      messages: [...summary.messages, ...skipNotes],
       // Rows settled without a write count as verified — they were read back from Shopify
       // and matched, which is the same evidence a written row needs.
       verified: summary.verified + settled.size,
