@@ -27,7 +27,7 @@ import { releaseClaim, transitionCampaign } from "./lifecycle.server";
 import type { CampaignState } from "../../lib/lifecycle/transitions";
 import { SKIP_REASON_GROUP } from "../../lib/planning/reasons";
 import { planResume, type LedgerState } from "../../lib/execution/resume";
-import { applyCampaignTags, removeCampaignTags } from "./tags.server";
+import { applyCampaignTags, applyTakeoverTags, removeCampaignTags } from "./tags.server";
 import {
   applyMarketSurfaces,
   captureMarketBaselinesFirst,
@@ -740,21 +740,36 @@ async function syncTags(
     where: { id: campaignId },
     select: { tagKit: true },
   });
-  if (!campaign?.tagKit.length) return null;
 
   try {
     if (options.revert) {
       // Scoped reverts leave tags alone: one variant coming out of a sale does not
       // un-badge the product, whose other variants are still in it.
       if (options.variantGids) return null;
+
+      // Whoever now wins these variants gets its badges first, whether or not the
+      // ending campaign had a tag kit of its own (#687).
+      const handedOver = await applyTakeoverTags(
+        shopId,
+        campaignId,
+        productsByWinner(rows, products),
+        client,
+      );
       const outcome = await removeCampaignTags(shopId, campaignId, client);
-      return {
-        messages:
-          outcome.failed > 0
-            ? [`${outcome.failed} product(s) kept their campaign tags — see the run for why.`]
-            : [],
-      };
+
+      const notes: string[] = [];
+      if (outcome.failed > 0) {
+        notes.push(`${outcome.failed} product(s) kept their campaign tags — see the run for why.`);
+      }
+      if (handedOver.failed > 0) {
+        notes.push(
+          `${handedOver.failed} product(s) now priced by another campaign could not get its tags.`,
+        );
+      }
+      return { messages: notes };
     }
+
+    if (!campaign?.tagKit.length) return null;
 
     const productGids = [
       ...new Set(rows.map((row) => products.get(row.ref.variantGid)).filter((gid): gid is string => !!gid)),
@@ -790,6 +805,22 @@ async function syncTags(
       ],
     };
   }
+}
+
+/** The products a revert handed to each campaign still running, keyed by that campaign. */
+function productsByWinner(
+  rows: readonly PlannedRow[],
+  products: ReadonlyMap<string, string>,
+): Map<string, string[]> {
+  const out = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const productGid = products.get(row.ref.variantGid);
+    if (!row.campaignId || !productGid) continue;
+    const set = out.get(row.campaignId) ?? new Set<string>();
+    set.add(productGid);
+    out.set(row.campaignId, set);
+  }
+  return new Map([...out].map(([id, set]) => [id, [...set]]));
 }
 
 /** Prisma's unique-constraint violation, which here means somebody else got there first. */

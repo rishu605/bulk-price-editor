@@ -254,4 +254,166 @@ describe("chaos: the campaign tag kit", () => {
       },
     );
   });
+
+  it("badges the lower sale once the sale above it ends (#687)", async () => {
+    await withChaos(
+      "tag-kit-takeover",
+      { catalog: { products: 3, variantsPerProduct: 1 }, percent: -30, tagKit: ["FLASH"] },
+      async (chaos) => {
+        const { shopId } = chaos.fixture;
+        const productGids = [...new Set([...chaos.fixture.productOf.values()])];
+        const client = chaosAdminClient(chaos.server.endpoint());
+
+        // The merchant's own CLEARANCE on one product, before either sale.
+        const preTagged = productGids[0];
+        chaos.fake.addMerchantTag(preTagged, "clearance");
+
+        // --------------------------------- A (priority 900) on, then B underneath it
+        await chaos.apply();
+        const lower = await createCampaign(shopId, {
+          name: "chaos/tag-kit-takeover lower",
+          priority: 100,
+          rule: { kind: "percent-change", percent: -10 },
+          compareAtPolicy: { kind: "leave" },
+          rounding: { default: "none", byCurrency: {} },
+          ast: { groups: [{ conditions: [{ field: "tag", value: "chaos" }] }] },
+          schedule: { kind: "manual" },
+          tagKit: ["CLEARANCE"],
+        });
+        await runCampaign(shopId, lower.id, client, { verifySampleRate: 1 });
+
+        // B wins nothing while A is on, so it has nothing to badge yet.
+        for (const productGid of productGids.slice(1)) {
+          expect(has(chaos.fake.tagsOf(productGid), "CLEARANCE")).toBe(false);
+        }
+
+        // --------------------------- A off: its prices hand over to B, so do the badges
+        const reverted = await chaos.revert();
+        await chaos.expectHonest(reverted.runId);
+
+        for (const gid of chaos.fixture.variantGids) {
+          const baseline = chaos.fixture.baseline.get(gid)!;
+          expect(chaos.fake.priceOf(gid)).toBe(((baseline * 0.9) / 100).toFixed(2));
+        }
+        for (const productGid of productGids) {
+          const tags = chaos.fake.tagsOf(productGid);
+          expect(has(tags, "FLASH"), `${productGid} kept the ended sale's badge`).toBe(false);
+          expect(has(tags, "CLEARANCE"), `${productGid} is on B's price without B's badge`).toBe(
+            true,
+          );
+        }
+
+        // Ledgered against B, so B's own revert can take them back; the merchant's
+        // CLEARANCE is recorded as theirs, not B's.
+        const claims = await prisma.tagChange.findMany({ where: { campaignId: lower.id } });
+        expect(claims).toHaveLength(productGids.length);
+        for (const row of claims) {
+          expect(row.addedTags).toEqual(row.productGid === preTagged ? [] : ["CLEARANCE"]);
+        }
+
+        // ------------------------------------------------ B off: its badges come off
+        await runCampaign(shopId, lower.id, client, { revert: true, verifySampleRate: 1 });
+
+        for (const productGid of productGids.slice(1)) {
+          expect(has(chaos.fake.tagsOf(productGid), "CLEARANCE")).toBe(false);
+        }
+        expect(has(chaos.fake.tagsOf(preTagged), "CLEARANCE"), "the merchant's tag was removed").toBe(
+          true,
+        );
+      },
+    );
+  });
+
+  it("hands a shared badge over without taking it off first", async () => {
+    await withChaos(
+      "tag-kit-takeover-shared",
+      { catalog: { products: 2, variantsPerProduct: 1 }, percent: -30, tagKit: ["SALE"] },
+      async (chaos) => {
+        const { shopId } = chaos.fixture;
+        const productGids = [...new Set([...chaos.fixture.productOf.values()])];
+        const client = chaosAdminClient(chaos.server.endpoint());
+
+        await chaos.apply();
+        const lower = await createCampaign(shopId, {
+          name: "chaos/tag-kit-takeover-shared lower",
+          priority: 100,
+          rule: { kind: "percent-change", percent: -10 },
+          compareAtPolicy: { kind: "leave" },
+          rounding: { default: "none", byCurrency: {} },
+          ast: { groups: [{ conditions: [{ field: "tag", value: "chaos" }] }] },
+          schedule: { kind: "manual" },
+          tagKit: ["SALE"],
+        });
+        await runCampaign(shopId, lower.id, client, { verifySampleRate: 1 });
+
+        // Record every tag write, so a remove-then-add flicker is visible even though
+        // the end state would look the same.
+        const removals: string[] = [];
+        const original = chaos.fake.request.bind(chaos.fake);
+        chaos.fake.request = ((query: string, variables: Record<string, unknown> = {}) => {
+          if (query.includes("tagsRemove")) {
+            removals.push(...(variables.tags as string[]).map((tag) => `${variables.id}:${tag}`));
+          }
+          return original(query, variables);
+        }) as typeof chaos.fake.request;
+
+        await chaos.revert();
+
+        expect(removals, "SALE came off a product the next sale still badges").toEqual([]);
+        for (const productGid of productGids) {
+          expect(has(chaos.fake.tagsOf(productGid), "SALE")).toBe(true);
+        }
+
+        await runCampaign(shopId, lower.id, client, { revert: true, verifySampleRate: 1 });
+        for (const productGid of productGids) {
+          expect(has(chaos.fake.tagsOf(productGid), "SALE")).toBe(false);
+        }
+      },
+    );
+  });
+
+  it("keeps the lower sale's own claim on a product both sales priced", async () => {
+    await withChaos(
+      "tag-kit-takeover-partial",
+      { catalog: { products: 2, variantsPerProduct: 2 }, percent: -10, tagKit: ["CLEARANCE"] },
+      async (chaos) => {
+        const { shopId, variantGids, productOf } = chaos.fixture;
+        const client = chaosAdminClient(chaos.server.endpoint());
+
+        // The fixture campaign is the lower sale here, over everything.
+        await chaos.apply();
+
+        // A higher sale over one variant of the first product only.
+        const variant = variantGids[0];
+        const shared = productOf.get(variant)!;
+        const higher = await createCampaign(shopId, {
+          name: "chaos/tag-kit-takeover-partial higher",
+          priority: 1000,
+          rule: { kind: "percent-change", percent: -40 },
+          compareAtPolicy: { kind: "leave" },
+          rounding: { default: "none", byCurrency: {} },
+          ast: { groups: [{ conditions: [{ field: "title", value: variant }] }] },
+          schedule: { kind: "manual" },
+          tagKit: ["FLASH"],
+        });
+        await runCampaign(shopId, higher.id, client, { verifySampleRate: 1 });
+        expect(has(chaos.fake.tagsOf(shared), "FLASH")).toBe(true);
+
+        // The higher sale ends and hands its variant back to the lower one, which
+        // already badged this product when it applied.
+        await runCampaign(shopId, higher.id, client, { revert: true, verifySampleRate: 1 });
+        expect(has(chaos.fake.tagsOf(shared), "FLASH")).toBe(false);
+        expect(has(chaos.fake.tagsOf(shared), "CLEARANCE")).toBe(true);
+
+        // The lower sale ending must still take its badge back.
+        await chaos.revert();
+        for (const productGid of new Set(productOf.values())) {
+          expect(
+            has(chaos.fake.tagsOf(productGid), "CLEARANCE"),
+            `${productGid} kept the lower sale's badge after it ended`,
+          ).toBe(false);
+        }
+      },
+    );
+  });
 });
