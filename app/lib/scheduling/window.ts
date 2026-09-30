@@ -25,6 +25,12 @@ export type Schedule =
        * window the merchant advertised.
        */
       revertBufferMinutes?: number;
+      /**
+       * Sentences about a typed time the clocks skipped or repeated, and what was
+       * scheduled instead. Written once, when the times are converted, because the
+       * typed time is not recoverable from the UTC instant afterwards.
+       */
+      clockNotes?: string[];
     };
 
 export const DEFAULT_REVERT_BUFFER_MINUTES = 5;
@@ -63,6 +69,9 @@ export function parseSchedule(raw: unknown): Schedule {
       : undefined;
 
   const buffer = Number(value.revertBufferMinutes);
+  const clockNotes = Array.isArray(value.clockNotes)
+    ? value.clockNotes.filter((note): note is string => typeof note === "string")
+    : [];
 
   return {
     kind: "window",
@@ -71,6 +80,7 @@ export function parseSchedule(raw: unknown): Schedule {
     revertBufferMinutes: Number.isFinite(buffer) && buffer >= 0
       ? buffer
       : DEFAULT_REVERT_BUFFER_MINUTES,
+    ...(clockNotes.length > 0 ? { clockNotes } : {}),
   };
 }
 
@@ -127,7 +137,7 @@ export function effectiveBufferMs(schedule: Extract<Schedule, { kind: "window" }
 export function scheduleWarnings(schedule: Schedule): string[] {
   if (schedule.kind !== "window") return [];
 
-  const warnings: string[] = [];
+  const warnings: string[] = [...(schedule.clockNotes ?? [])];
   const start = Date.parse(schedule.startAt);
 
   if (schedule.endAt) {
@@ -227,19 +237,86 @@ export function joinDateAndTime(
 }
 
 export function localInputToUtc(value: string, timeZone: string): string | null {
+  return resolveLocalInput(value, timeZone)?.utc ?? null;
+}
+
+/**
+ * What a typed wall-clock time was, as the clocks in that zone saw it.
+ *
+ * - `exact`: it happens once.
+ * - `skipped`: the clocks jumped past it (spring forward). It is moved forward by the
+ *   jump, so 02:30 on a morning that goes from 02:00 to 03:00 becomes 03:30.
+ * - `ambiguous`: it happens twice (fall back). The first occurrence is taken.
+ *
+ * Both rules are P3.9's.
+ */
+export type LocalTimeKind = "exact" | "skipped" | "ambiguous";
+
+/**
+ * Converts a datetime-local value in `timeZone` to a UTC instant, and says which case it was.
+ *
+ * The offset has to be the one in force *at the instant being computed*. The first
+ * version looked it up at the typed wall-clock time read as if it were UTC -- up to the
+ * zone's whole offset away from the real instant -- so every time within that distance of
+ * a clock change was stored an hour off: a New York sale typed for 04:00 on 8 March ran at
+ * 05:00, and in Auckland every sale from Saturday 14:00 to Sunday 02:00 ran an hour early
+ * (#814, #703).
+ *
+ * So every offset in force near the time is tried, and an instant is kept only if it
+ * reads back as exactly the typed time. One candidate is an ordinary time; two is a
+ * repeated hour; none is a skipped one.
+ */
+export function resolveLocalInput(
+  value: string,
+  timeZone: string,
+): { utc: string; kind: LocalTimeKind } | null {
   if (!value) return null;
 
   const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value.trim());
   if (!match) return null;
 
   const [, y, mo, d, h, mi] = match.map(Number) as unknown as number[];
-
-  // Start from the naive UTC reading, then correct by the zone's offset at that
-  // instant. Doing it this way keeps DST correct: the offset is looked up for the
-  // date in question rather than assumed constant.
   const naive = Date.UTC(y, mo - 1, d, h, mi);
-  const offset = zoneOffsetMs(new Date(naive), timeZone);
-  return new Date(naive - offset).toISOString();
+
+  // The offsets in force within a day either side: every zone's changes are further
+  // apart than that, so this is every offset the typed time could be read under.
+  const DAY = 24 * 60 * 60_000;
+  const offsets = [
+    ...new Set([naive - DAY, naive, naive + DAY].map((at) => zoneOffsetMs(new Date(at), timeZone))),
+  ];
+  const candidates = [...new Set(offsets.map((offset) => naive - offset))].sort((a, b) => a - b);
+  const exact = candidates.filter((at) => at + zoneOffsetMs(new Date(at), timeZone) === naive);
+
+  if (exact.length === 1) return { utc: new Date(exact[0]).toISOString(), kind: "exact" };
+  if (exact.length > 1) return { utc: new Date(exact[0]).toISOString(), kind: "ambiguous" };
+
+  // No instant reads back as the typed time: the clocks jumped over it. Reading it with
+  // the offset from before the jump lands the same distance past the jump, which is
+  // "moved forward by the gap".
+  return { utc: new Date(candidates[candidates.length - 1]).toISOString(), kind: "skipped" };
+}
+
+/**
+ * A sentence for the campaign page when a typed time was skipped or repeated, or null.
+ *
+ * Without it a merchant who typed 02:30 on a spring-forward morning sees 03:30 on the
+ * campaign and has no way to tell whether that is a bug.
+ */
+export function clockNote(
+  which: "starts" | "ends",
+  typed: string,
+  resolved: { utc: string; kind: LocalTimeKind },
+  timeZone: string,
+): string | null {
+  if (resolved.kind === "exact") return null;
+  const [day, time] = typed.split("T");
+  const actual = utcToLocalInput(resolved.utc, timeZone).split("T")[1];
+
+  return resolved.kind === "skipped"
+    ? `The clocks go forward on ${day} in ${timeZone}, so ${time} does not happen that day. ` +
+        `The campaign ${which} at ${actual} instead.`
+    : `The clocks go back on ${day} in ${timeZone}, so ${time} happens twice that day. ` +
+        `The campaign ${which} at the first ${time}, before the clocks change.`;
 }
 
 /** A zone's UTC offset in milliseconds at a given instant. */
