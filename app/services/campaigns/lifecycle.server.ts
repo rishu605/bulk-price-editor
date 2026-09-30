@@ -163,6 +163,25 @@ export async function releaseClaim(
   return { changed: true, from, to };
 }
 
+/**
+ * Records why a campaign could not move, without moving it.
+ *
+ * For a scheduled transition the scheduler could not even attempt -- no usable session,
+ * because the store revoked Anchor's access -- the campaign stays where it is, and the
+ * only other trace was a line in a tick log nobody reads (#707). Written once per reason,
+ * however many ticks hit the same wall.
+ */
+export async function noteCampaign(shopId: string, campaignId: string, reason: string): Promise<void> {
+  if ((await lastTransitionReason(shopId, campaignId)) === reason) return;
+  const campaign = await prisma.campaign.findFirst({
+    where: { id: campaignId, shopId },
+    select: { status: true },
+  });
+  if (!campaign) return;
+  const status = campaign.status as CampaignState;
+  await recordTransition(shopId, campaignId, status, status, { reason });
+}
+
 /** The reason on this campaign's most recent recorded transition. */
 async function lastTransitionReason(shopId: string, campaignId: string): Promise<string | undefined> {
   const last = await prisma.auditLogEntry.findFirst({

@@ -105,13 +105,50 @@ function formatGraphQLErrors(errors: unknown): string | null {
 }
 
 /**
- * Builds a client for a shop from its stored offline session.
+ * Builds a client for a shop with no request to authenticate: the worker, the scheduler,
+ * Flow deliveries, the nightly audit.
  *
- * The worker has no request to authenticate, so it reads the token directly. This
- * returns null rather than throwing when there is no usable session -- an
- * uninstalled shop is an expected state for a background tick, not an error.
+ * Through the Shopify library's `unauthenticated.admin`, which loads the shop's offline
+ * session and refreshes it with the stored refresh token when it has expired or is about
+ * to (#707). With `expiringOfflineAccessTokens` on, an offline token lasts an hour. This
+ * used to read the Session row itself and skip expired tokens, so an hour after anyone
+ * last opened the app every background path had no client: scheduled sales did not start
+ * or end, enrolled variants were dropped, queued runs vanished, and the audit ran at 2am
+ * against nothing. With the offline row filtered out it fell back to an *online* session,
+ * which Shopify refused as "Invalid API key or access token".
+ *
+ * Returns null rather than throwing when there is no usable session -- none stored, or a
+ * refresh Shopify refused (revoked, uninstalled). That is an expected state for a
+ * background tick, and it surfaces as NO_SESSION, not as a crash.
  */
 export async function adminClientForShop(shopDomain: string): Promise<AdminClient | null> {
+  let unauthenticated: (typeof import("../shopify.server"))["unauthenticated"];
+  try {
+    ({ unauthenticated } = await import("../shopify.server"));
+  } catch {
+    // The library cannot start without the app's key and secret. Every deployed process
+    // has them; a script run outside the Shopify CLI does not, and reads the row directly
+    // below -- which works until that token expires, and cannot refresh it.
+    return storedSessionClient(shopDomain);
+  }
+
+  try {
+    const { admin } = await unauthenticated.admin(shopDomain);
+    return toAdminClient(admin);
+  } catch (error) {
+    logger.warn("no usable admin session", {
+      shop: shopDomain,
+      reason: error instanceof Error ? error.message : error instanceof Response ? `HTTP ${error.status}` : String(error),
+    });
+    return null;
+  }
+}
+
+/**
+ * A client from the stored session row, for processes that cannot start the Shopify
+ * library. No refresh: an expired token is skipped, not used.
+ */
+async function storedSessionClient(shopDomain: string): Promise<AdminClient | null> {
   const { default: prisma } = await import("../db.server");
 
   // Offline sessions first: they are the ones that outlive a browser tab, which is the
