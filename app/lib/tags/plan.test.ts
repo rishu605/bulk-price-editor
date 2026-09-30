@@ -50,6 +50,28 @@ describe("planTagsFor", () => {
     const plan = planTagsFor("p1", ["SALE", "sale"], []);
     expect(plan.toAdd).toEqual(["SALE"]);
   });
+
+  it("shares a tag another running campaign added, rather than calling it the merchant's", () => {
+    // #686: recorded as already present, this campaign owned nothing, so ending the
+    // sale that added it un-badged products this one was still discounting.
+    const plan = planTagsFor("p1", ["Sale", "SUMMER"], ["SALE"], new Set(["sale"]));
+    expect(plan.toAdd).toEqual(["SUMMER"]);
+    expect(plan.shared).toEqual(["Sale"]);
+    expect(plan.alreadyPresent).toEqual([]);
+  });
+
+  it("does not share a claim on a tag that is not on the product", () => {
+    // Absent is absent: it is ours to add, whoever else once claimed it.
+    const plan = planTagsFor("p1", ["SALE"], [], new Set(["sale"]));
+    expect(plan.toAdd).toEqual(["SALE"]);
+    expect(plan.shared).toEqual([]);
+  });
+
+  it("leaves a present tag nobody else claims as the merchant's", () => {
+    const plan = planTagsFor("p1", ["SALE", "NEW"], ["SALE", "NEW"], new Set(["new"]));
+    expect(plan.shared).toEqual(["NEW"]);
+    expect(plan.alreadyPresent).toEqual(["SALE"]);
+  });
 });
 
 describe("planTagRemoval", () => {

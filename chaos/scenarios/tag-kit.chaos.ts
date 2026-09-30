@@ -20,6 +20,9 @@
 import { describe, expect, it } from "vitest";
 
 import prisma from "../../app/db.server";
+import { createCampaign } from "../../app/services/campaigns/model.server";
+import { runCampaign } from "../../app/services/campaigns/run.server";
+import { chaosAdminClient } from "../harness/http-client";
 import { withChaos } from "../harness/scenario";
 
 const has = (tags: string[], tag: string) =>
@@ -141,6 +144,112 @@ describe("chaos: the campaign tag kit", () => {
         expect(has(chaos.fake.tagsOf(latecomerProduct), "SALE")).toBe(false);
         for (const gid of variantGids) {
           expect(has(chaos.fake.tagsOf(productOf.get(gid)!), "SALE")).toBe(false);
+        }
+      },
+    );
+  });
+
+  it("keeps the badge while any overlapping sale still owes it: first on, first off (#686)", async () => {
+    await withChaos(
+      "tag-kit-overlap",
+      { catalog: { products: 4, variantsPerProduct: 1 }, percent: -20, tagKit: ["SALE"] },
+      async (chaos) => {
+        const { shopId } = chaos.fixture;
+        const productGids = [...new Set([...chaos.fixture.productOf.values()])];
+        const client = chaosAdminClient(chaos.server.endpoint());
+
+        // The merchant's own badge, there before either sale. Neither campaign may
+        // ever take it off.
+        const preTagged = productGids[0];
+        chaos.fake.addMerchantTag(preTagged, "Sale");
+
+        // ------------------------------------------ A on, then B over the same products
+        const first = await chaos.apply();
+        await chaos.expectHonest(first.runId);
+
+        const second = await createCampaign(shopId, {
+          name: "chaos/tag-kit-overlap second",
+          priority: 1000,
+          rule: { kind: "percent-change", percent: -30 },
+          compareAtPolicy: { kind: "leave" },
+          rounding: { default: "none", byCurrency: {} },
+          ast: { groups: [{ conditions: [{ field: "tag", value: "chaos" }] }] },
+          schedule: { kind: "manual" },
+          tagKit: ["SALE"],
+        });
+        const b = await runCampaign(shopId, second.id, client, { verifySampleRate: 1 });
+        expect(b.clean).toBe(true);
+
+        // The second sale wrote no tag, and still owns one: SALE is there because the
+        // first sale put it there, not the merchant. On the pre-tagged product it is
+        // the merchant's, and stays theirs.
+        const claims = await prisma.tagChange.findMany({ where: { runId: b.runId } });
+        for (const row of claims) {
+          if (row.productGid === preTagged) {
+            expect(row.addedTags).toEqual([]);
+            expect(row.alreadyPresent).toEqual(["SALE"]);
+          } else {
+            expect(row.addedTags).toEqual(["SALE"]);
+            expect(row.status).toBe("VERIFIED");
+          }
+        }
+
+        // ------------------------------------------------- A off first: B still owes SALE
+        await chaos.revert();
+
+        for (const productGid of productGids) {
+          expect(
+            has(chaos.fake.tagsOf(productGid), "SALE"),
+            `${productGid} lost its badge while the second sale is still discounting it`,
+          ).toBe(true);
+        }
+
+        // ------------------------------------------------ B off last: nobody owes it now
+        await runCampaign(shopId, second.id, client, { revert: true, verifySampleRate: 1 });
+
+        for (const productGid of productGids.slice(1)) {
+          expect(
+            has(chaos.fake.tagsOf(productGid), "SALE"),
+            `${productGid} kept a badge no running campaign owes`,
+          ).toBe(false);
+        }
+        expect(has(chaos.fake.tagsOf(preTagged), "SALE"), "the merchant's own tag was removed").toBe(
+          true,
+        );
+      },
+    );
+  });
+
+  it("keeps the badge for a held campaign, whose sale prices are still live", async () => {
+    await withChaos(
+      "tag-kit-overlap-held",
+      { catalog: { products: 2, variantsPerProduct: 1 }, percent: -20, tagKit: ["SALE"] },
+      async (chaos) => {
+        const { shopId } = chaos.fixture;
+        const productGids = [...new Set([...chaos.fixture.productOf.values()])];
+        const client = chaosAdminClient(chaos.server.endpoint());
+
+        await chaos.apply();
+
+        const second = await createCampaign(shopId, {
+          name: "chaos/tag-kit-overlap-held second",
+          priority: 1000,
+          rule: { kind: "percent-change", percent: -30 },
+          compareAtPolicy: { kind: "leave" },
+          rounding: { default: "none", byCurrency: {} },
+          ast: { groups: [{ conditions: [{ field: "tag", value: "chaos" }] }] },
+          schedule: { kind: "manual" },
+          tagKit: ["SALE"],
+        });
+        await runCampaign(shopId, second.id, client, { verifySampleRate: 1 });
+
+        // Held for drift: a price was edited by hand, and the sale is still on.
+        await prisma.campaign.update({ where: { id: second.id }, data: { status: "HELD" } });
+
+        await chaos.revert();
+
+        for (const productGid of productGids) {
+          expect(has(chaos.fake.tagsOf(productGid), "SALE")).toBe(true);
         }
       },
     );
