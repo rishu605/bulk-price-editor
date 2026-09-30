@@ -56,10 +56,14 @@ describe("chaos: a duplicate scheduler tick", () => {
         await chaos.expectHonest(applied.runId);
         expect(applied.verified).toBe(variantGids.length);
 
-        // The second tick. It must stand down rather than apply a second time.
-        const duplicate = await chaos.apply({ occurrenceKey: second });
-        expect(duplicate.deferredTo).toBe(applied.runId);
-        expect(duplicate.verified).toBe(0);
+        // The second tick, arriving after the first finished. It must not apply a second
+        // time -- and it must not "stand down" to a run that is no longer running either,
+        // which is how a finished occurrence left campaigns claimed forever (#700). It is
+        // refused out loud and the campaign is released, still ACTIVE.
+        await expect(chaos.apply({ occurrenceKey: second })).rejects.toThrow(/already ran/);
+        expect(
+          (await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } })).status,
+        ).toBe("ACTIVE");
 
         // One run for one occurrence.
         expect(
