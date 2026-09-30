@@ -15,6 +15,12 @@
 
 import { isPlanId, PLAN_ORDER, type PlanId } from "./plans";
 
+/** Statuses a shop pays for and gets its tier on. */
+const PAID = new Set(["ACTIVE", "ACCEPTED"]);
+
+/** Statuses a subscription never leaves. FROZEN is not one: a store that unfreezes resumes. */
+const ENDED = new Set(["CANCELLED", "DECLINED", "EXPIRED"]);
+
 export interface SubscriptionPayload {
   app_subscription?: {
     admin_graphql_api_id?: string;
@@ -40,9 +46,47 @@ export function parseSubscription(payload: unknown): ParsedSubscription {
     gid: subscription.admin_graphql_api_id ?? null,
     status,
     // A cancelled or expired subscription is free regardless of what it was named.
-    planId: status && !["ACTIVE", "ACCEPTED"].includes(status) ? "free" : planFromName(subscription.name),
+    planId: status && !PAID.has(status) ? "free" : planFromName(subscription.name),
     trialEndsAt: trialEnd(subscription.created_at, subscription.trial_days),
   };
+}
+
+export interface StoredSubscription {
+  subscriptionGid: string | null;
+  subscriptionStatus: string | null;
+}
+
+/**
+ * Why an update must not be applied over what is stored, or null to apply it (#709).
+ *
+ * Shopify does not deliver subscription webhooks in order. An upgrade activates the new
+ * subscription and cancels the old one, and when the old one's CANCELLED arrives last,
+ * writing it unconditionally put a merchant who had just paid for more on Free. Without a
+ * timestamp to order by, the subscriptions themselves decide:
+ *
+ *   A shop paying on one subscription is not downgraded by news about another. That
+ *   other one was replaced (the old plan's cancellation), or never went through (an
+ *   upgrade charge still PENDING, or DECLINED).
+ *
+ *   A subscription that has ended does not come back. An ACTIVE for it arriving after its
+ *   CANCELLED is the same reordering the other way round.
+ */
+export function staleSubscriptionUpdate(
+  stored: StoredSubscription,
+  update: Pick<ParsedSubscription, "gid" | "status">,
+): string | null {
+  const storedGid = stored.subscriptionGid;
+  const storedStatus = stored.subscriptionStatus?.toUpperCase() ?? null;
+  const status = update.status?.toUpperCase() ?? null;
+  if (!storedGid || !update.gid || !storedStatus || !status) return null;
+
+  if (update.gid !== storedGid && PAID.has(storedStatus) && !PAID.has(status)) {
+    return `${status} for ${update.gid}, while the shop pays on ${storedGid}`;
+  }
+  if (update.gid === storedGid && ENDED.has(storedStatus) && PAID.has(status)) {
+    return `${status} for ${update.gid}, which had already ${storedStatus === "DECLINED" ? "been declined" : storedStatus.toLowerCase()}`;
+  }
+  return null;
 }
 
 /**
