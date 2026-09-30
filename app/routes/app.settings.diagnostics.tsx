@@ -35,7 +35,7 @@ export const loader = withGuard("/app/settings/diagnostics", async ({ request }:
 
   // A quoted id is the common case and deserves an exact match, not a search over
   // recent rows that may already have scrolled past the limit.
-  const match = query && isErrorId(query) ? await errorByPublicId(query) : null;
+  const match = query && isErrorId(query) ? await errorByPublicId(shop.id, query) : null;
   const recent = await recentErrors(shop.id, 50);
 
   const counts = new Map<string, number>();

@@ -16,6 +16,7 @@
 import { data } from "react-router";
 
 import { reportError, type ReportContext } from "../../services/error-report.server";
+import { currentLogContext, withLogContext } from "../logging/context.server";
 import { metric } from "../telemetry/metrics";
 import { ANCHOR_ERROR, type ReportedError } from "./report";
 
@@ -49,7 +50,12 @@ export function withGuard<Args, Result>(
   route: string,
   handler: (args: Args) => Promise<Result>,
 ): (args: Args) => Promise<Result> {
-  return async (args: Args) => {
+  // A scope per request, so the shop the route authenticates -- `ensureShop` adds it --
+  // is known here when the handler throws. The error is then stored against that shop
+  // and shown on its Diagnostics page, and on nobody else's (#717).
+  return (args: Args) => withLogContext({ route }, () => guarded(args));
+
+  async function guarded(args: Args): Promise<Result> {
     const started = Date.now();
     const method = (args as { request?: Request })?.request?.method ?? "GET";
 
@@ -72,15 +78,22 @@ export function withGuard<Args, Result>(
       metric("route.server_ms", Date.now() - started, { route, method, outcome: "error" });
 
       const request = (args as { request?: Request })?.request;
+      // The shop from the authenticated session, never from the query string. `?shop=` is
+      // whatever the request says, and attributing an error to it would put one shop's
+      // failure on another shop's Diagnostics page. A failure before authentication has
+      // no shop and is stored unattributed -- for operators, not merchants.
+      const { shop, shopId } = currentLogContext();
       const reported = await reportError(error, {
         route,
         method: request?.method,
         ...shopContext(request),
+        ...(shop ? { shop } : {}),
+        shopId,
       } as ReportContext);
 
       throw data({ [ANCHOR_ERROR]: reported }, { status: reported.status });
     }
-  };
+  }
 }
 
 /**
