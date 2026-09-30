@@ -18,6 +18,7 @@ import type { ResolutionReason } from "../pricing/types";
 export const SKIP_REASON_GROUP: Record<ResolutionReason, string> = {
   "missing-cost": "have no cost recorded, and a cost-based guardrail applies",
   "missing-import": "were not in the imported file",
+  "currency-mismatch": "are priced by a fixed amount in another currency, which is never converted",
   "below-floor": "would have priced below a guardrail floor",
   "invalid-margin": "have a margin target that cannot be satisfied",
   "invalid-compare-at": "would have had a compare-at price below their price",
@@ -28,6 +29,7 @@ export const SKIP_REASON_GROUP: Record<ResolutionReason, string> = {
 export const SKIP_REASON_ROW: Record<ResolutionReason, string> = {
   "missing-cost": "No cost recorded",
   "missing-import": "Not in the imported file",
+  "currency-mismatch": "Fixed amount is in another currency",
   "below-floor": "Below your price floor",
   "invalid-margin": "Margin target cannot be met",
   "invalid-compare-at": "Compare-at would be below the price",

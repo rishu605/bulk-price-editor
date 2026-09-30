@@ -397,3 +397,87 @@ describe("write-path selection", () => {
     expect(thresholdFromEnv({ BULK_PATH_ROW_THRESHOLD: "-5" })).toBe(DEFAULT_THRESHOLD);
   });
 });
+
+describe("a fixed amount never prices a surface in another currency (#692)", () => {
+  const jpyMarket = (over: Partial<PlanCandidate> = {}): PlanCandidate => ({
+    ref: {
+      variantGid: "gid://Variant/1",
+      surfaceKind: "market",
+      priceListGid: "gid://PriceList/jp",
+      currency: "JPY",
+    },
+    baseline: { price: money(3_000, "JPY") },
+    livePrice: undefined,
+    ...over,
+  });
+
+  const only = (input: PlanInput) => {
+    const out = planRun(input);
+    if (out.kind !== "ok") throw new Error(`plan ${out.kind}`);
+    expect(out.rows).toHaveLength(1);
+    return { row: out.rows[0], counts: out.counts };
+  };
+
+  it("leaves a yen market alone rather than writing a $20 set price as ¥20", () => {
+    const { row, counts } = only({
+      campaigns: [campaign({ ruleRows: [{ segmentIds: [], rule: { kind: "set-exact", amount: usd(2_000) } }] })],
+      candidates: [jpyMarket()],
+    });
+    expect(row.status).toBe("skipped");
+    expect(row.reason).toBe("currency-mismatch");
+    expect(row.intendedPrice).toBeUndefined();
+    expect(counts).toMatchObject({ planned: 0, skipped: 1 });
+  });
+
+  it("skips a fixed change on a euro market instead of throwing", () => {
+    const { row } = only({
+      campaigns: [campaign({ ruleRows: [{ segmentIds: [], rule: { kind: "fixed-change", amount: usd(-500) } }] })],
+      candidates: [jpyMarket({ ref: { ...jpyMarket().ref, currency: "EUR" }, baseline: { price: money(5_000, "EUR") } })],
+    });
+    expect(row).toMatchObject({ status: "skipped", reason: "currency-mismatch" });
+  });
+
+  it("skips before the strike-through is compared, so set-to-baseline cannot throw either", () => {
+    const { row } = only({
+      campaigns: [
+        campaign({
+          ruleRows: [{ segmentIds: [], rule: { kind: "set-exact", amount: usd(2_000) } }],
+          compareAtPolicy: { kind: "set-to-baseline" },
+        }),
+      ],
+      candidates: [jpyMarket()],
+    });
+    expect(row).toMatchObject({ status: "skipped", reason: "currency-mismatch" });
+  });
+
+  it("does not let the block policy stop a whole run over a market the rule cannot price", () => {
+    const out = planRun({
+      campaigns: [
+        campaign({
+          ruleRows: [{ segmentIds: [], rule: { kind: "set-exact", amount: usd(2_000) } }],
+          guardrailViolationPolicy: "block",
+        }),
+      ],
+      candidates: [jpyMarket()],
+    });
+    expect(out.kind).toBe("ok");
+  });
+
+  it("still sets the price on a surface in the rule's own currency", () => {
+    const { row } = only({
+      campaigns: [campaign({ ruleRows: [{ segmentIds: [], rule: { kind: "set-exact", amount: usd(2_000) } }] })],
+      candidates: [candidate()],
+    });
+    expect(row).toMatchObject({ status: "pending", intendedPrice: usd(2_000) });
+  });
+
+  it("backstops any rule that produces a price in the wrong currency", () => {
+    // An imported file row in dollars for a yen surface: nothing in the rule checks it,
+    // so the planner must.
+    const { row } = only({
+      campaigns: [campaign({ ruleRows: [{ segmentIds: [], rule: { kind: "from-import", importId: "imp-1" } }] })],
+      candidates: [jpyMarket({ importedPrices: { "imp-1": usd(2_000) } })],
+    });
+    expect(row).toMatchObject({ status: "skipped", reason: "currency-mismatch" });
+  });
+});

@@ -127,6 +127,24 @@ export function planRun(input: PlanInput): PlanOutcome {
       continue;
     }
 
+    // The backstop for every rule kind, present or future: a price is written only in
+    // the currency of the surface it is written to. `set-exact` once produced a dollar
+    // amount for a yen market, the executor sent it as yen, and read-back verified the
+    // wrong price clean (#692). Whatever produced such a row, it is left alone, visibly.
+    if (inAnotherCurrency(resolution, candidate.ref.currency)) {
+      counts.skipped++;
+      rows.push({
+        ref: candidate.ref,
+        beforePrice: candidate.livePrice,
+        beforeCompareAt: candidate.liveCompareAt,
+        intendedCompareAtSet: false,
+        status: "skipped",
+        reason: "currency-mismatch",
+        campaignId: resolution.meta.controlledBy,
+      });
+      continue;
+    }
+
     if (isNoop(resolution, candidate)) {
       counts.noop++;
       continue;
@@ -151,6 +169,15 @@ export function planRun(input: PlanInput): PlanOutcome {
   }
 
   return { kind: "ok", rows, counts };
+}
+
+/** A resolved price, or compare-at, in a currency other than the surface's own. */
+function inAnotherCurrency(
+  resolution: { price?: { currency: string }; compareAtPrice?: { currency: string } | null },
+  currency: string,
+): boolean {
+  if (resolution.price && resolution.price.currency !== currency) return true;
+  return !!resolution.compareAtPrice && resolution.compareAtPrice.currency !== currency;
 }
 
 /**

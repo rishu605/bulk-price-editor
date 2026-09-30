@@ -26,7 +26,9 @@ export class RuleNotApplicableError extends Error {
       | "missing-compare-at"
       | "invalid-margin"
       /** The imported file did not name this variant. */
-      | "missing-import",
+      | "missing-import"
+      /** A fixed amount in one currency, asked to price a surface in another. */
+      | "currency-mismatch",
     message: string,
   ) {
     super(message);
@@ -75,9 +77,11 @@ export function applyRule(
       return applyPercentChange(baseline.price, rule.percent);
 
     case "fixed-change":
+      requireSameCurrency(rule.amount, baseline.price, rule.kind);
       return add(baseline.price, rule.amount);
 
     case "set-exact":
+      requireSameCurrency(rule.amount, baseline.price, rule.kind);
       return rule.amount;
 
     case "from-import": {
@@ -125,6 +129,22 @@ export function applyRule(
   throw new RuleNotApplicableError(
     "invalid-margin",
     `Unhandled rule kind: ${(rule as { kind: string }).kind}`,
+  );
+}
+
+/**
+ * A fixed amount only means something in its own currency.
+ *
+ * The editor builds these rules in the store's currency, which is right for the base
+ * price. On a market priced in another currency, `set-exact` used to return the dollar
+ * amount to be sent relabelled as yen, and `fixed-change` threw adding euros to dollars.
+ * Converting it would be a guess at an exchange rate the merchant never chose (#692).
+ */
+function requireSameCurrency(amount: Money, surface: Money, ruleKind: string): void {
+  if (amount.currency === surface.currency) return;
+  throw new RuleNotApplicableError(
+    "currency-mismatch",
+    `Rule "${ruleKind}" is ${amount.currency}, and this price is in ${surface.currency}.`,
   );
 }
 

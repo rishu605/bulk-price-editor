@@ -108,6 +108,10 @@ export function resolve(input: ResolveInput): Resolution {
     unrounded = applyRule(rule, baseline, { importedPrices: input.importedPrices });
   } catch (error) {
     if (error instanceof RuleNotApplicableError) {
+      // Not a guardrail and not the merchant's floor: this surface is simply outside what
+      // the rule can say, so the "block" policy does not stop the whole run over it.
+      if (error.reason === "currency-mismatch") return skipped(winner, "currency-mismatch", rule);
+
       const reason =
         error.reason === "invalid-margin"
           ? "invalid-margin"
