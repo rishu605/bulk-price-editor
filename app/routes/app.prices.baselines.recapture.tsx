@@ -19,7 +19,7 @@
  */
 
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useFetcher, useLoaderData } from "react-router";
+import { Form, useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
@@ -70,11 +70,23 @@ export const action = withGuard("/app/prices/baselines/recapture", async ({ requ
   const shop = await ensureShop(session.shop);
   const form = await request.formData();
 
+  // The count the page showed next to the button (#716). Absent only on a request this
+  // page did not build, which is refused rather than recapturing a scope nobody looked at.
+  const shown = String(form.get("scope") ?? "");
+  if (!/^\d+$/.test(shown)) {
+    return {
+      ok: false,
+      message:
+        "Nothing was recaptured: the request did not say which scope it was checked against. Check the scope on this page, then recapture.",
+    };
+  }
+
   try {
     const result = await recapture(shop.id, {
       segmentId: String(form.get("segment") ?? "") || undefined,
       confirmation: String(form.get("confirmation") ?? ""),
       actor: actorFor(sessionToken, session.shop),
+      expectedScope: Number(shown),
     });
 
     return {
@@ -128,7 +140,11 @@ export default function Recapture() {
           </s-text>
         </s-paragraph>
 
-        <fetcher.Form method="get">
+        {/* A navigation, not a fetcher (#716). A GET fetcher loads into `fetcher.data`,
+            which nothing here reads -- the count, the overlaps and the scope posted with
+            Recapture all come from the loader -- so picking a segment changed nothing on
+            screen and "Replace" still rewrote every baseline in the store. */}
+        <Form method="get">
           <s-stack gap={SPACE.section}>
             <Field width="medium">
             <s-select name="segment" label="Scope">
@@ -150,7 +166,7 @@ export default function Recapture() {
               <s-button type="submit">Check this scope</s-button>
             </ActionRow>
           </s-stack>
-        </fetcher.Form>
+        </Form>
 
         <s-paragraph>
           <s-text>
@@ -185,6 +201,7 @@ export default function Recapture() {
 
       <Card heading="Recapture">    <fetcher.Form method="post">
           <input type="hidden" name="segment" value={segmentId} />
+          <input type="hidden" name="scope" value={assessment.scope} />
           <s-stack gap={SPACE.section}>
             {assessment.confirmationPhrase ? (
               <Field width="medium">
