@@ -15,6 +15,7 @@ import {
   type Transition,
 } from "../lib/scheduling/window";
 import { runCampaign } from "./campaigns/run.server";
+import { nextAttemptKey } from "../lib/scheduling/attempts";
 import type { CampaignState } from "../lib/lifecycle/transitions";
 import { adminClientForShop } from "./admin-client.server";
 import { claimEnrollment, pendingEnrollments } from "./auto-enroll.server";
@@ -101,6 +102,20 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
     );
     if (!transition) continue;
 
+    // Which attempt at this occurrence, if any. Null when one is still running or every
+    // attempt has been used; a finished attempt never blocks the next one (#700).
+    const base = occurrenceKeyFor(parseSchedule(campaign.schedule), transition, now);
+    const attempts = await prisma.campaignRun.findMany({
+      where: {
+        campaignId: campaign.id,
+        kind: transition === "apply" ? "APPLY" : "REVERT",
+        occurrenceKey: { startsWith: base },
+      },
+      select: { occurrenceKey: true, status: true },
+    });
+    const occurrenceKey = nextAttemptKey(base, attempts);
+    if (!occurrenceKey) continue;
+
     // Beaten again per campaign, not only at the top of the tick. `runTransition` below
     // can spend minutes on a large catalogue, and a heartbeat that only fires between
     // ticks would go stale during precisely the work that proves the scheduler is
@@ -117,7 +132,7 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
         // The occurrence this tick is acting on, not the instant it happened to run.
         // Two ticks that both find this window due produce the same key, and the unique
         // index turns the second into a no-op rather than a second apply.
-        occurrenceKeyFor(parseSchedule(campaign.schedule), transition, now),
+        occurrenceKey,
       );
       if (transition === "apply") {
         result.applied++;

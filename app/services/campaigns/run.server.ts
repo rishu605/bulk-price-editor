@@ -440,8 +440,16 @@ async function executeCampaignRun(
 
     const existing = await prisma.campaignRun.findFirst({
       where: { campaignId, occurrenceKey, kind },
-      select: { id: true },
+      select: { id: true, status: true },
     });
+
+    // Standing down is right only when the other run is still going. Deferring to a run
+    // that already finished left the campaign claimed -- REVERTING or APPLYING -- with
+    // nothing behind it, forever (#700). Thrown, so the claim is released like any other
+    // failure before the run existed.
+    if (existing && FINISHED_RUN.has(existing.status)) {
+      throw new OccurrenceFinishedError(occurrenceKey, existing.id, existing.status);
+    }
 
     return {
       runId: existing?.id ?? "",
@@ -820,6 +828,20 @@ function productsByWinner(
     out.set(row.campaignId, set);
   }
   return new Map([...out].map(([id, set]) => [id, [...set]]));
+}
+
+/** Run states with no process behind them. */
+const FINISHED_RUN = new Set(["COMPLETED", "PARTIAL", "FAILED", "CANCELLED"]);
+
+/** This occurrence already ran to an end; running it under the same key would do nothing. */
+export class OccurrenceFinishedError extends Error {
+  constructor(occurrenceKey: string, runId: string, status: string) {
+    super(
+      `This occurrence (${occurrenceKey}) already ran and ended ${status} (run ${runId}). ` +
+        `Nothing was run again; the campaign was released so it can be retried.`,
+    );
+    this.name = "OccurrenceFinishedError";
+  }
 }
 
 /** Prisma's unique-constraint violation, which here means somebody else got there first. */
