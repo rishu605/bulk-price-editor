@@ -27,6 +27,7 @@ import {
   type Plan,
   type PlanId,
 } from "../lib/billing/plans";
+import { staleSubscriptionUpdate } from "../lib/billing/subscription-payload";
 import { logger } from "../lib/logging/logger";
 
 /** Shopify's subscription statuses that mean "this plan is real right now". */
@@ -112,6 +113,9 @@ export interface SubscriptionUpdate {
   trialEndsAt?: Date | null;
 }
 
+/** Attempts at the compare-and-set before giving up on a shop whose row keeps moving. */
+const WRITE_ATTEMPTS = 3;
+
 /**
  * Records what Shopify told us about a subscription.
  *
@@ -119,44 +123,83 @@ export interface SubscriptionUpdate {
  * deleted. A downgrade changes what the merchant can start next; it does not reach into
  * work already in flight. That is the entire content of E8, and the safest way to
  * guarantee it is for this function to have no ability to break it.
+ *
+ * Webhooks arrive out of order, so an update that `staleSubscriptionUpdate` says is older
+ * than what is stored is recorded and not applied (#709). The write is a compare-and-set
+ * on the subscription it was judged against: an upgrade's two webhooks can land on two
+ * processes at once, and a check followed by a plain write would let the stale one win
+ * anyway.
  */
 export async function applySubscriptionUpdate(
   shopId: string,
   update: SubscriptionUpdate,
 ): Promise<void> {
-  const before = await prisma.shop.findUnique({
-    where: { id: shopId },
-    select: { planTier: true },
-  });
+  for (let attempt = 1; attempt <= WRITE_ATTEMPTS; attempt++) {
+    const before = await prisma.shop.findUnique({
+      where: { id: shopId },
+      select: { planTier: true, subscriptionGid: true, subscriptionStatus: true },
+    });
+    if (!before) return;
 
-  await prisma.shop.update({
-    where: { id: shopId },
-    data: {
-      subscriptionGid: update.gid,
-      subscriptionStatus: update.status,
-      planTier: update.planId.toUpperCase() as Shop["planTier"],
-      planChangedAt: new Date(),
-      ...(update.trialEndsAt === undefined ? {} : { trialEndsAt: update.trialEndsAt }),
-    },
-  });
+    const stale = staleSubscriptionUpdate(before, update);
+    if (stale) {
+      await prisma.auditLogEntry.create({
+        data: {
+          shopId,
+          action: "billing.subscription-ignored",
+          entity: "subscription",
+          entityId: update.gid ?? "none",
+          before: { planTier: before.planTier, subscriptionGid: before.subscriptionGid } as never,
+          after: { status: update.status, reason: stale } as never,
+        },
+      });
+      logger.info("subscription update arrived out of order; kept the current plan", {
+        shopId,
+        plan: before.planTier,
+        status: update.status,
+      });
+      return;
+    }
 
-  await prisma.auditLogEntry.create({
-    data: {
+    const written = await prisma.shop.updateMany({
+      where: {
+        id: shopId,
+        subscriptionGid: before.subscriptionGid,
+        subscriptionStatus: before.subscriptionStatus,
+      },
+      data: {
+        subscriptionGid: update.gid,
+        subscriptionStatus: update.status,
+        planTier: update.planId.toUpperCase() as Shop["planTier"],
+        planChangedAt: new Date(),
+        ...(update.trialEndsAt === undefined ? {} : { trialEndsAt: update.trialEndsAt }),
+      },
+    });
+    if (written.count === 0) continue; // another webhook moved the row; judge again
+
+    await prisma.auditLogEntry.create({
+      data: {
+        shopId,
+        action: "billing.subscription-updated",
+        entity: "subscription",
+        entityId: update.gid ?? "none",
+        before: { planTier: before.planTier } as never,
+        after: { planTier: update.planId.toUpperCase(), status: update.status } as never,
+      },
+    });
+
+    logger.info("subscription updated", {
       shopId,
-      action: "billing.subscription-updated",
-      entity: "subscription",
-      entityId: update.gid ?? "none",
-      before: { planTier: before?.planTier ?? null } as never,
-      after: { planTier: update.planId.toUpperCase(), status: update.status } as never,
-    },
-  });
+      from: before.planTier,
+      to: update.planId,
+      status: update.status,
+    });
+    return;
+  }
 
-  logger.info("subscription updated", {
-    shopId,
-    from: before?.planTier ?? null,
-    to: update.planId,
-    status: update.status,
-  });
+  // Shopify redelivers a webhook that fails, so throwing here gets it judged again later
+  // rather than dropped.
+  throw new Error(`subscription update for ${shopId} kept racing another; retry`);
 }
 
 /**
