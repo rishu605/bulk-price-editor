@@ -32,11 +32,30 @@ import { withChaos } from "../harness/scenario";
  * down, so the handler no-opped and the assertion failed against a product bug that was
  * not there.
  */
-let pending: { shop: string; topic: string; payload: unknown } = {
+let pending: { shop: string; topic: string; payload: unknown; admin?: FakeAdmin } = {
   shop: "",
   topic: "",
   payload: {},
 };
+
+/** The slice of the webhook's `admin` context the route uses, answering one question. */
+interface FakeAdmin {
+  graphql(query: string, options?: { variables?: Record<string, unknown> }): Promise<{ json(): Promise<unknown> }>;
+}
+
+/** An admin that says whether a product is a gift card, and counts how often it was asked. */
+function giftCardAdmin(answer: boolean | "fail") {
+  const asked: string[] = [];
+  const admin: FakeAdmin = {
+    async graphql(query, options) {
+      if (!query.includes("AnchorProductGiftCard")) throw new Error(`unexpected query: ${query}`);
+      asked.push(String(options?.variables?.id));
+      if (answer === "fail") throw new Error("Invalid API key or access token");
+      return { json: async () => ({ data: { product: { id: options?.variables?.id, isGiftCard: answer } } }) };
+    },
+  };
+  return { admin, asked };
+}
 
 // Hoisted, so the route sees it however it is imported. The route reads
 // `authenticate.webhook`, which needs an HMAC we cannot produce here; mocking just that
@@ -46,8 +65,8 @@ vi.mock("../../app/shopify.server", () => ({
   authenticate: { webhook: async () => pending },
 }));
 
-async function deliver(shopDomain: string, topic: string, payload: unknown) {
-  pending = { shop: shopDomain, topic, payload };
+async function deliver(shopDomain: string, topic: string, payload: unknown, admin?: FakeAdmin) {
+  pending = { shop: shopDomain, topic, payload, admin };
   const { action } = await import("../../app/routes/webhooks.products");
   return action({
     request: new Request("https://example.invalid/webhooks/products", { method: "POST" }),
@@ -172,6 +191,103 @@ describe("chaos: product webhooks keeping the mirror current", () => {
           });
           expect(row.deletedAt).toBeNull();
         }
+      },
+    );
+  });
+
+  it("mirrors a new gift card as one, so a running sale never enrols it (#689)", async () => {
+    await withChaos(
+      "webhook-new-gift-card",
+      { catalog: { products: 1, variantsPerProduct: 1 }, percent: -20 },
+      async (chaos) => {
+        const { shopId, domain, campaignId } = chaos.fixture;
+
+        // "Everything 20% off", auto-enrol on, already live.
+        await chaos.apply();
+        await prisma.campaign.update({ where: { id: campaignId }, data: { enrollPendingAt: null } });
+
+        // The merchant creates a $50 gift card. Shopify's payload does not say so.
+        const giftCard = "gid://shopify/Product/689-gift-card";
+        const variant = "gid://shopify/ProductVariant/689-gift-card-50";
+        const { admin, asked } = giftCardAdmin(true);
+        await deliver(
+          domain,
+          "PRODUCTS_CREATE",
+          productPayload(giftCard, [{ gid: variant, price: "50.00" }], new Date().toISOString()),
+          admin,
+        );
+
+        expect(asked).toEqual([giftCard]);
+        const row = await prisma.variantIndex.findUniqueOrThrow({
+          where: { shopId_variantGid: { shopId, variantGid: variant } },
+        });
+        expect(row.isGiftCard, "mirrored with the schema default instead of Shopify's answer").toBe(true);
+
+        const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
+        expect(campaign.enrollPendingAt, "a gift card was queued for the sale").toBeNull();
+        const baseline = await prisma.baseline.findFirst({ where: { shopId, variantGid: variant } });
+        expect(baseline, "an enrolment baseline was captured for a gift card").toBeNull();
+      },
+    );
+  });
+
+  it("keeps a new product out of sales when Shopify cannot be asked, until it can", async () => {
+    await withChaos(
+      "webhook-gift-card-lookup-fails",
+      { catalog: { products: 1, variantsPerProduct: 1 }, percent: -20 },
+      async (chaos) => {
+        const { shopId, domain, campaignId } = chaos.fixture;
+        await chaos.apply();
+        await prisma.campaign.update({ where: { id: campaignId }, data: { enrollPendingAt: null } });
+
+        const product = "gid://shopify/Product/689-unknown";
+        const variant = "gid://shopify/ProductVariant/689-unknown-m";
+        const payload = (at: string) =>
+          productPayload(product, [{ gid: variant, price: "30.00" }], at);
+
+        // No usable session: the lookup fails. Guessing "ordinary" is what sold store
+        // credit at a discount, so the product stays out.
+        await deliver(domain, "PRODUCTS_CREATE", payload("2026-09-30T10:00:00.000Z"), giftCardAdmin("fail").admin);
+        const before = await prisma.variantIndex.findUniqueOrThrow({
+          where: { shopId_variantGid: { shopId, variantGid: variant } },
+        });
+        expect(before.isGiftCard).toBe(true);
+        expect((await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } })).enrollPendingAt).toBeNull();
+
+        // No admin at all behaves the same way.
+        await deliver(domain, "PRODUCTS_UPDATE", payload("2026-09-30T10:01:00.000Z"));
+        expect((await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } })).enrollPendingAt).toBeNull();
+
+        // Its next edit asks again, Shopify says it is an ordinary product, and it joins.
+        const { admin, asked } = giftCardAdmin(false);
+        await deliver(domain, "PRODUCTS_UPDATE", payload("2026-09-30T10:02:00.000Z"), admin);
+        expect(asked).toEqual([product]);
+        const after = await prisma.variantIndex.findUniqueOrThrow({
+          where: { shopId_variantGid: { shopId, variantGid: variant } },
+        });
+        expect(after.isGiftCard).toBe(false);
+        expect((await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } })).enrollPendingAt).not.toBeNull();
+      },
+    );
+  });
+
+  it("does not ask about a product it already knows is ordinary", async () => {
+    await withChaos(
+      "webhook-gift-card-known",
+      { catalog: { products: 1, variantsPerProduct: 1 }, percent: -20 },
+      async (chaos) => {
+        const { domain, variantGids, productOf } = chaos.fixture;
+        const gid = variantGids[0];
+
+        // Stock and title edits fire this constantly; each one must not cost a query.
+        const { admin, asked } = giftCardAdmin(true);
+        await deliver(
+          domain,
+          "PRODUCTS_UPDATE",
+          productPayload(productOf.get(gid)!, [{ gid, price: "12.00" }], new Date().toISOString()),
+          admin,
+        );
+        expect(asked).toEqual([]);
       },
     );
   });

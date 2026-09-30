@@ -314,6 +314,13 @@ export type AnchorFlowTriggerReceiveMutationVariables = AdminTypes.Exact<{
 
 export type AnchorFlowTriggerReceiveMutation = { flowTriggerReceive?: AdminTypes.Maybe<{ userErrors: Array<Pick<AdminTypes.UserError, 'field' | 'message'>> }> };
 
+export type AnchorProductGiftCardQueryVariables = AdminTypes.Exact<{
+  id: AdminTypes.Scalars['ID']['input'];
+}>;
+
+
+export type AnchorProductGiftCardQuery = { product?: AdminTypes.Maybe<Pick<AdminTypes.Product, 'id' | 'isGiftCard'>> };
+
 export type AnchorPriceListsQueryVariables = AdminTypes.Exact<{
   cursor?: AdminTypes.InputMaybe<AdminTypes.Scalars['String']['input']>;
 }>;
@@ -429,6 +436,7 @@ interface GeneratedQueryTypes {
   "#graphql\n  query AnchorProductVariantsPage($id: ID!, $cursor: String) {\n    product(id: $id) {\n      featuredImage { url }\n      variants(first: 250, after: $cursor) {\n        pageInfo { hasNextPage endCursor }\n        nodes {\n          id\n          title\n          sku\n          barcode\n          price\n          compareAtPrice\n          inventoryQuantity\n          inventoryItem { unitCost { amount currencyCode } }\n        }\n      }\n    }\n  }\n": {return: AnchorProductVariantsPageQuery, variables: AnchorProductVariantsPageQueryVariables},
   "#graphql\n  query AnchorCatalogPage($cursor: String) {\n    products(first: 50, after: $cursor) {\n      pageInfo { hasNextPage endCursor }\n      nodes {\n        id\n        title\n        vendor\n        productType\n        status\n        tags\n        updatedAt\n        isGiftCard\n        featuredImage { url }\n        collections(first: 20) { nodes { id } }\n        variants(first: 100) {\n          pageInfo { hasNextPage endCursor }\n          nodes {\n            id\n            title\n            sku\n            barcode\n            price\n            compareAtPrice\n            inventoryQuantity\n            image { url }\n            inventoryItem { unitCost { amount currencyCode } }\n          }\n        }\n      }\n    }\n  }\n": {return: AnchorCatalogPageQuery, variables: AnchorCatalogPageQueryVariables},
   "#graphql\n  query AnchorShopCurrency {\n    shop {\n      currencyCode\n      ianaTimezone\n      plan { partnerDevelopment }\n    }\n  }\n": {return: AnchorShopCurrencyQuery, variables: AnchorShopCurrencyQueryVariables},
+  "#graphql\n  query AnchorProductGiftCard($id: ID!) {\n    product(id: $id) { id isGiftCard }\n  }\n": {return: AnchorProductGiftCardQuery, variables: AnchorProductGiftCardQueryVariables},
   "#graphql\n  query AnchorPriceLists($cursor: String) {\n    priceLists(first: 50, after: $cursor) {\n      pageInfo { hasNextPage endCursor }\n      nodes {\n        id\n        name\n        currency\n        parent { adjustment { type value } }\n        catalog {\n          id\n          title\n          __typename\n          ... on MarketCatalog {\n            # One country this catalogue's market serves.\n            #\n            # Prices are asked for by country rather than by price list, so the market\n            # surface needs a country to ask about. Every country in a market sees the\n            # same price, so the first region answers for all of them.\n            markets(first: 1) {\n              nodes {\n                conditions {\n                  regionsCondition {\n                    regions(first: 1) {\n                      nodes { ... on MarketRegionCountry { code } }\n                    }\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n": {return: AnchorPriceListsQuery, variables: AnchorPriceListsQueryVariables},
   "#graphql\n  query AnchorPriceListPrices($id: ID!, $cursor: String) {\n    priceList(id: $id) {\n      id\n      prices(first: 250, after: $cursor) {\n        pageInfo { hasNextPage endCursor }\n        nodes {\n          originType\n          variant { id }\n          price { amount currencyCode }\n          compareAtPrice { amount currencyCode }\n        }\n      }\n    }\n  }\n": {return: AnchorPriceListPricesQuery, variables: AnchorPriceListPricesQueryVariables},
   "#graphql\n  query AnchorAuditVariants($ids: [ID!]!) {\n    nodes(ids: $ids) {\n      ... on ProductVariant { id price compareAtPrice }\n    }\n  }\n": {return: AnchorAuditVariantsQuery, variables: AnchorAuditVariantsQueryVariables},

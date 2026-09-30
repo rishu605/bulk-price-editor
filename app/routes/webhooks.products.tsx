@@ -29,6 +29,8 @@ import { logger } from "../lib/logging/logger";
 import { parseMoney } from "../lib/money/money";
 import { checkForDrift } from "../services/drift.server";
 import { enrollNewVariants } from "../services/auto-enroll.server";
+import { toAdminClient } from "../services/admin-client.server";
+import { giftCardFlagFor } from "../services/gift-card.server";
 
 interface WebhookVariant {
   id: number | string;
@@ -54,7 +56,7 @@ interface WebhookProduct {
 }
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { shop: shopDomain, topic, payload } = await authenticate.webhook(request);
+  const { shop: shopDomain, topic, payload, admin } = await authenticate.webhook(request);
 
   const shop = await prisma.shop.findUnique({ where: { domain: shopDomain } });
   // A webhook for a shop we have never recorded is not an error: it can arrive
@@ -75,6 +77,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const remoteUpdatedAt = product.updated_at ? new Date(product.updated_at) : null;
   const currency = await currencyFor(shop.id);
+
+  // Asked of Shopify before any variant is mirrored, so the enrolment below never sees
+  // a new gift card as an ordinary product (#689). Undefined leaves the column alone.
+  const isGiftCard = await giftCardFlagFor(shop.id, productGid, admin ? toAdminClient(admin) : null);
 
   const seenVariantGids: string[] = [];
 
@@ -122,21 +128,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       syncedAt: new Date(),
       // A variant reappearing after deletion clears its tombstone.
       deletedAt: null,
+      // The payload carries no gift-card field, so this comes from `giftCardFlagFor`:
+      // Shopify's own answer for a product never seen before, and absent (preserving what
+      // the mirror knows) for one already recorded as ordinary. Do not "fix" a gap here by
+      // inferring from `product_type` or `requires_shipping` -- both are merchant-editable
+      // and neither identifies a gift card.
+      ...(isGiftCard === undefined ? {} : { isGiftCard }),
     };
-
-    // `isGiftCard` is deliberately absent from `data`, so this upsert never writes it.
-    //
-    // The product webhook payload carries no gift-card field -- only the GraphQL
-    // `Product.isGiftCard` does -- so there is nothing here to write that would not be
-    // a guess, and guessing false on a gift card is the bug this column exists to stop.
-    // Omitting it means an update preserves whatever the last catalogue sync established,
-    // which is correct: gift-card-ness is fixed for the life of a product.
-    //
-    // A product Anchor has never seen before is created with the schema default, false.
-    // That window closes at the next catalogue sync, or immediately via
-    // `scripts/backfill-gift-cards.ts`. Do not "fix" this by inferring from
-    // `product_type` or `requires_shipping` -- both are merchant-editable and neither
-    // identifies a gift card.
 
     // Before overwriting the mirror, ask whether this change was ours. A price that
     // moved under an active campaign and is not our echo is a merchant edit, and
