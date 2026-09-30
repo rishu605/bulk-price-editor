@@ -3,17 +3,19 @@ import fc from "fast-check";
 
 import {
   DEFAULT_REVERT_BUFFER_MINUTES,
+  type SchedulableStatus,
+  type Schedule,
+  clockNote,
   describeSchedule,
-  joinDateAndTime,
   dueTransition,
   effectiveBufferMs,
-  scheduleWarnings,
+  joinDateAndTime,
   localInputToUtc,
   parseSchedule,
+  resolveLocalInput,
+  scheduleWarnings,
   utcToLocalInput,
   windowClosed,
-  type Schedule,
-  type SchedulableStatus,
 } from "./window";
 
 const at = (iso: string) => new Date(iso);
@@ -260,5 +262,118 @@ describe("recombining a date field and a time field", () => {
 
   it("ignores a malformed date entirely", () => {
     expect(joinDateAndTime("27/08/2026", "14:30", "09:00")).toBe("");
+  });
+});
+
+describe("local times near a clock change (#814, #703)", () => {
+  const ZONES = [
+    "America/New_York",
+    "America/Los_Angeles",
+    "Europe/Berlin",
+    "Europe/London",
+    "Australia/Sydney",
+    "Pacific/Auckland",
+  ];
+  const HOUR = 60 * 60_000;
+
+  /** The zone's offset at an instant, read through the app's own formatter. */
+  const offsetAt = (at: number, zone: string) =>
+    Date.parse(`${utcToLocalInput(new Date(at).toISOString(), zone)}:00Z`) - Math.floor(at / 60_000) * 60_000;
+
+  /** Every instant in 2026 where the zone's offset changes. */
+  function changes(zone: string): number[] {
+    const out: number[] = [];
+    const from = Date.UTC(2026, 0, 1);
+    for (let at = from; at < Date.UTC(2027, 0, 1); at += HOUR) {
+      if (offsetAt(at, zone) !== offsetAt(at - HOUR, zone)) out.push(at);
+    }
+    return out;
+  }
+
+  it.each(ZONES)("finds both 2026 changes in %s", (zone) => {
+    expect(changes(zone).length, zone === "Europe/London" ? "London has DST too" : zone).toBe(2);
+  });
+
+  it.each(ZONES)("round-trips every real half hour for 48 hours around each change in %s", (zone) => {
+    for (const change of changes(zone)) {
+      for (let at = change - 24 * HOUR; at <= change + 24 * HOUR; at += HOUR / 2) {
+        const iso = new Date(at).toISOString();
+        const typed = utcToLocalInput(iso, zone);
+        const resolved = resolveLocalInput(typed, zone)!;
+
+        // What was typed is what the campaign page shows back, always.
+        expect(utcToLocalInput(resolved.utc, zone), `${zone} ${typed}`).toBe(typed);
+        if (resolved.kind === "exact") {
+          expect(resolved.utc, `${zone} ${typed}`).toBe(iso);
+        } else {
+          // The second of a repeated hour resolves to the first.
+          expect(resolved.kind).toBe("ambiguous");
+          expect(Date.parse(resolved.utc)).toBeLessThanOrEqual(at);
+        }
+      }
+    }
+  });
+
+  it.each(ZONES)("moves a skipped time forward by the jump in %s", (zone) => {
+    const spring = changes(zone).find((at) => offsetAt(at, zone) > offsetAt(at - HOUR, zone))!;
+    const jump = offsetAt(spring, zone) - offsetAt(spring - HOUR, zone);
+    const day = utcToLocalInput(new Date(spring).toISOString(), zone).slice(0, 10);
+
+    let skipped = 0;
+    for (let minutes = 0; minutes < 24 * 60; minutes += 30) {
+      const typed = `${day}T${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+      const resolved = resolveLocalInput(typed, zone)!;
+      if (resolved.kind !== "skipped") continue;
+      skipped++;
+      const shown = utcToLocalInput(resolved.utc, zone);
+      expect(Date.parse(`${shown}:00Z`) - Date.parse(`${typed}:00Z`), `${zone} ${typed}`).toBe(jump);
+    }
+    expect(skipped, `${zone} has a skipped hour on ${day}`).toBe(jump / (HOUR / 2));
+  });
+
+  it("matches the ticket's cases", () => {
+    const at = (typed: string, zone: string) =>
+      utcToLocalInput(resolveLocalInput(typed, zone)!.utc, zone);
+
+    // Each of these came back an hour off.
+    expect(at("2026-03-08T04:00", "America/New_York")).toBe("2026-03-08T04:00");
+    expect(at("2026-03-08T06:30", "America/New_York")).toBe("2026-03-08T06:30");
+    expect(at("2026-03-08T09:00", "America/Los_Angeles")).toBe("2026-03-08T09:00");
+    expect(at("2026-11-01T03:00", "America/New_York")).toBe("2026-11-01T03:00");
+    expect(at("2026-03-29T01:30", "Europe/Berlin")).toBe("2026-03-29T01:30");
+    expect(at("2026-10-04T00:00", "Australia/Sydney")).toBe("2026-10-04T00:00");
+    expect(at("2026-09-26T14:00", "Pacific/Auckland")).toBe("2026-09-26T14:00");
+
+    // P3.9: a skipped 02:30 becomes 03:30; a repeated 01:30 is the first one (EDT).
+    expect(resolveLocalInput("2026-03-08T02:30", "America/New_York")).toEqual({
+      utc: "2026-03-08T07:30:00.000Z",
+      kind: "skipped",
+    });
+    expect(resolveLocalInput("2026-11-01T01:30", "America/New_York")).toEqual({
+      utc: "2026-11-01T05:30:00.000Z",
+      kind: "ambiguous",
+    });
+  });
+
+  it("says what happened to a skipped or repeated time, and nothing for an ordinary one", () => {
+    const zone = "America/New_York";
+    const note = (typed: string) => clockNote("starts", typed, resolveLocalInput(typed, zone)!, zone);
+
+    expect(note("2026-03-08T02:30")).toBe(
+      "The clocks go forward on 2026-03-08 in America/New_York, so 02:30 does not happen that day. " +
+        "The campaign starts at 03:30 instead.",
+    );
+    expect(note("2026-11-01T01:30")).toMatch(/happens twice that day\. The campaign starts at the first 01:30/);
+    expect(note("2026-03-08T09:00")).toBeNull();
+  });
+
+  it("carries the notes through parseSchedule into the campaign page's warnings", () => {
+    const schedule = parseSchedule({
+      kind: "window",
+      startAt: "2026-03-08T07:30:00.000Z",
+      clockNotes: ["The clocks go forward…", 42],
+    });
+    expect(scheduleWarnings(schedule)).toContain("The clocks go forward…");
+    expect(schedule.kind === "window" && schedule.clockNotes).toEqual(["The clocks go forward…"]);
   });
 });

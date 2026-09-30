@@ -11,7 +11,12 @@ import { ensureShop } from "../services/shop.server";
 import { facetDetails } from "../lib/segments/facets";
 import { facets } from "../services/segments.server";
 import { createCampaign } from "../services/campaigns/index.server";
-import { joinDateAndTime, localInputToUtc, type Schedule } from "../lib/scheduling/window";
+import {
+  clockNote,
+  joinDateAndTime,
+  resolveLocalInput,
+  type Schedule,
+} from "../lib/scheduling/window";
 import { presetStartFor } from "../lib/scheduling/calendar";
 import { formatClock, formatCount, formatDay, formatWhen } from "../lib/format/display";
 import { PriceImportHistory } from "../components/imports/PriceImportHistory";
@@ -275,16 +280,23 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
     String(form.get("endTime") ?? ""),
     "23:59",
   );
-  const startUtc = startLocal ? localInputToUtc(startLocal, shop.timezone) : null;
+  const start = startLocal ? resolveLocalInput(startLocal, shop.timezone) : null;
+  const end = endLocal ? resolveLocalInput(endLocal, shop.timezone) : null;
+  // A typed time the clocks skip or repeat is scheduled by P3.9's rule and said out loud.
+  const clockNotes = [
+    start && clockNote("starts", startLocal, start, shop.timezone),
+    end && clockNote("ends", endLocal, end, shop.timezone),
+  ].filter((note): note is string => !!note);
 
   // A schedule needs a valid start. Anything else stays manual rather than being
   // half-scheduled, which would leave the merchant unsure whether it will fire.
-  const schedule: Schedule | undefined = startUtc
+  const schedule: Schedule | undefined = start
     ? {
         kind: "window",
-        startAt: startUtc,
-        endAt: endLocal ? localInputToUtc(endLocal, shop.timezone) ?? undefined : undefined,
+        startAt: start.utc,
+        endAt: end?.utc,
         revertBufferMinutes: Number(form.get("revertBuffer") ?? 5) || 5,
+        ...(clockNotes.length > 0 ? { clockNotes } : {}),
       }
     : undefined;
 
