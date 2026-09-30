@@ -51,6 +51,15 @@ export interface RecaptureOptions extends RecaptureScope {
   /** What the merchant typed. Checked against the phrase the assessment demanded. */
   confirmation?: string;
   actor?: string;
+  /**
+   * How many variants the page said this would rewrite, when there was a page (#716).
+   *
+   * The confirmation is only worth something if it confirms *this* recapture. A scope
+   * that resolves to a different number now -- a segment edited, a sync in between, or a
+   * form that posted a different scope from the one it showed -- is refused rather than
+   * run on a count nobody saw.
+   */
+  expectedScope?: number;
 }
 
 export async function recapture(shopId: string, options: RecaptureOptions = {}) {
@@ -62,6 +71,16 @@ export async function recapture(shopId: string, options: RecaptureOptions = {}) 
       userMessage:
         `${plan.warning ?? ""} Type “${plan.confirmationPhrase}” to confirm you want to do this anyway.`.trim(),
       context: { shopId, scope: plan.scope, overlaps: plan.overlaps.map((o) => o.campaignId) },
+    });
+  }
+
+  if (options.expectedScope !== undefined && options.expectedScope !== plan.scope) {
+    throw new AppError({
+      code: "VALIDATION",
+      userMessage:
+        `This scope is ${plan.scope} variant${plan.scope === 1 ? "" : "s"} now, not the ${options.expectedScope} you were shown, so nothing was recaptured. ` +
+        "Check the scope again and read the new count before recapturing.",
+      context: { shopId, scope: plan.scope, expected: options.expectedScope, segmentId: options.segmentId ?? null },
     });
   }
 
