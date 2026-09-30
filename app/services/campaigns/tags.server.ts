@@ -22,6 +22,8 @@
  * immediately before writing, and only the delta is ever removed.
  */
 
+import type { CampaignStatus } from "@prisma/client";
+
 import prisma from "../../db.server";
 import { classifyFailure } from "../../lib/execution/classify";
 import type { AdminClient } from "../../lib/execution/sync-executor";
@@ -116,14 +118,25 @@ export async function applyCampaignTags(
   }
 
   const current = await liveTags(client, productGids);
+  const claimedByOthers = await tagsOwedByOthers(shopId, campaignId);
   const messages: string[] = [];
   let tagged = 0;
   let failed = 0;
   let leftAlone = 0;
 
   for (const productGid of productGids) {
-    const plan = planTagsFor(productGid, kit, current.get(productGid) ?? []);
+    const plan = planTagsFor(
+      productGid,
+      kit,
+      current.get(productGid) ?? [],
+      claimedByOthers.get(productGid),
+    );
     leftAlone += plan.alreadyPresent.length;
+
+    // Shared tags are claimed without being written: they are on the product already,
+    // and the read-back below confirms that like any other claim.
+    const owned = [...plan.toAdd, ...plan.shared];
+    const status = owned.length === 0 ? "SKIPPED" : plan.toAdd.length === 0 ? "APPLIED" : "PENDING";
 
     // Ledgered even when there is nothing to add. "We looked and everything was
     // already there" is a different fact from "we never got to this product", and a
@@ -135,19 +148,22 @@ export async function applyCampaignTags(
         runId,
         campaignId,
         productGid,
-        addedTags: plan.toAdd,
+        addedTags: owned,
         alreadyPresent: plan.alreadyPresent,
-        status: plan.toAdd.length === 0 ? "SKIPPED" : "PENDING",
+        status,
         appliedAt: plan.toAdd.length === 0 ? new Date() : null,
       },
       update: {
-        addedTags: plan.toAdd,
+        addedTags: owned,
         alreadyPresent: plan.alreadyPresent,
-        status: plan.toAdd.length === 0 ? "SKIPPED" : "PENDING",
+        status,
       },
     });
 
-    if (plan.toAdd.length === 0) continue;
+    if (plan.toAdd.length === 0) {
+      if (plan.shared.length > 0) tagged++;
+      continue;
+    }
 
     try {
       const response = await withRetry(
@@ -281,11 +297,18 @@ export async function removeCampaignTags(
 }
 
 /**
- * Tags other still-running campaigns have on each product.
+ * Campaign states whose sale prices, and so whose badges, are still on the storefront.
+ * HELD is one: a campaign held for drift is paused, not ended.
+ */
+const LIVE_STATUSES: CampaignStatus[] = ["ACTIVE", "APPLYING", "PARTIAL", "HELD"];
+
+/**
+ * Tags other still-running campaigns have claimed on each product.
  *
  * Two overlapping sales both tagging "SALE" is ordinary, and ending one must not strip
  * the badge from the other. Without this, the first campaign to finish silently
- * un-badges the second.
+ * un-badges the second. Applying reads it too: a tag present only because another sale
+ * added it is claimed jointly, not recorded as the merchant's.
  */
 async function tagsOwedByOthers(
   shopId: string,
@@ -296,7 +319,7 @@ async function tagsOwedByOthers(
       shopId,
       campaignId: { not: campaignId },
       status: { in: ["APPLIED", "VERIFIED"] },
-      run: { campaign: { status: { in: ["ACTIVE", "APPLYING", "PARTIAL"] } } },
+      run: { campaign: { status: { in: LIVE_STATUSES } } },
     },
     select: { productGid: true, addedTags: true },
   });
