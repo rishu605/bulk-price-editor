@@ -6,6 +6,8 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { actorFor } from "../lib/audit/actor";
 import { priceListLabel } from "../lib/markets/display-name";
 import { GUIDED_PRODUCT_LIMIT } from "../lib/onboarding/steps";
+import { scopeChosen } from "../lib/onboarding/guided-scope";
+import { AppError } from "../lib/errors/app-error";
 import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
 import { facetDetails } from "../lib/segments/facets";
@@ -232,8 +234,9 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
     // catalogue, so a merchant following the checklist and pressing the obvious button
     // got a whole-catalogue sale having just been told they were doing a small one.
     // See #624 and `GUIDED_PRODUCT_LIMIT`.
-    guidedNeedsScope:
-      guided && !segmentId && SCOPE_CONDITION_FIELDS.every((field) => !url.searchParams.get(field)),
+    // Only where the page starts. The scope is in the POST form, not the URL, so the
+    // component re-reads it on every change (#715).
+    guidedNeedsScope: guided && !scopeChosen(readerFor(url.searchParams)),
   };
 });
 
@@ -309,6 +312,17 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
 
   const segmentId = String(form.get("segment") ?? "").trim();
   const practice = String(form.get("practice") ?? "") === "1";
+
+  // The page holds its button until a guided campaign is narrowed; this is the same rule
+  // for a submit that did not come through that button -- no JavaScript, or a hand-built
+  // request. See `scopeChosen`.
+  if (String(form.get("guided") ?? "") === "1" && !scopeChosen(readerFor(form))) {
+    throw new AppError({
+      code: "VALIDATION",
+      userMessage:
+        "Your first campaign still covers the whole catalogue. Pick a collection, a vendor, a tag or a title — or a saved segment — so the first run is a handful of products you can check, then create it again.",
+    });
+  }
 
   const campaign = await createCampaign(
     shop.id,
@@ -395,6 +409,17 @@ export default function NewCampaign() {
   const importResult = importFetcher.data?.result;
   const importProblems = problemsFrom(importResult);
 
+  /**
+   * Whether the guided gate is satisfied, from the form as it stands now (#715).
+   *
+   * Starts from the loader's reading of the URL and follows the form from then on: the
+   * scope fields post with everything else and never reach the URL, so the loader's
+   * answer alone never changed and the create button never enabled.
+   */
+  const [scoped, setScoped] = useState(!guidedNeedsScope);
+  // A campaign from a file has no scope to narrow -- the file names its variants.
+  const needsScope = guided && !scoped && !fromFile;
+
   const submitPreview = useCallback(() => {
     const form = formRef.current;
     if (!form) return;
@@ -415,6 +440,41 @@ export default function NewCampaign() {
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(submitPreview, 400);
   }, [submitPreview]);
+
+  // Every change reprices, and on a guided page also re-reads the scope. The scope read is
+  // not debounced: it costs nothing, and a button that lags the field beside it looks
+  // broken.
+  const formChanged = useCallback(() => {
+    requestPreview();
+    if (guided && formRef.current) setScoped(scopeChosen(readerFor(new FormData(formRef.current))));
+  }, [guided, requestPreview]);
+
+  /*
+   * Listened for natively, not with React's `<Form onChange>` (#863).
+   *
+   * Every field here is a Polaris web component, and their events reach the form as native
+   * `input` and `change` events whose target is the custom element. React does not turn
+   * those into an `onChange` on an ancestor, so the handler never ran: measured in the
+   * admin, one edit gave native change=1, input=2 and React onChange=0. The preview was
+   * priced once, at load, and never again, and the guided create button never enabled
+   * (#715). `SettingsSaveBar` listens the same way for the same reason.
+   *
+   * Bound once, through a ref to the latest handler, because `formChanged` changes identity
+   * whenever the preview fetcher changes state.
+   */
+  const latestFormChanged = useRef(formChanged);
+  latestFormChanged.current = formChanged;
+  useEffect(() => {
+    const form = formRef.current;
+    if (!form) return;
+    const changed = () => latestFormChanged.current();
+    form.addEventListener("input", changed);
+    form.addEventListener("change", changed);
+    return () => {
+      form.removeEventListener("input", changed);
+      form.removeEventListener("change", changed);
+    };
+  }, []);
 
   // Clear the pending call on unmount, so navigating away mid-type does not fire a
   // request against a page that is gone.
@@ -499,7 +559,7 @@ export default function NewCampaign() {
           </s-paragraph>
           {/* The promise, kept. Saying "start small" and defaulting to everything left
               the merchant one obvious button away from a whole-catalogue sale. */}
-          {guidedNeedsScope ? (
+          {needsScope ? (
             <s-paragraph>
               <s-text type="strong">
                 Pick a collection, a vendor, a tag or a title to narrow this down — the
@@ -521,8 +581,9 @@ export default function NewCampaign() {
           One form removes both. It is also what makes the preview live: the fetcher
           already posts `new FormData(form)`, so with the scope inside that form a change
           to a filter reprices exactly as a change to the rule does. */}
-      <Form method="post" ref={formRef} onChange={requestPreview}>
+      <Form method="post" ref={formRef}>
         <input type="hidden" name="practice" value={practice ? "1" : ""} />
+        <input type="hidden" name="guided" value={guided ? "1" : ""} />
 
         {/* `s-page` spaces its direct children, and these are no longer direct children
             — they are inside a form. `PageSections` is the page rhythm, available for
@@ -967,10 +1028,11 @@ export default function NewCampaign() {
           thing it is submitting. */}
       {fromFile ? null : (
         <ActionRow>
-          {/* Disabled rather than refused after the fact: the scope lives in the URL, so
-              the page already knows, and telling a merchant afterwards that their first
-              campaign was too big is telling them after they pressed the button. */}
-          <s-button type="submit" variant="primary" disabled={guidedNeedsScope || undefined}>
+          {/* Disabled rather than refused after the fact: telling a merchant afterwards
+              that their first campaign was too big is telling them after they pressed the
+              button. `needsScope` follows the form as it changes; the action refuses the
+              same thing for a submit that did not come through here. */}
+          <s-button type="submit" variant="primary" disabled={needsScope || undefined}>
             {practice ? "Preview it — nothing will be written" : "Create and preview"}
           </s-button>
         </ActionRow>
