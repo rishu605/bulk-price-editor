@@ -197,6 +197,16 @@ describe("the safety properties travelled with the flows", () => {
     expect(COSTS).toContain("isCommit(intent, IMPORT_INTENT.commit)");
   });
 
+  it("a spreadsheet started in practice mode posts the practice flag with its own form (#765)", () => {
+    // The editor's hidden `practice` field goes with the editor's form. The spreadsheet
+    // posts from `ImportForm`, so the flag has to be inside that form too -- without it a
+    // practice import came out a real, appliable campaign.
+    const importForm = EDITOR.slice(EDITOR.indexOf("<ImportForm"), EDITOR.indexOf("</ImportForm>"));
+    expect(importForm, "the import form does not carry practice").toMatch(/<input type="hidden" name="practice"/);
+    expect(PRICE_IMPORT).toContain('form.get("practice")');
+    expect(PRICE_IMPORT).toMatch(/practice \? \{ practice: true \}/);
+  });
+
   it("recapture still demands a typed confirmation phrase", () => {
     // The one action that can destroy the guarantee the whole product rests on. Moving
     // it must not have moved it one click closer.

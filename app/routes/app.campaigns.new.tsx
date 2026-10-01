@@ -1078,6 +1078,10 @@ export default function NewCampaign() {
           <Field width="medium">
             <s-text-field name="name" label="Call this" value={defaultName} />
           </Field>
+          {/* Practice, again, for the same reason: the editor's hidden field goes with the
+              editor's form, and a practice campaign made from a file came out real and
+              appliable (#765). */}
+          <input type="hidden" name="practice" value={practice ? "1" : ""} />
         </ImportForm>
       ) : null}
 
