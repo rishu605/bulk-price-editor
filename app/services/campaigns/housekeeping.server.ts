@@ -12,6 +12,7 @@ import { Prisma } from "@prisma/client";
 
 import prisma from "../../db.server";
 import { copyName } from "../../lib/campaigns/copy-name";
+import { manualSchedule } from "../../lib/campaigns/schedule-blob";
 import { logger } from "../../lib/logging/logger";
 
 /**
@@ -24,10 +25,15 @@ import { logger } from "../../lib/logging/logger";
  * any of these would be a campaign that quietly prices differently from the one it was
  * copied from, which is worse than no duplicate at all.
  *
- * Not copied, and this is the point of the feature: `status` (a copy is a draft),
- * `schedule`/`startAt`/`endAt` (last month's dates are never the dates the merchant
- * wants — leaving them would schedule a run in the past), `enrollPendingAt`, the runs,
- * and the ledger. History belongs to the campaign that made it. A duplicate carrying its
+ * Copied from inside `schedule`, too: the filter, the segment id, the rounding and the
+ * practice flag live in that JSON beside the dates (`lib/campaigns/schedule-blob.ts`).
+ * Dropping the whole blob made every copy price the entire catalogue, let a practice
+ * campaign's copy be applied, and lost its rounding (#762).
+ *
+ * Not copied, and this is the point of the feature: `status` (a copy is a draft), the
+ * schedule's window and `startAt`/`endAt` (last month's dates are never the dates the
+ * merchant wants — leaving them would schedule a run in the past), `enrollPendingAt`, the
+ * runs, and the ledger. History belongs to the campaign that made it. A duplicate carrying its
  * source's run history would be a lie about what has been written to the storefront, and
  * this app's entire proposition is that the record is true.
  */
@@ -54,7 +60,7 @@ export async function duplicateCampaign(
 ): Promise<{ id: string; name: string }> {
   const source = await prisma.campaign.findFirstOrThrow({
     where: { id: campaignId, shopId },
-    select: { ...COPIED, segments: { select: { id: true } } },
+    select: { ...COPIED, schedule: true, segments: { select: { id: true } } },
   });
 
   // Every name in the shop, not just the unarchived ones. A copy that collides with an
@@ -62,7 +68,7 @@ export async function duplicateCampaign(
   // thousand short strings is cheaper than the query that would avoid it.
   const taken = await prisma.campaign.findMany({ where: { shopId }, select: { name: true } });
 
-  const { segments, ruleRows, surfaces, compareAtPolicy, guardrails, ...fields } = source;
+  const { segments, ruleRows, surfaces, compareAtPolicy, guardrails, schedule, ...fields } = source;
 
   const copy = await prisma.campaign.create({
     data: {
@@ -79,6 +85,9 @@ export async function duplicateCampaign(
       shopId,
       name: copyName(source.name, taken.map((c) => c.name)),
       status: "DRAFT",
+      // What it prices, run by hand: the same scope, rounding and practice flag, and no
+      // dates. A draft, so `manual` -- the window is what is deliberately left behind.
+      schedule: manualSchedule(schedule) as Prisma.InputJsonValue,
       createdBy: actor,
       // Connected, not copied. A segment is a saved definition shared across campaigns;
       // duplicating the rows would give the copy a segment that stops tracking the

@@ -13,13 +13,11 @@
 
 import prisma from "../../db.server";
 import { AppError } from "../../lib/errors/app-error";
+import { definitionOf, manualSchedule } from "../../lib/campaigns/schedule-blob";
 import { describeState, type CampaignState } from "../../lib/lifecycle/transitions";
 import { formatScheduleInstant } from "../../lib/scheduling/window";
 import { windowFromFields, windowInputProblem } from "../../lib/scheduling/window-input";
 import { transitionCampaign } from "./lifecycle.server";
-
-/** What `createCampaign` keeps beside the window in the schedule blob, and must survive. */
-const WINDOW_KEYS = ["kind", "startAt", "endAt", "revertBufferMinutes", "clockNotes"] as const;
 
 async function scheduled(shopId: string, campaignId: string) {
   const campaign = await prisma.campaign.findFirst({
@@ -40,13 +38,6 @@ function notScheduled(name: string, status: CampaignState): AppError {
       `"${name}" is ${describeState(status).label.toLowerCase()}, not scheduled, so there is no schedule to change. ` +
       "Nothing was changed. Reload the page to see where it is now.",
   });
-}
-
-/** The schedule blob with its window removed: what a manual campaign carries. */
-function withoutWindow(schedule: unknown): Record<string, unknown> {
-  const rest = { ...((schedule ?? {}) as Record<string, unknown>) };
-  for (const key of WINDOW_KEYS) delete rest[key];
-  return rest;
 }
 
 /**
@@ -82,7 +73,7 @@ export async function unschedule(shopId: string, campaignId: string, actor?: str
 
   await prisma.campaign.update({
     where: { id: campaignId },
-    data: { schedule: { ...withoutWindow(campaign.schedule), kind: "manual" } as never, startAt: null, endAt: null },
+    data: { schedule: manualSchedule(campaign.schedule) as never, startAt: null, endAt: null },
   });
   await prisma.auditLogEntry.create({
     data: {
@@ -117,7 +108,7 @@ export async function reschedule(
     where: { id: campaignId, shopId, status: "SCHEDULED" },
     data: {
       schedule: {
-        ...withoutWindow(previous),
+        ...definitionOf(previous),
         kind: "window",
         startAt: window.startUtc,
         ...(window.endUtc ? { endAt: window.endUtc } : {}),
