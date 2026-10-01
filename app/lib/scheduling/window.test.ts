@@ -187,6 +187,12 @@ describe("describeSchedule", () => {
   it("explains manual scheduling plainly", () => {
     expect(describeSchedule({ kind: "manual" }, "UTC")).toContain("by hand");
   });
+
+  it("does not say a cancelled campaign starts (#760)", () => {
+    const text = describeSchedule(window(), "UTC", "CANCELLED");
+    expect(text).toMatch(/^Was to start .*Cancelled, so it will not run\.$/);
+    expect(text).not.toMatch(/^Starts/);
+  });
 });
 
 describe("revert buffer capping", () => {

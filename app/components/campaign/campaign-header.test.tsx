@@ -182,6 +182,85 @@ describe("applying a held campaign says whose edits it writes over (#755)", () =
   });
 });
 
+describe("a campaign that has not started can be moved or called off (#760)", () => {
+  const window = {
+    start: "2026-11-27T09:00",
+    end: "2026-11-30T23:59",
+    startText: "Nov 27, 2026, 9:00 AM (America/New_York)",
+  };
+  const html = render(
+    <CampaignHeader {...props({ lifecycle: describeState("SCHEDULED"), state: "SCHEDULED", window } as never)} />,
+  );
+  const [row, ...modals] = html.split("<s-modal");
+  const dialogs = modals.join("<s-modal");
+
+  it("offers Edit dates and a control that says it stops the campaign", () => {
+    expect(row).toContain("Edit dates");
+    expect(row).toContain("Cancel or unschedule");
+  });
+
+  it("names the start date in the dialogs, and offers both ways to stop it", () => {
+    expect(dialogs).toContain("It is scheduled to start Nov 27, 2026, 9:00 AM (America/New_York).");
+    expect(dialogs).toContain("Unschedule");
+    expect(dialogs).toContain("Cancel campaign");
+    expect(dialogs).toContain("Keep it scheduled");
+  });
+
+  it("prefills the dates it will save", () => {
+    expect(dialogs).toContain('value="2026-11-27"');
+    expect(dialogs).toContain('value="09:00"');
+    expect(dialogs).toContain('value="2026-11-30"');
+    expect(dialogs).toContain('value="23:59"');
+  });
+
+  it("offers no Revert: nothing has been written to revert (#749)", () => {
+    expect(row).not.toMatch(/>Revert</);
+  });
+
+  it("offers none of it once the campaign has started", () => {
+    const active = render(<CampaignHeader {...props({ lifecycle: describeState("ACTIVE"), state: "ACTIVE", window: null } as never)} />);
+    expect(active).not.toContain("Edit dates");
+    expect(active).not.toContain("Cancel or unschedule");
+  });
+});
+
+describe("every dialog button opens a dialog that is there (#749)", () => {
+  /**
+   * Revert rendered whenever there was no report of edits to review -- including on every
+   * draft and scheduled campaign, which have no report at all -- and opened a dialog that
+   * was only drawn when there *was* a report. Pressing it did nothing. Rendered here for
+   * every state, the way the loader would give it: a rollback report only where the
+   * campaign has written prices, a window only before it starts.
+   */
+  const STATES = ["DRAFT", "SCHEDULED", "APPLYING", "ACTIVE", "HELD", "REVERTING", "COMPLETED", "PARTIAL", "CANCELLED"] as const;
+  const live = new Set(["ACTIVE", "PARTIAL", "HELD"]);
+
+  it.each(STATES)("%s", (state) => {
+    const html = render(
+      <CampaignHeader
+        {...props({
+          lifecycle: describeState(state),
+          state,
+          canApply: state === "DRAFT" || state === "SCHEDULED",
+          rollback: live.has(state)
+            ? ({ straightforward: true, counts: { total: 4, drifted: 0, deleted: 0 }, rows: [] } as never)
+            : null,
+          window:
+            state === "SCHEDULED"
+              ? { start: "2026-11-27T09:00", end: "", startText: "Nov 27, 2026, 9:00 AM (UTC)" }
+              : null,
+        } as never)}
+      />,
+    );
+
+    const targets = [...html.matchAll(/commandfor="([^"]+)"/gi)].map(([, id]) => id);
+    for (const id of targets) {
+      expect(html, `a button opens #${id}, which is not on the page`).toContain(`id="${id}"`);
+    }
+    expect(/>Revert</.test(html.split("<s-modal")[0]), "Revert on a campaign with nothing live").toBe(live.has(state));
+  });
+});
+
 describe("a practice campaign is never offered a way to apply", () => {
   const html = render(<CampaignHeader {...props({ practice: true })} />);
 
