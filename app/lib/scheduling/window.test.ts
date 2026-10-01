@@ -54,6 +54,12 @@ describe("due transitions", () => {
     expect(dueTransition(state, at("2026-08-22T09:00:00Z"))).toBe("revert");
   });
 
+  it("reverts a held campaign at its end — a price edit stops it writing, not its prices being live (#756)", () => {
+    const state = { schedule: window(), status: "HELD" as SchedulableStatus };
+    expect(dueTransition(state, at("2026-08-22T08:54:00Z"))).toBeNull();
+    expect(dueTransition(state, at("2026-08-22T09:00:00Z"))).toBe("revert");
+  });
+
   it("does not apply a campaign whose window has already closed", () => {
     // Created late, or resumed after an outage. Applying here would put a finished
     // sale live.
@@ -88,7 +94,7 @@ describe("due transitions", () => {
     fc.assert(
       fc.property(
         fc.date({ min: new Date("2026-08-19"), max: new Date("2026-08-23") }),
-        fc.constantFrom<SchedulableStatus>("SCHEDULED", "ACTIVE", "PARTIAL", "COMPLETED"),
+        fc.constantFrom<SchedulableStatus>("SCHEDULED", "ACTIVE", "PARTIAL", "HELD", "COMPLETED"),
         (now, status) => {
           const result = dueTransition({ schedule: window(), status }, now);
           expect(result === null || result === "apply" || result === "revert").toBe(true);

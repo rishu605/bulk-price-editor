@@ -26,7 +26,7 @@ import { notify } from "./notifications.server";
 import { formatMinorUnits } from "../lib/money/format";
 import { isKnownCurrency } from "../lib/money/currency";
 import { formatMoneyForDisplay, money } from "../lib/money/money";
-import { holdForDrift } from "./campaigns/lifecycle.server";
+import { holdForDrift, releaseHold } from "./campaigns/lifecycle.server";
 
 /** How long a write intent stays valid. Generous: webhook delivery is not instant. */
 const INTENT_TTL_MS = 15 * 60 * 1000;
@@ -261,6 +261,7 @@ export async function resolveOverwrittenDrift(
   shopId: string,
   runId: string,
   variantGids: readonly string[],
+  kind: "APPLY" | "REVERT",
   actor?: string,
 ): Promise<number> {
   if (variantGids.length === 0) return 0;
@@ -294,7 +295,14 @@ export async function resolveOverwrittenDrift(
         action: "drift.overwritten",
         entity: "CampaignRun",
         entityId: runId,
-        after: { events: ids.length, reason: "the run wrote the campaign's price over an edit made outside Anchor" } as never,
+        after: {
+          events: ids.length,
+          kind,
+          reason:
+            kind === "REVERT"
+              ? "the revert wrote the price without this campaign over an edit made outside Anchor"
+              : "the run wrote the campaign's price over an edit made outside Anchor",
+        } as never,
       },
     }),
   ]);
@@ -304,22 +312,39 @@ export async function resolveOverwrittenDrift(
 export type DriftResolution = "adopt" | "reassert" | "ignore";
 
 /**
- * Resolves a drift event.
+ * Resolves a drift event by keeping the merchant's price: as the new baseline, or as is.
  *
  * "adopt" supersedes the current baseline with the observed price, which is the only
  * one of the three that changes what future campaigns compute from — so it is the
- * one worth being sure about. "reassert" only marks the event; the campaign's next
- * run rewrites the price, because writing here would bypass the ledger.
+ * one worth being sure about.
+ *
+ * "reassert" is not here. It used to only mark the event, on the promise that the
+ * campaign's next run would rewrite the price -- a run that never came for a manual
+ * campaign, or for a held one the scheduler skips (#756). Putting the price back is a
+ * write, so it is a run: `reassertDrift`.
+ *
+ * Either way the decision the hold was waiting for has been made, so a campaign with
+ * nothing left pending runs again.
  */
 export async function resolveDrift(
   shopId: string,
   eventId: string,
-  resolution: DriftResolution,
+  resolution: Exclude<DriftResolution, "reassert">,
   actor?: string,
-): Promise<void> {
+): Promise<{ released: boolean }> {
   const event = await prisma.driftEvent.findFirstOrThrow({
     where: { id: eventId, shopId },
   });
+  // A second answer to a question already answered -- a stale page, a double click, a
+  // run that wrote over the edit in the meantime -- must not rewrite the first.
+  if (event.resolution !== "PENDING") {
+    throw new AppError({
+      code: "VALIDATION",
+      userMessage:
+        `This price drift was already resolved (${event.resolution.toLowerCase()}${event.resolvedBy ? ` by ${event.resolvedBy}` : ""}). ` +
+        "Nothing was changed. Reload the page to see what is still waiting.",
+    });
+  }
 
   // Adopting makes the observed price the baseline, so it must still be the price on the
   // storefront. A run that wrote over it since left an event describing a price that is
@@ -371,12 +396,7 @@ export async function resolveDrift(
   await prisma.driftEvent.update({
     where: { id: eventId },
     data: {
-      resolution:
-        resolution === "adopt"
-          ? "ADOPTED"
-          : resolution === "reassert"
-            ? "REASSERTED"
-            : "IGNORED",
+      resolution: resolution === "adopt" ? "ADOPTED" : "IGNORED",
       resolvedAt: new Date(),
       resolvedBy: actor ?? null,
     },
@@ -392,6 +412,9 @@ export async function resolveDrift(
       after: { variantGid: event.variantGid, observedPrice: String(event.observedPrice) },
     },
   });
+
+  const released = event.campaignId ? await releaseHold(shopId, event.campaignId, actor) : null;
+  return { released: released?.changed ?? false };
 }
 
 /** Removes expired write intents so the table stays bounded. */

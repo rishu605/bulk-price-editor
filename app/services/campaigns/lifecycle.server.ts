@@ -281,3 +281,48 @@ export async function holdForDrift(
     actor: "drift-detector",
   });
 }
+
+/**
+ * Lets a held campaign run again once nothing holds it (#756).
+ *
+ * The merchant resolves the drift from the queue -- puts the price back, keeps the
+ * change, or leaves it -- and that decision is what the hold was waiting for. Nothing
+ * released it: the campaign stayed HELD for good, and the scheduler, which only looks at
+ * running campaigns, never ended it either.
+ *
+ * Back to the state it was held from, read from the transition that held it: a campaign
+ * that was PARTIAL before somebody edited one of its prices still has rows to resume.
+ */
+export async function releaseHold(
+  shopId: string,
+  campaignId: string,
+  actor?: string,
+): Promise<TransitionResult | null> {
+  const campaign = await prisma.campaign.findFirst({
+    where: { id: campaignId, shopId },
+    select: { status: true },
+  });
+  if (campaign?.status !== "HELD") return null;
+
+  const pending = await prisma.driftEvent.count({
+    where: { shopId, campaignId, resolution: "PENDING" },
+  });
+  if (pending > 0) return null;
+
+  const held = await prisma.auditLogEntry.findFirst({
+    where: {
+      shopId,
+      action: "campaign.transition",
+      entityId: campaignId,
+      after: { path: ["status"], equals: "HELD" },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { before: true },
+  });
+  const from = (held?.before as { status?: string } | null)?.status;
+
+  return transitionCampaign(shopId, campaignId, from === "PARTIAL" ? "PARTIAL" : "ACTIVE", {
+    reason: "price drift resolved",
+    actor,
+  });
+}
