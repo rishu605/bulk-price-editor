@@ -481,3 +481,38 @@ describe("a fixed amount never prices a surface in another currency (#692)", () 
     expect(row).toMatchObject({ status: "skipped", reason: "currency-mismatch" });
   });
 });
+
+describe("a campaign is offered only the variants its scope covers (#752)", () => {
+  const narrow = campaign({
+    id: "narrow",
+    priority: 1000,
+    ruleRows: [{ segmentIds: [], rule: { kind: "percent-change", percent: -50 } }],
+    scope: new Set(["gid://Variant/1"]),
+  });
+  const broad = campaign({ id: "broad", priority: 900 });
+  const candidates = ["gid://Variant/1", "gid://Variant/2"].map((gid) => candidate({ ref: baseRef(gid) }));
+
+  it("prices a variant outside a higher campaign's scope by the campaign that covers it", () => {
+    const out = planRun({ campaigns: [broad, narrow], candidates });
+    if (out.kind !== "ok") throw new Error("expected ok");
+    const byVariant = new Map(out.rows.map((row) => [row.ref.variantGid, row]));
+    expect(byVariant.get("gid://Variant/1")?.campaignId).toBe("narrow");
+    expect(byVariant.get("gid://Variant/1")?.intendedPrice).toEqual(usd(5_000));
+    expect(byVariant.get("gid://Variant/2")?.campaignId, "the narrow campaign priced a variant it does not cover").toBe("broad");
+    expect(byVariant.get("gid://Variant/2")?.intendedPrice).toEqual(usd(8_000));
+  });
+
+  it("returns a variant to its baseline on revert when nothing left covers it", () => {
+    const out = planRun({ campaigns: [broad, narrow], candidates, excludeCampaignId: "broad" });
+    if (out.kind !== "ok") throw new Error("expected ok");
+    const two = out.rows.find((row) => row.ref.variantGid === "gid://Variant/2");
+    // At baseline already, so no row: the narrow campaign does not take it.
+    expect(two?.campaignId).not.toBe("narrow");
+  });
+
+  it("treats a campaign with no scope as covering every candidate, as for the one being planned", () => {
+    const out = planRun({ campaigns: [broad], candidates });
+    if (out.kind !== "ok") throw new Error("expected ok");
+    expect(out.rows.map((row) => row.campaignId)).toEqual(["broad", "broad"]);
+  });
+});

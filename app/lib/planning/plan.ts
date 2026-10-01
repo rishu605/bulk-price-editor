@@ -76,12 +76,16 @@ export function planRun(input: PlanInput): PlanOutcome {
     // A variant reverted out of a campaign individually. Dropping the campaign for
     // this candidate and re-resolving is what makes the variant fall through to
     // whatever else still controls it, rather than to full price.
-    const applicable =
-      exclusions.size === 0
-        ? campaigns
-        : campaigns.filter(
-            (campaign) => !exclusions.get(campaign.id)?.has(candidate.ref.variantGid),
-          );
+    //
+    // And a campaign is only offered the variants its own scope covers (#752). A rule row
+    // with no segments matches everything, so without this every active campaign priced
+    // the whole store whenever it outranked the one being planned.
+    const variantGid = candidate.ref.variantGid;
+    const applicable = campaigns.filter(
+      (campaign) =>
+        (!campaign.scope || campaign.scope.has(variantGid)) &&
+        !exclusions.get(campaign.id)?.has(variantGid),
+    );
 
     const resolution = resolve({
       baseline: candidate.baseline,
