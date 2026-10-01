@@ -10,7 +10,8 @@
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-import { sendSupportRequest } from "./support.server";
+import { sendSupportRequest, supportEmailConfigured } from "./support.server";
+import { SUPPORT_ADDRESS } from "../lib/support/contact";
 import { supportContext } from "../lib/support/context";
 
 const context = supportContext({
@@ -63,6 +64,28 @@ describe("sending", () => {
     expect(result.sent).toBe(false);
     expect(result.message).toContain("Nothing was sent");
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(supportEmailConfigured()).toBe(false);
+  });
+
+  it("gives the merchant another way to reach us whenever nothing was sent (#758)", async () => {
+    // Addressed to the merchant, who cannot configure anything -- not to whoever runs the
+    // deployment -- and never a dead end at the moment they most need help.
+    const failures = [
+      () => vi.stubEnv("RESEND_API_KEY", ""),
+      () => vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 502 })),
+      () => vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network"))),
+    ];
+
+    for (const fail of failures) {
+      vi.stubEnv("RESEND_API_KEY", "re_test");
+      fail();
+      const { sent, message } = await sendSupportRequest(request);
+
+      expect(sent).toBe(false);
+      expect(message).toContain(`Email ${SUPPORT_ADDRESS}`);
+      expect(message).toContain("still in the form");
+      expect(message).not.toMatch(/configured|install/i);
+    }
   });
 
   it("reports a provider failure instead of swallowing it", async () => {
@@ -77,7 +100,7 @@ describe("sending", () => {
     const result = await sendSupportRequest(request);
 
     expect(result.sent).toBe(false);
-    expect(result.message).toContain("could not send");
+    expect(result.message).toContain("couldn't send");
   });
 });
 

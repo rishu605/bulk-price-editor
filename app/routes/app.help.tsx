@@ -38,6 +38,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
 import { ActionRow } from "../components/ActionRow";
+import { SUPPORT_ADDRESS, supportMailto } from "../lib/support/contact";
 import { PageShell } from "../components/PageShell";
 import { QueryContainer } from "../components/QueryContainer";
 import { RouteBoundary } from "../components/RouteBoundary";
@@ -86,6 +87,9 @@ export default function HelpIndex() {
               Contact support
             </s-button>
           </ActionRow>
+          <Secondary>
+            Or email <s-link href={supportMailto()} target="_blank">{SUPPORT_ADDRESS}</s-link>.
+          </Secondary>
         </s-stack>
       </Card>
 

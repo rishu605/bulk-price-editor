@@ -19,6 +19,8 @@
  * - "Telemetry carries no price values" is the convention in CLAUDE.md and `redact.ts`.
  */
 
+import { SUPPORT_ADDRESS, supportMailto } from "../lib/support/contact";
+
 export const meta = () => [
   { title: "Privacy policy · Anchor" },
   { name: "robots", content: "index" },
@@ -197,7 +199,7 @@ export default function Privacy() {
           <h2>Contact</h2>
           <p>
             Questions about this policy, or a request about your data, go to{" "}
-            <a href="mailto:rishu605@gmail.com">rishu605@gmail.com</a>.
+            <a href={supportMailto()}>{SUPPORT_ADDRESS}</a>.
           </p>
         </main>
       </body>

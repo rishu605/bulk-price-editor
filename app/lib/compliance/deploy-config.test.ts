@@ -36,6 +36,15 @@ function environmentKeys(): Set<string> {
 
       const source = sourceOf(ROOT, path);
       for (const [, key] of source.matchAll(/process\.env\.([A-Z0-9_]+)/g)) keys.add(key);
+      // Destructured -- `const { A, B } = process.env` -- which is how `SUPPORT_EMAIL` went
+      // unseen while production had no support email at all (#758).
+      for (const [, names] of source.matchAll(/\{([^}]*)\}\s*=\s*process\.env\b/g)) {
+        for (const [key] of names.matchAll(/[A-Z][A-Z0-9_]+/g)) keys.add(key);
+      }
+      // Aliased -- `const env = process.env; env.A`.
+      for (const [, alias] of source.matchAll(/(?:const|let)\s+(\w+)\s*=\s*process\.env\s*;/g)) {
+        for (const [, key] of source.matchAll(new RegExp(`\\b${alias}\\.([A-Z][A-Z0-9_]+)`, "g"))) keys.add(key);
+      }
     }
   };
 
@@ -143,6 +152,27 @@ describe("the Railway runbook", () => {
       undocumented,
       "read by the code and absent from the runbook — somebody will find this at boot",
     ).toEqual([]);
+  });
+
+  it("finds a variable however it is read", () => {
+    // The shapes the walk has to see. A destructured read is how `SUPPORT_EMAIL` stayed
+    // out of the runbook (#758).
+    const keys = environmentKeys();
+    expect(keys).toContain("SUPPORT_EMAIL");
+    expect(keys).toContain("SENTRY_RELEASE");
+  });
+
+  it("requires the mail variables in production, so support can be reached (#758)", () => {
+    // Shopify's review expects a working support contact. Without these, Contact support
+    // cannot send and the merchant is sent to an address instead -- tolerable as a
+    // fallback, not as how production runs.
+    const required = runbook.split("### Required")[1]?.split("### ")[0] ?? "";
+    const optional = runbook.split("### Optional")[1]?.split("---")[0] ?? "";
+
+    for (const key of ["RESEND_API_KEY", "NOTIFICATION_FROM_EMAIL", "SUPPORT_EMAIL"]) {
+      expect(required, `${key} must be in the runbook's Required table`).toContain(`\`${key}\``);
+      expect(optional, `${key} is required, not optional`).not.toContain(`\`${key}\``);
+    }
   });
 
   it("agrees with the app manifest about scopes", () => {

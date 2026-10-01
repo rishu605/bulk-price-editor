@@ -16,7 +16,7 @@
  * release from ever replacing a broken one.
  */
 
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import prisma from "../../app/db.server";
 import { loader } from "../../app/routes/healthz";
@@ -27,6 +27,7 @@ import { withChaos } from "../harness/scenario";
 type Health = {
   status: string;
   database: { ok: boolean };
+  mail: { ok: boolean; detail?: string };
   scheduler: { ok: boolean; detail?: string; secondsSinceTick: number | null };
 };
 
@@ -36,6 +37,17 @@ async function health(): Promise<{ body: Health; status: number }> {
 }
 
 describe("chaos: healthz reports the scheduler", () => {
+  // Mail configured, so "ok" here means the scheduler and nothing else. Without it the
+  // status reads "degraded" for mail's sake (#758), covered on its own below.
+  beforeEach(() => {
+    vi.stubEnv("RESEND_API_KEY", "re_test");
+    vi.stubEnv("NOTIFICATION_FROM_EMAIL", "anchor@example.com");
+    vi.stubEnv("SUPPORT_EMAIL", "support@example.com");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("tells a worker that never started from one that stopped", async () => {
     await withChaos(
       "healthz-scheduler",
@@ -67,6 +79,27 @@ describe("chaos: healthz reports the scheduler", () => {
           stopped.status,
           "a stopped worker must never take the web service down with it",
         ).toBe(200);
+      },
+    );
+  });
+
+  it("reports a deployment that cannot send mail, without failing the check (#758)", async () => {
+    await withChaos(
+      "healthz-mail",
+      { catalog: { products: 1, variantsPerProduct: 1 }, percent: -10 },
+      async () => {
+        await beat(new Date());
+        expect((await health()).body.mail.ok).toBe(true);
+
+        // Contact support cannot send, so merchants are shown the address instead: a
+        // deployment missing a required variable, said at every deploy check -- and never
+        // a 503, which would take away the pages that show the address.
+        vi.stubEnv("SUPPORT_EMAIL", "");
+        const missing = await health();
+        expect(missing.body.mail.ok).toBe(false);
+        expect(missing.body.mail.detail).toContain("SUPPORT_EMAIL");
+        expect(missing.body.status).toBe("degraded");
+        expect(missing.status).toBe(200);
       },
     );
   });

@@ -27,11 +27,18 @@
  * because a *different* service stopped, turning "scheduled reverts are late" into "the
  * app is gone".
  *
+ * **It reports whether this deployment can send mail, and does not fail on that either.**
+ * Without a mail provider, Contact support cannot send and merchants are shown the support
+ * address instead (#758). That is a deployment missing a required variable, so it reads
+ * "degraded" at every deploy check -- but taking the app down over it would take away the
+ * pages that show the address.
+ *
  * Unauthenticated on purpose: it is called by the platform before any session exists, and
  * it returns no shop data — only whether its dependencies answered.
  */
 
 import prisma from "../db.server";
+import { supportEmailConfigured } from "../services/support.server";
 import { TICK_SILENCE_SECONDS } from "../lib/observability/alerts";
 import { secondsSinceBeat } from "../services/scheduler-heartbeat.server";
 
@@ -100,6 +107,17 @@ async function checkScheduler(): Promise<Check & { secondsSinceTick: number | nu
   }
 }
 
+/** Whether support requests and notification emails can be sent at all (#758). */
+function checkMail(): Check {
+  return supportEmailConfigured()
+    ? { ok: true }
+    : {
+        ok: false,
+        detail:
+          "RESEND_API_KEY, NOTIFICATION_FROM_EMAIL and SUPPORT_EMAIL are not all set: Contact support cannot send, so merchants are shown the support address instead",
+      };
+}
+
 export async function loader() {
   const [database, redis, scheduler] = await Promise.all([
     checkDatabase(),
@@ -111,12 +129,15 @@ export async function loader() {
   // queue runs inline and campaigns still apply.
   const status = database.ok ? 200 : 503;
 
+  const mail = checkMail();
+
   return new Response(
     JSON.stringify({
-      status: database.ok ? (redis.ok && scheduler.ok ? "ok" : "degraded") : "unhealthy",
+      status: database.ok ? (redis.ok && scheduler.ok && mail.ok ? "ok" : "degraded") : "unhealthy",
       database,
       redis,
       scheduler,
+      mail,
     }),
     { status, headers: { "content-type": "application/json" } },
   );
