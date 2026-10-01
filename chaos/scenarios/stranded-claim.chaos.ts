@@ -190,7 +190,11 @@ describe("chaos: the floor-violation policy reaches the resolver", () => {
           where: { id: campaignId },
           data: { guardrailViolationPolicy: "obliterate" },
         });
-        await writeSettings(shopId, { ...DEFAULT_SETTINGS, minPrice: 100_000 });
+        // A floor between the discounted price and the normal one: $100 baselines, 10% off
+        // makes $90, and the floor is $95. Clamping is "don't discount past this" -- a floor
+        // above the baseline is a different case, which a discount leaves alone (#740).
+        await prisma.baseline.updateMany({ where: { shopId, supersededAt: null }, data: { basePrice: 10_000n } });
+        await writeSettings(shopId, { ...DEFAULT_SETTINGS, minPrice: 95 });
 
         const outcome = await ctx.apply();
         expect(outcome.clean, "an unknown policy must not stop the run").toBe(true);
@@ -198,7 +202,7 @@ describe("chaos: the floor-violation policy reaches the resolver", () => {
 
         // Clamped to the floor, not blocked and not skipped.
         const live = [...ctx.livePrices().values()];
-        expect(new Set(live).size, "every price clamped to the same floor").toBe(1);
+        expect(live, "every price clamped to the same floor").toEqual(["95.00", "95.00"]);
       },
     );
   });

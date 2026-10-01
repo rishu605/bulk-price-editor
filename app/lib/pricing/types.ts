@@ -213,7 +213,13 @@ export type ResolutionReason =
    */
   | "currency-mismatch"
   /** The stored baseline is in another currency than the price it would replace (#734). */
-  | "baseline-currency";
+  | "baseline-currency"
+  /**
+   * A rule that reduces prices met a floor above the variant's normal price -- a cost so
+   * close to the price that the margin floor is higher than the baseline. Clamping would
+   * have raised the price on a "Reduce by" campaign; the row is left alone instead (#740).
+   */
+  | "floor-above-baseline";
 
 export interface Resolution {
   /** The price to write. Absent when nothing should be written. */
