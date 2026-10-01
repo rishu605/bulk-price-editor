@@ -12,13 +12,24 @@
  * repeated. Only the first becomes the segment.
  */
 
-/** What a value in the file was recognised as. */
-export type IdentifierKind = "variant-gid" | "product-gid" | "sku" | "barcode";
+/**
+ * What a value in the file was recognised as.
+ *
+ * `variant-id` is a bare number in a column headed Variant ID -- how Shopify's own admin
+ * and Matrixify write a variant (#774). `barcode` is a bare number anywhere else, which is
+ * only *probably* a barcode: it is also tried as a variant id and a SKU.
+ */
+export type IdentifierKind = "variant-gid" | "variant-id" | "product-gid" | "sku" | "barcode";
+
+/** Header names that say a column holds variant ids. */
+export const VARIANT_ID_HEADERS: readonly string[] = ["variant id", "variant_id", "variantid"];
 
 export interface CsvRow {
   /** 1-based line in the original file, so a report points at something findable. */
   line: number;
   value: string;
+  /** Set when the column's header says what it holds: a Variant ID column (#774). */
+  column?: "variant-id";
 }
 
 export interface AmbiguousRow {
@@ -116,6 +127,11 @@ export function parseIdentifierCsv(text: string): { rows: CsvRow[]; skippedHeade
     rows.push({ line: i + 1, value });
   }
 
+  // A file headed "Variant ID" says what its numbers are (#774).
+  if (skippedHeader && VARIANT_ID_HEADERS.includes(skippedHeader.toLowerCase())) {
+    for (const row of rows) row.column = "variant-id";
+  }
+
   return { rows, skippedHeader };
 }
 
@@ -159,12 +175,15 @@ export function firstCell(line: string): string {
 }
 
 /** Classifies a value without looking it up. */
-export function identifierKindOf(value: string): IdentifierKind {
+export function identifierKindOf(value: string, column?: CsvRow["column"]): IdentifierKind {
   if (value.startsWith("gid://shopify/ProductVariant/")) return "variant-gid";
   if (value.startsWith("gid://shopify/Product/")) return "product-gid";
-  // Barcodes are all-digit and long; anything else is treated as a SKU. Wrong
-  // guesses here cost nothing, because both are looked up and a miss falls through.
-  return /^\d{8,14}$/.test(value) ? "barcode" : "sku";
+  // A bare number. In a Variant ID column it is a variant id, as Shopify and Matrixify
+  // write one -- `46172975661290` -- which used to be read as a barcode and never matched,
+  // so a Matrixify export came back "No match" on every row (#774). Anywhere else it is
+  // tried as a variant id, a barcode and a SKU, and more than one hit is a question.
+  if (/^\d+$/.test(value)) return column === "variant-id" ? "variant-id" : "barcode";
+  return "sku";
 }
 
 export function matchIdentifiers(rows: readonly CsvRow[], index: MatchIndex): MatchOutcome {
@@ -184,7 +203,7 @@ export function matchIdentifiers(rows: readonly CsvRow[], index: MatchIndex): Ma
     }
     seenValue.add(key);
 
-    const kind = identifierKindOf(row.value);
+    const kind = identifierKindOf(row.value, row.column);
     const candidates = lookup(row.value, kind, index);
 
     if (candidates.length === 0) {
@@ -216,12 +235,26 @@ function lookup(value: string, kind: IdentifierKind, index: MatchIndex): string[
   switch (kind) {
     case "variant-gid":
       return index.byVariantGid.has(value.trim()) ? [value.trim()] : [];
+    case "variant-id": {
+      const gid = `gid://shopify/ProductVariant/${value.trim()}`;
+      return index.byVariantGid.has(gid) ? [gid] : [];
+    }
     case "product-gid":
       return index.byProductGid.get(key) ?? [];
-    case "barcode":
-      // Falls through to SKU: a numeric string is only probably a barcode, and a
-      // merchant whose SKUs are numeric should not be told their file is unmatched.
-      return index.byBarcode.get(key) ?? index.bySku.get(key) ?? [];
+    case "barcode": {
+      // A number is only probably a barcode. It may be a variant id or a numeric SKU,
+      // and a merchant should not be told their file is unmatched because we guessed
+      // the wrong one. Every reading is tried; two that name different variants are a
+      // question, reported as ambiguous rather than answered by whichever came first.
+      const asVariant = `gid://shopify/ProductVariant/${value.trim()}`;
+      return [
+        ...new Set([
+          ...(index.byVariantGid.has(asVariant) ? [asVariant] : []),
+          ...(index.byBarcode.get(key) ?? []),
+          ...(index.bySku.get(key) ?? []),
+        ]),
+      ];
+    }
     case "sku":
       return index.bySku.get(key) ?? index.byBarcode.get(key) ?? [];
   }

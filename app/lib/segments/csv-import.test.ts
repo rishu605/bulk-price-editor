@@ -25,6 +25,10 @@ const variants = [
   // the index maps to lists rather than single gids.
   { variantGid: "gid://shopify/ProductVariant/3", productGid: "gid://shopify/Product/20", sku: "DUP", barcode: null },
   { variantGid: "gid://shopify/ProductVariant/4", productGid: "gid://shopify/Product/30", sku: "dup", barcode: null },
+  // Numeric ids as Shopify writes them, and one whose id is another variant's barcode.
+  { variantGid: "gid://shopify/ProductVariant/46172975661290", productGid: "gid://shopify/Product/40", sku: "GLOVE-S", barcode: null },
+  { variantGid: "gid://shopify/ProductVariant/46172975694058", productGid: "gid://shopify/Product/40", sku: "GLOVE-M", barcode: null },
+  { variantGid: "gid://shopify/ProductVariant/5", productGid: "gid://shopify/Product/50", sku: "SCARF", barcode: "46172975694058" },
 ];
 
 const index = buildMatchIndex(variants);
@@ -63,12 +67,23 @@ describe("parseIdentifierCsv", () => {
   });
 });
 
+describe("a file headed Variant ID (#774)", () => {
+  it("marks every row as a variant id", () => {
+    const { rows, skippedHeader } = parseIdentifierCsv("Variant ID\n46172975661290\n46172975694058");
+    expect(skippedHeader).toBe("Variant ID");
+    expect(rows.map((row) => row.column)).toEqual(["variant-id", "variant-id"]);
+  });
+});
+
 describe("identifierKindOf", () => {
   it("recognises gids by prefix and long digit strings as barcodes", () => {
     expect(identifierKindOf("gid://shopify/ProductVariant/1")).toBe("variant-gid");
     expect(identifierKindOf("gid://shopify/Product/10")).toBe("product-gid");
     expect(identifierKindOf("5012345678900")).toBe("barcode");
     expect(identifierKindOf("SHIRT-S")).toBe("sku");
+    // A number in a Variant ID column is a variant id (#774).
+    expect(identifierKindOf("46172975661290", "variant-id")).toBe("variant-id");
+    expect(identifierKindOf("46172975661290")).toBe("barcode");
   });
 });
 
@@ -109,6 +124,34 @@ describe("matchIdentifiers", () => {
     // A numeric SKU looks like a barcode. Telling the merchant their file is
     // unmatched because of our guess about digits would be our bug, not their data.
     expect(match(["5012345678900"]).matched).toEqual(["gid://shopify/ProductVariant/1"]);
+  });
+
+  it("matches a numeric variant id in a Variant ID column, as Shopify and Matrixify write it (#774)", () => {
+    const out = matchIdentifiers(
+      [
+        { line: 2, value: "46172975661290", column: "variant-id" },
+        { line: 3, value: "46172975694058", column: "variant-id" },
+      ],
+      index,
+    );
+    // The second is also SCARF's barcode -- but the column says what it is.
+    expect(out.matched).toEqual([
+      "gid://shopify/ProductVariant/46172975661290",
+      "gid://shopify/ProductVariant/46172975694058",
+    ]);
+    expect(out.unmatched).toEqual([]);
+  });
+
+  it("tries a bare number as a variant id too, and asks when it means two variants (#774)", () => {
+    // No header to say what the numbers are: the variant id is one of the readings.
+    expect(match(["46172975661290"]).matched).toEqual(["gid://shopify/ProductVariant/46172975661290"]);
+    // A variant's id and a different variant's barcode: a question, not a guess.
+    const both = match(["46172975694058"]);
+    expect(both.matched).toEqual([]);
+    expect(both.ambiguous[0].candidates.sort()).toEqual([
+      "gid://shopify/ProductVariant/46172975694058",
+      "gid://shopify/ProductVariant/5",
+    ]);
   });
 
   it("counts a repeated identifier once and says it was repeated", () => {

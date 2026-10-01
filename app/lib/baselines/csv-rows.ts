@@ -18,11 +18,14 @@
  */
 
 import { parseMoney, type Money } from "../money/money";
+import { VARIANT_ID_HEADERS } from "../segments/csv-import";
 
 export interface RawRow {
   /** 1-based line in the file, so an error points at something findable. */
   line: number;
   identifier: string;
+  /** Set when the identifier came from a column headed Variant ID (#774). */
+  identifierColumn?: "variant-id";
   price: string;
   compareAt?: string;
   currency?: string;
@@ -169,6 +172,8 @@ const HEADERS: Record<"identifier" | "price" | "compareAt" | "currency" | "cost"
 
 export interface ColumnMap {
   identifier: number;
+  /** The identifier column is headed Variant ID, so its numbers are variant ids (#774). */
+  identifierColumn?: "variant-id";
   /**
    * Null when the file has no price column at all.
    *
@@ -204,6 +209,7 @@ export function mapColumns(header: readonly string[]): ColumnMap | null {
   };
 
   const identifier = find(HEADERS.identifier);
+  const identifierName = identifier === -1 ? "" : header[identifier].trim().toLowerCase();
   const price = find(HEADERS.price);
   const cost = find(HEADERS.cost);
 
@@ -216,6 +222,7 @@ export function mapColumns(header: readonly string[]): ColumnMap | null {
 
   return {
     identifier,
+    ...(VARIANT_ID_HEADERS.includes(identifierName) ? { identifierColumn: "variant-id" as const } : {}),
     price: price === -1 ? null : price,
     compareAt: compareAt === -1 ? null : compareAt,
     currency: currency === -1 ? null : currency,
@@ -291,6 +298,7 @@ export async function* readRows(
     yield {
       line: lineNumber,
       identifier: cells[columns.identifier] ?? "",
+      ...(columns.identifierColumn ? { identifierColumn: columns.identifierColumn } : {}),
       price: columns.price === null ? "" : (cells[columns.price] ?? ""),
       compareAt: columns.compareAt === null ? undefined : cells[columns.compareAt],
       currency: columns.currency === null ? undefined : cells[columns.currency],

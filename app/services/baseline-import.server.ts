@@ -119,7 +119,7 @@ export async function importBaselines(
 
     // The same matcher segments use, so "SKU-1 matches two variants" means the same
     // thing in both places rather than being decided twice, differently.
-    const csvRow: CsvRow = { line: raw.line, value: raw.identifier };
+    const csvRow: CsvRow = { line: raw.line, value: raw.identifier, column: raw.identifierColumn };
     const outcome = matchIdentifiers([csvRow], index);
 
     if (outcome.ambiguous.length > 0) {
