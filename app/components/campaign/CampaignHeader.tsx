@@ -56,6 +56,7 @@ export function CampaignHeader({
   canApply,
   keepers,
   keepersPending,
+  heldEdits = 0,
 }: CampaignDetailProps) {
   return (
     <>
@@ -91,7 +92,9 @@ export function CampaignHeader({
                  * be told no is worse than a button that says so. */}
             <s-button
               type="button"
-              variant={canApply ? "primary" : "secondary"}
+              // Not the obvious next step on a campaign held by edits made in Shopify:
+              // applying writes over them. "Review the drift queue", beside it, is (#755).
+              variant={canApply && heldEdits === 0 ? "primary" : "secondary"}
               loading={busy || undefined}
               disabled={!canApply || undefined}
               commandFor={APPLY_MODAL_ID}
@@ -102,6 +105,15 @@ export function CampaignHeader({
 
           </>
         )}
+
+        {lifecycle.nextAction?.intent === "drift" && heldEdits > 0 ? (
+          // Where a held campaign's decision is made. The lifecycle has always named it as
+          // the next step, but the header drew only Apply -- which writes over the edits
+          // the drift queue was holding for a decision (#755).
+          <s-button variant="primary" href="/app/prices/drift">
+            {lifecycle.nextAction.label}
+          </s-button>
+        ) : null}
 
         {lifecycle.nextAction?.intent === "resume" ? (
           <fetcher.Form method="post">
@@ -243,6 +255,7 @@ export function CampaignHeader({
           notifyEmail={notifyEmail}
           scheduleText={scheduleText}
           busy={busy}
+          heldEdits={heldEdits}
           onConfirm={(confirmation) =>
             fetcher.submit({ intent: "apply", confirmation }, { method: "post" })
           }

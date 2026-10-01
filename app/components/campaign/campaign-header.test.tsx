@@ -75,6 +75,7 @@ const props = (over: Partial<CampaignDetailProps> = {}) =>
     needsAttention: false,
     keepers: null,
     keepersPending: false,
+    heldEdits: 0,
     ...over,
   }) as unknown as CampaignDetailProps;
 
@@ -135,12 +136,49 @@ describe("at most one action is black", () => {
     expect(primaries(html)).toBe(1);
   });
 
+  it("hands the primary to the drift queue on a held campaign, and demotes Apply (#755)", () => {
+    // Applying a held campaign writes over the edits that held it. Apply stays -- a
+    // merchant may mean exactly that -- but the obvious next step is the decision.
+    const html = render(
+      <CampaignHeader {...props({ lifecycle: describeState("HELD"), canApply: true, heldEdits: 2 })} />,
+    );
+    const row = html.split("<s-modal")[0];
+
+    expect(row).toContain('href="/app/prices/drift"');
+    expect(row).toContain("Review the drift queue");
+    expect(primaries(html)).toBe(1);
+    expect(row).toMatch(/variant="secondary"[^>]*>Apply to storefront/);
+  });
+
   it("offers nothing black when nothing can be done", () => {
     const html = render(
       <CampaignHeader {...props({ lifecycle: describeState("COMPLETED"), canApply: false })} />,
     );
 
     expect(primaries(html)).toBe(0);
+  });
+});
+
+describe("applying a held campaign says whose edits it writes over (#755)", () => {
+  const dialog = (heldEdits: number) =>
+    render(
+      <CampaignHeader {...props({ lifecycle: describeState("HELD"), canApply: true, heldEdits })} />,
+    ).split("<s-modal")[1] ?? "";
+
+  it("names how many edits Apply overwrites, and where to keep them instead", () => {
+    const html = dialog(2);
+
+    expect(html).toContain("2 prices were changed in Shopify");
+    expect(html).toContain("over those edits");
+    expect(html).toContain('href="/app/prices/drift"');
+  });
+
+  it("is singular for one edit", () => {
+    expect(dialog(1)).toContain("1 price was changed in Shopify");
+  });
+
+  it("says nothing of the kind when nothing is held", () => {
+    expect(dialog(0)).not.toContain("changed in Shopify");
   });
 });
 

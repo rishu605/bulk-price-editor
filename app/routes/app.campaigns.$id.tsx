@@ -80,6 +80,12 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
   const approval = await approvalFor(shop.id, campaignId);
   const state = record.status as CampaignState;
   const practice = isPractice(record);
+  // Edits made in Shopify that hold this campaign. Apply would write over them, so the
+  // header stops offering it as the obvious next step and its dialog says so (#755).
+  const heldEdits =
+    state === "HELD"
+      ? await prisma.driftEvent.count({ where: { shopId: shop.id, campaignId, resolution: "PENDING" } })
+      : 0;
   const lifecycle = describeState(state, {
     resumes: state === "PARTIAL" ? (await runToResume(campaignId))?.kind : undefined,
   });
@@ -133,6 +139,7 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     lifecycle,
     approval: approvalSummary(approval),
     needsAttention: needsAttention(state),
+    heldEdits,
     history,
   };
 });
@@ -220,6 +227,7 @@ export const action = withGuard("/app/campaigns/$id", async ({ request, params }
     const result = await runCampaign(shop.id, String(params.id), toAdminClient(admin), {
       revert: reverting,
       resume: intent === "resume",
+      actor,
       // Rows the merchant ticked "leave as it is" in the rollback report. Only
       // meaningful on a revert; an apply has no drifted-row conversation to honour.
       skipVariantGids: reverting ? form.getAll("keep").map(String) : undefined,

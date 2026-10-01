@@ -20,9 +20,12 @@
 import { createHash } from "node:crypto";
 
 import prisma from "../db.server";
+import { AppError } from "../lib/errors/app-error";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { notify } from "./notifications.server";
 import { formatMinorUnits } from "../lib/money/format";
+import { isKnownCurrency } from "../lib/money/currency";
+import { formatMoneyForDisplay, money } from "../lib/money/money";
 import { holdForDrift } from "./campaigns/lifecycle.server";
 
 /** How long a write intent stays valid. Generous: webhook delivery is not instant. */
@@ -203,6 +206,11 @@ export interface DriftRow {
   expected: string | null;
   campaignName: string | null;
   detectedAt: string;
+  /**
+   * Whether the storefront still shows the observed price, as far as the mirror knows.
+   * A run may have written over it since; then there is no change left to keep (#755).
+   */
+  stillShown: boolean;
 }
 
 export async function pendingDrift(shopId: string, limit = ROWS_PER_VIEW): Promise<DriftRow[]> {
@@ -218,6 +226,11 @@ export async function pendingDrift(shopId: string, limit = ROWS_PER_VIEW): Promi
     select: { variantGid: true, title: true },
   });
   const titleBy = new Map(titles.map((t) => [t.variantGid, t.title ?? t.variantGid]));
+  const live = await prisma.priceSurfaceEntry.findMany({
+    where: { shopId, surfaceKind: "BASE", priceListGid: "", variantGid: { in: events.map((e) => e.variantGid) } },
+    select: { variantGid: true, livePrice: true },
+  });
+  const liveBy = new Map(live.map((entry) => [entry.variantGid, entry.livePrice]));
 
   return events.map((event) => ({
     id: event.id,
@@ -227,7 +240,65 @@ export async function pendingDrift(shopId: string, limit = ROWS_PER_VIEW): Promi
     expected: formatMinorUnits(event.expectedPrice, event.currency),
     campaignName: event.campaign?.name ?? null,
     detectedAt: event.detectedAt.toISOString(),
+    // Unknown counts as still shown: refusing a merchant's choice needs evidence. Only the
+    // base price is mirrored here, so an event on another surface is never judged by it.
+    stillShown:
+      event.priceListGid !== "" ||
+      (liveBy.get(event.variantGid) ?? event.observedPrice) === event.observedPrice,
   }));
+}
+
+/**
+ * Closes the pending drift events a run has just written over (#755).
+ *
+ * A held campaign could still be applied, and its run wrote the campaign's price over the
+ * merchant's edit -- leaving the drift queue asking about a price no longer on the
+ * storefront, with "Keep the change" one click from adopting it as the baseline. Whatever
+ * the run wrote and read back now stands, so each such event is the campaign's price
+ * reasserted: said so, with who ran it, and written to the audit log.
+ */
+export async function resolveOverwrittenDrift(
+  shopId: string,
+  runId: string,
+  variantGids: readonly string[],
+  actor?: string,
+): Promise<number> {
+  if (variantGids.length === 0) return 0;
+
+  const ids: string[] = [];
+  for (let i = 0; i < variantGids.length; i += 5_000) {
+    const pending = await prisma.driftEvent.findMany({
+      where: {
+        shopId,
+        resolution: "PENDING",
+        surfaceKind: "BASE",
+        priceListGid: "",
+        variantGid: { in: variantGids.slice(i, i + 5_000) },
+      },
+      select: { id: true },
+    });
+    ids.push(...pending.map((event) => event.id));
+  }
+  if (ids.length === 0) return 0;
+
+  // Together, so an event never closes without the entry that says why.
+  await prisma.$transaction([
+    prisma.driftEvent.updateMany({
+      where: { id: { in: ids }, resolution: "PENDING" },
+      data: { resolution: "REASSERTED", resolvedAt: new Date(), resolvedBy: actor ?? `run:${runId}` },
+    }),
+    prisma.auditLogEntry.create({
+      data: {
+        shopId,
+        actor: actor ?? null,
+        action: "drift.overwritten",
+        entity: "CampaignRun",
+        entityId: runId,
+        after: { events: ids.length, reason: "the run wrote the campaign's price over an edit made outside Anchor" } as never,
+      },
+    }),
+  ]);
+  return ids.length;
 }
 
 export type DriftResolution = "adopt" | "reassert" | "ignore";
@@ -249,6 +320,25 @@ export async function resolveDrift(
   const event = await prisma.driftEvent.findFirstOrThrow({
     where: { id: eventId, shopId },
   });
+
+  // Adopting makes the observed price the baseline, so it must still be the price on the
+  // storefront. A run that wrote over it since left an event describing a price that is
+  // gone, and adopting that would have every later campaign compute from it (#755).
+  if (resolution === "adopt" && event.observedPrice !== null) {
+    const entry = await prisma.priceSurfaceEntry.findFirst({
+      where: { shopId, variantGid: event.variantGid, surfaceKind: "BASE", priceListGid: event.priceListGid },
+      select: { livePrice: true },
+    });
+    if (entry?.livePrice != null && entry.livePrice !== event.observedPrice) {
+      throw new AppError({
+        code: "VALIDATION",
+        userMessage:
+          `The storefront no longer shows ${shown(event.observedPrice, event.currency)} for this variant ` +
+          `-- it shows ${shown(entry.livePrice, event.currency)} -- so there is no change to keep. Nothing was adopted. ` +
+          "Choose Put it back or Leave it for now.",
+      });
+    }
+  }
 
   if (resolution === "adopt" && event.observedPrice !== null) {
     await prisma.$transaction(async (tx) => {
@@ -352,4 +442,11 @@ async function notifyDrift(shopId: string, campaignId: string, campaignName: str
   });
 
   void notify(shopId, { kind: "drift-hold", campaignId, campaignName, driftedCount: pending });
+}
+
+/** A price as a merchant reads it in a sentence: "$2.34", not "2.34". */
+function shown(amount: bigint, currency: string): string {
+  return isKnownCurrency(currency)
+    ? formatMoneyForDisplay(money(Number(amount), currency))
+    : `${formatMinorUnits(amount, currency)} ${currency}`;
 }
