@@ -38,6 +38,7 @@ const preview = (over: Partial<Preview> = {}): Preview => ({
   changing: 1,
   alreadyCorrect: 0,
   skipped: 0,
+  staleBaselines: 0,
   withoutBaseline: 0,
   rows: [row()],
   overlaps: [],
@@ -175,5 +176,19 @@ describe("the states that are not a table", () => {
     expect(html).toContain("left alone");
     expect(html).toContain("no baseline yet");
     expect(html).toContain("Below your cost floor");
+  });
+});
+
+describe("prices changed outside a campaign (#745)", () => {
+  it("says so before Apply, naming what the sale would do to them", () => {
+    const html = render(preview({ staleBaselines: 2 }));
+    expect(html).toContain("2 of the prices this would change were changed outside this app");
+    expect(html).toContain("discount from the old price, and ending it would put the old price back");
+    expect(html).toContain('href="/app/prices/baselines/recapture?segment=stale"');
+  });
+
+  it("says nothing when there are none", () => {
+    const html = render(preview());
+    expect(html).not.toContain("outside this app while no");
   });
 });

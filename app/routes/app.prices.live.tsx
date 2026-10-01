@@ -1,4 +1,5 @@
 import { formatCount } from "../lib/format/display";
+import { ActionRow } from "../components/ActionRow";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useFetcher, useLoaderData, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -51,6 +52,7 @@ export const loader = withGuard("/app/prices/live", async ({ request }: LoaderFu
       campaignId: url.searchParams.get("campaign") || undefined,
       driftedOnly: state === "drifted",
       offBaselineOnly: state === "off-baseline",
+      staleBaselineOnly: state === "stale-baseline",
     },
     page,
   );
@@ -121,12 +123,38 @@ export default function Reconciliation() {
           <s-banner tone="success">
             <s-paragraph>
               Every price we have written is still exactly what we wrote.
-              {counts.offBaseline > 0
-                ? ` ${counts.offBaseline} are away from their baseline, which is what a running campaign looks like.`
+              {/* Only the ones a campaign put there. A price nobody's campaign set is not
+                  "what a running campaign looks like", and saying so hid a stale baseline
+                  behind a green banner (#745). */}
+              {counts.offBaseline - counts.staleBaseline > 0
+                ? ` ${formatCount(counts.offBaseline - counts.staleBaseline)} ${
+                    counts.offBaseline - counts.staleBaseline === 1 ? "is" : "are"
+                  } away from their baseline because a campaign is running on them.`
                 : ""}
             </s-paragraph>
           </s-banner>
         )}
+
+        {counts.staleBaseline > 0 ? (
+          <s-banner tone="warning">
+            <s-paragraph>
+              {formatCount(counts.staleBaseline)}{" "}
+              {counts.staleBaseline === 1 ? "price was" : "prices were"} changed outside this
+              app while no campaign was running on {counts.staleBaseline === 1 ? "it" : "them"}, so{" "}
+              {counts.staleBaseline === 1 ? "its baseline is" : "their baselines are"} out of
+              date. The next sale would discount from the old price, and ending it would put
+              the old price back.
+            </s-paragraph>
+            <ActionRow>
+              <s-button href="/app/prices/baselines/recapture?segment=stale">
+                Recapture {counts.staleBaseline === 1 ? "its baseline" : "these baselines"}
+              </s-button>
+              <s-button variant="tertiary" icon="filter" href="/app/prices/live?state=stale-baseline">
+                Show {counts.staleBaseline === 1 ? "it" : "them"}
+              </s-button>
+            </ActionRow>
+          </s-banner>
+        ) : null}
 
         <VariantSearch
           fields={RECONCILE_FIELDS}
@@ -178,6 +206,12 @@ export default function Reconciliation() {
                 defaultSelected={selected.state === "off-baseline"}
               >
                 Only prices away from their baseline
+              </s-option>
+              <s-option
+                value="stale-baseline"
+                defaultSelected={selected.state === "stale-baseline"}
+              >
+                Only prices changed outside a campaign
               </s-option>
             </s-select>
 

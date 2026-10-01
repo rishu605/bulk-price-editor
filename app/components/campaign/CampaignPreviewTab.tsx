@@ -93,6 +93,22 @@ export function CampaignPreviewTab({ preview, approval, fetcher, busy }: Campaig
           </s-text>
         </s-paragraph>
 
+        {/* Before Apply: these rows are discounted from, and reverted to, a price the
+            merchant has since changed outside the app (#745). */}
+        {preview.staleBaselines > 0 ? (
+          <s-banner tone="warning">
+            <s-paragraph>
+              {preview.staleBaselines} of the prices this would write{" "}
+              {preview.staleBaselines === 1 ? "was" : "were"} changed outside this app while no
+              campaign was running on {preview.staleBaselines === 1 ? "it" : "them"}, so{" "}
+              {preview.staleBaselines === 1 ? "its baseline is" : "their baselines are"} out of
+              date. This campaign would discount from the old price, and ending it would put the
+              old price back.
+            </s-paragraph>
+            <s-button href="/app/prices/baselines/recapture?segment=stale">Recapture baselines</s-button>
+          </s-banner>
+        ) : null}
+
         {preview.blastRadius ? (
           <s-banner tone="warning">
             <s-paragraph>

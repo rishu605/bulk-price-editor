@@ -26,6 +26,7 @@
 import { Prisma } from "@prisma/client";
 
 import prisma from "../db.server";
+import { PRICES_MAY_BE_LIVE } from "../lib/lifecycle/transitions";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { formatMinorUnits } from "../lib/money/format";
 
@@ -40,6 +41,8 @@ export interface ReconciliationFilters {
   driftedOnly?: boolean;
   /** Live price differs from the baseline — normal during a sale, not otherwise. */
   offBaselineOnly?: boolean;
+  /** Off baseline with no campaign behind it: a price changed outside the app (#745). */
+  staleBaselineOnly?: boolean;
 }
 
 export interface ReconciliationRow {
@@ -74,7 +77,7 @@ export interface ReconciliationPage {
   total: number;
   surfaces: Array<{ priceListGid: string; name: string; currency: string }>;
   campaigns: Array<{ id: string; name: string }>;
-  counts: { drifted: number; offBaseline: number };
+  counts: { drifted: number; offBaseline: number; staleBaseline: number };
 }
 
 export async function reconcile(
@@ -132,10 +135,12 @@ export async function reconcile(
   // page. Filtering after paging would report "nothing matches" on page 1 while the
   // matches sat on page 9 — and on a 500K-variant catalogue the whole point is that the
   // database does the narrowing.
-  if (filters.driftedOnly || filters.offBaselineOnly) {
+  if (filters.driftedOnly || filters.offBaselineOnly || filters.staleBaselineOnly) {
     const cells = filters.driftedOnly
       ? await driftedCells(shopId)
-      : await offBaselineCells(shopId);
+      : filters.staleBaselineOnly
+        ? await staleBaselineCells(shopId)
+        : await offBaselineCells(shopId);
 
     if (cells.length === 0) {
       return { rows: [], total: 0, surfaces, campaigns, counts: await counts(shopId) };
@@ -300,6 +305,59 @@ export function offBaselineFrom(shopId: string): Prisma.Sql {
 }
 
 /**
+ * Cells off their baseline that no running campaign put there (#745).
+ *
+ * Off baseline is what a sale looks like -- but only when a campaign that may still have
+ * prices live wrote that cell. Without one, somebody changed the price outside the app
+ * while nothing was running. Drift detection only covers cells a live campaign controls,
+ * and nothing else updates a baseline, so the baseline is simply out of date: the next
+ * sale discounts from the old price, and ending it writes the old price back.
+ *
+ * The same fragment feeds What's live, Home and the previews, so "3 changed outside a
+ * campaign" in one place is never four in another.
+ */
+export function staleBaselineFrom(
+  shopId: string,
+  options: { variantGids?: readonly string[]; baseOnly?: boolean } = {},
+): Prisma.Sql {
+  const live = Prisma.join([...PRICES_MAY_BE_LIVE].map((state) => Prisma.sql`${state}::"CampaignStatus"`));
+  return Prisma.sql`
+    ${offBaselineFrom(shopId)}
+      ${options.variantGids ? Prisma.sql`AND e."variantGid" = ANY(${[...options.variantGids]})` : Prisma.empty}
+      ${options.baseOnly ? Prisma.sql`AND e."surfaceKind" = 'BASE' AND e."priceListGid" = ''` : Prisma.empty}
+      AND NOT EXISTS (
+        SELECT 1
+        FROM "variant_changes" c
+        JOIN "campaign_runs" r ON r."id" = c."runId"
+        JOIN "campaigns" k ON k."id" = r."campaignId"
+        WHERE c."shopId" = e."shopId"
+          AND c."variantGid" = e."variantGid"
+          AND c."priceListGid" = e."priceListGid"
+          AND c."status" = 'VERIFIED'
+          AND k."status" IN (${live})
+      )
+  `;
+}
+
+/**
+ * How many base prices were changed outside any campaign -- across the store, or among
+ * these variants. Base only: Home's "Not at baseline" and a draft's candidates are both
+ * base prices, and a count that mixed in market cells would not be "N of these".
+ */
+export async function staleBaselineCount(shopId: string, variantGids?: readonly string[]): Promise<number> {
+  if (variantGids && variantGids.length === 0) return 0;
+  return countCells(staleBaselineFrom(shopId, { variantGids, baseOnly: true }));
+}
+
+/** The variants with a stale baseline on any surface, for a recapture scoped to them. */
+export async function staleBaselineVariants(shopId: string): Promise<string[]> {
+  const rows = await prisma.$queryRaw<Array<{ variantGid: string }>>(
+    Prisma.sql`SELECT DISTINCT e."variantGid" ${staleBaselineFrom(shopId)}`,
+  );
+  return rows.map((row) => row.variantGid);
+}
+
+/**
  * How many cells a `WHERE ... IN` may name.
  *
  * A bound on the filter, not on the truth. The count below deliberately does not use it.
@@ -337,6 +395,7 @@ async function countCells(where: Prisma.Sql): Promise<number> {
 
 const driftedCells = (shopId: string) => cells(driftedFrom(shopId));
 const offBaselineCells = (shopId: string) => cells(offBaselineFrom(shopId));
+const staleBaselineCells = (shopId: string) => cells(staleBaselineFrom(shopId));
 
 /**
  * Store-wide totals, not page totals.
@@ -345,12 +404,13 @@ const offBaselineCells = (shopId: string) => cells(offBaselineFrom(shopId));
  * nothing and quietly implies everything is fine.
  */
 async function counts(shopId: string) {
-  const [drifted, offBaseline] = await Promise.all([
+  const [drifted, offBaseline, staleBaseline] = await Promise.all([
     countCells(driftedFrom(shopId)),
     countCells(offBaselineFrom(shopId)),
+    countCells(staleBaselineFrom(shopId)),
   ]);
 
-  return { drifted, offBaseline };
+  return { drifted, offBaseline, staleBaseline };
 }
 
 const key = (variantGid: string, priceListGid: string) => `${variantGid}@${priceListGid}`;

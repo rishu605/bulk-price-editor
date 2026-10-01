@@ -26,6 +26,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { ensureShop } from "../services/shop.server";
 import { planRecapture, recapture } from "../services/recapture.server";
+import { recaptureScopeFrom, STALE_SCOPE } from "../lib/baselines/recapture-scope";
 import { actorFor } from "../lib/audit/actor";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
@@ -43,7 +44,7 @@ export const loader = withGuard("/app/prices/baselines/recapture", async ({ requ
 
   const segmentId = new URL(request.url).searchParams.get("segment") ?? undefined;
   const [plan, segments] = await Promise.all([
-    planRecapture(shop.id, { segmentId }),
+    planRecapture(shop.id, recaptureScopeFrom(segmentId)),
     prisma.segment.findMany({
       where: { shopId: shop.id },
       select: { id: true, name: true, kind: true },
@@ -83,7 +84,7 @@ export const action = withGuard("/app/prices/baselines/recapture", async ({ requ
 
   try {
     const result = await recapture(shop.id, {
-      segmentId: String(form.get("segment") ?? "") || undefined,
+      ...recaptureScopeFrom(String(form.get("segment") ?? "")),
       confirmation: String(form.get("confirmation") ?? ""),
       actor: actorFor(sessionToken, session.shop),
       expectedScope: Number(shown),
@@ -150,6 +151,11 @@ export default function Recapture() {
             <s-select name="segment" label="Scope">
               <s-option value="" defaultSelected={!segmentId}>
                 The whole catalogue
+              </s-option>
+              {/* The baselines What's live calls out of date: prices changed outside the
+                  app while no campaign was running on them (#745). */}
+              <s-option value={STALE_SCOPE} defaultSelected={segmentId === STALE_SCOPE}>
+                Prices changed outside a campaign
               </s-option>
               {segments.map((segment) => (
                 <s-option
