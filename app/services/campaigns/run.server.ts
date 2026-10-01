@@ -14,7 +14,7 @@ import type { AdminClient } from "../../lib/execution/sync-executor";
 import { executeRows } from "./execute.server";
 import type { PlannedRow } from "../../lib/planning/types";
 import { planRun } from "../../lib/planning/plan";
-import { recordWriteIntents } from "../drift.server";
+import { recordWriteIntents, resolveOverwrittenDrift } from "../drift.server";
 import { loadCandidates, productMapFor } from "./candidates.server";
 import { isPractice, loadCampaignContext, scopeOf, importIdsOf} from "./model.server";
 import { astToWhere } from "../segments.server";
@@ -39,6 +39,8 @@ import { addLogContext, withLogContext } from "../../lib/logging/context.server"
 
 export interface RunOptions {
   revert?: boolean;
+  /** Who asked for this run, recorded on anything it resolves on their behalf (#755). */
+  actor?: string;
   /**
    * The state the caller moved this campaign out of when it claimed it.
    *
@@ -613,6 +615,7 @@ async function executeCampaignRun(
   // what happened to those rows; the campaign's own state is left alone.
   if (options.variantGids) {
     await refreshMirror(shopId, result.rows);
+    await resolveOverwrittenDrift(shopId, run.id, verifiedVariants(result.rows), options.actor);
 
   // The headline panels, from the one place that knows the answer. Counts and durations
   // only — the ledger holds what actually changed.
@@ -643,6 +646,9 @@ async function executeCampaignRun(
   });
 
   await refreshMirror(shopId, result.rows);
+  // A held campaign can still be applied; whatever this run wrote over an edit made
+  // outside Anchor now stands, and the drift queue must stop asking about it (#755).
+  await resolveOverwrittenDrift(shopId, run.id, verifiedVariants(result.rows), options.actor);
 
   // The headline panels, from the one place that knows the answer. Counts and durations
   // only — the ledger holds what actually changed.
@@ -1117,6 +1123,13 @@ async function recordResults(
   }
 
   return messages;
+}
+
+/** Base-price variants this run wrote and read back. */
+function verifiedVariants(rows: ExecutedRows): string[] {
+  return rows
+    .filter((executed) => executed.status === "verified" && executed.row.ref.priceListGid === "")
+    .map((executed) => executed.row.ref.variantGid);
 }
 
 /**

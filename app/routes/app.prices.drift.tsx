@@ -20,6 +20,7 @@ import {
 } from "../services/drift.server";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
+import { AppError } from "../lib/errors/app-error";
 import { PageShell } from "../components/PageShell";
 import { EmptyState } from "../components/AsyncState";
 import { ActionRow } from "../components/ActionRow";
@@ -50,7 +51,16 @@ export const action = withGuard("/app/prices/drift", async ({ request }: ActionF
   const eventId = String(form.get("eventId"));
   const resolution = String(form.get("resolution")) as DriftResolution;
 
-  await resolveDrift(shop.id, eventId, resolution, session.shop);
+  try {
+    await resolveDrift(shop.id, eventId, resolution, session.shop);
+  } catch (error) {
+    // A refusal the merchant can act on -- the price to keep is gone (#755) -- is said on
+    // this page, beside the row, rather than replacing the queue with an error screen.
+    if (error instanceof AppError && error.code === "VALIDATION") {
+      return { ok: false, message: error.userMessage };
+    }
+    throw error;
+  }
 
   const wording: Record<DriftResolution, string> = {
     adopt: "Adopted as the new baseline. Future campaigns compute from this price.",
@@ -71,7 +81,7 @@ export default function DriftQueue() {
   return (
     <PageShell heading="Price drift">
       {fetcher.data ? (
-        <s-banner tone="success">
+        <s-banner tone={fetcher.data.ok ? "success" : "critical"}>
           <s-paragraph>{fetcher.data.message}</s-paragraph>
         </s-banner>
       ) : null}
@@ -225,7 +235,9 @@ function DriftDecision({
               intent should fall safe, the way the imports' dry run does. */}
           <input type="hidden" name="resolution" ref={resolution} value="ignore" readOnly />
           <ActionRow>
-            {RESOLUTIONS.map((choice) => (
+            {/* "Keep the change" only while there is a change to keep. A run that wrote over
+                the edit since leaves nothing on the storefront to adopt (#755). */}
+            {RESOLUTIONS.filter((choice) => choice.value !== "adopt" || event.stillShown).map((choice) => (
               <s-button
                 key={choice.value}
                 type="button"

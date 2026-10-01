@@ -37,6 +37,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   const outcome = await runCampaign(shop.id, campaign.id, toAdminClient(admin), {
+    actor: "shopify-flow",
     revert: true,
   });
 

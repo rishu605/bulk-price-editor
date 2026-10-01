@@ -43,6 +43,7 @@ export function ApplyConfirmation({
   notifyEmail,
   scheduleText,
   busy,
+  heldEdits = 0,
   onConfirm,
 }: {
   preview: CampaignPreview;
@@ -60,6 +61,8 @@ export function ApplyConfirmation({
   scheduleText?: string | null;
   /** A request is in flight, so the submit shows it. */
   busy?: boolean;
+  /** Prices changed in Shopify that hold this campaign, which applying writes over (#755). */
+  heldEdits?: number;
   /**
    * Commit, carrying whatever was typed into the confirmation box.
    *
@@ -158,6 +161,19 @@ export function ApplyConfirmation({
           result. Reverting recomputes without this campaign rather than restoring a
           saved number.
         </Secondary>
+
+        {heldEdits > 0 ? (
+          <s-banner tone="critical">
+            <s-paragraph>
+              {heldEdits} {heldEdits === 1 ? "price was" : "prices were"} changed in Shopify
+              while this campaign was running, which is why it is held. Applying writes this
+              campaign&rsquo;s price over {heldEdits === 1 ? "that edit" : "those edits"}, and
+              the drift queue will record {heldEdits === 1 ? "it" : "them"} as overwritten. To
+              keep {heldEdits === 1 ? "it" : "any of them"}, resolve the drift first.
+            </s-paragraph>
+            <s-button href="/app/prices/drift">Review drift</s-button>
+          </s-banner>
+        ) : null}
 
         {blastRadius ? (
           <s-banner tone="warning">

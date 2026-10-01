@@ -49,6 +49,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // Same request deadline as the button, and the same reason: Flow calls this over HTTP
   // and the run is written before the response is sent.
   const outcome = await runCampaign(shop.id, campaign.id, toAdminClient(admin), {
+    actor: "shopify-flow",
     inlineRowLimit: MAX_INLINE_ROWS,
   });
 
