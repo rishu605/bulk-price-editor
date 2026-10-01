@@ -12,7 +12,8 @@ import { selectWritePath } from "../../lib/planning/write-path";
 import { loadCandidates, titleMapFor } from "./candidates.server";
 import { loadCampaignContext, importIdsOf} from "./model.server";
 import { guardrailsFor, readSettings } from "../settings.server";
-import { staleBaselineCount } from "../reconciliation.server";
+import { uncontrolledAmong } from "../reconciliation.server";
+import { offBaseline } from "./off-baseline";
 import { describeImpact, marginImpact } from "../../lib/pricing/margin";
 import {
   decideMarketPath,
@@ -120,11 +121,12 @@ export async function previewCampaign(
   // The prices this campaign would write, from a baseline nobody updated after the
   // merchant changed the price outside the app (#745): said before Apply, because those
   // rows are discounted from -- and reverted to -- the old price.
-  const staleBaselines = await staleBaselineCount(
+  const staleBaselines = await uncontrolledAmong(
     shopId,
-    outcome.rows
-      .filter((row) => row.status !== "skipped" && row.campaignId === campaignId)
-      .map((row) => row.ref.variantGid),
+    offBaseline(
+      outcome.rows.filter((row) => row.status !== "skipped" && row.campaignId === campaignId),
+      candidates,
+    ),
   );
   const margin = marginImpact(
     outcome.rows

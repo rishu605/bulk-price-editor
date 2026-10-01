@@ -22,7 +22,8 @@ import { format } from "../../lib/money/format";
 import type { Money } from "../../lib/money/money";
 import { planRun } from "../../lib/planning/plan";
 import { loadCandidates, variantDisplayFor } from "./candidates.server";
-import { staleBaselineCount } from "../reconciliation.server";
+import { uncontrolledAmong } from "../reconciliation.server";
+import { offBaseline } from "./off-baseline";
 import { importIdsOf, withScopes } from "./model.server";
 import { guardrailsFor, readSettings } from "../settings.server";
 import { skipReasonForRow } from "../../lib/planning/reasons";
@@ -241,7 +242,7 @@ export async function previewDraft(
   const shown = [...changing, ...alreadyCorrect, ...skipped].slice(0, limit);
   const [display, staleBaselines] = await Promise.all([
     variantDisplayFor(shopId, shown.map((row) => row.ref.variantGid)),
-    staleBaselineCount(shopId, changing.map((row) => row.ref.variantGid)),
+    uncontrolledAmong(shopId, offBaseline(changing, candidates)),
   ]);
 
   // The baseline lives on the candidate, not on the planned row — the planner carries

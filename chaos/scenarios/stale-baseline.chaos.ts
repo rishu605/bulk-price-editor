@@ -14,7 +14,7 @@
 import { describe, expect, it } from "vitest";
 
 import prisma from "../../app/db.server";
-import { reconcile, staleBaselineCount } from "../../app/services/reconciliation.server";
+import { reconcile, staleBaselineCount, uncontrolledAmong } from "../../app/services/reconciliation.server";
 import { planRecapture } from "../../app/services/recapture.server";
 import { withChaos } from "../harness/scenario";
 
@@ -42,7 +42,12 @@ describe("chaos: a price changed outside any campaign", () => {
       expect(counts.offBaseline).toBe(2);
       expect(counts.staleBaseline, "a hand-changed price was called a running campaign").toBe(1);
       expect(await staleBaselineCount(shopId)).toBe(1);
-      expect(await staleBaselineCount(shopId, [onSale, untouched])).toBe(0);
+      // What the previews ask: of the rows they found off baseline, how many no running
+      // campaign wrote. The one on sale is the campaign's; the hand-changed one is not.
+      expect(await uncontrolledAmong(shopId, [onSale, changedByHand])).toBe(1);
+      expect(await uncontrolledAmong(shopId, [onSale])).toBe(0);
+      expect(await uncontrolledAmong(shopId, [])).toBe(0);
+      void untouched;
 
       // The filter lists exactly that one.
       const listed = await reconcile(shopId, domain, { staleBaselineOnly: true });

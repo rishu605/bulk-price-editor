@@ -339,14 +339,40 @@ export function staleBaselineFrom(
   `;
 }
 
+/** How many base prices across the store were changed outside any campaign. */
+export async function staleBaselineCount(shopId: string): Promise<number> {
+  return countCells(staleBaselineFrom(shopId, { baseOnly: true }));
+}
+
 /**
- * How many base prices were changed outside any campaign -- across the store, or among
- * these variants. Base only: Home's "Not at baseline" and a draft's candidates are both
- * base prices, and a count that mixed in market cells would not be "N of these".
+ * Of these off-baseline variants, how many no running campaign wrote (#745).
+ *
+ * For the previews, which already know each row's live price and baseline: they find the
+ * rows off baseline themselves -- usually none -- and ask only about those. Asking the
+ * database to recompute "off baseline" for a 70,000-variant scope meant joining it to its
+ * baselines, and on freshly written rows the planner, expecting one, chose a nested loop
+ * that took two minutes.
  */
-export async function staleBaselineCount(shopId: string, variantGids?: readonly string[]): Promise<number> {
-  if (variantGids && variantGids.length === 0) return 0;
-  return countCells(staleBaselineFrom(shopId, { variantGids, baseOnly: true }));
+export async function uncontrolledAmong(shopId: string, offBaselineVariantGids: readonly string[]): Promise<number> {
+  if (offBaselineVariantGids.length === 0) return 0;
+
+  const controlled = new Set<string>();
+  for (let i = 0; i < offBaselineVariantGids.length; i += 5_000) {
+    const rows = await prisma.variantChange.findMany({
+      where: {
+        shopId,
+        variantGid: { in: offBaselineVariantGids.slice(i, i + 5_000) },
+        priceListGid: "",
+        status: "VERIFIED",
+        run: { campaign: { status: { in: [...PRICES_MAY_BE_LIVE] } } },
+      },
+      select: { variantGid: true },
+      distinct: ["variantGid"],
+    });
+    for (const row of rows) controlled.add(row.variantGid);
+  }
+
+  return new Set(offBaselineVariantGids).size - controlled.size;
 }
 
 /** The variants with a stale baseline on any surface, for a recapture scoped to them. */
