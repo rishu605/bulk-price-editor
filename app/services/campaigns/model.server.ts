@@ -21,7 +21,7 @@ import type { AdjustmentRule,
   Guardrails,
   ResolvableCampaign,
 } from "../../lib/pricing/types";
-import { segmentToAst, type FilterAst } from "../segments.server";
+import { astToWhere, segmentToAst, type FilterAst } from "../segments.server";
 import { readSettings } from "../settings.server";
 import type { CampaignInput } from "./types";
 
@@ -270,9 +270,32 @@ export async function loadCampaignContext(shopId: string, campaignId: string) {
 
   return {
     campaign,
-    resolvable: [toResolvable(campaign), ...others.map(toResolvable)],
+    // The campaign being planned covers its own candidates by construction; every other
+    // one is offered only the variants inside its own scope (#752).
+    resolvable: [toResolvable(campaign), ...(await withScopes(shopId, others))],
     ast: await scopeOf(shopId, campaign),
   };
+}
+
+/**
+ * Other campaigns, each carrying the set of variants its own scope covers (#752).
+ *
+ * Resolved the way a run resolves a scope -- segment or filter, through `astToWhere` --
+ * so "this campaign covers that variant" here means what it means when the campaign runs.
+ */
+export async function withScopes(
+  shopId: string,
+  campaigns: readonly Campaign[],
+): Promise<ResolvableCampaign[]> {
+  return Promise.all(
+    campaigns.map(async (campaign) => {
+      const covered = await prisma.variantIndex.findMany({
+        where: astToWhere(shopId, await scopeOf(shopId, campaign)),
+        select: { variantGid: true },
+      });
+      return { ...toResolvable(campaign), scope: new Set(covered.map((row) => row.variantGid)) };
+    }),
+  );
 }
 
 

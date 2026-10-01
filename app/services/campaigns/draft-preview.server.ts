@@ -22,7 +22,7 @@ import { format } from "../../lib/money/format";
 import type { Money } from "../../lib/money/money";
 import { planRun } from "../../lib/planning/plan";
 import { loadCandidates, variantDisplayFor } from "./candidates.server";
-import { importIdsOf, toResolvable } from "./model.server";
+import { importIdsOf, withScopes } from "./model.server";
 import { guardrailsFor, readSettings } from "../settings.server";
 import { skipReasonForRow } from "../../lib/planning/reasons";
 import { liveIfDrifted } from "../../lib/pricing/drift-note";
@@ -185,7 +185,8 @@ export async function previewDraft(
   ]);
   const resolvable = [
     draftAsResolvable(draft, settings.violationPolicy),
-    ...others.map(toResolvable),
+    // Each offered only what its own scope covers, as in a run (#752).
+    ...(await withScopes(shopId, others)),
   ];
 
   const [candidates, storeGuardrails, matched] = await Promise.all([

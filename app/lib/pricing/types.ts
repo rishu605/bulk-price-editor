@@ -163,6 +163,17 @@ export interface ResolvableCampaign {
    * campaign-level revert, so preview and execution cannot disagree.
    */
   excludedVariantGids?: string[];
+  /**
+   * The variants this campaign's own scope covers -- its segment or filter, resolved.
+   *
+   * Absent means "every candidate", which is right for the campaign being planned: its
+   * candidates *are* its scope. Every other campaign offered to the planner must carry
+   * it. Without it, an active campaign was treated as covering the whole store, and its
+   * rule priced products it was never pointed at -- on apply, on revert and in every
+   * preview (#752). Applied by the planner beside the exclusions, so preview and
+   * execution cannot disagree.
+   */
+  scope?: ReadonlySet<string>;
 }
 
 // ------------------------------------------------------------------ results
