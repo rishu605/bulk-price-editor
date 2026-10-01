@@ -105,7 +105,11 @@ export function dueTransition(state: ScheduleState, now: Date): Transition | nul
   if (pastRevert) {
     // Only something currently live needs reverting. A campaign that never applied
     // has nothing to undo, and re-reverting a completed one would be a no-op run.
-    return status === "ACTIVE" || status === "PARTIAL" ? "revert" : null;
+    //
+    // HELD is live: a price edit stopped the campaign *writing*, not its prices being on
+    // the storefront, so its end still comes. Skipping it left a sale running past its end
+    // date for as long as one drift event went unresolved (#756).
+    return status === "ACTIVE" || status === "PARTIAL" || status === "HELD" ? "revert" : null;
   }
 
   if (millis >= start) {

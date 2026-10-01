@@ -12,6 +12,8 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
+import { toAdminClient } from "../services/admin-client.server";
+import { reassertDrift } from "../services/campaigns/reassert.server";
 import {
   pendingDrift,
   resolveDrift,
@@ -44,7 +46,7 @@ export const loader = withGuard("/app/prices/drift", async ({ request }: LoaderF
 });
 
 export const action = withGuard("/app/prices/drift", async ({ request }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
 
   const form = await request.formData();
@@ -52,7 +54,21 @@ export const action = withGuard("/app/prices/drift", async ({ request }: ActionF
   const resolution = String(form.get("resolution")) as DriftResolution;
 
   try {
-    await resolveDrift(shop.id, eventId, resolution, session.shop);
+    // Putting the price back is a write, so it is a run, made now -- not a mark waiting
+    // for a run that a manual or held campaign never gets (#756).
+    if (resolution === "reassert") {
+      return await reassertDrift(shop.id, eventId, toAdminClient(admin), session.shop);
+    }
+
+    const { released } = await resolveDrift(shop.id, eventId, resolution, session.shop);
+    const wording: Record<typeof resolution, string> = {
+      adopt: "Adopted as the new baseline. Future campaigns compute from this price.",
+      ignore: "Ignored. The price stays as the merchant left it.",
+    };
+    return {
+      ok: true,
+      message: wording[resolution] + (released ? " Nothing else was waiting, so the campaign is running again." : ""),
+    };
   } catch (error) {
     // A refusal the merchant can act on -- the price to keep is gone (#755) -- is said on
     // this page, beside the row, rather than replacing the queue with an error screen.
@@ -61,14 +77,6 @@ export const action = withGuard("/app/prices/drift", async ({ request }: ActionF
     }
     throw error;
   }
-
-  const wording: Record<DriftResolution, string> = {
-    adopt: "Adopted as the new baseline. Future campaigns compute from this price.",
-    reassert: "Marked for reassertion. The campaign will rewrite this price on its next run.",
-    ignore: "Ignored. The price stays as the merchant left it.",
-  };
-
-  return { ok: true, message: wording[resolution] };
 });
 
 type ActionData = { ok: boolean; message: string };
@@ -136,15 +144,16 @@ export default function DriftQueue() {
           permanent repricing.
         </s-paragraph>
         <s-paragraph>
-          <strong>Put it back</strong> — rewrite the campaign price on the next run. For a
-          mistake.
+          <strong>Put it back</strong> — write the campaign&rsquo;s price again now, and read
+          it back. For a mistake.
         </s-paragraph>
         <s-paragraph>
           <strong>Leave it for now</strong> — close the alert, change nothing.
         </s-paragraph>
         <Secondary>
           Only the first changes what future campaigns compute from, which is why it is
-          the one marked consequential.
+          the one marked consequential. A campaign held by edits runs again once every one
+          of them is resolved.
         </Secondary>
       </HelpNote>
     </PageShell>

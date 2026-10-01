@@ -85,8 +85,10 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
   const alerts = await checkAlerts(now);
   result.alerts = alerts.sent;
 
+  // HELD too: a held campaign's prices are still live, and its window still ends. Leaving
+  // it out meant a sale that took one price edit never reverted on its end date (#756).
   const candidates = await prisma.campaign.findMany({
-    where: { status: { in: ["SCHEDULED", "ACTIVE", "PARTIAL"] } },
+    where: { status: { in: ["SCHEDULED", "ACTIVE", "PARTIAL", "HELD"] } },
     include: { shop: { select: { id: true, domain: true, uninstalledAt: true } } },
   });
 
@@ -329,7 +331,7 @@ async function runTransition(
   const claimed = await prisma.campaign.updateMany({
     where: {
       id: campaignId,
-      status: transition === "apply" ? "SCHEDULED" : { in: ["ACTIVE", "PARTIAL"] },
+      status: transition === "apply" ? "SCHEDULED" : { in: ["ACTIVE", "PARTIAL", "HELD"] },
     },
     data: { status: transition === "apply" ? "APPLYING" : "REVERTING" },
   });
@@ -346,7 +348,7 @@ async function runTransition(
 /** Campaigns with a schedule that has not yet fired, for the UI. */
 export async function upcomingTransitions(shopId: string, limit = 10) {
   const campaigns = await prisma.campaign.findMany({
-    where: { shopId, status: { in: ["SCHEDULED", "ACTIVE", "PARTIAL"] } },
+    where: { shopId, status: { in: ["SCHEDULED", "ACTIVE", "PARTIAL", "HELD"] } },
     orderBy: { createdAt: "desc" },
     take: limit,
   });
