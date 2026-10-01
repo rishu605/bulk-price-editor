@@ -7,6 +7,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { ensureShop } from "../services/shop.server";
 import { readSettings, shopCurrency, writeSettings } from "../services/settings.server";
+import { guardrailInputProblems } from "../lib/settings/guardrail-input";
 import { readPreferences, writePreferences } from "../services/notifications.server";
 import { actorFor } from "../lib/audit/actor";
 import { RouteBoundary } from "../components/RouteBoundary";
@@ -82,12 +83,28 @@ export const action = withGuard("/app/settings", async ({ request }: ActionFunct
   // remembered. `{ ...existing }` stays only for fields no control on this page owns.
   const existing = await readSettings(shop.id);
 
+  // Checked before anything is written, settings or notifications, so a refused save
+  // changes nothing and the form keeps every edit for the merchant to correct (#739).
+  const problems = guardrailInputProblems((name) => form.get(name), await shopCurrency(shop.id));
+  if (problems.length > 0) {
+    return {
+      ok: false,
+      message: "Nothing was saved. Correct this and save again:",
+      problems: problems.map((problem) => problem.message),
+    };
+  }
+
   const saved = await writeSettings(
     shop.id,
     {
       ...existing,
       neverBelowCost: form.get("neverBelowCost") === "on",
-      approvalThreshold: emptyToNull(form.get("approvalThreshold")),
+      // No control on this page owns the approval threshold, so a field that is not in
+      // the form is not a field the merchant cleared. Reading it unconditionally set it to
+      // null on every save, which switched approvals off.
+      approvalThreshold: form.has("approvalThreshold")
+        ? emptyToNull(form.get("approvalThreshold"))
+        : existing.approvalThreshold,
       minMarginPercent: emptyToNull(form.get("minMarginPercent")),
       minPrice: emptyToNull(form.get("minPrice")),
       violationPolicy: asPolicy(form.get("violationPolicy")),
@@ -106,7 +123,7 @@ export const action = withGuard("/app/settings", async ({ request }: ActionFunct
     weeklyDigest: form.get("weeklyDigest") === "on",
   });
 
-  return { ok: true, message: "Settings saved.", saved };
+  return { ok: true, message: "Settings saved.", saved, problems: [] as string[] };
 });
 
 function emptyToNull(value: FormDataEntryValue | null): number | null {
@@ -119,7 +136,7 @@ function asPolicy(value: FormDataEntryValue | null): "clamp" | "skip" | "block" 
   return text === "skip" || text === "block" ? text : "clamp";
 }
 
-type ActionData = { ok: boolean; message: string };
+type ActionData = { ok: boolean; message: string; problems?: string[] };
 
 export default function Settings() {
   const {
@@ -142,8 +159,11 @@ export default function Settings() {
   return (
     <PageShell heading="Settings">
       {fetcher.data ? (
-        <s-banner tone="success">
+        <s-banner tone={fetcher.data.ok ? "success" : "critical"}>
           <s-paragraph>{fetcher.data.message}</s-paragraph>
+          {(fetcher.data.problems ?? []).map((problem) => (
+            <s-paragraph key={problem}>{problem}</s-paragraph>
+          ))}
         </s-banner>
       ) : null}
 
