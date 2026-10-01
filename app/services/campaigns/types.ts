@@ -210,6 +210,11 @@ export interface RunOutcome {
    * that had nothing to do with billing.
    */
   refused?: string;
+  /**
+   * Set when the run was handed to the background worker rather than run here: a revert
+   * too large for one request (#772). Nothing was written by this call; the worker writes.
+   */
+  queued?: boolean;
 }
 
 export interface RunSummary {

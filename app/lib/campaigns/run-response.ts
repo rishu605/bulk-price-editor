@@ -40,9 +40,15 @@ export function runResponse(
     messages: string[];
     deferredTo?: string | null;
     refused?: string | null;
+    queued?: boolean;
   },
   verb: string,
 ): RunResponse {
+  // Handed to the worker (#772): nothing failed, and nothing was written yet either.
+  if (result.queued) {
+    return { ok: true, message: result.messages[0] ?? "", details: [] };
+  }
+
   if (result.deferredTo) {
     return { ok: true, message: result.messages[0] ?? "", details: [] };
   }

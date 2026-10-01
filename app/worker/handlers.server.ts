@@ -11,6 +11,7 @@
  * while its job was queued must not run.
  */
 
+import type { CampaignState } from "../lib/lifecycle/transitions";
 import prisma from "../db.server";
 import { adminClientForShop } from "../services/admin-client.server";
 import type { JobRef, QueueName } from "./queues";
@@ -60,7 +61,10 @@ async function runCampaignJob(ref: JobRef): Promise<void> {
   if (!client) throw new Error(`No usable session for ${shop.domain}; the run did not start.`);
 
   const { runCampaign } = await import("../services/campaigns/run.server");
-  await runCampaign(ref.shopId, ref.campaignId, client, { revert: ref.revert === true });
+  await runCampaign(ref.shopId, ref.campaignId, client, {
+    revert: ref.revert === true,
+    ...(ref.claimedFrom ? { claimedFrom: ref.claimedFrom as CampaignState } : {}),
+  });
 }
 
 async function auditJob(ref: JobRef): Promise<void> {

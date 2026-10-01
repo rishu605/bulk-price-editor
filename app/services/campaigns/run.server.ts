@@ -321,18 +321,7 @@ async function executeCampaignRun(
     let scopedCount = options.variantGids?.length;
 
     if (options.inlineRowLimit !== undefined) {
-      scopedCount ??= await prisma.variantIndex.count({
-        where: astToWhere(
-          shopId,
-          await scopeOf(
-            shopId,
-            await prisma.campaign.findFirstOrThrow({
-              where: { id: campaignId, shopId },
-              select: { schedule: true },
-            }),
-          ),
-        ),
-      });
+      scopedCount ??= await scopeSize(shopId, campaignId);
 
       // Before the plan gate, because a scope too large to finish is too large whatever
       // tier the shop is on -- telling a merchant to upgrade for a run that would be
@@ -371,6 +360,19 @@ async function executeCampaignRun(
         messages: [refusal],
         refused: refusal,
       };
+    }
+  }
+
+  // A revert too large for the caller's deadline goes to the worker instead of running
+  // here (#772). Before the claim below, because handing it over takes the claim itself.
+  // Never refused: ending a sale must always be possible, so with no worker queue it
+  // runs here as it always did.
+  if (options.revert && !options.variantGids && options.inlineRowLimit !== undefined) {
+    const rows = await scopeSize(shopId, campaignId);
+    if (rows > options.inlineRowLimit) {
+      const { queueRevert } = await import("./queued-revert.server");
+      const queued = await queueRevert(shopId, campaignId, rows, options.actor);
+      if (queued) return queued;
     }
   }
 
@@ -1193,6 +1195,19 @@ async function recordResults(
   }
 
   return messages;
+}
+
+/** How many variants the campaign's scope covers, counted the way a run resolves it. */
+async function scopeSize(shopId: string, campaignId: string): Promise<number> {
+  return prisma.variantIndex.count({
+    where: astToWhere(
+      shopId,
+      await scopeOf(
+        shopId,
+        await prisma.campaign.findFirstOrThrow({ where: { id: campaignId, shopId }, select: { schedule: true } }),
+      ),
+    ),
+  });
 }
 
 /** The states in which a full run holds the campaign's claim. */
