@@ -22,6 +22,8 @@ import { format } from "../../lib/money/format";
 import type { Money } from "../../lib/money/money";
 import { planRun } from "../../lib/planning/plan";
 import { loadCandidates, variantDisplayFor } from "./candidates.server";
+import { uncontrolledAmong } from "../reconciliation.server";
+import { offBaseline } from "./off-baseline";
 import { importIdsOf, withScopes } from "./model.server";
 import { guardrailsFor, readSettings } from "../settings.server";
 import { skipReasonForRow } from "../../lib/planning/reasons";
@@ -128,6 +130,12 @@ export interface DraftPreview {
    * while editing.
    */
   blocked: { reason: string; variantGid: string } | null;
+  /**
+   * Of the rows this draft would change, how many have a price changed outside the app
+   * while no campaign was running on them (#745). Their baseline is out of date, so this
+   * sale discounts from the old price and ending it puts the old price back.
+   */
+  staleBaselines: number;
 }
 
 const EMPTY: DraftPreview = {
@@ -139,6 +147,7 @@ const EMPTY: DraftPreview = {
   rows: [],
   overlaps: [],
   blocked: null,
+  staleBaselines: 0,
 };
 
 /**
@@ -231,7 +240,10 @@ export async function previewDraft(
   const skipped = ours.filter((row) => row.status === "skipped");
 
   const shown = [...changing, ...alreadyCorrect, ...skipped].slice(0, limit);
-  const display = await variantDisplayFor(shopId, shown.map((row) => row.ref.variantGid));
+  const [display, staleBaselines] = await Promise.all([
+    variantDisplayFor(shopId, shown.map((row) => row.ref.variantGid)),
+    uncontrolledAmong(shopId, offBaseline(changing, candidates)),
+  ]);
 
   // The baseline lives on the candidate, not on the planned row — the planner carries
   // `beforePrice`, which is the *live* price. Both are wanted here: the campaign's
@@ -251,6 +263,7 @@ export async function previewDraft(
     skipped: skipped.length,
     withoutBaseline: matched - candidates.length,
     blocked: null,
+    staleBaselines,
     rows: shown.map((row) => {
       const baseline = baselines.get(row.ref.variantGid) ?? null;
 

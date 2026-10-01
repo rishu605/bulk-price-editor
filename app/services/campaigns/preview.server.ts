@@ -12,6 +12,8 @@ import { selectWritePath } from "../../lib/planning/write-path";
 import { loadCandidates, titleMapFor } from "./candidates.server";
 import { loadCampaignContext, importIdsOf} from "./model.server";
 import { guardrailsFor, readSettings } from "../settings.server";
+import { uncontrolledAmong } from "../reconciliation.server";
+import { offBaseline } from "./off-baseline";
 import { describeImpact, marginImpact } from "../../lib/pricing/margin";
 import {
   decideMarketPath,
@@ -80,6 +82,7 @@ export async function previewCampaign(
       markets: [],
       margin: null,
       blastRadius: false,
+      staleBaselines: 0,
     };
   }
 
@@ -114,6 +117,17 @@ export async function previewCampaign(
   // than the shown page: a merchant asking "what does this cost me" means the campaign,
   // not the first twenty-five rows of it.
   const storeSettings = await readSettings(shopId);
+
+  // The prices this campaign would write, from a baseline nobody updated after the
+  // merchant changed the price outside the app (#745): said before Apply, because those
+  // rows are discounted from -- and reverted to -- the old price.
+  const staleBaselines = await uncontrolledAmong(
+    shopId,
+    offBaseline(
+      outcome.rows.filter((row) => row.status !== "skipped" && row.campaignId === campaignId),
+      candidates,
+    ),
+  );
   const margin = marginImpact(
     outcome.rows
       .filter((row) => row.status !== "skipped" && row.intendedPrice && row.beforePrice)
@@ -157,6 +171,7 @@ export async function previewCampaign(
     writePath: decision.path,
     writePathReason: decision.reason,
     blastRadius: outcome.counts.planned > BLAST_RADIUS_THRESHOLD,
+    staleBaselines,
   };
 }
 

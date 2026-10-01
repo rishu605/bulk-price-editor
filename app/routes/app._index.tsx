@@ -29,6 +29,7 @@ import { RouteBoundary } from "../components/RouteBoundary";
 import { onboarding } from "../lib/onboarding/steps";
 import { homeSections } from "../lib/dashboard/home";
 import { ResultBanner } from "../components/ResultBanner";
+import { staleBaselineCount } from "../services/reconciliation.server";
 import { syncMessage } from "../lib/dashboard/sync-message";
 import { nextMoments } from "../lib/scheduling/upcoming";
 import { withGuard } from "../lib/errors/guard.server";
@@ -48,7 +49,7 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
   // Counted in parallel and as aggregates, never by loading rows. This is the landing
   // page and it has a sub-second budget; a card that costs a table scan is a card that
   // makes the whole app feel slow.
-  const [health, campaigns, live, upcoming, driftOpen, lastRun, recent, scheduled, usage] =
+  const [health, campaigns, live, upcoming, driftOpen, lastRun, recent, scheduled, usage, staleBaselines] =
     await Promise.all([
     baselineHealth(shop.id),
     prisma.campaign.count({ where: { shopId: shop.id } }),
@@ -96,6 +97,9 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
     // What the plan covers. One indexed count and the shop's tier — see `plan-usage`
     // for why it is the catalogue size and not the largest campaign's scope.
     planUsage(shop.id),
+    // Of "Not at baseline", the ones no campaign put there: prices changed outside the app
+    // while nothing was running on them, whose baselines are now out of date (#745).
+    staleBaselineCount(shop.id),
   ]);
 
   // Runs that need somebody: the number a merchant should act on, distinct from how
@@ -135,6 +139,7 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
     health: {
       ...health,
       oldestCapturedAt: health.oldestCapturedAt?.toISOString() ?? null,
+      staleBaselines,
     },
     campaigns,
     onboarding: onboarding({
@@ -850,6 +855,21 @@ export default function Dashboard() {
               },
             ]}
           />
+          {/* Under the tiles rather than as a fifth: the row is four on purpose. Said only
+              when it is true, because "Not at baseline" is otherwise what a sale looks like
+              and needs no comment (#745). */}
+          {health.staleBaselines > 0 ? (
+            <Secondary>
+              {formatCount(health.staleBaselines)} of these{" "}
+              {health.staleBaselines === 1 ? "was" : "were"} changed outside this app while no
+              campaign was running on {health.staleBaselines === 1 ? "it" : "them"}, so{" "}
+              {health.staleBaselines === 1 ? "its baseline is" : "their baselines are"} out of
+              date.{" "}
+              <s-link href="/app/prices/live?state=stale-baseline">
+                {health.staleBaselines === 1 ? "Review it" : "Review them"}
+              </s-link>
+            </Secondary>
+          ) : null}
 
           {health.withBaseline > health.variants ? (
             <Secondary>

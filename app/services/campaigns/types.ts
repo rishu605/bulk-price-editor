@@ -173,6 +173,11 @@ export interface CampaignPreview {
   margin: MarginPreview | null;
   /** Campaigns over this size need typed confirmation (A-3.11). */
   blastRadius: boolean;
+  /**
+   * Of the prices this would write, how many were changed outside the app while no
+   * campaign was running on them, so their baselines are out of date (#745).
+   */
+  staleBaselines: number;
 }
 
 export interface RunOutcome {

@@ -147,6 +147,24 @@ export function DraftPreview({
           `Prices → Drift` is where the app already answers the question properly.
           
           Absent when no row has drifted, which is the ordinary case. */}
+      {/* Named on its own, ahead of the general note below: a stale baseline is not "another
+          campaign is pricing it", and the drift queue that note points to never lists it,
+          because drift is only watched while a campaign runs (#745). */}
+      {preview.staleBaselines > 0 ? (
+        <s-banner tone="warning">
+          <s-paragraph>
+            {formatCount(preview.staleBaselines)} of the prices this would change{" "}
+            {preview.staleBaselines === 1 ? "was" : "were"} changed outside this app while no
+            campaign was running on {preview.staleBaselines === 1 ? "it" : "them"}, so{" "}
+            {preview.staleBaselines === 1 ? "its baseline is" : "their baselines are"} out of
+            date. This sale would discount from the old price, and ending it would put the old
+            price back. Recapture {preview.staleBaselines === 1 ? "that baseline" : "those baselines"}{" "}
+            first if the new price is the normal one.
+          </s-paragraph>
+          <s-button href="/app/prices/baselines/recapture?segment=stale">Recapture baselines</s-button>
+        </s-banner>
+      ) : null}
+
       {preview.rows.some((row) => row.live) ? (
         <s-stack gap={SPACE.tight}>
           <Secondary>

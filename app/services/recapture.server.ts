@@ -25,11 +25,10 @@ import { PRICES_MAY_BE_LIVE } from "../lib/lifecycle/transitions";
 import { captureBaselines } from "./baselines.server";
 import { astToWhere, type FilterAst } from "./segments.server";
 import { scopeOf } from "./campaigns/model.server";
+import type { RecaptureScope } from "../lib/baselines/recapture-scope";
+import { staleBaselineVariants } from "./reconciliation.server";
 
-export interface RecaptureScope {
-  /** A saved segment, or the whole catalogue when absent. */
-  segmentId?: string;
-}
+export type { RecaptureScope } from "../lib/baselines/recapture-scope";
 
 /**
  * Works out what a recapture would do, without doing any of it.
@@ -117,6 +116,7 @@ export async function recapture(shopId: string, options: RecaptureOptions = {}) 
       after: {
         scope: plan.scope,
         segmentId: options.segmentId ?? null,
+        stale: options.stale === true,
         captured: result.captured,
         superseded: result.superseded,
         alreadyCurrent: result.alreadyCurrent,
@@ -129,6 +129,8 @@ export async function recapture(shopId: string, options: RecaptureOptions = {}) 
 }
 
 async function resolveScope(shopId: string, scope: RecaptureScope): Promise<string[]> {
+  if (scope.stale) return staleBaselineVariants(shopId);
+
   if (!scope.segmentId) {
     const all = await prisma.variantIndex.findMany({
       where: { shopId, deletedAt: null },

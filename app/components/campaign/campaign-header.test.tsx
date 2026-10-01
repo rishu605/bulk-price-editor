@@ -45,7 +45,7 @@ const preview = (over: Record<string, unknown> = {}) => ({
   writePathReason: "under the threshold",
   markets: [],
   margin: null,
-  blastRadius: false,
+  blastRadius: false, staleBaselines: 0,
   ...over,
 });
 
@@ -442,7 +442,7 @@ describe("the confirmation says what is about to happen", () => {
 describe("the typed confirmation appears only when it is earned", () => {
   it("asks for it over the blast-radius threshold", () => {
     const html = render(
-      <CampaignHeader {...props({ preview: preview({ blastRadius: true, counts: { planned: 5000, noop: 0, skipped: 0, clamped: 0 } }) })} />,
+      <CampaignHeader {...props({ preview: preview({ blastRadius: true, staleBaselines: 0, counts: { planned: 5000, noop: 0, skipped: 0, clamped: 0 } }) })} />,
     );
 
     expect(html).toContain("Type apply to confirm");
