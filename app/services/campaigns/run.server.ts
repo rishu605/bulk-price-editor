@@ -157,8 +157,16 @@ export async function runCampaign(
     // claimed the campaign, it stayed APPLYING with nothing behind it: the sale never
     // started, approving it later changed nothing, and nothing ever reverted it (#701).
     // Released back to where the scheduler took it from, so the next tick asks again.
-    if (outcome.refused && options.claimedFrom && releaseTo !== "APPLYING" && releaseTo !== "REVERTING") {
-      await releaseClaim(shopId, campaignId, options.claimedFrom, {
+    // A full run that stood down for a scoped one (#763) took its claim itself, so it
+    // gives it back whoever started it.
+    if (
+      outcome.refused &&
+      releaseTo &&
+      (options.claimedFrom || outcome.deferredTo) &&
+      releaseTo !== "APPLYING" &&
+      releaseTo !== "REVERTING"
+    ) {
+      await releaseClaim(shopId, campaignId, releaseTo, {
         reason: outcome.refused,
         // The scheduler asks every tick while the reason stands. One activity entry
         // says why; a new one every thirty seconds would bury it.
@@ -370,6 +378,28 @@ async function executeCampaignRun(
     await transitionCampaign(shopId, campaignId, options.revert ? "REVERTING" : "APPLYING", {
       reason: options.resume ? "resume requested" : options.revert ? "revert requested" : "apply requested",
     });
+
+    // One writer at a time, whichever kind (rule 2, #763). A run over one variant never
+    // takes this claim, so it cannot collide on it: it writes its run row first and then
+    // looks for a claim, while this run has taken its claim and now looks for a run row.
+    // Whichever looks second sees the other and stands down, and nothing is written twice.
+    const scoped = await liveScopedRun(campaignId);
+    if (scoped) {
+      const message =
+        "A change to one variant of this campaign is being written right now, so nothing was " +
+        "written. Try again in a minute, once it has finished.";
+      return {
+        runId: "",
+        planned: 0,
+        verified: 0,
+        failed: 0,
+        unverified: 0,
+        clean: true,
+        messages: [message],
+        refused: message,
+        deferredTo: scoped.id,
+      };
+    }
   }
 
   const startedAt = Date.now();
@@ -485,6 +515,31 @@ async function executeCampaignRun(
     };
   }
 
+  // The other half of the check above (#763): this run's row exists, so a full run
+  // claiming the campaign from now on will see it. One that claimed first is seen here.
+  if (options.variantGids) {
+    const holder = await prisma.campaign.findUnique({ where: { id: campaignId }, select: { status: true } });
+    if (holder && CLAIMED.has(holder.status)) {
+      await prisma.campaignRun.update({
+        where: { id: run.id },
+        data: { status: "CANCELLED", finishedAt: new Date() },
+      });
+      const message =
+        `This campaign is being ${holder.status === "REVERTING" ? "reverted" : "applied"} right now, ` +
+        "so nothing was written for this variant. Try again once that has finished.";
+      return {
+        runId: run.id,
+        planned: 0,
+        verified: 0,
+        failed: 0,
+        unverified: 0,
+        clean: true,
+        messages: [message],
+        refused: message,
+      };
+    }
+  }
+
   await writeLedgerRows(run.id, shopId, writable);
   await writeSparedRows(run.id, shopId, spared);
 
@@ -530,11 +585,13 @@ async function executeCampaignRun(
   //
   // Nothing is written here; it only records what the markets look like now, which is
   // exactly the moment that is about to stop being observable.
-  if (!options.revert && !options.variantGids) {
+  if (!options.revert) {
     const baselines = await captureMarketBaselinesFirst(
       shopId,
       campaignId,
-      writable.map((row) => row.ref.variantGid),
+      // A scoped run's whole scope, not only the rows its base surface writes: a variant
+      // already at its base price may still need its markets priced (#763).
+      options.variantGids ?? writable.map((row) => row.ref.variantGid),
       client,
     );
     messagesBeforeExecution.push(...baselines.messages);
@@ -567,9 +624,22 @@ async function executeCampaignRun(
   // not.
   try {
     const markets = options.variantGids
-      ? // Scoped runs leave markets alone: one variant coming out of a sale does not
-        // change what the other surfaces should show for the rest of them.
-        []
+      ? // A scoped run prices its own variants' markets and nobody else's (#763). It used
+        // to skip markets altogether, so a variant taken out of a sale went back to full
+        // price at home and stayed discounted in every market until the whole campaign
+        // ended. Recomputed, not restored: a revert plans without this campaign, as the
+        // base surface does. Per product only -- a market-wide percentage moves the whole
+        // list, which is the one thing a run over one variant must never do.
+        await applyMarketSurfaces(
+          shopId,
+          campaignId,
+          run.id,
+          options.revert ? resolvable.filter((campaign) => campaign.id !== campaignId) : resolvable,
+          options.variantGids,
+          client,
+          refusedMarkets,
+          { perProductOnly: true },
+        )
       : options.revert
         ? await revertMarketSurfaces(shopId, campaignId, client)
         : await applyMarketSurfaces(
@@ -1123,6 +1193,21 @@ async function recordResults(
   }
 
   return messages;
+}
+
+/** The states in which a full run holds the campaign's claim. */
+const CLAIMED: ReadonlySet<string> = new Set(["APPLYING", "REVERTING"]);
+
+/** A run over named variants that is still writing, if there is one. */
+async function liveScopedRun(campaignId: string): Promise<{ id: string } | null> {
+  return prisma.campaignRun.findFirst({
+    where: {
+      campaignId,
+      occurrenceKey: { startsWith: "VARIANT-" },
+      status: { in: ["PLANNING", "QUEUED", "EXECUTING", "VERIFYING"] },
+    },
+    select: { id: true },
+  });
 }
 
 /** Base-price variants this run wrote and read back. */

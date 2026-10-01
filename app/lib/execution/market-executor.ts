@@ -58,7 +58,13 @@ export const PRICE_LIST_FIXED_PRICES_DELETE = `#graphql
 export interface MarketPriceRow {
   variantGid: string;
   price: Money;
-  /** Per-market strike-through. The whole point; absent means leave it unset. */
+  /**
+   * Per-market strike-through, in three states, because Shopify has three.
+   *
+   * `undefined` leaves whatever the list holds; `null` clears it; a value sets it. Folding
+   * "clear" into "leave" meant a variant reverted out of a sale kept the campaign's
+   * strike-through in every market, beside a price that was no longer reduced (#763).
+   */
   compareAt?: Money | null;
 }
 
@@ -87,18 +93,21 @@ export function chunkPrices<T>(rows: readonly T[], size = MAX_PRICES_PER_REQUEST
   return chunks;
 }
 
-/** Builds the mutation input for one row, omitting compare-at when there is none. */
+/** Builds the mutation input for one row: compare-at omitted, cleared or set, as the row says. */
 export function toPriceInput(row: MarketPriceRow, currency: string): Record<string, unknown> {
   const input: Record<string, unknown> = {
     variantId: row.variantGid,
     price: { amount: formatMoney(row.price), currencyCode: currency },
   };
 
-  // Omitted rather than sent as null. On this surface a null compare-at is a
-  // different instruction from an absent one, and sending null on every write would
-  // clear strike-throughs the merchant set themselves.
+  // Omitted unless the row decided it. On this surface a null compare-at is a different
+  // instruction from an absent one: absent keeps what the list holds, null clears it. So
+  // null is sent only when the plan says the strike-through must go -- sending it on every
+  // write would clear strike-throughs the merchant set themselves.
   if (row.compareAt) {
     input.compareAtPrice = { amount: formatMoney(row.compareAt), currencyCode: currency };
+  } else if (row.compareAt === null) {
+    input.compareAtPrice = null;
   }
 
   return input;

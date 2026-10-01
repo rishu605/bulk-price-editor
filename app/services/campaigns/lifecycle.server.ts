@@ -134,8 +134,15 @@ export async function releaseClaim(
   // state is newer than ours and must not be clobbered.
   if (!CLAIM_STATES.has(from)) return { changed: false, from, to };
 
+  // Full runs only. A run over named variants never holds the claim, so one in flight is
+  // no reason to keep a claim nobody is using -- and a full run standing down for one has
+  // to be able to give its claim back (#763).
   const executing = await prisma.campaignRun.count({
-    where: { campaignId, status: { in: ["PLANNING", "QUEUED", "EXECUTING", "VERIFYING"] } },
+    where: {
+      campaignId,
+      status: { in: ["PLANNING", "QUEUED", "EXECUTING", "VERIFYING"] },
+      NOT: { occurrenceKey: { startsWith: "VARIANT-" } },
+    },
   });
   if (executing > 0) {
     // A run is live. Releasing now would tell the merchant nothing is happening while

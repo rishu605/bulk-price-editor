@@ -27,6 +27,7 @@
 import prisma from "../../db.server";
 import { AppError } from "../../lib/errors/app-error";
 import type { AdminClient } from "../../lib/execution/sync-executor";
+import { priceListLabel } from "../../lib/markets/display-name";
 import { runCampaign } from "./run.server";
 import type { RunOutcome } from "./types";
 
@@ -121,29 +122,62 @@ export async function revertVariant(
   return {
     changed: !already,
     outcome,
-    message: describe(campaign.name, outcome, already),
+    message: await describe(campaign.name, outcome, already),
   };
 }
 
-function describe(campaignName: string, outcome: RunOutcome, already: boolean): string {
+/**
+ * What happened, surface by surface, from the run's own ledger.
+ *
+ * "Its price has been recomputed without it and verified" was true of the base price
+ * only: markets were never touched, and the variant stayed on sale in every market
+ * catalogue (#763). Named from the ledger rather than the outcome's counts, which are the
+ * base surface's -- a variant already at its base price may still have had its markets
+ * changed, and "nothing was written" would then be false.
+ */
+async function describe(campaignName: string, outcome: RunOutcome, already: boolean): Promise<string> {
   const prefix = already
     ? `This variant was already excluded from "${campaignName}".`
     : `"${campaignName}" will no longer price this variant.`;
 
-  if (outcome.planned === 0) {
+  if (outcome.refused) return `${prefix} ${outcome.refused}`;
+
+  const rows = outcome.runId
+    ? await prisma.variantChange.findMany({
+        where: { runId: outcome.runId, status: { in: ["VERIFIED", "FAILED", "APPLIED", "PENDING"] } },
+        select: { surfaceKind: true, priceListGid: true, status: true },
+      })
+    : [];
+  const lists = await prisma.priceListRecord.findMany({
+    where: { priceListGid: { in: rows.map((row) => row.priceListGid).filter(Boolean) } },
+    select: { priceListGid: true, name: true, currency: true, catalogTitle: true, surfaceKind: true },
+  });
+  const label = (row: { surfaceKind: string; priceListGid: string }) => {
+    if (row.priceListGid === "") return "the base price";
+    const list = lists.find((candidate) => candidate.priceListGid === row.priceListGid);
+    return list ? `${priceListLabel(list)} (${list.currency})` : "a market";
+  };
+  const done = [...new Set(rows.filter((row) => row.status === "VERIFIED").map(label))];
+  const notDone = [...new Set(rows.filter((row) => row.status !== "VERIFIED").map(label))];
+
+  if (rows.length === 0) {
     // Nothing to write: the storefront already shows what resolution says it should.
     // Saying "0 variants updated" without this reads like a failure.
-    return `${prefix} Its price was already correct, so nothing was written.`;
+    return `${prefix} Its prices were already correct, so nothing was written.`;
   }
 
-  if (!outcome.clean) {
+  const recomputed = done.length > 0 ? ` Recomputed without it and verified: ${joinNames(done)}.` : "";
+  if (notDone.length > 0) {
     return (
-      `${prefix} The price change did not complete — ${outcome.failed} failed, ` +
-      `${outcome.unverified} unverified. The exclusion is saved; resume the campaign to retry.`
+      `${prefix}${recomputed} Not confirmed: ${joinNames(notDone)}. The exclusion is saved; ` +
+      "press Revert this variant again to retry."
     );
   }
+  return `${prefix}${recomputed}`;
+}
 
-  return `${prefix} Its price has been recomputed without it and verified.`;
+function joinNames(names: string[]): string {
+  return names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
 /**

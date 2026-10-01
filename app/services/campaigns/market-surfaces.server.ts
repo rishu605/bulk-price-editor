@@ -217,6 +217,13 @@ export async function applyMarketSurfaces(
   variantGids: readonly string[],
   client: AdminClient,
   refusedPriceListGids: readonly string[] = [],
+  options: {
+    /**
+     * Never set a list's parent adjustment, only per-variant prices. For a run over named
+     * variants: a percentage moves every variant on the list, not just these (#763).
+     */
+    perProductOnly?: boolean;
+  } = {},
 ): Promise<MarketSurfaceOutcome[]> {
   const campaign = await prisma.campaign.findUnique({
     where: { id: campaignId },
@@ -343,7 +350,7 @@ export async function applyMarketSurfaces(
         // The strike-through is this market's own number, so a shopper there sees what
         // they would otherwise have paid — not a figure converted from another currency,
         // which is both wrong and obviously wrong to them.
-        compareAt: row.intendedCompareAtSet ? (row.intendedCompareAt ?? null) : null,
+        compareAt: row.intendedCompareAtSet ? (row.intendedCompareAt ?? null) : undefined,
       }));
 
     // Said out loud, and recorded even when nothing is left to write. Filtering skipped
@@ -466,7 +473,7 @@ export async function applyMarketSurfaces(
       });
     }
 
-    if (decision.path === "market-wide" && !baseAlreadyMoved) {
+    if (decision.path === "market-wide" && !baseAlreadyMoved && !options.perProductOnly) {
       // Write-ahead for every row first, exactly as the chunked path does. The
       // shortcut is in the number of requests, not in the ledger.
       await ledgerChunk(runId, shopId, list, rows, 0);
@@ -517,9 +524,11 @@ export async function applyMarketSurfaces(
       verified: summary.verified + settled.size,
       path: "per-product",
       pathReason:
-        decision.path === "market-wide"
-          ? "this market already follows the base price, so a percentage would apply the campaign twice"
-          : decision.reason,
+        decision.path === "market-wide" && options.perProductOnly
+          ? "only some variants are being priced, and a percentage would move the whole market"
+          : decision.path === "market-wide"
+            ? "this market already follows the base price, so a percentage would apply the campaign twice"
+            : decision.reason,
     });
   }
 
@@ -675,7 +684,7 @@ async function ledgerChunk(
       currency: list.currency,
       intendedPrice: BigInt(row.price.amount),
       intendedCompareAt: row.compareAt ? BigInt(row.compareAt.amount) : null,
-      intendedCompareAtSet: row.compareAt !== null && row.compareAt !== undefined,
+      intendedCompareAtSet: row.compareAt !== undefined,
       status: "PENDING" as const,
     })),
     skipDuplicates: true,
