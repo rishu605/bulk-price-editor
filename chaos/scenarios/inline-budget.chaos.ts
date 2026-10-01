@@ -20,11 +20,16 @@
  * that makes "schedule it instead" honest advice rather than a brush-off.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import prisma from "../../app/db.server";
 import { pricesMayBeLive } from "../../app/lib/lifecycle/transitions";
 import { withChaos } from "../harness/scenario";
+
+// No worker queue, so a revert over the limit has nowhere to go but here. With one, it is
+// handed to the worker instead (#772, `queued-revert.chaos.ts`) -- and CI has Redis, so
+// without this the revert below would put a real job on a real queue.
+vi.mock("../../app/worker/web-queue.server", () => ({ webQueue: () => null }));
 
 describe("chaos: a run too large for its request is refused, not abandoned halfway", () => {
   it("refuses before the claim and leaves the campaign schedulable", async () => {
@@ -102,7 +107,8 @@ describe("chaos: a run too large for its request is refused, not abandoned halfw
         expect(applied.clean).toBe(true);
 
         // A limit far below the scope. Refusing here would strand a store at 20% off
-        // because it is large -- the guard causing the incident it exists to prevent.
+        // because it is large -- the guard causing the incident it exists to prevent. With
+        // no worker queue to hand it to, it runs here, as it always did.
         const reverted = await ctx.revert({ inlineRowLimit: 1 });
 
         expect(reverted.refused, "a revert is never gated, on anything").toBeFalsy();

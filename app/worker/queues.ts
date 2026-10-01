@@ -76,6 +76,11 @@ export interface JobRef {
   webhookEventId?: string;
   /** Set for a revert, so a handler can never confuse one with an apply. */
   revert?: boolean;
+  /**
+   * The state the web process took the campaign out of when it claimed it and handed the
+   * run here (#772), so a run that fails before it starts puts it back there.
+   */
+  claimedFrom?: string;
 }
 
 /**

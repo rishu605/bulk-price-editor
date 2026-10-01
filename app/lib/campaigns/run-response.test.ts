@@ -69,6 +69,21 @@ describe("a run that deferred", () => {
   });
 });
 
+describe("a revert handed to the worker (#772)", () => {
+  it("says the worker has it, as good news, and never 'Reverted 0 variants'", () => {
+    // Nothing failed and nothing is written yet: the background worker is reverting it.
+    const queued = runResponse(
+      { ...quiet, messages: ["The background worker is reverting it."], queued: true },
+      "Reverted",
+    );
+
+    expect(queued.ok).toBe(true);
+    expect(queued.tone).toBeUndefined();
+    expect(queued.message).toBe("The background worker is reverting it.");
+    expect(queued.message).not.toContain("Reverted 0 variants");
+  });
+});
+
 describe("a run that actually ran", () => {
   it("counts what it verified, in the verb the caller used", () => {
     const clean = runResponse(

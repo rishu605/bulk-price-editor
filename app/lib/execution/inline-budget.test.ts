@@ -123,16 +123,20 @@ describe("every caller that runs inside a request declares its deadline", () => 
   });
 
   it.each(callers.map((c) => [c.file, c.args] as const))(
-    "%s passes inlineRowLimit or is a revert",
+    "%s declares inlineRowLimit",
     (file, args) => {
       const reverts = /revert:\s*true/.test(args);
 
       if (reverts) {
+        // Bounded too, since #772 -- but never refused. For a revert the limit means "too
+        // large for this request, so the background worker does it": ending a sale must
+        // always be possible, and a store left discounted is the incident the guard exists
+        // to prevent. Unbounded, a large revert outlived its request and kept writing.
         expect(
           args,
-          `${file} reverts, and a revert must never be refused for its size — ` +
-            "a store left discounted is the incident the guard exists to prevent",
-        ).not.toContain("inlineRowLimit");
+          `${file} reverts inside an HTTP request without declaring a row limit, so a large ` +
+            "revert would run past the proxy's timeout instead of going to the worker",
+        ).toContain("inlineRowLimit");
         return;
       }
 

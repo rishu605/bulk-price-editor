@@ -13,6 +13,7 @@ import { authenticate } from "../shopify.server";
 import { toAdminClient } from "../services/admin-client.server";
 import { runCampaign } from "../services/campaigns/index.server";
 import { logger } from "../lib/logging/logger";
+import { MAX_INLINE_ROWS } from "../lib/execution/inline-budget";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin, session, payload } = await authenticate.flow(request);
@@ -36,12 +37,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return new Response(null, { status: 200 });
   }
 
+  // Bounded like the button (#772): Flow calls this over HTTP too, and a revert too large
+  // for one request is handed to the background worker rather than cut off mid-write.
   const outcome = await runCampaign(shop.id, campaign.id, toAdminClient(admin), {
     actor: "shopify-flow",
     revert: true,
+    inlineRowLimit: MAX_INLINE_ROWS,
   });
 
-  logger.info("Flow ended a campaign", {
+  logger.info(outcome.queued ? "Flow ended a campaign through the worker" : "Flow ended a campaign", {
     shopId: shop.id,
     campaignId: campaign.id,
     verified: outcome.verified,
