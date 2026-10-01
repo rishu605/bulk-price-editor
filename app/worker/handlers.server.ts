@@ -88,6 +88,12 @@ async function syncJob(ref: JobRef): Promise<void> {
   });
   if (!shop || shop.uninstalledAt) return;
 
+  if (ref.recaptureSegmentId) {
+    const { captureForFlow } = await import("../services/flow/flow-capture.server");
+    await captureForFlow(ref.shopId, ref.recaptureSegmentId);
+    return;
+  }
+
   const client = await adminClientForShop(shop.domain);
   if (!client) return;
 

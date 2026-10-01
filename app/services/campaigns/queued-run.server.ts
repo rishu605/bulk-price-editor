@@ -19,31 +19,32 @@ import { formatCount } from "../../lib/format/display";
 import { estimateMinutes } from "../../lib/execution/inline-budget";
 import type { CampaignState } from "../../lib/lifecycle/transitions";
 import { logger } from "../../lib/logging/logger";
-import { webQueue } from "../../worker/web-queue.server";
+import { enqueueWithin, webQueue } from "../../worker/web-queue.server";
 import { releaseClaim, transitionCampaign } from "./lifecycle.server";
 import type { RunOutcome } from "./types";
 
-/**
- * How long the request waits for Redis to take the job. The connection retries forever,
- * so without this a Redis outage would hang the request -- the very thing being avoided.
- */
-export const ENQUEUE_TIMEOUT_MS = 10_000;
-
 const nothing = { runId: "", planned: 0, verified: 0, failed: 0, unverified: 0, clean: true };
 
-/** The queued outcome, or null when there is no worker queue and the caller runs it itself. */
-export async function queueRevert(
+/**
+ * The queued outcome, or null when there is no worker queue and the caller decides.
+ *
+ * Reverts since #772; applies since #773, for Flow, whose ten seconds an apply of a few
+ * thousand variants already outlives.
+ */
+export async function queueRun(
   shopId: string,
   campaignId: string,
   rows: number,
-  actor?: string,
+  { revert, actor }: { revert: boolean; actor?: string },
 ): Promise<RunOutcome | null> {
+  const verb = revert ? "reverting" : "applying";
   const queue = webQueue();
   if (!queue) {
-    logger.warn("revert larger than one request, but there is no worker queue; running it inline", {
+    logger.warn("run larger than one request, but there is no worker queue", {
       shopId,
       campaignId,
       rows,
+      revert,
     });
     return null;
   }
@@ -52,31 +53,28 @@ export async function queueRevert(
     await prisma.campaign.findFirstOrThrow({ where: { id: campaignId, shopId }, select: { status: true } })
   ).status as CampaignState;
 
-  const claim = await transitionCampaign(shopId, campaignId, "REVERTING", {
-    reason: `revert handed to the background worker: ${formatCount(rows)} variants is more than one request can write`,
+  const claim = await transitionCampaign(shopId, campaignId, revert ? "REVERTING" : "APPLYING", {
+    reason: `${revert ? "revert" : "apply"} handed to the background worker: ${formatCount(rows)} variants is more than one request can write`,
     actor,
   });
   if (!claim.changed) {
-    const message = "This campaign is already being reverted. Nothing more was queued; the Runs tab shows the run.";
-    return { ...nothing, messages: [message], refused: message };
+    // The work is already in hand, which is a deferral rather than a refusal: the merchant
+    // or the automation asked for exactly what is happening.
+    const message = `This campaign is already being ${revert ? "reverted" : "applied"}. Nothing more was queued; the Runs tab shows the run.`;
+    return { ...nothing, messages: [message], deferredTo: "in-progress" };
   }
 
   try {
-    await Promise.race([
-      queue.enqueue("execution", { shopId, campaignId, revert: true, claimedFrom: before }),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error(`no answer from the queue in ${ENQUEUE_TIMEOUT_MS}ms`)), ENQUEUE_TIMEOUT_MS),
-      ),
-    ]);
+    await enqueueWithin(queue, "execution", { shopId, campaignId, revert, claimedFrom: before });
   } catch (error) {
     await releaseClaim(shopId, campaignId, before, {
-      reason: `the revert could not be handed to the worker: ${error instanceof Error ? error.message : String(error)}`,
+      reason: `the ${revert ? "revert" : "apply"} could not be handed to the worker: ${error instanceof Error ? error.message : String(error)}`,
       actor,
     });
     const message =
-      "This revert is too large to run from here, and the background worker could not be reached, so nothing " +
+      `This ${revert ? "revert" : "apply"} is too large to run from here, and the background worker could not be reached, so nothing ` +
       "was written. Try again in a minute. If it keeps happening, contact support from this page.";
-    return { ...nothing, messages: [message], refused: message };
+    return { ...nothing, messages: [message], refused: message, transient: true };
   }
 
   const minutes = estimateMinutes(rows);
@@ -85,8 +83,8 @@ export async function queueRevert(
     queued: true,
     messages: [
       `This campaign covers ${formatCount(rows)} variants, which would take about ${minutes} ${minutes === 1 ? "minute" : "minutes"} — ` +
-        "longer than a request from this page is allowed to run. So the background worker is reverting it, with no " +
-        "time limit. It reads Reverting until it finishes, and the Runs tab shows the result.",
+        `longer than a request is allowed to run. So the background worker is ${verb} it, with no ` +
+        `time limit. It reads ${revert ? "Reverting" : "Applying"} until it finishes, and the Runs tab shows the result.`,
     ],
   };
 }

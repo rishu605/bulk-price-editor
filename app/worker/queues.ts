@@ -81,6 +81,11 @@ export interface JobRef {
    * run here (#772), so a run that fails before it starts puts it back there.
    */
   claimedFrom?: string;
+  /**
+   * A baseline capture of this segment that Flow asked for and was too large to finish
+   * inside Flow's ten seconds (#773). Carried on the sync queue.
+   */
+  recaptureSegmentId?: string;
 }
 
 /**

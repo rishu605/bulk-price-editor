@@ -39,6 +39,12 @@ import { addLogContext, withLogContext } from "../../lib/logging/context.server"
 
 export interface RunOptions {
   revert?: boolean;
+  /**
+   * Hand an apply too large for `inlineRowLimit` to the background worker rather than
+   * refusing it. For a caller with nobody to tell "schedule it instead" -- Shopify Flow,
+   * which waits ten seconds and then retries (#773). A revert is always handed over.
+   */
+  queueWhenTooLarge?: boolean;
   /** Who asked for this run, recorded on anything it resolves on their behalf (#755). */
   actor?: string;
   /**
@@ -293,6 +299,9 @@ async function executeCampaignRun(
   // Checked here rather than only in the wizard because a catalogue grows and a plan can
   // lapse between a campaign being created and the scheduler running it, and the
   // scheduler never goes near the wizard.
+  // Set when the scope is too large for this request and the run should go to the worker.
+  let tooLargeToRunHere: number | undefined;
+
   if (!options.revert) {
     // Approval before plan. A campaign nobody has signed off should say so rather than
     // being refused for a plan reason the merchant would then go and fix, only to hit the
@@ -327,7 +336,11 @@ async function executeCampaignRun(
       // tier the shop is on -- telling a merchant to upgrade for a run that would be
       // cut off either way is worse than useless.
       const tooBig = refuseInline(scopedCount, options.inlineRowLimit);
-      if (tooBig) {
+      // A caller with nobody to tell "schedule it instead" -- Flow (#773) -- has it run by
+      // the worker, once the plan gate below has had its say.
+      if (tooBig && options.queueWhenTooLarge) {
+        tooLargeToRunHere = scopedCount;
+      } else if (tooBig) {
         return {
           runId: "",
           planned: 0,
@@ -369,10 +382,20 @@ async function executeCampaignRun(
   // runs here as it always did.
   if (options.revert && !options.variantGids && options.inlineRowLimit !== undefined) {
     const rows = await scopeSize(shopId, campaignId);
-    if (rows > options.inlineRowLimit) {
-      const { queueRevert } = await import("./queued-revert.server");
-      const queued = await queueRevert(shopId, campaignId, rows, options.actor);
-      if (queued) return queued;
+    if (rows > options.inlineRowLimit) tooLargeToRunHere = rows;
+  }
+  if (tooLargeToRunHere !== undefined) {
+    const { queueRun } = await import("./queued-run.server");
+    const queued = await queueRun(shopId, campaignId, tooLargeToRunHere, {
+      revert: options.revert === true,
+      actor: options.actor,
+    });
+    if (queued) return queued;
+    // No worker queue. A revert runs here as it always did; an apply is refused, as the
+    // button's is -- writing past the deadline is the one outcome this exists to prevent.
+    if (!options.revert) {
+      const message = refuseInline(tooLargeToRunHere, options.inlineRowLimit)!;
+      return { runId: "", planned: 0, verified: 0, failed: 0, unverified: 0, clean: true, messages: [message], refused: message };
     }
   }
 
@@ -400,6 +423,7 @@ async function executeCampaignRun(
         messages: [message],
         refused: message,
         deferredTo: scoped.id,
+        transient: true,
       };
     }
   }
@@ -538,6 +562,7 @@ async function executeCampaignRun(
         clean: true,
         messages: [message],
         refused: message,
+        transient: true,
       };
     }
   }
