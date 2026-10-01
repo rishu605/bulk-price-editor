@@ -22,9 +22,9 @@ import type { LoaderFunctionArgs } from "react-router";
 import { login } from "../../shopify.server";
 import { Card } from "../../components/Card";
 import { Secondary } from "../../components/Type";
+import { SUPPORT_ADDRESS } from "../../lib/support/contact";
 
 const APP_STORE = "https://apps.shopify.com";
-const SUPPORT = "rishu605@gmail.com";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   // Throws a redirect when the request names a shop we can install for. Returning at all
@@ -61,7 +61,7 @@ export default function Auth() {
 
           <Secondary>
             Stuck, or landed here from a link that should have worked? Write to{" "}
-            <s-link href={`mailto:${SUPPORT}`}>{SUPPORT}</s-link> and say what you clicked.
+            <s-link href={`mailto:${SUPPORT_ADDRESS}`}>{SUPPORT_ADDRESS}</s-link> and say what you clicked.
           </Secondary>
         </Card>
       </s-page>

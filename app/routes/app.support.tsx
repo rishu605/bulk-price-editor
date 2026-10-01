@@ -23,7 +23,8 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
 import { billingFor } from "../services/billing.server";
-import { sendSupportRequest } from "../services/support.server";
+import { sendSupportRequest, supportEmailConfigured } from "../services/support.server";
+import { SUPPORT_ADDRESS, supportMailto } from "../lib/support/contact";
 import { CONTEXT_FIELDS, CONTEXT_LABELS, supportContext } from "../lib/support/context";
 import { PageShell } from "../components/PageShell";
 import { Field } from "../components/FieldGrid";
@@ -66,7 +67,10 @@ async function contextFor(request: Request) {
 }
 
 export const loader = withGuard("/app/support", async ({ request }: LoaderFunctionArgs) => {
-  return { context: await contextFor(request) };
+  const context = await contextFor(request);
+  // Whether Send can work at all, so a deployment without a mail provider says so before
+  // the merchant writes anything, with the address that does work (#758).
+  return { context, canSend: supportEmailConfigured() };
 });
 
 export const action = withGuard("/app/support", async ({ request }: ActionFunctionArgs) => {
@@ -97,15 +101,34 @@ export const action = withGuard("/app/support", async ({ request }: ActionFuncti
 });
 
 export default function Support() {
-  const { context } = useLoaderData<typeof loader>();
+  const { context, canSend } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const busy = fetcher.state !== "idle";
+  const mailto = supportMailto(`Support request — ${context.shopDomain}`);
 
   return (
     <PageShell heading="Contact support" backTo={{ href: "/app/help", label: "Help" }}>
       {fetcher.data ? (
         <s-banner tone={fetcher.data.ok ? "success" : "critical"}>
           <s-paragraph>{fetcher.data.message}</s-paragraph>
+          {fetcher.data.ok ? null : (
+            <s-button href={mailto} target="_blank" icon="email">
+              Email {SUPPORT_ADDRESS}
+            </s-button>
+          )}
+        </s-banner>
+      ) : !canSend ? (
+        // Before they write, not after they press Send: finding out the form cannot send
+        // once the message is written is the dead end this replaces (#758).
+        <s-banner tone="warning">
+          <s-paragraph>
+            Sending from inside Anchor isn&rsquo;t available right now. Email us at{" "}
+            {SUPPORT_ADDRESS} instead, and include what is listed under &ldquo;What we
+            attach&rdquo; so we do not have to ask.
+          </s-paragraph>
+          <s-button href={mailto} target="_blank" icon="email">
+            Email {SUPPORT_ADDRESS}
+          </s-button>
         </s-banner>
       ) : null}
 
@@ -153,6 +176,12 @@ export default function Support() {
                 Send
               </s-button>
             </ActionRow>
+            {/* Always, not only when sending fails: some merchants would rather use their
+                own mail client, and an address nobody can see is no help on the day the
+                form is the thing that broke. */}
+            <Secondary>
+              Or email <s-link href={mailto} target="_blank">{SUPPORT_ADDRESS}</s-link> directly.
+            </Secondary>
           </s-stack>
         </fetcher.Form>
       </Card>

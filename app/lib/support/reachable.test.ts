@@ -13,6 +13,7 @@
 import { describe, expect, it } from "vitest";
 
 import { sourceOf } from "../testing/source";
+import { SUPPORT_ADDRESS } from "./contact";
 
 const SURFACES: { file: string; why: string }[] = [
   {
@@ -49,5 +50,36 @@ describe("the surfaces that link to support", () => {
     // attaches the error id, the campaign header the campaign, and both attach the page.
     expect(sourceOf("app/components/ErrorScreen.tsx")).toContain("error");
     expect(sourceOf("app/components/campaign/CampaignHeader.tsx")).toContain("campaign:");
+  });
+});
+
+describe("the support address is never out of reach (#758)", () => {
+  /**
+   * A link a merchant can press, not the constant merely imported. As above: a check that
+   * deleting the link cannot fail is not guarding anything.
+   */
+  const MAILTO_LINK = /<s-(?:link|button)[^>]*href=\{(?:mailto|supportMailto\()[^>]*>[\s\S]{0,40}\{SUPPORT_ADDRESS\}/;
+
+  it.each([
+    ["app/routes/app.support.tsx", "the contact form, for when it cannot send or a merchant would rather not"],
+    ["app/routes/app.help.tsx", "Help's \"Still stuck\", which promises a reply to every message"],
+  ])("%s — %s", (file) => {
+    expect(sourceOf(file)).toMatch(MAILTO_LINK);
+  });
+
+  it("warns before the merchant writes, when this deployment cannot send", () => {
+    // Finding out after pressing Send -- with the message already written -- is the dead
+    // end the ticket was about.
+    const source = sourceOf("app/routes/app.support.tsx");
+    expect(source).toContain("canSend: supportEmailConfigured()");
+    expect(source).toMatch(/!canSend \?[\s\S]{0,400}tone="warning"/);
+  });
+
+  it("is written down once", () => {
+    // Login, privacy and support each published it separately; one of them changing alone
+    // is how a merchant ends up writing to an address nobody reads.
+    for (const file of ["app/routes/auth.login/route.tsx", "app/routes/privacy.tsx", "app/routes/app.support.tsx", "app/routes/app.help.tsx"]) {
+      expect(sourceOf(file), file).not.toContain(SUPPORT_ADDRESS);
+    }
   });
 });

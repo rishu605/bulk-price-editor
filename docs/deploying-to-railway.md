@@ -90,6 +90,14 @@ values, so a credential rotation does not need a redeploy.
 | `SCOPES` | `write_products,read_markets` | must match `shopify.app.toml` |
 | `TOKEN_ENCRYPTION_KEY` | 32+ random bytes | secret — see below |
 | `NODE_ENV` | `production` | set by the Dockerfile; override only to debug |
+| `RESEND_API_KEY` | from Resend | secret — support requests and notification emails |
+| `NOTIFICATION_FROM_EMAIL` | a sender on a domain verified in Resend | |
+| `SUPPORT_EMAIL` | where support requests arrive | |
+
+**The three mail variables are required in production.** Without them Contact support
+cannot send: the page says so and shows the support address instead, and `/healthz` reads
+`"degraded"` with a `mail` entry naming them. Shopify's review expects a working support
+contact, and a merchant at an error page is the worst person to send on a detour.
 
 **`TOKEN_ENCRYPTION_KEY` is not optional in a deployed environment.** Access tokens are
 encrypted at the session-storage layer, and without the key the worker reads ciphertext and
@@ -105,9 +113,9 @@ not after.
 | Variable | Absent means |
 |---|---|
 | `SENTRY_DSN` | Errors stay local. Every failure still lands in `error_events` with an id a merchant can quote. |
+| `SENTRY_RELEASE` | Falls back to `SOURCE_VERSION`. With neither, Sentry releases are untagged and Contact support's "App version" reads `dev`, so a support thread cannot be lined up with a stack trace. |
+| `SOURCE_VERSION` | The build's commit, where the platform provides one; the fallback for `SENTRY_RELEASE`. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Metrics stay in the logs rather than going to a collector. |
-| `RESEND_API_KEY` | No notification emails are sent. |
-| `NOTIFICATION_FROM_EMAIL` | — required if `RESEND_API_KEY` is set |
 | `OPERATOR_ALERT_EMAIL` | Nobody is paged for a systematic failure. |
 | `HELP_BASE_URL` | Help links point at this deploy's own `/help`. Set it only to move the docs onto hosting that survives an outage of this app — `failures/app-unavailable` is otherwise served by the app it describes. |
 | `SCHEDULER_TICK_MS` | Defaults to 30s. |
@@ -148,9 +156,15 @@ curl -s https://<web-domain>/healthz | jq
 { "status": "ok", "database": { "ok": true }, "redis": { "ok": true } }
 ```
 
-`"degraded"` means Redis is unreachable and the queue is running jobs inline: campaigns
-still apply, scheduling suffers. The check deliberately does not fail for it, because
-taking the web service down over a degraded queue turns a partial outage into a total one.
+`"degraded"` means something the app can run without is missing, and the entry with
+`"ok": false` says which:
+
+- `redis` — the queue is running jobs inline: campaigns still apply, scheduling suffers.
+- `scheduler` — the worker has stopped or never started.
+- `mail` — the mail variables above are not all set, so Contact support cannot send.
+
+The check deliberately does not fail for any of them, because taking the web service
+down over one turns a partial outage into a total one.
 
 For the worker, which has no endpoint, look for the tick line in its logs. Silence for
 more than three minutes is the condition `TICK_SILENCE_SECONDS` alerts on.
