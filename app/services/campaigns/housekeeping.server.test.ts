@@ -18,6 +18,7 @@ const { prisma } = vi.hoisted(() => ({
 vi.mock("../../db.server", () => ({ default: prisma }));
 
 import { duplicateCampaign, setArchived, setNote } from "./housekeeping.server";
+import { astOf, isPractice, segmentIdOf } from "./model.server";
 
 const SOURCE = {
   name: "Summer sale",
@@ -33,6 +34,19 @@ const SOURCE = {
   autoEnroll: true,
   excludedVariantGids: ["gid://shopify/ProductVariant/9"],
   note: "Matched a competitor",
+  // The blob as `createCampaign` writes it: a window, and beside it the four things that
+  // decide a price (#762).
+  schedule: {
+    kind: "window",
+    startAt: "2026-07-01T09:00:00.000Z",
+    endAt: "2026-07-31T23:59:00.000Z",
+    revertBufferMinutes: 10,
+    clockNotes: ["The clocks go forward…"],
+    ast: { groups: [{ conditions: [{ field: "title", value: "Alpine" }] }] },
+    segmentId: "seg-1",
+    rounding: "charm-99",
+    practice: true,
+  },
   segments: [{ id: "seg-1" }],
 };
 
@@ -71,9 +85,31 @@ describe("duplicating a campaign", () => {
 
     const { data } = prisma.campaign.create.mock.calls[0]![0];
     expect(data.status).toBe("DRAFT");
-    for (const field of ["schedule", "startAt", "endAt", "enrollPendingAt", "runs", "id"]) {
+    for (const field of ["startAt", "endAt", "enrollPendingAt", "runs", "id"]) {
       expect(data, `a copy must not carry ${field}`).not.toHaveProperty(field);
     }
+    // The window inside the blob as well: a copy runs by hand until somebody dates it.
+    expect(data.schedule.kind).toBe("manual");
+    for (const key of ["startAt", "endAt", "revertBufferMinutes", "clockNotes"]) {
+      expect(data.schedule, `a copy must not carry the schedule's ${key}`).not.toHaveProperty(key);
+    }
+  });
+
+  it("prices exactly what its source prices (#762)", async () => {
+    // The copy used to get the column default `{}`: an empty filter -- the whole
+    // catalogue -- no segment, no rounding, and not practice, so it could be applied.
+    // Read back through the model's own readers, the way a run reads it.
+    await duplicateCampaign("shop", "c1", "ada");
+
+    const { data } = prisma.campaign.create.mock.calls[0]![0];
+    const copy = { schedule: data.schedule } as never;
+    const source = { schedule: SOURCE.schedule } as never;
+
+    expect(astOf(copy)).toEqual(astOf(source));
+    expect(astOf(copy).groups).toHaveLength(1);
+    expect(segmentIdOf(copy)).toBe("seg-1");
+    expect(isPractice(copy), "a practice campaign's copy could be applied").toBe(true);
+    expect(data.schedule.rounding).toBe("charm-99");
   });
 
   it("connects the segment rather than copying it", async () => {
