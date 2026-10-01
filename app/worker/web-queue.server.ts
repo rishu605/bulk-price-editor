@@ -12,6 +12,33 @@
 
 import { logger } from "../lib/logging/logger";
 import { redisRuntime, type QueueRuntime } from "./queue-runtime.server";
+import type { JobRef, QueueName } from "./queues";
+
+/**
+ * How long a request waits for Redis to take a job. The connection retries forever, so
+ * without this a Redis outage would hang the request -- the very thing being avoided.
+ */
+export const ENQUEUE_TIMEOUT_MS = 10_000;
+
+/** Enqueues, or throws if Redis has not taken the job within the timeout. */
+export async function enqueueWithin(
+  queue: QueueRuntime,
+  name: QueueName,
+  ref: JobRef,
+  ms = ENQUEUE_TIMEOUT_MS,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      queue.enqueue(name, ref),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`no answer from the queue in ${ms}ms`)), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 let runtime: QueueRuntime | null | undefined;
 

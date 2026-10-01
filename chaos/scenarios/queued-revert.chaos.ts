@@ -22,7 +22,8 @@ let endpoint = "";
 const enqueued: Array<{ name: QueueName; ref: JobRef }> = [];
 let queueMode: "ok" | "down" | "none" = "ok";
 
-vi.mock("../../app/worker/web-queue.server", () => ({
+vi.mock("../../app/worker/web-queue.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../app/worker/web-queue.server")>()),
   webQueue: () =>
     queueMode === "none"
       ? null
@@ -75,7 +76,8 @@ describe("chaos: a revert too large for one request", () => {
 
       // A second press finds it claimed, and queues nothing more.
       const again = await chaos.revert({ inlineRowLimit: 10 });
-      expect(again.refused).toMatch(/already being reverted/);
+      expect(again.deferredTo).toBeTruthy();
+      expect(again.messages[0]).toMatch(/already being reverted/);
       expect(enqueued).toHaveLength(1);
 
       // The worker runs the job.

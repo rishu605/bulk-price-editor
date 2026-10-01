@@ -16,7 +16,15 @@ import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 import { toAdminClient } from "../services/admin-client.server";
 import { runCampaign } from "../services/campaigns/index.server";
-import { MAX_INLINE_ROWS } from "../lib/execution/inline-budget";
+import {
+  answerForError,
+  answerForRun,
+  FLOW_ACTOR,
+  FLOW_INLINE_ROWS,
+  recordFlowRequest,
+  respond,
+  type FlowAnswer,
+} from "../services/flow/flow-answer.server";
 import { logger } from "../lib/logging/logger";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -39,26 +47,39 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     select: { id: true, name: true },
   });
 
-  // 200, not 404. Flow retries a failure, and retrying will not make a deleted campaign
-  // exist — it would just repeat the same error until the automation is disabled.
+  // A 4xx, which Flow shows and does not resend: resending will not make a deleted
+  // campaign exist. It used to be a 200, so the merchant's run log said it had worked.
   if (!campaign) {
-    logger.warn("Flow asked to start an unknown campaign", { shop: session.shop, campaignId });
-    return new Response(null, { status: 200 });
+    const answer: FlowAnswer = {
+      status: 404,
+      outcome: "not-found",
+      message: `There is no campaign "${campaignId || "(empty)"}" in this store, so nothing was applied. Check the campaign ID in this Flow action -- the campaign may have been deleted.`,
+    };
+    await recordFlowRequest(shop.id, "start-campaign", { kind: "Campaign", id: campaignId }, answer);
+    return respond(answer);
   }
 
-  // Same request deadline as the button, and the same reason: Flow calls this over HTTP
-  // and the run is written before the response is sent.
-  const outcome = await runCampaign(shop.id, campaign.id, toAdminClient(admin), {
-    actor: "shopify-flow",
-    inlineRowLimit: MAX_INLINE_ROWS,
-  });
+  // The same call the button makes, bounded by Flow's ten seconds rather than the page's
+  // five minutes (#773): anything larger goes to the background worker and is answered at
+  // once, after the approval and plan gates have had their say.
+  let answer: FlowAnswer;
+  try {
+    const outcome = await runCampaign(shop.id, campaign.id, toAdminClient(admin), {
+      actor: FLOW_ACTOR,
+      inlineRowLimit: FLOW_INLINE_ROWS,
+      queueWhenTooLarge: true,
+    });
+    answer = answerForRun(outcome, campaign.name, "applied");
+  } catch (error) {
+    answer = answerForError(error, `"${campaign.name}" was not applied`);
+  }
 
-  logger.info("Flow started a campaign", {
+  logger.info("Flow asked to start a campaign", {
     shopId: shop.id,
     campaignId: campaign.id,
-    verified: outcome.verified,
-    refused: outcome.refused ?? null,
+    status: answer.status,
+    outcome: answer.outcome,
   });
-
-  return new Response(null, { status: 200 });
+  await recordFlowRequest(shop.id, "start-campaign", { kind: "Campaign", id: campaign.id }, answer);
+  return respond(answer);
 };

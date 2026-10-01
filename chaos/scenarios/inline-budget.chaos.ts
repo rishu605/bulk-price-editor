@@ -29,7 +29,10 @@ import { withChaos } from "../harness/scenario";
 // No worker queue, so a revert over the limit has nowhere to go but here. With one, it is
 // handed to the worker instead (#772, `queued-revert.chaos.ts`) -- and CI has Redis, so
 // without this the revert below would put a real job on a real queue.
-vi.mock("../../app/worker/web-queue.server", () => ({ webQueue: () => null }));
+vi.mock("../../app/worker/web-queue.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../app/worker/web-queue.server")>()),
+  webQueue: () => null,
+}));
 
 describe("chaos: a run too large for its request is refused, not abandoned halfway", () => {
   it("refuses before the claim and leaves the campaign schedulable", async () => {

@@ -215,6 +215,12 @@ export interface RunOutcome {
    * too large for one request (#772). Nothing was written by this call; the worker writes.
    */
   queued?: boolean;
+  /**
+   * Set with `refused` when the reason will clear on its own -- another writer of this
+   * campaign finishing, the worker's queue coming back. A caller that can retry (Shopify
+   * Flow, which resends a 5xx) should; nothing about the campaign needs changing (#773).
+   */
+  transient?: boolean;
 }
 
 export interface RunSummary {
