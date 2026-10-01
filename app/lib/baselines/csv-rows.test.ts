@@ -142,6 +142,18 @@ describe("mapColumns", () => {
     ).toEqual({ identifier: 1, price: 2, compareAt: 3, currency: null, cost: 4 });
   });
 
+  it("reads a real Matrixify export's header row, keyed by its Variant ID (#774)", () => {
+    // The columns a Matrixify Products export actually carries. "ID" is the *product*;
+    // "Variant ID" is the variant, written as a plain number -- and it is the most
+    // specific identifier, so it is the one used, with the column saying what it holds.
+    expect(
+      mapColumns([
+        "ID", "Handle", "Variant ID", "Variant SKU", "Variant Barcode",
+        "Variant Price", "Variant Compare At Price", "Variant Cost",
+      ]),
+    ).toEqual({ identifier: 2, identifierColumn: "variant-id", price: 5, compareAt: 6, currency: null, cost: 7 });
+  });
+
   it("prefers the SKU column over a handle, whichever comes first", () => {
     // Both orderings, because the bug this replaces was "whichever column appeared
     // first wins" and it only shows up when the handle is on the left.

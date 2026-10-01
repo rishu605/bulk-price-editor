@@ -96,7 +96,7 @@ export async function importPrices(
       continue;
     }
 
-    const csvRow: CsvRow = { line: raw.line, value: raw.identifier };
+    const csvRow: CsvRow = { line: raw.line, value: raw.identifier, column: raw.identifierColumn };
     const outcome = matchIdentifiers([csvRow], index);
 
     if (outcome.ambiguous.length > 0) {
