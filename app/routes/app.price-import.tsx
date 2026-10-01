@@ -39,6 +39,9 @@ export const action = withGuard("/app/price-import", async ({ request }: ActionF
   const currency = await shopCurrency(shop.id);
   const dryRun = !isCommit(form.get("intent"));
   const name = String(form.get("name") ?? "Imported prices").trim() || "Imported prices";
+  // Started in practice mode: the campaign is practice too, so it can be previewed and
+  // never applied. The editor promises exactly that above this form (#765).
+  const practice = String(form.get("practice") ?? "") === "1";
   const actor = actorFor(sessionToken, session.shop);
 
   const result = await importPrices(
@@ -79,6 +82,7 @@ export const action = withGuard("/app/price-import", async ({ request }: ActionF
     rule: { kind: "from-import", importId: result.importId },
     compareAtPolicy: { kind: "leave" },
     rounding: { default: "none", byCurrency: {} },
+    ...(practice ? { practice: true } : {}),
     },
     { actor },
   );
