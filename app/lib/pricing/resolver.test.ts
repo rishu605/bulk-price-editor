@@ -239,6 +239,78 @@ describe("invariant I6 — floor totality", () => {
   });
 });
 
+describe("a discount never raises a price (#740)", () => {
+  const reduceBy = (percent: number) =>
+    campaign({ ruleRows: [{ segmentIds: [], rule: { kind: "percent-change", percent: -percent } }] });
+
+  it("skips a row whose margin floor is above its normal price, rather than clamping up", () => {
+    // Cost 50, baseline 60, a 40% minimum margin: the floor is 50 ÷ 0.6 = 83.34.
+    const result = resolve({
+      baseline: { price: usd(6_000), cost: usd(5_000) },
+      surface: USD,
+      campaigns: [reduceBy(20)],
+      storeGuardrails: { minMarginPercent: 40 },
+    });
+
+    expect(result.meta.outcome, "a 'Reduce by 20%' campaign priced it at the floor").toBe("skipped");
+    expect(result.meta.reason).toBe("floor-above-baseline");
+    expect(result.price).toBeUndefined();
+  });
+
+  it("does the same for a 'Reduce by' a fixed amount", () => {
+    const result = resolve({
+      baseline: { price: usd(6_000), cost: usd(5_000) },
+      surface: USD,
+      campaigns: [campaign({ ruleRows: [{ segmentIds: [], rule: { kind: "fixed-change", amount: usd(-1_000) } }] })],
+      storeGuardrails: { minMarginPercent: 40 },
+    });
+    expect(result.meta.reason).toBe("floor-above-baseline");
+  });
+
+  it("still clamps a discount to a floor at or below the normal price", () => {
+    // The ordinary case clamping exists for: "don't discount past this".
+    const result = resolve({
+      baseline: { price: usd(10_000), cost: usd(6_000) },
+      surface: USD,
+      campaigns: [reduceBy(50)],
+      storeGuardrails: { minMarginPercent: 25 },
+    });
+    expect(result.price).toEqual(usd(8_000));
+    expect(result.meta.clamped).toBe(true);
+  });
+
+  it("lets a rule that sets the price from cost land above the baseline, which is what it is for", () => {
+    const result = resolve({
+      baseline: { price: usd(6_000), cost: usd(5_000) },
+      surface: USD,
+      campaigns: [campaign({ ruleRows: [{ segmentIds: [], rule: { kind: "from-cost-multiplier", factor: 1.1 } }] })],
+      storeGuardrails: { minMarginPercent: 40 },
+    });
+    expect(result.meta.outcome).toBe("priced");
+    expect(result.meta.clamped).toBe(true);
+  });
+
+  it("never prices a reducing rule above the baseline, whatever the floor", () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 100, max: 100_000 }),
+        fc.integer({ min: 1, max: 100_000 }),
+        fc.integer({ min: 1, max: 95 }),
+        fc.integer({ min: 0, max: 95 }),
+        (base, cost, off, margin) => {
+          const result = resolve({
+            baseline: { price: usd(base), cost: usd(cost) },
+            surface: USD,
+            campaigns: [reduceBy(off)],
+            storeGuardrails: { minMarginPercent: margin },
+          });
+          return result.price === undefined || result.price.amount <= base;
+        },
+      ),
+    );
+  });
+});
+
 describe("invariant I3 — revert recomputes", () => {
   it("removing the winner falls through to the next campaign, not the baseline", () => {
     const baseline: Baseline = { price: usd(10_000) };

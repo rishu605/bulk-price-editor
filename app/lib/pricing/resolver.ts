@@ -19,7 +19,7 @@
 
 import { profileFor } from "../money/rounding-policy";
 import { applyRounding } from "../money/rounding";
-import { isPositive, lessThanOrEqual, max, type Money } from "../money/money";
+import { compare, isPositive, lessThanOrEqual, max, type Money } from "../money/money";
 import {
   computeFloor,
   MissingCostError,
@@ -30,6 +30,7 @@ import {
 } from "./guardrails";
 import { applyRule, RuleNotApplicableError, selectRule } from "./rules";
 import type {
+  AdjustmentRule,
   CompareAtPolicy,
   Resolution,
   ResolvableCampaign,
@@ -151,6 +152,14 @@ export function resolve(input: ResolveInput): Resolution {
       case "skip":
         return skipped(winner, "below-floor", rule, effectiveFloor, unrounded);
       case "clamp":
+        // Clamping is "don't discount past this". When the floor is above the variant's
+        // normal price -- a margin floor over a low-margin line -- clamping a discount to
+        // it raises the price, and a "Reduce by 20%" campaign was marking jackets *up* to
+        // their floor under "would change price" (#740). A discount never raises a price:
+        // the row is left alone, with the reason.
+        if (reduces(rule) && compare(effectiveFloor as Money, baseline.price) > 0) {
+          return skipped(winner, "floor-above-baseline", rule, effectiveFloor, unrounded);
+        }
         price = effectiveFloor as Money;
         clamped = true;
         break;
@@ -337,4 +346,16 @@ export function isSameOutcome(a: Resolution, b: Resolution): boolean {
       a.compareAtPrice.currency === b.compareAtPrice.currency);
 
   return samePrice && sameCompareAt;
+}
+
+/**
+ * Whether a rule takes money off the normal price: "Reduce by" a percentage or an amount.
+ *
+ * The rules that set a price from something else -- an exact amount, a file, cost and a
+ * markup -- can legitimately land above the baseline, so only these promise never to.
+ */
+function reduces(rule: AdjustmentRule): boolean {
+  if (rule.kind === "percent-change") return rule.percent < 0;
+  if (rule.kind === "fixed-change") return rule.amount.amount < 0;
+  return false;
 }
