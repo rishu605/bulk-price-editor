@@ -19,6 +19,8 @@ import { MAX_INLINE_ROWS } from "../lib/execution/inline-budget";
 import { runResponse } from "../lib/campaigns/run-response";
 import { ResultBanner } from "../components/ResultBanner";
 import { describeSchedule, parseSchedule, scheduleWarnings } from "../lib/scheduling/window";
+import { scheduledWindow } from "../lib/scheduling/window-input";
+import { scheduleAction } from "../services/campaigns/schedule-control.server";
 import { RunHistoryTable } from "../components/RunHistoryTable";
 import { RunResultSection } from "../components/RunResultSection";
 import { runEvidence } from "../services/campaigns/run-evidence.server";
@@ -92,7 +94,8 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
   const history = await transitionHistory(shop.id, campaignId, 8);
 
   const schedule = parseSchedule(record.schedule);
-  const scheduleText = describeSchedule(schedule, shop.timezone);
+  const scheduleText = describeSchedule(schedule, shop.timezone, state);
+  const window = state === "SCHEDULED" ? scheduledWindow(schedule, shop.timezone) : null; // #760
   const warnings = scheduleWarnings(schedule);
 
   // Show the newest run's ledger inline. The first question after a run is always
@@ -121,6 +124,7 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     result,
     selectedRunId,
     scheduleText,
+    window,
     timeZone: shop.timezone,
     warnings,
     // The same two sentences the index shows, through the same formatter, so a merchant
@@ -159,6 +163,9 @@ export const action = withGuard("/app/campaigns/$id", async ({ request, params }
     return housekeeping.redirectTo ? redirect(housekeeping.redirectTo) : housekeeping;
   }
 
+  // Calling off or moving a campaign that has not started (#760). None of it writes a price.
+  const scheduling = await scheduleAction(shop.id, campaignId, intent, form, shop.timezone, actor);
+  if (scheduling) return scheduling;
   if (intent === "request-approval") {
     await requestApproval(shop.id, campaignId, actor);
     return { ok: true, message: "Approval requested. Somebody else needs to sign this off." };

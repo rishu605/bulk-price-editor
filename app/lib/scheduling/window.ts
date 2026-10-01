@@ -190,15 +190,24 @@ export function windowClosed(schedule: Schedule, now: Date): boolean {
  * whose nine o'clock, and a campaign that goes live at the wrong hour is a real
  * cost.
  */
-export function describeSchedule(schedule: Schedule, timeZone: string): string {
+/** An instant as the schedule sentences write it, in the store's zone: "27 Nov 2026, 09:00". */
+export function formatScheduleInstant(iso: string, timeZone: string): string {
+  return new Intl.DateTimeFormat("en", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone,
+  }).format(new Date(iso));
+}
+
+export function describeSchedule(schedule: Schedule, timeZone: string, status?: SchedulableStatus): string {
   if (schedule.kind !== "window") return "Runs when you apply it by hand.";
 
-  const format = (iso: string) =>
-    new Intl.DateTimeFormat("en", {
-      dateStyle: "medium",
-      timeStyle: "short",
-      timeZone,
-    }).format(new Date(iso));
+  const format = (iso: string) => formatScheduleInstant(iso, timeZone);
+
+  // "Starts 6 Oct…" beside a Cancelled badge reads as a sale still coming (#760).
+  if (status === "CANCELLED") {
+    return `Was to start ${format(schedule.startAt)} (${timeZone}). Cancelled, so it will not run.`;
+  }
 
   const start = `Starts ${format(schedule.startAt)}`;
   if (!schedule.endAt) return `${start} (${timeZone}). Runs until you revert it.`;

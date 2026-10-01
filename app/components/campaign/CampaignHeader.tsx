@@ -31,6 +31,7 @@
  */
 
 import { ActionRow } from "../ActionRow";
+import { ScheduleButtons, ScheduleModals } from "./ScheduleControls";
 import { ApplyConfirmation, APPLY_MODAL_ID } from "./ApplyConfirmation";
 import { RevertConfirmation, REVERT_MODAL_ID } from "./RevertConfirmation";
 import { SPACE } from "../../lib/ui/spacing";
@@ -57,6 +58,7 @@ export function CampaignHeader({
   keepers,
   keepersPending,
   heldEdits = 0,
+  window,
 }: CampaignDetailProps) {
   return (
     <>
@@ -103,6 +105,10 @@ export function CampaignHeader({
               Apply to storefront
             </s-button>
 
+            {/* Before it starts: move it, or stop it. Nothing else on the page could
+                (#760), and Archive -- the only thing that looked like it might -- files it
+                away and leaves it to run on its date. */}
+            {window ? <ScheduleButtons busy={busy} /> : null}
           </>
         )}
 
@@ -128,7 +134,11 @@ export function CampaignHeader({
           </fetcher.Form>
         ) : null}
 
-        {rollback && !rollback.straightforward ? (
+        {/* Only where there is something to revert -- which is exactly where the loader
+            builds a rollback report. Rendered without one, Revert pointed at a dialog that
+            was never drawn, and pressing it on a draft or a scheduled campaign did nothing
+            at all (#749). */}
+        {!rollback ? null : !rollback.straightforward ? (
           // Deliberately not a revert button. There are edits to decide about, and a
           // one-click revert here would silently overwrite them.
           //
@@ -247,6 +257,17 @@ export function CampaignHeader({
           `fetcher.submit` rather than a form, for the reason the menu above gives and
           `ApplyConfirmation`'s own button records: only an `s-button` may carry
           `slot="primary-action"`, so there is nowhere in a modal to put a form. */}
+      {window && !practice ? (
+        <ScheduleModals
+          campaignName={preview.name}
+          window={window}
+          busy={busy}
+          onSave={(fields) => fetcher.submit({ intent: "reschedule", ...fields }, { method: "post" })}
+          onUnschedule={() => fetcher.submit({ intent: "unschedule" }, { method: "post" })}
+          onCancel={() => fetcher.submit({ intent: "cancel-schedule" }, { method: "post" })}
+        />
+      ) : null}
+
       {practice ? null : (
         <ApplyConfirmation
           preview={preview}

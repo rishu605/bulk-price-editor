@@ -13,12 +13,8 @@ import { ensureShop } from "../services/shop.server";
 import { facetDetails } from "../lib/segments/facets";
 import { facets } from "../services/segments.server";
 import { createCampaign } from "../services/campaigns/index.server";
-import {
-  clockNote,
-  joinDateAndTime,
-  resolveLocalInput,
-  type Schedule,
-} from "../lib/scheduling/window";
+import { formatScheduleInstant, type Schedule } from "../lib/scheduling/window";
+import { windowFromFields, windowInputProblem } from "../lib/scheduling/window-input";
 import { presetStartFor } from "../lib/scheduling/calendar";
 import { formatClock, formatCount, formatDay, formatWhen } from "../lib/format/display";
 import { PriceImportHistory } from "../components/imports/PriceImportHistory";
@@ -273,31 +269,37 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
   const rule = ruleFrom(read, currency);
   const compareAtPolicy = compareAtFrom(read);
 
-  const startLocal = joinDateAndTime(
-    String(form.get("startDate") ?? ""),
-    String(form.get("startTime") ?? ""),
-    "09:00",
-  );
-  const endLocal = joinDateAndTime(
-    String(form.get("endDate") ?? ""),
-    String(form.get("endTime") ?? ""),
-    "23:59",
-  );
-  const start = startLocal ? resolveLocalInput(startLocal, shop.timezone) : null;
-  const end = endLocal ? resolveLocalInput(endLocal, shop.timezone) : null;
   // A typed time the clocks skip or repeat is scheduled by P3.9's rule and said out loud.
-  const clockNotes = [
-    start && clockNote("starts", startLocal, start, shop.timezone),
-    end && clockNote("ends", endLocal, end, shop.timezone),
-  ].filter((note): note is string => !!note);
+  const { startUtc, endUtc, clockNotes } = windowFromFields(
+    {
+      startDate: String(form.get("startDate") ?? ""),
+      startTime: String(form.get("startTime") ?? ""),
+      endDate: String(form.get("endDate") ?? ""),
+      endTime: String(form.get("endTime") ?? ""),
+    },
+    shop.timezone,
+  );
+
+  // Refused here, naming the field, rather than created and then warned about on a page
+  // that cannot fix it: an end before the start, or one already past, is a campaign that
+  // sits in Scheduled forever (#760).
+  const windowProblem = windowInputProblem({
+    startUtc,
+    endUtc,
+    now: new Date(),
+    describe: (iso) => `${formatScheduleInstant(iso, shop.timezone)} (${shop.timezone})`,
+  });
+  if (windowProblem) {
+    throw new AppError({ code: "VALIDATION", userMessage: `${windowProblem} Nothing was created.` });
+  }
 
   // A schedule needs a valid start. Anything else stays manual rather than being
   // half-scheduled, which would leave the merchant unsure whether it will fire.
-  const schedule: Schedule | undefined = start
+  const schedule: Schedule | undefined = startUtc
     ? {
         kind: "window",
-        startAt: start.utc,
-        endAt: end?.utc,
+        startAt: startUtc,
+        endAt: endUtc ?? undefined,
         revertBufferMinutes: Number(form.get("revertBuffer") ?? 5) || 5,
         ...(clockNotes.length > 0 ? { clockNotes } : {}),
       }
