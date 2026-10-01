@@ -94,8 +94,10 @@ function finiteOrNull(value: unknown, min: number, max: number): number | null {
   if (value === null || value === undefined || value === "") return null;
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return null;
-  // Clamp rather than reject: a merchant typing 150 into a margin field means
-  // "as high as possible", and refusing the whole save would lose their other edits.
+  // Clamped, for a value read back from storage that is somehow out of range. What a
+  // merchant types never gets here out of range: the settings action refuses it first,
+  // naming the field (#739), because silently turning 150 into 99.9 made a floor of a
+  // thousand times cost under "Settings saved."
   return Math.min(max, Math.max(min, parsed));
 }
 
