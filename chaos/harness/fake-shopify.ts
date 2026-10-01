@@ -764,7 +764,15 @@ export class FakeShopify {
       const row = {
         variantGid: price.variantId,
         amount: stored,
-        compareAt: price.compareAtPrice?.amount ?? null,
+        // Shopify's three states. An absent compare-at keeps what the list already holds
+        // and only an explicit null clears it -- the fake replaced the whole row, so an
+        // absent one cleared it here and a stale strike-through could never show (#763).
+        compareAt:
+          "compareAtPrice" in price
+            ? (price.compareAtPrice?.amount ?? null)
+            : existing === -1
+              ? null
+              : list.prices[existing].compareAt,
         originType: "FIXED" as const,
       };
 

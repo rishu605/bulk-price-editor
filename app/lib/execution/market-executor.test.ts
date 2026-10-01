@@ -62,10 +62,20 @@ describe("toPriceInput", () => {
     });
   });
 
-  it("omits compare-at entirely rather than sending null", () => {
+  it("omits compare-at when the row has no decision about it", () => {
     // On this surface a null compare-at is a different instruction from an absent one.
     // Sending null on every write would clear strike-throughs the merchant set.
     expect(toPriceInput(row(1), "EUR")).not.toHaveProperty("compareAtPrice");
+  });
+
+  it("sends null when the row says the strike-through must go (#763)", () => {
+    // A variant reverted out of a sale: omitting it left the campaign's strike-through on
+    // the market beside a price that was no longer reduced.
+    expect(toPriceInput({ ...row(1), compareAt: null }, "EUR")).toEqual({
+      variantId: "gid://shopify/ProductVariant/1",
+      price: { amount: "10.01", currencyCode: "EUR" },
+      compareAtPrice: null,
+    });
   });
 
   it("carries the market's currency, not the shop's", () => {

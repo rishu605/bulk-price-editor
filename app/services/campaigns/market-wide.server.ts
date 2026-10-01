@@ -143,7 +143,9 @@ export async function applyMarketWide(
     ) {
       verified.push(row.ref.variantGid);
     } else {
-      drifted.push({ variantGid: row.ref.variantGid, price: intended, compareAt: null });
+      // The price only: these rows were planned without a strike-through decision, and
+      // `null` would now clear one (#763).
+      drifted.push({ variantGid: row.ref.variantGid, price: intended });
     }
   }
 
