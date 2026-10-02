@@ -1,7 +1,7 @@
 /**
- * A revert too large for one request, handed to the worker (#772).
+ * A run too long for one request, handed to the worker (#772, #790).
  *
- * Apply has always been bounded by `MAX_INLINE_ROWS`; revert never was, because the
+ * Apply has always been bounded by the inline budget; revert never was, because the
  * check sat inside `if (!options.revert)`. Railway closes a silent request after five
  * minutes and the writes carry on with nobody reading the result -- `inline-budget.ts`
  * calls that the one outcome this product exists to prevent. A revert cannot be refused
@@ -15,13 +15,20 @@
  */
 
 import prisma from "../../db.server";
-import { formatCount } from "../../lib/format/display";
-import { estimateMinutes } from "../../lib/execution/inline-budget";
 import type { CampaignState } from "../../lib/lifecycle/transitions";
 import { logger } from "../../lib/logging/logger";
 import { enqueueWithin, webQueue } from "../../worker/web-queue.server";
 import { releaseClaim, transitionCampaign } from "./lifecycle.server";
 import type { RunOutcome } from "./types";
+
+export interface QueuedRunOptions {
+  revert: boolean;
+  resume?: boolean;
+  actor?: string;
+  /** The rollback report's "leave as it is" (#790): carried to the worker, never dropped. */
+  skipVariantGids?: string[];
+  skipReason?: string;
+}
 
 const nothing = { runId: "", planned: 0, verified: 0, failed: 0, unverified: 0, clean: true };
 
@@ -29,23 +36,20 @@ const nothing = { runId: "", planned: 0, verified: 0, failed: 0, unverified: 0, 
  * The queued outcome, or null when there is no worker queue and the caller decides.
  *
  * Reverts since #772; applies since #773, for Flow, whose ten seconds an apply of a few
- * thousand variants already outlives.
+ * thousand variants already outlives; and since #790 anything from the campaign page that
+ * would outlive its five minutes, which includes every run that takes the bulk path.
  */
 export async function queueRun(
   shopId: string,
   campaignId: string,
-  rows: number,
-  { revert, actor }: { revert: boolean; actor?: string },
+  /** Why it cannot run here, from `overBudget`: names the size and the reason. */
+  reason: string,
+  { revert, actor, resume, skipVariantGids, skipReason }: QueuedRunOptions,
 ): Promise<RunOutcome | null> {
   const verb = revert ? "reverting" : "applying";
   const queue = webQueue();
   if (!queue) {
-    logger.warn("run larger than one request, but there is no worker queue", {
-      shopId,
-      campaignId,
-      rows,
-      revert,
-    });
+    logger.warn("run longer than one request, but there is no worker queue", { shopId, campaignId, revert });
     return null;
   }
 
@@ -54,7 +58,7 @@ export async function queueRun(
   ).status as CampaignState;
 
   const claim = await transitionCampaign(shopId, campaignId, revert ? "REVERTING" : "APPLYING", {
-    reason: `${revert ? "revert" : "apply"} handed to the background worker: ${formatCount(rows)} variants is more than one request can write`,
+    reason: `${revert ? "revert" : resume ? "resume" : "apply"} handed to the background worker: ${reason}`,
     actor,
   });
   if (!claim.changed) {
@@ -65,7 +69,18 @@ export async function queueRun(
   }
 
   try {
-    await enqueueWithin(queue, "execution", { shopId, campaignId, revert, claimedFrom: before });
+    // Everything the request would have run with. A revert that dropped the merchant's
+    // "leave as it is" ticks on the way to the worker would overwrite the very edits they
+    // asked to keep, and a resume that arrived as an apply would rewrite verified rows.
+    await enqueueWithin(queue, "execution", {
+      shopId,
+      campaignId,
+      revert,
+      claimedFrom: before,
+      ...(resume ? { resume } : {}),
+      ...(actor ? { actor } : {}),
+      ...(skipVariantGids?.length ? { skipVariantGids, skipReason } : {}),
+    });
   } catch (error) {
     await releaseClaim(shopId, campaignId, before, {
       reason: `the ${revert ? "revert" : "apply"} could not be handed to the worker: ${error instanceof Error ? error.message : String(error)}`,
@@ -77,14 +92,12 @@ export async function queueRun(
     return { ...nothing, messages: [message], refused: message, transient: true };
   }
 
-  const minutes = estimateMinutes(rows);
   return {
     ...nothing,
     queued: true,
     messages: [
-      `This campaign covers ${formatCount(rows)} variants, which would take about ${minutes} ${minutes === 1 ? "minute" : "minutes"} — ` +
-        `longer than a request is allowed to run. So the background worker is ${verb} it, with no ` +
-        `time limit. It reads ${revert ? "Reverting" : "Applying"} until it finishes, and the Runs tab shows the result.`,
+      `${reason} So the background worker is ${verb} it, with no time limit. It reads ` +
+        `${revert ? "Reverting" : "Applying"} until it finishes, and the Runs tab shows the result.`,
     ],
   };
 }

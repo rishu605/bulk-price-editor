@@ -86,6 +86,13 @@ export interface JobRef {
    * inside Flow's ten seconds (#773). Carried on the sync queue.
    */
   recaptureSegmentId?: string;
+  /** An execution job that continues a partial run rather than starting fresh (#790). */
+  resume?: boolean;
+  /** Who asked, so what the run resolves on their behalf is attributed to them. */
+  actor?: string;
+  /** Variants the merchant asked to leave as they are, and why (#790). */
+  skipVariantGids?: string[];
+  skipReason?: string;
 }
 
 /**

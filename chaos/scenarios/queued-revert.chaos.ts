@@ -1,7 +1,7 @@
 /**
  * A revert too large for one request goes to the worker (#772).
  *
- * Apply has always been bounded by `MAX_INLINE_ROWS`; revert was not, because the check
+ * Apply has always been bounded by the inline budget; revert was not, because the check
  * sat inside `if (!options.revert)`. A revert from the campaign page or Flow ran inline
  * however large it was, and past Railway's five-minute proxy limit the request is cut off
  * while the writes carry on with nobody reading the result.
@@ -66,16 +66,18 @@ describe("chaos: a revert too large for one request", () => {
       const { campaignId, variantGids, baseline } = chaos.fixture;
       const sale = await onSale(chaos);
 
-      const outcome = await chaos.revert({ inlineRowLimit: 10, actor: "staff@example.com" });
+      const outcome = await chaos.revert({ inlineBudgetMs: 10_000, actor: "staff@example.com" });
 
-      expect(outcome.queued, "a 20-variant revert ran inline past a 10-row limit").toBe(true);
+      expect(outcome.queued, "a 20-product revert ran inline past a 10-second budget").toBe(true);
       expect(outcome.messages[0]).toMatch(/covers 20 variants.*background worker is reverting it/);
       for (const gid of variantGids) expect(chaos.fake.priceOf(gid), "written inline anyway").toBe(sale.get(gid));
       expect(await statusOf(campaignId), "not claimed, so a second press could queue a second revert").toBe("REVERTING");
-      expect(enqueued).toEqual([{ name: "execution", ref: { shopId: chaos.fixture.shopId, campaignId, revert: true, claimedFrom: "ACTIVE" } }]);
+      expect(enqueued).toEqual([
+        { name: "execution", ref: { shopId: chaos.fixture.shopId, campaignId, revert: true, claimedFrom: "ACTIVE", actor: "staff@example.com" } },
+      ]);
 
       // A second press finds it claimed, and queues nothing more.
-      const again = await chaos.revert({ inlineRowLimit: 10 });
+      const again = await chaos.revert({ inlineBudgetMs: 10_000 });
       expect(again.deferredTo).toBeTruthy();
       expect(again.messages[0]).toMatch(/already being reverted/);
       expect(enqueued).toHaveLength(1);
@@ -96,7 +98,7 @@ describe("chaos: a revert too large for one request", () => {
       const sale = await onSale(chaos);
       queueMode = "down";
 
-      const outcome = await chaos.revert({ inlineRowLimit: 10 });
+      const outcome = await chaos.revert({ inlineBudgetMs: 10_000 });
 
       expect(outcome.refused).toMatch(/could not be reached, so nothing was written/);
       expect(await statusOf(campaignId), "the claim was kept with no job behind it").toBe("ACTIVE");
@@ -111,7 +113,7 @@ describe("chaos: a revert too large for one request", () => {
 
       // No queue to hand it to: a revert is never refused, so it runs here.
       queueMode = "none";
-      const inline = await chaos.revert({ inlineRowLimit: 10 });
+      const inline = await chaos.revert({ inlineBudgetMs: 10_000 });
       expect(inline.queued).toBeUndefined();
       expect(inline.verified).toBe(20);
       expect(await statusOf(campaignId)).toBe("COMPLETED");
@@ -122,7 +124,7 @@ describe("chaos: a revert too large for one request", () => {
   it("does not queue a revert that fits in the request", async () => {
     await withChaos("queued-revert-small", CATALOG, async (chaos) => {
       await onSale(chaos);
-      const outcome = await chaos.revert({ inlineRowLimit: 50 });
+      const outcome = await chaos.revert({ inlineBudgetMs: 60_000 });
       expect(outcome.queued).toBeUndefined();
       expect(outcome.verified).toBe(20);
       expect(enqueued).toHaveLength(0);

@@ -82,14 +82,14 @@ describe("the rule in CLAUDE.md says this and not the old thing", () => {
 
   it("states the invariant that is actually enforced", () => {
     expect(rules).toContain("One writer per occurrence");
-    expect(rules).toContain("MAX_INLINE_ROWS");
+    expect(rules).toContain("PAGE_INLINE_BUDGET_MS");
   });
 
   it("names a bound that exists", () => {
     // The rule points at the thing that makes web writing safe. If that constant is
     // renamed or deleted, the rule is describing a guard the app no longer has.
     expect(sourceOf("app/lib/execution/inline-budget.ts")).toContain(
-      "export const MAX_INLINE_ROWS",
+      "export const PAGE_INLINE_BUDGET_MS",
     );
   });
 });

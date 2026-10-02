@@ -18,8 +18,8 @@ storefront, which is the failure mode the whole product exists to prevent.
    the `campaign_runs` row for `(campaign, occurrence, kind)` — a unique index, so the
    loser of the race defers rather than writing twice. The web process may write, and does:
    Apply, Revert, Resume and both Flow actions run inline. What bounds that is
-   `MAX_INLINE_ROWS`, because a request that outlives its dyno leaves writes in flight with
-   nobody reading the result.
+   `PAGE_INLINE_BUDGET_MS`, a time budget the bulk path never fits, because a request that
+   outlives its dyno leaves writes in flight with nobody reading the result.
 3. **Ledger before write.** No Admin API price mutation without a `variant_changes` row
    already committed (invariant I4).
 4. **Preview and execution share one code path.** `resolve()` runs in both modes; a preview

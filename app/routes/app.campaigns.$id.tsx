@@ -15,7 +15,7 @@ import {
   runCampaign,
   runToResume,
 } from "../services/campaigns/index.server";
-import { MAX_INLINE_ROWS } from "../lib/execution/inline-budget";
+import { PAGE_INLINE_BUDGET_MS } from "../lib/execution/inline-budget";
 import { runResponse } from "../lib/campaigns/run-response";
 import { ResultBanner } from "../components/ResultBanner";
 import { describeSchedule, parseSchedule, scheduleWarnings, windowEndText } from "../lib/scheduling/window";
@@ -45,6 +45,7 @@ import { approvalFor, approvalSummary, decideApproval, requestApproval, SelfAppr
 import { PageShell } from "../components/PageShell";
 import { CampaignTabs, currentTab, tabsFor } from "../components/campaign/CampaignTabs";
 import { useKeepers } from "../components/campaign/useKeepers";
+import { IN_FLIGHT, useRunPolling } from "../components/campaign/useRunPolling";
 import { CampaignHeader } from "../components/campaign/CampaignHeader";
 import { CampaignOverviewTab } from "../components/campaign/CampaignOverviewTab";
 import { CampaignPreviewTab } from "../components/campaign/CampaignPreviewTab";
@@ -238,8 +239,7 @@ export const action = withGuard("/app/campaigns/$id", async ({ request, params }
       // Rows the merchant ticked "leave as it is" in the rollback report. Only
       // meaningful on a revert; an apply has no drifted-row conversation to honour.
       skipVariantGids: reverting ? form.getAll("keep").map(String) : undefined,
-      // Written during this request, so it dies with it. See `inline-budget`.
-      inlineRowLimit: MAX_INLINE_ROWS,
+      inlineBudgetMs: PAGE_INLINE_BUDGET_MS, // this request's deadline: longer goes to the worker (#790)
     });
 
     // Deferred, refused and clean all come back looking alike — see `runResponse`,
@@ -294,17 +294,18 @@ export default function CampaignDetail() {
   const busy = fetcher.state !== "idle";
 
   // Gated on the lifecycle and on guardrails, deliberately not on "would this write
-  // anything". A campaign whose prices already match -- because a merchant set them by
-  // hand, or because an earlier run got there first -- still needs to be applied to
-  // take ownership of them. Requiring rows to write left such a campaign stuck in
-  // Draft forever, which also meant nothing would ever revert those prices.
-  // A practice campaign can never be applied — the run path refuses it outright. The
-  // button is not merely disabled: offering a control that exists only to be refused
-  // undermines the promise the merchant was given when they chose practice.
-  const canApply = !practice && !preview.blocked && canTransition(state, "APPLYING");
+  // anything": a campaign whose prices already match still has to be applied to take
+  // ownership of them, or it sits in Draft and nothing ever reverts those prices. Not
+  // while a run is writing (#790): the worker's run can take minutes, and a black Apply
+  // beside "Applying" asks for a second one. A practice campaign can never be applied —
+  // the run path refuses it outright, and the button is not merely disabled: offering a
+  // control that exists only to be refused undermines the promise the merchant was given
+  // when they chose practice.
+  const canApply = !practice && !preview.blocked && canTransition(state, "APPLYING") && !IN_FLIGHT.has(state);
 
   const tabs = tabsFor({ runs, rollback, ledger });
   const { keepers, pending: keepersPending } = useKeepers(rollback);
+  useRunPolling(data.campaignId, state); // a run in the worker, followed to its end (#790)
   const [params] = useSearchParams();
   const tab = currentTab(tabs, params.get("tab"));
 
@@ -324,7 +325,6 @@ export default function CampaignDetail() {
     keepers,
     keepersPending,
   };
-
 
   return (
     <PageShell heading={preview.name} backTo={{ href: "/app/campaigns", label: "Campaigns" }}>

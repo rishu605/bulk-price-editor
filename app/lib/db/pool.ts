@@ -11,7 +11,7 @@
  *
  * **Exhaustion does not fail cleanly.** Postgres refuses the connection and the failure
  * surfaces wherever the next query happened to be — including inside a run that is part
- * way through writing prices. `MAX_INLINE_ROWS` exists because a request that outlives
+ * way through writing prices. The inline budget exists because a request that outlives
  * its dyno leaves writes in flight with nobody reading the result; a pool that runs out
  * mid-apply is the same failure reached a different way.
  *

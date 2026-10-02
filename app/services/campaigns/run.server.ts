@@ -18,11 +18,12 @@ import { recordWriteIntents, resolveOverwrittenDrift } from "../drift.server";
 import { loadCandidates, productMapFor } from "./candidates.server";
 import { isPractice, loadCampaignContext, scopeOf, importIdsOf} from "./model.server";
 import { astToWhere } from "../segments.server";
+import { DEFAULT_THRESHOLD } from "../../lib/planning/write-path";
 import { AppError } from "../../lib/errors/app-error";
 import { guardrailsFor } from "../settings.server";
 import type { RunOutcome } from "./types";
 import { inChunksCounting } from "../../lib/db/chunk";
-import { refuseInline } from "../../lib/execution/inline-budget";
+import { overBudget, refuseInline, type InlineWork } from "../../lib/execution/inline-budget";
 import { releaseClaim, transitionCampaign } from "./lifecycle.server";
 import type { CampaignState } from "../../lib/lifecycle/transitions";
 import { SKIP_REASON_GROUP } from "../../lib/planning/reasons";
@@ -39,12 +40,6 @@ import { addLogContext, withLogContext } from "../../lib/logging/context.server"
 
 export interface RunOptions {
   revert?: boolean;
-  /**
-   * Hand an apply too large for `inlineRowLimit` to the background worker rather than
-   * refusing it. For a caller with nobody to tell "schedule it instead" -- Shopify Flow,
-   * which waits ten seconds and then retries (#773). A revert is always handed over.
-   */
-  queueWhenTooLarge?: boolean;
   /** Who asked for this run, recorded on anything it resolves on their behalf (#755). */
   actor?: string;
   /**
@@ -60,14 +55,16 @@ export interface RunOptions {
    */
   claimedFrom?: CampaignState;
   /**
-   * Refuse rather than start, when the scope is too large to finish inside this
-   * caller's deadline.
+   * How long this caller can wait for the writing, in milliseconds. A run estimated to
+   * take longer -- or one that goes to Shopify's bulk queue, which has no estimate -- is
+   * handed to the background worker instead of starting here (#790).
    *
    * Set by the web routes, which run inside an HTTP request that gets closed after five
-   * minutes. Left unset by the worker and the scheduler, which have no request attached
-   * -- the ceiling is a property of the caller, not of the campaign.
+   * minutes, and by Flow, which waits ten seconds. Left unset by the worker and the
+   * scheduler, which have no request attached -- the ceiling is a property of the
+   * caller, not of the campaign. See `inline-budget.ts`.
    */
-  inlineRowLimit?: number;
+  inlineBudgetMs?: number;
   /**
    * Fraction of applied rows to read back. Defaults to full verification, which
    * suits the catalogue sizes the sync path handles; the bulk path compares every row
@@ -291,6 +288,14 @@ async function executeCampaignRun(
   // Scoped runs are exempt: reverting one variant out of a four-thousand-variant sale
   // says nothing about the campaign, and moving it to APPLYING would misreport the
   // other 3,999.
+
+  // What this run will write, for the inline budget (#790). Counted only for a caller
+  // that declared a deadline, and only for a whole-campaign run: a scoped run is a
+  // handful of variants by construction, and handing one to the worker would take the
+  // whole campaign's claim for it.
+  const work =
+    options.inlineBudgetMs !== undefined && !options.variantGids ? await inlineWork(shopId, campaignId) : undefined;
+
   // ---------------------------------------------------------- the plan gate (E8)
   //
   // Applies only. A revert is never gated on any plan, ever: a merchant who downgrades
@@ -301,9 +306,6 @@ async function executeCampaignRun(
   // Checked here rather than only in the wizard because a catalogue grows and a plan can
   // lapse between a campaign being created and the scheduler running it, and the
   // scheduler never goes near the wizard.
-  // Set when the scope is too large for this request and the run should go to the worker.
-  let tooLargeToRunHere: number | undefined;
-
   if (!options.revert) {
     // Approval before plan. A campaign nobody has signed off should say so rather than
     // being refused for a plan reason the merchant would then go and fix, only to hit the
@@ -323,42 +325,9 @@ async function executeCampaignRun(
       };
     }
 
-    // How many variants this run will attempt.
-    //
-    // A subset apply is bounded by the list the caller sent. Everything else has to be
-    // counted, which is only worth doing for a caller that declared a deadline -- and
-    // cheap enough to be worth it now that the scope columns are GIN-indexed. The plan
-    // gate below wants the same number, so it is counted once and passed down.
-    let scopedCount = options.variantGids?.length;
-
-    if (options.inlineRowLimit !== undefined) {
-      scopedCount ??= await scopeSize(shopId, campaignId);
-
-      // Before the plan gate, because a scope too large to finish is too large whatever
-      // tier the shop is on -- telling a merchant to upgrade for a run that would be
-      // cut off either way is worse than useless.
-      const tooBig = refuseInline(scopedCount, options.inlineRowLimit);
-      // A caller with nobody to tell "schedule it instead" -- Flow (#773) -- has it run by
-      // the worker, once the plan gate below has had its say.
-      if (tooBig && options.queueWhenTooLarge) {
-        tooLargeToRunHere = scopedCount;
-      } else if (tooBig) {
-        return {
-          runId: "",
-          planned: 0,
-          verified: 0,
-          failed: 0,
-          unverified: 0,
-          // Clean, for the same reason the plan refusal below is: nothing is half-done.
-          // No price moved and no ledger row exists, so putting this campaign into the
-          // needs-attention queue would report a problem the merchant cannot fix by
-          // attending to it.
-          clean: true,
-          messages: [tooBig],
-          refused: tooBig,
-        };
-      }
-    }
+    // How many variants this run will attempt: the list a subset apply was sent, or the
+    // count the budget already made. The plan gate counts for itself otherwise.
+    const scopedCount = options.variantGids?.length ?? work?.variants;
 
     const refusal = await refusedByPlan(shopId, campaignId, scopedCount);
     if (refusal) {
@@ -378,25 +347,25 @@ async function executeCampaignRun(
     }
   }
 
-  // A revert too large for the caller's deadline goes to the worker instead of running
-  // here (#772). Before the claim below, because handing it over takes the claim itself.
-  // Never refused: ending a sale must always be possible, so with no worker queue it
-  // runs here as it always did.
-  if (options.revert && !options.variantGids && options.inlineRowLimit !== undefined) {
-    const rows = await scopeSize(shopId, campaignId);
-    if (rows > options.inlineRowLimit) tooLargeToRunHere = rows;
-  }
-  if (tooLargeToRunHere !== undefined) {
+  // A run too long for the caller's deadline goes to the worker instead of running here
+  // (#772, #790), after the approval and plan gates have had their say, and before the
+  // claim below, because handing it over takes the claim itself.
+  const tooLongHere = work ? overBudget(work, options.inlineBudgetMs!) : null;
+  if (tooLongHere) {
     const { queueRun } = await import("./queued-run.server");
-    const queued = await queueRun(shopId, campaignId, tooLargeToRunHere, {
+    const queued = await queueRun(shopId, campaignId, tooLongHere, {
       revert: options.revert === true,
+      resume: options.resume,
       actor: options.actor,
+      skipVariantGids: options.skipVariantGids,
+      skipReason: options.skipReason,
     });
     if (queued) return queued;
-    // No worker queue. A revert runs here as it always did; an apply is refused, as the
-    // button's is -- writing past the deadline is the one outcome this exists to prevent.
+    // No worker queue. A revert runs here as it always did -- ending a sale must always be
+    // possible. An apply is refused: writing past the deadline is the one outcome this
+    // exists to prevent. Clean, because nothing is half-done.
     if (!options.revert) {
-      const message = refuseInline(tooLargeToRunHere, options.inlineRowLimit)!;
+      const message = refuseInline(tooLongHere);
       return { runId: "", planned: 0, verified: 0, failed: 0, unverified: 0, clean: true, messages: [message], refused: message };
     }
   }
@@ -1225,16 +1194,23 @@ async function recordResults(
 }
 
 /** How many variants the campaign's scope covers, counted the way a run resolves it. */
-async function scopeSize(shopId: string, campaignId: string): Promise<number> {
-  return prisma.variantIndex.count({
-    where: astToWhere(
-      shopId,
-      await scopeOf(
-        shopId,
-        await prisma.campaign.findFirstOrThrow({ where: { id: campaignId, shopId }, select: { schedule: true } }),
-      ),
-    ),
+/**
+ * What a whole-campaign run will do, counted before it starts, for the inline budget.
+ *
+ * Products only below the bulk threshold: above it the run goes to Shopify's queue and has
+ * no estimate to make. Tags are counted as every product in scope when the campaign has a
+ * tag kit -- an apply adds them, a revert takes them off, one call a product either way.
+ */
+async function inlineWork(shopId: string, campaignId: string): Promise<InlineWork> {
+  const campaign = await prisma.campaign.findFirstOrThrow({
+    where: { id: campaignId, shopId },
+    select: { schedule: true, tagKit: true },
   });
+  const where = astToWhere(shopId, await scopeOf(shopId, campaign));
+  const variants = await prisma.variantIndex.count({ where });
+  const products =
+    variants > DEFAULT_THRESHOLD ? 0 : (await prisma.variantIndex.groupBy({ by: ["productGid"], where })).length;
+  return { variants, products, taggedProducts: campaign.tagKit.length > 0 ? products : 0 };
 }
 
 /** The states in which a full run holds the campaign's claim. */

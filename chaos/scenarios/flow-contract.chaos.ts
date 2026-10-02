@@ -123,7 +123,7 @@ describe("chaos: Flow's Start campaign", () => {
       expect(answer.ms, "the answer waited for the writes").toBeLessThan(10_000);
       for (const gid of variantGids) expect(Number(chaos.fake.priceOf(gid)!.replace(".", ""))).toBe(baseline.get(gid));
       expect(await statusOf(campaignId)).toBe("APPLYING");
-      expect(enqueued).toEqual([{ name: "execution", ref: { shopId, campaignId, revert: false, claimedFrom: "DRAFT" } }]);
+      expect(enqueued).toEqual([{ name: "execution", ref: { shopId, campaignId, revert: false, claimedFrom: "DRAFT", actor: "shopify-flow" } }]);
       expect((await activity(shopId, "start-campaign"))[0].after).toMatchObject({ outcome: "queued", status: 200 });
 
       const { handleJob } = await import("../../app/worker/handlers.server");
@@ -154,7 +154,7 @@ describe("chaos: Flow's End campaign", () => {
       const answer = await flow("end-campaign", chaos, { "campaign-id": campaignId });
 
       expect(answer.status).toBe(200);
-      expect(enqueued).toEqual([{ name: "execution", ref: { shopId, campaignId, revert: true, claimedFrom: "ACTIVE" } }]);
+      expect(enqueued).toEqual([{ name: "execution", ref: { shopId, campaignId, revert: true, claimedFrom: "ACTIVE", actor: "shopify-flow" } }]);
       expect(await statusOf(campaignId)).toBe("REVERTING");
     });
   });
