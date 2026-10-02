@@ -62,12 +62,17 @@ describe("a failed run reaches a terminal state", () => {
     // than the bug it fixes: it would lie about runs that succeeded.
     const body = failRunBody();
 
-    expect(body, "the update must be filtered by status").toMatch(/status:\s*\{\s*in:\s*\[/);
+    // The run row's update, and the status filter on it. The body as a whole may name
+    // PARTIAL: since #802 a run that had started writing is *marked* PARTIAL. What must
+    // never name a terminal state is the filter that picks which runs to mark.
+    const update = body.slice(body.indexOf("campaignRun.updateMany("));
+    const filter = /where:\s*\{[^}]*status:\s*\{\s*in:\s*\[([^\]]*)\]/.exec(update)?.[1];
+    expect(filter, "the update must be filtered by status").toBeDefined();
     for (const live of ["PLANNING", "QUEUED", "EXECUTING", "VERIFYING"]) {
-      expect(body, `${live} is a state a dead run can be left in`).toContain(live);
+      expect(filter, `${live} is a state a dead run can be left in`).toContain(live);
     }
-    for (const terminal of ["COMPLETED", "PARTIAL", "CANCELLED"]) {
-      expect(body, `${terminal} runs must not be rewritten`).not.toContain(terminal);
+    for (const terminal of ["COMPLETED", "PARTIAL", "FAILED", "CANCELLED"]) {
+      expect(filter, `${terminal} runs must not be rewritten`).not.toContain(terminal);
     }
     // `updateMany`, because `update` throws when the filter matches nothing — which is
     // exactly what happens on the path this is designed to tolerate.
