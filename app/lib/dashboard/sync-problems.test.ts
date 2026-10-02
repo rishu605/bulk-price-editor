@@ -15,8 +15,13 @@ const HOME = sourceOf("app/routes/app._index.tsx");
 
 describe("the Re-sync banner", () => {
   it("counts a market sync that refused as a problem, and names it", () => {
-    expect(HOME).toContain("const problems = [...sync.errors, ...markets.errors];");
-    expect(HOME).toContain("ok: problems.length === 0,");
-    expect(HOME).toContain("errors: problems.slice(0, 5),");
+    // The sync runs in the worker since #801: it collects both sets, says them on Home when
+    // it finishes, and returns them when it runs in the request.
+    const job = sourceOf("app/services/sync-job.server.ts");
+    expect(job).toContain("const errors = [...catalogue.errors, ...markets.errors];");
+    expect(job).toContain("errors.length > 0");
+    expect(job).toContain("ok: summary.errors.length === 0");
+    expect(job).toContain("errors: summary.errors.slice(0, 5)");
+    expect(HOME).toContain("return startSync(");
   });
 });

@@ -51,8 +51,10 @@ describe("a warning on Home offers its own remedy", () => {
   });
 
   it("every one of them has a button", () => {
+    // `syncButton(...)` renders the sync button -- or, while a sync runs, what it is doing,
+    // which is the remedy already under way (#801).
     const silent = items
-      .filter((item) => !item.includes("<s-button"))
+      .filter((item) => !item.includes("<s-button") && !item.includes("syncButton("))
       .map((item) => /heading: "([^"]*)"/.exec(item)?.[1] ?? item.slice(0, 60));
 
     expect(
@@ -65,7 +67,8 @@ describe("a warning on Home offers its own remedy", () => {
     const item = items.find((each) => each.includes("no baseline"));
 
     expect(item).toBeDefined();
-    expect(item).toContain('value="sync"');
+    expect(item).toContain('syncButton("Re-sync catalogue")');
+    expect(home).toContain('<input type="hidden" name="intent" value="sync" />');
   });
 
   it("leads with the run that stopped, not with the tidiest item", () => {
@@ -112,9 +115,8 @@ describe("one thing to do at a time", () => {
     // "Sync catalogue" and "Sync catalogue and capture baselines" were one POST.
     // `busy("sync")` rather than a bare `busy` since #619: one fetcher serves the whole
     // page, so the loading state has to name the intent it belongs to.
-    const labels = [...home.matchAll(/busy\("sync"\) \? "Syncing…" : "([^"]+)"/g)].map(
-      (match) => match[1],
-    );
+    // Every sync control goes through `syncButton` since #801, so its labels are its calls.
+    const labels = [...home.matchAll(/syncButton\("([^"]+)"/g)].map((match) => match[1]);
 
     // Two are allowed and two is the ceiling: a first sync and a re-sync are different
     // requests to make of a merchant even though they post the same intent. What is not

@@ -12,11 +12,10 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { openNotices, resolveNotice } from "../services/markets-topology.server";
-import { ensureShop, markSyncComplete } from "../services/shop.server";
-import { fetchShopBasics, syncCatalog } from "../services/catalog-sync.server";
-import { baselineHealth, captureBaselines } from "../services/baselines.server";
-import { syncMarkets } from "../services/markets-sync.server";
-import { syncCatalogViaBulk } from "../services/catalog-bulk-sync.server";
+import { ensureShop } from "../services/shop.server";
+import { startSync, syncStateOf } from "../services/sync-job.server";
+import { useSyncPolling } from "../components/useSyncPolling";
+import { baselineHealth } from "../services/baselines.server";
 import { toAdminClient } from "../services/admin-client.server";
 import { OnboardingCard } from "../components/OnboardingCard";
 import { ActionRow } from "../components/ActionRow";
@@ -26,11 +25,10 @@ import { Field } from "../components/FieldGrid";
 import { LastRunSummary } from "../components/LastRunSummary";
 import { UpcomingCampaigns } from "../components/UpcomingCampaigns";
 import { RouteBoundary } from "../components/RouteBoundary";
-import { onboarding } from "../lib/onboarding/steps";
+import { baselinesCaptured, onboarding } from "../lib/onboarding/steps";
 import { homeSections } from "../lib/dashboard/home";
 import { ResultBanner } from "../components/ResultBanner";
 import { staleBaselineCount } from "../services/reconciliation.server";
-import { syncMessage } from "../lib/dashboard/sync-message";
 import { nextMoments } from "../lib/scheduling/upcoming";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
@@ -125,6 +123,13 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
     prisma.campaign.count({ where: { shopId: shop.id, schedule: { path: ["practice"], equals: true } } }),
   ]);
 
+  const sync = syncStateOf(
+    await prisma.shop.findUniqueOrThrow({
+      where: { id: shop.id },
+      select: { syncStartedAt: true, syncPhase: true, syncProgress: true, syncHeartbeatAt: true, syncFailure: true },
+    }),
+  );
+
   return {
     // The page's clock, sent with the page. Relative times ("2 hours ago") are computed
     // from this rather than from `Date.now()` at render, so the server's HTML and the
@@ -136,6 +141,8 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
     // one decision and it belongs in one place. See `usage-line.ts`.
     usage: usageLine({ ...usage, synced: shop.initialSyncCompletedAt !== null }),
     syncedAt: shop.initialSyncCompletedAt?.toISOString() ?? null,
+    // A sync in progress, or why the last one stopped (#801).
+    sync,
     health: {
       ...health,
       oldestCapturedAt: health.oldestCapturedAt?.toISOString() ?? null,
@@ -143,7 +150,7 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
     },
     campaigns,
     onboarding: onboarding({
-      hasBaselines: health.withBaseline > 0,
+      hasBaselines: baselinesCaptured(health, shop.initialSyncCompletedAt !== null, sync.running),
       hasCampaign: campaigns > 0,
       hasPracticed: practiceCampaigns > 0,
       hasCleanRun: cleanRuns > 0,
@@ -239,84 +246,10 @@ export const action = withGuard("/app", async ({ request }: ActionFunctionArgs) 
   }
 
   if (intent === "sync") {
-    const basics = await fetchShopBasics(admin);
-    await prisma.shop.update({
-      where: { id: shop.id },
-      data: {
-        timezone: basics.timezone,
-        // Recorded at sync, because it is the answer to "which plan applies" and the
-        // exemption for it was unreachable until now: `billingFrom` grants a development
-        // store the top tier, and nothing ever set the flag, so every dev store fell to
-        // Free and its 500-variant cap. Shopify's own reviewers evaluate on development
-        // stores, so the first campaign they tried would have been refused.
-        developerStore: basics.developerStore,
-      },
-    });
-
-    // Bulk first. One operation and a streamed result beats ten thousand paginated
-    // round trips against a rate limit that allows a couple a second — and the
-    // paginated path holds nothing back on a catalogue that does not fit in memory.
-    const client = toAdminClient(admin);
-    const bulk = await syncCatalogViaBulk(client, shop.id, basics.currency);
-
-    // Falling back rather than failing. A shop already running a bulk operation, or a
-    // catalogue Shopify declines to build a file for, still deserves a sync — and on a
-    // small store the paginated path is perfectly adequate, which is what it is for.
-    const sync =
-      bulk.errors.length === 0 && bulk.written > 0
-        ? { variants: bulk.written, products: bulk.products, errors: [] as string[] }
-        : await syncCatalog(admin, shop.id, basics.currency);
-
-    // After the catalogue, never alongside it: Shopify allows one bulk operation per
-    // shop, and the market sync checks for a running one rather than racing it.
-    const markets = await syncMarkets(client, shop.id);
-
-    // Capture baselines immediately: a variant with no baseline cannot be priced by
-    // a campaign, and capturing at sync time is the only moment we can be confident
-    // the live price is the merchant's normal price.
-    const capture = await captureBaselines(shop.id);
-    await markSyncComplete(shop.id);
-
-    // A sync is a merchant decision with consequences — it rewrites the mirror every
-    // price is computed against, and captures a baseline for every surface that had
-    // none — and it left no trace at all. Minutes after a merchant re-synced, Home's
-    // Recent activity was still showing something the scheduler did seventeen days
-    // earlier, which reads as a broken panel rather than as a quiet shop. See #614.
-    await prisma.auditLogEntry.create({
-      data: {
-        shopId: shop.id,
-        actor: actorFor(sessionToken, session.shop),
-        action: "catalogue.synced",
-        entity: "Shop",
-        entityId: shop.id,
-        after: {
-          variants: sync.variants,
-          products: sync.products,
-          captured: capture.captured,
-          priceLists: markets.priceLists,
-        } as never,
-      },
-    });
-
-    // The market sync's refusals too: it was the one that went silent when a stranded
-    // bulk record blocked it, while the banner said the sync had worked (#733).
-    const problems = [...sync.errors, ...markets.errors];
-    return {
-      ok: problems.length === 0,
-      // Built in `sync-message`, which is where the grouping and the units live. This
-      // was the one place on Home that interpolated raw numbers, so the banner said
-      // "3669" two inches above a tile saying "3,669". See #617.
-      message: syncMessage({
-        variants: sync.variants,
-        products: sync.products,
-        captured: capture.captured,
-        alreadyCurrent: capture.alreadyCurrent,
-        priceLists: markets.priceLists,
-        relative: markets.relative,
-        entries: markets.entries,
-      }),
-      errors: problems.slice(0, 5),
-    };
+    // Claimed here, run by the worker (#801). The whole sync used to run inside this
+    // request: on a 102,132-variant store about twelve minutes, cut off by the proxy at
+    // five with a bare "502" while it carried on. The page follows it instead.
+    return startSync(shop.id, toAdminClient(admin), actorFor(sessionToken, session.shop));
   }
 
   // The unguarded store-wide recapture that used to live here is gone. It took one
@@ -356,6 +289,7 @@ export default function Dashboard() {
     lastRun,
     recent,
     timeZone,
+    sync,
   } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
   // Which submit is in flight, not merely whether one is. There is one fetcher for the
@@ -365,6 +299,21 @@ export default function Dashboard() {
   const busy = (intent: string) => submitting === intent;
 
   const neverSynced = syncedAt === null;
+  // A sync running in the worker, followed step by step (#801). While it runs nothing on
+  // this page offers to start another: every button that used to was a second sync.
+  const syncNow = useSyncPolling(sync);
+  const syncing = syncNow.running;
+  const syncButton = (label: string, primary = false) =>
+    syncing ? (
+      <s-text color="subdued">{syncNow.text}</s-text>
+    ) : (
+      <fetcher.Form method="post">
+        <input type="hidden" name="intent" value="sync" />
+        <s-button type="submit" variant={primary ? "primary" : "secondary"} loading={busy("sync") || undefined}>
+          {busy("sync") ? "Starting the sync…" : label}
+        </s-button>
+      </fetcher.Form>
+    );
   // Which sections this page shows, decided in one tested place rather than in four
   // conditionals spread through the markup below. Each of those rules exists because of
   // a specific way this page used to embarrass itself; see `homeSections`.
@@ -481,6 +430,22 @@ export default function Dashboard() {
     });
   }
 
+  // A sync that stopped says where, and how to carry on (#801). Not while one is running:
+  // the running one is the answer.
+  if (!syncing && syncNow.failure) {
+    attention.push({
+      id: "sync-stopped",
+      heading: "The last sync did not finish cleanly",
+      tone: "warning",
+      body: (
+        <>
+          <s-paragraph>{syncNow.failure}</s-paragraph>
+          <ActionRow>{syncButton("Re-sync catalogue")}</ActionRow>
+        </>
+      ),
+    });
+  }
+
   if (health.missing > 0) {
     attention.push({
       id: "missing-baselines",
@@ -490,7 +455,7 @@ export default function Dashboard() {
         <>
               <s-paragraph>
             {formatCount(health.missing)} variants cannot be included in a campaign until they have
-            one. Re-syncing captures them.
+            one. {syncing ? "They are being captured now." : "Re-syncing captures them."}
           </s-paragraph>
           {/* The banner carries the action it asks for.
 
@@ -498,18 +463,12 @@ export default function Dashboard() {
               meant was in the Store card two columns away. This is the exact shape of the
               worst bug this product has had (#252): a warning whose only remedy was
               somewhere else, and which the action a merchant could find did not clear. */}
-          <ActionRow>
-            <fetcher.Form method="post">
-              <input type="hidden" name="intent" value="sync" />
-              <s-button type="submit" loading={busy("sync") || undefined}>
-                {busy("sync") ? "Syncing…" : "Re-sync catalogue"}
-              </s-button>
-            </fetcher.Form>
-          </ActionRow>
+          <ActionRow>{syncButton("Re-sync catalogue")}</ActionRow>
         </>
       ),
     });
   }
+
 
   return (
     <PageShell
@@ -596,18 +555,7 @@ export default function Dashboard() {
       <OnboardingCard
         state={guide}
         actions={{
-          sync: (
-            <fetcher.Form method="post">
-              <input type="hidden" name="intent" value="sync" />
-              <s-button
-                type="submit"
-                variant={guide.next?.id === "sync" ? "primary" : "secondary"}
-                loading={busy("sync") || undefined}
-              >
-                {busy("sync") ? "Syncing…" : "Sync catalogue"}
-              </s-button>
-            </fetcher.Form>
-          ),
+          sync: syncButton("Sync catalogue", guide.next?.id === "sync"),
         }}
       />
 
@@ -910,7 +858,9 @@ export default function Dashboard() {
               "28/08/2026" says when without saying how long. The date stays, and the
               sentence under it says what to do about it. */}
           <Fact label="Last synced" detail={staleSync(syncedAt, now)}>
-            <s-text>{syncedAt ? formatAgo(syncedAt, now, timeZone) : "Not yet synced"}</s-text>
+            <s-text>
+              {syncing ? `Syncing now · ${syncNow.text}` : syncedAt ? formatAgo(syncedAt, now, timeZone) : "Not yet synced"}
+            </s-text>
           </Fact>
 
           {/* The plan, and what it covers, before it ever refuses anything.
@@ -934,16 +884,7 @@ export default function Dashboard() {
           {/* The action belongs with the fact it acts on. It used to sit in the catalogue
               card, two columns away from the sentence saying how stale the catalogue
               was. */}
-          {!neverSynced ? (
-            <ActionRow>
-              <fetcher.Form method="post">
-                <input type="hidden" name="intent" value="sync" />
-                <s-button type="submit" loading={busy("sync") || undefined}>
-                  {busy("sync") ? "Syncing…" : "Re-sync catalogue"}
-                </s-button>
-              </fetcher.Form>
-            </ActionRow>
-          ) : null}
+          {!neverSynced && !syncing ? <ActionRow>{syncButton("Re-sync catalogue")}</ActionRow> : null}
         </s-stack>
       </s-section>
 
