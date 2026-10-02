@@ -18,6 +18,7 @@
  * merchant opens to look something up is not a trade worth making for one fewer URL.
  */
 
+import { useEffect, useRef, useState, type ElementRef } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { Form, useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -114,6 +115,27 @@ export default function Recapture() {
   const busy = fetcher.state !== "idle";
   const data = fetcher.data;
 
+  // What the Scope field shows, against the scope the page has assessed. They differ
+  // between picking a segment and pressing "Check this scope" -- and in that gap the count,
+  // the on-sale warning and the button all describe the *assessed* scope, so pressing
+  // Replace rewrote baselines the field said were not selected (#780). Listened to
+  // natively: React 18 never delivers `onChange` from a Polaris field (#863).
+  const scopeField = useRef<ElementRef<"s-select">>(null);
+  const [picked, setPicked] = useState<{ against: string; value: string } | null>(null);
+  useEffect(() => {
+    const field = scopeField.current;
+    if (!field) return;
+    const changed = () => setPicked({ against: segmentId, value: String((field as { value?: string }).value ?? "") });
+    field.addEventListener("change", changed);
+    field.addEventListener("input", changed);
+    return () => {
+      field.removeEventListener("change", changed);
+      field.removeEventListener("input", changed);
+    };
+  }, [segmentId]);
+  // A pick made against an earlier assessment is forgotten once the page assesses anew.
+  const unchecked = picked !== null && picked.against === segmentId && picked.value !== segmentId;
+
   return (
     <PageShell
       heading="Recapture baselines"
@@ -148,7 +170,7 @@ export default function Recapture() {
         <Form method="get">
           <s-stack gap={SPACE.section}>
             <Field width="medium">
-            <s-select name="segment" label="Scope">
+            <s-select ref={scopeField} name="segment" label="Scope">
               <s-option value="" defaultSelected={!segmentId}>
                 The whole catalogue
               </s-option>
@@ -219,12 +241,22 @@ export default function Recapture() {
               </Field>
             ) : null}
 
+            {unchecked ? (
+              <s-banner tone="warning">
+                <s-paragraph>
+                  The scope you picked has not been checked yet. Press Check this scope first:
+                  the count, the warning and this button still describe the scope checked
+                  before, and recapturing now would replace those baselines instead.
+                </s-paragraph>
+              </s-banner>
+            ) : null}
+
             <s-button
               type="submit"
               tone="critical"
               variant="primary"
               loading={busy || undefined}
-              disabled={assessment.scope === 0 || undefined}
+              disabled={assessment.scope === 0 || unchecked || undefined}
             >
               Replace {assessment.scope} baseline{assessment.scope === 1 ? "" : "s"}
             </s-button>
