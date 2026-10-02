@@ -305,14 +305,19 @@ async function failRun(runId: string | undefined, error: unknown, writing = fals
 }
 
 /**
- * The mirror, for a run that threw after it started writing (#802).
+ * The mirror, from a run's ledger: what this run left live on the storefront.
  *
- * `refreshMirror` does this at the end of a run that finishes, from its results; a run that
- * throws never gets there, so the mirror went on asserting every variant's pre-run price.
- * A revert then planned the written ones as already at baseline, wrote nothing, and
- * reported clean with the sale still live. The same rule, from the ledger: a row read back
- * says its price is live; every other row this run may have sent is unknown, which the
- * planner never treats as already correct, so the next run writes it.
+ * A row read back from Shopify says its price is live. Every other row this run may have
+ * sent -- failed, written but never read back, or still pending when it stopped -- is
+ * unknown, and null is the honest answer: the planner never treats an absent live price as
+ * already correct, so the next run writes it, and drift reads null as "we have not looked".
+ * Asserting the pre-run price instead is how a revert finds a written row "already at
+ * baseline", writes nothing and reports clean with the sale still live; asserting the
+ * intended price for an unverified row is how a resume finds it "already correct" (#699).
+ *
+ * For every run, done before the run or its campaign says it has finished (#906): it used
+ * to run row by row after the campaign read Active. And for a run that throws after it
+ * started writing (#802), which never reaches that point at all.
  */
 async function settleMirror(runId: string): Promise<void> {
   const landed = Prisma.sql`c."runId" = ${runId} AND c."surfaceKind" = 'BASE' AND c."status" IN ('VERIFIED', 'CLAMPED') AND c."intendedPrice" IS NOT NULL`;
@@ -834,6 +839,15 @@ async function executeCampaignRun(
     );
   }
 
+  // The mirror, before anything says this run is over (#906). It was refreshed row by row
+  // -- two queries a variant, 204,000 for a 102,132-variant apply -- *after* the campaign
+  // read Active, so for minutes the campaign looked finished over a mirror still holding
+  // pre-run prices. A revert started in that window planned 3,831 variants as already at
+  // baseline, skipped them, and reported clean with the sale live; the late refresh then
+  // overwrote 2,514 rows the revert had just restored. Now it is a handful of statements
+  // from the ledger, done before the run row or the campaign says "finished".
+  await settleMirror(run.id);
+
   await prisma.campaignRun.update({
     where: { id: run.id },
     data: {
@@ -850,7 +864,6 @@ async function executeCampaignRun(
   // the sale COMPLETED -- it is still running, for everything else. The ledger records
   // what happened to those rows; the campaign's own state is left alone.
   if (options.variantGids) {
-    await refreshMirror(shopId, result.rows);
     await resolveOverwrittenDrift(shopId, run.id, verifiedVariants(result.rows), kind, options.actor);
 
   // The headline panels, from the one place that knows the answer. Counts and durations
@@ -881,7 +894,6 @@ async function executeCampaignRun(
     runId: run.id,
   });
 
-  await refreshMirror(shopId, result.rows);
   // A held campaign can still be applied; whatever this run wrote over an edit made
   // outside Anchor now stands, and the drift queue must stop asking about it (#755).
   await resolveOverwrittenDrift(shopId, run.id, verifiedVariants(result.rows), kind, options.actor);
@@ -1500,100 +1512,6 @@ function verifiedVariants(rows: ExecutedRows): string[] {
     .map((executed) => executed.row.ref.variantGid);
 }
 
-/**
- * Updates the mirror for what we just wrote.
- *
- * Without this the dashboard's "not at baseline" count stays stale until the next
- * sync, which makes the app look wrong immediately after it did the right thing.
- *
- * *Both* copies of the base live price, which is the part that was missing. The catalogue
- * index carries it for search and filtering; `price_surface_entries` carries it as one
- * uniform "live value on surface X" the resolver can read the same way for every surface.
- * Updating only the second left the first stale after every campaign — and the nightly
- * mirror audit compares against the first. A merchant who ran a sale over their whole
- * catalogue would have woken up to an alert saying the pipeline was systematically
- * broken, on the morning after it worked perfectly.
- */
-async function refreshMirror(shopId: string, rows: ExecutedRows): Promise<void> {
-  for (const executed of rows) {
-    if (!executed.row.intendedPrice) continue;
-
-    // Nothing was written: the variant was deleted mid-run. Its mirror row is the
-    // tombstone's business, not a price to record.
-    if (executed.status === "skipped-deleted") continue;
-
-    // Only a row read back from Shopify may say its price is live. Any other row leaves
-    // the mirror saying "unknown", not saying the old price, and not the new one either.
-    //
-    // Read-back failed, so we genuinely do not know what is live: the write may have
-    // landed and been misreported, or not landed at all. Skipping the update left the
-    // mirror asserting the *pre-run* price, which is a definite claim and a wrong one —
-    // and the planner believes it. `isNoop` then compares a revert's target against that
-    // stale value, finds them equal, drops the row, and the revert writes nothing while
-    // reporting clean. A storefront stays on sale and the campaign says it is over.
-    //
-    // Null is the honest answer and the one the planner handles correctly: `isNoop`
-    // never treats an absent live price as already-correct, so the row is written. Drift
-    // detection already reads null as "we have not looked" and stays quiet, and the
-    // nightly audit heals it from Shopify.
-    //
-    // Unverified rows too (#699). A bulk operation that ends FAILED leaves every row
-    // missing from its result file unverified, and recording the intended price for them
-    // made Resume find them "already correct", write nothing and call the campaign clean
-    // with the old price still live wherever the operation never reached.
-    if (executed.status !== "verified") {
-      await prisma.priceSurfaceEntry.updateMany({
-        where: {
-          shopId,
-          variantGid: executed.row.ref.variantGid,
-          surfaceKind: "BASE",
-          priceListGid: "",
-        },
-        data: { livePrice: null, liveCompareAt: null, syncedAt: new Date() },
-      });
-      await prisma.variantIndex.updateMany({
-        where: { shopId, variantGid: executed.row.ref.variantGid },
-        data: { price: null, compareAt: null, syncedAt: new Date() },
-      });
-      continue;
-    }
-
-    await prisma.priceSurfaceEntry.updateMany({
-      where: {
-        shopId,
-        variantGid: executed.row.ref.variantGid,
-        surfaceKind: "BASE",
-        priceListGid: "",
-      },
-      data: {
-        livePrice: BigInt(executed.row.intendedPrice.amount),
-        ...(executed.row.intendedCompareAtSet
-          ? {
-              liveCompareAt: executed.row.intendedCompareAt
-                ? BigInt(executed.row.intendedCompareAt.amount)
-                : null,
-            }
-          : {}),
-        syncedAt: new Date(),
-      },
-    });
-
-    await prisma.variantIndex.updateMany({
-      where: { shopId, variantGid: executed.row.ref.variantGid },
-      data: {
-        price: BigInt(executed.row.intendedPrice.amount),
-        ...(executed.row.intendedCompareAtSet
-          ? {
-              compareAt: executed.row.intendedCompareAt
-                ? BigInt(executed.row.intendedCompareAt.amount)
-                : null,
-            }
-          : {}),
-        syncedAt: new Date(),
-      },
-    });
-  }
-}
 
 
 /**
