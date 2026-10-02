@@ -223,6 +223,8 @@ export async function applyMarketSurfaces(
      * variants: a percentage moves every variant on the list, not just these (#763).
      */
     perProductOnly?: boolean;
+    /** Called as each chunk is written, so the run's heartbeat stays fresh (#791). */
+    onProgress?: () => void | Promise<void>;
   } = {},
 ): Promise<MarketSurfaceOutcome[]> {
   const campaign = await prisma.campaign.findUnique({
@@ -510,7 +512,10 @@ export async function applyMarketSurfaces(
       list.priceListGid,
       list.currency,
       remaining,
-      (chunk, index) => ledgerChunk(runId, shopId, list, chunk, index),
+      async (chunk, index) => {
+        await ledgerChunk(runId, shopId, list, chunk, index);
+        await options.onProgress?.();
+      },
     );
 
     await recordResults(runId, shopId, list.priceListGid, result);
@@ -546,6 +551,8 @@ export async function revertMarketSurfaces(
   shopId: string,
   campaignId: string,
   client: AdminClient,
+  /** Called as each chunk is deleted, so the run's heartbeat stays fresh (#791). */
+  onProgress?: () => void | Promise<void>,
 ): Promise<MarketSurfaceOutcome[]> {
   // Markets repriced by a single percentage are undone by restoring the merchant's
   // own percentage, not by deleting per-product prices — there are none to delete.
@@ -578,7 +585,7 @@ export async function revertMarketSurfaces(
 
   for (const [priceListGid, variantGids] of byList) {
     const list = await prisma.priceListRecord.findFirst({ where: { shopId, priceListGid } });
-    const result = await deleteMarketPrices(client, priceListGid, variantGids);
+    const result = await deleteMarketPrices(client, priceListGid, variantGids, onProgress);
 
     await prisma.variantChange.updateMany({
       where: { shopId, priceListGid, variantGid: { in: variantGids }, run: { campaignId } },

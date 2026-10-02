@@ -262,11 +262,14 @@ export async function deleteMarketPrices(
   client: AdminClient,
   priceListGid: string,
   variantGids: readonly string[],
+  /** Called before each chunk, so a long revert keeps its run's heartbeat fresh (#791). */
+  onChunk?: () => void | Promise<void>,
 ): Promise<MarketWriteResult> {
   const results = new Map<string, MarketRowResult>();
   const chunks = chunkPrices(variantGids);
 
   for (const chunk of chunks) {
+    await onChunk?.();
     try {
       const response = await withRetry(
         () =>

@@ -65,6 +65,16 @@ export interface TagOutcome {
   messages: string[];
 }
 
+/**
+ * Called once per product, so a long tag phase keeps its run's heartbeat fresh (#791).
+ *
+ * Tags are written one product at a time, after the prices. Without this a campaign
+ * tagging a few thousand products went quiet for minutes, the reaper took the live run
+ * for a dead one, and the page showed Partial and offered Resume while it was still
+ * writing.
+ */
+export type TagProgress = () => void | Promise<void>;
+
 interface TagsResponse {
   tagsAdd?: { userErrors?: Array<{ message: string }> };
   tagsRemove?: { userErrors?: Array<{ message: string }> };
@@ -111,8 +121,14 @@ export async function applyCampaignTags(
   productGids: string[],
   tagKit: string[],
   client: AdminClient,
-  /** A campaign that is ending, whose tags still count as another campaign's, not the merchant's. */
-  sharedWith?: string,
+  {
+    sharedWith,
+    onProgress,
+  }: {
+    /** A campaign that is ending, whose tags still count as another campaign's, not the merchant's. */
+    sharedWith?: string;
+    onProgress?: TagProgress;
+  } = {},
 ): Promise<TagOutcome> {
   const kit = tagKit.map((t) => t.trim()).filter(Boolean);
   if (kit.length === 0 || productGids.length === 0) {
@@ -127,6 +143,7 @@ export async function applyCampaignTags(
   let leftAlone = 0;
 
   for (const productGid of productGids) {
+    await onProgress?.();
     const plan = planTagsFor(
       productGid,
       kit,
@@ -267,6 +284,7 @@ export async function applyTakeoverTags(
   endingCampaignId: string,
   productsByWinner: ReadonlyMap<string, string[]>,
   client: AdminClient,
+  onProgress?: TagProgress,
 ): Promise<TagOutcome> {
   const total: TagOutcome = { products: 0, tagged: 0, failed: 0, leftAlone: 0, messages: [] };
 
@@ -303,7 +321,7 @@ export async function applyTakeoverTags(
       untagged,
       winner.tagKit,
       client,
-      endingCampaignId,
+      { sharedWith: endingCampaignId, onProgress },
     );
     total.products += outcome.products;
     total.tagged += outcome.tagged;
@@ -326,6 +344,7 @@ export async function removeCampaignTags(
   shopId: string,
   campaignId: string,
   client: AdminClient,
+  onProgress?: TagProgress,
 ): Promise<TagOutcome> {
   const ledgered = await prisma.tagChange.findMany({
     where: { shopId, campaignId, status: { in: ["APPLIED", "VERIFIED"] } },
@@ -341,6 +360,7 @@ export async function removeCampaignTags(
   let failed = 0;
 
   for (const { productGid, toRemove } of removals) {
+    await onProgress?.();
     try {
       const response = await withRetry(
         () => client.request<TagsResponse>(TAGS_REMOVE, { id: productGid, tags: toRemove }),

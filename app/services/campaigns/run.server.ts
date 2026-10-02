@@ -35,6 +35,7 @@ import {
   revertMarketSurfaces,
 } from "./market-surfaces.server";
 import { notify } from "../notifications.server";
+import { HEARTBEAT_EVERY_MS } from "./reaper.server";
 import { metric } from "../../lib/telemetry/metrics";
 import { addLogContext, withLogContext } from "../../lib/logging/context.server";
 
@@ -288,6 +289,23 @@ async function executeCampaignRun(
   // Scoped runs are exempt: reverting one variant out of a four-thousand-variant sale
   // says nothing about the campaign, and moving it to APPLYING would misreport the
   // other 3,999.
+
+  // One writer per campaign, checked before anything is claimed or queued (#791). A run
+  // the reaper wrongly took for dead left its campaign Partial with a Resume button while
+  // it was still writing; pressing it started a second writer over the same rows. Whatever
+  // the state says, a full run that has not finished is still the writer, so a Resume, an
+  // Apply or a Revert waits for it. Transient: it clears on its own, and Flow's resend is
+  // the retry it needs.
+  if (!options.variantGids) {
+    const live = await liveFullRun(campaignId);
+    if (live) {
+      const message =
+        `This campaign is still being ${live.kind === "REVERT" ? "reverted" : "applied"} by a run that has not ` +
+        "finished, so nothing new was started. That run finishes on its own, and this page updates when it " +
+        "does; the Runs tab shows how far it has got.";
+      return { runId: "", planned: 0, verified: 0, failed: 0, unverified: 0, clean: true, messages: [message], refused: message, transient: true };
+    }
+  }
 
   // What this run will write, for the inline budget (#790). Counted only for a caller
   // that declared a deadline, and only for a whole-campaign run: a scoped run is a
@@ -597,13 +615,19 @@ async function executeCampaignRun(
     refusedMarkets.push(...baselines.refused);
   }
 
+  // One throttled heartbeat for every phase that writes: prices, then tags, then markets.
+  // Prices alone used to stamp it, so a run tagging a few thousand products one call at a
+  // time went quiet for minutes and the reaper took it for dead while it was still
+  // writing -- Partial, with a Resume button that would have started a second writer (#791).
+  const beat = heartbeat(run.id);
+
   const result = await executeRows(writable, {
     client,
     shopId,
     productOf: (gid) => products.get(gid) ?? gid,
     verifySampleRate: options.verifySampleRate ?? 1,
     forcePath: options.forcePath,
-    onProgress: heartbeat(run.id),
+    onProgress: beat,
   });
 
   const messages = await recordResults(run.id, shopId, result.rows);
@@ -612,7 +636,7 @@ async function executeCampaignRun(
   // Tags after prices, deliberately. A badge on a product still showing full price is
   // worse than a price change nobody has badged yet, so the storefront never claims a
   // sale that has not landed.
-  const tagOutcome = await syncTags(shopId, campaignId, run.id, writable, products, client, options);
+  const tagOutcome = await syncTags(shopId, campaignId, run.id, writable, products, client, options, beat);
   if (tagOutcome) messages.push(...tagOutcome.messages);
 
   // Markets, after the base surface. A campaign that only ever touched the base price
@@ -636,10 +660,10 @@ async function executeCampaignRun(
           options.variantGids,
           client,
           refusedMarkets,
-          { perProductOnly: true },
+          { perProductOnly: true, onProgress: beat },
         )
       : options.revert
-        ? await revertMarketSurfaces(shopId, campaignId, client)
+        ? await revertMarketSurfaces(shopId, campaignId, client, beat)
         : await applyMarketSurfaces(
             shopId,
             campaignId,
@@ -648,6 +672,7 @@ async function executeCampaignRun(
             writable.map((row) => row.ref.variantGid),
             client,
             refusedMarkets,
+            { onProgress: beat },
           );
 
     for (const market of markets) {
@@ -836,6 +861,7 @@ async function syncTags(
   products: Map<string, string>,
   client: AdminClient,
   options: RunOptions,
+  beat: () => Promise<void>,
 ): Promise<{ messages: string[] } | null> {
   const campaign = await prisma.campaign.findUnique({
     where: { id: campaignId },
@@ -855,8 +881,9 @@ async function syncTags(
         campaignId,
         productsByWinner(rows, products),
         client,
+        beat,
       );
-      const outcome = await removeCampaignTags(shopId, campaignId, client);
+      const outcome = await removeCampaignTags(shopId, campaignId, client, beat);
 
       const notes: string[] = [];
       if (outcome.failed > 0) {
@@ -883,6 +910,7 @@ async function syncTags(
       productGids,
       campaign.tagKit,
       client,
+      { onProgress: beat },
     );
 
     const notes: string[] = [];
@@ -955,11 +983,12 @@ function isOccurrenceTaken(error: unknown): boolean {
  * threshold is minutes, so seconds of resolution is ample.
  *
  * Failures are swallowed on purpose. A heartbeat that could abort a run would mean
- * adding liveness reporting had made runs *less* reliable, and the worst case of a
- * missed stamp is a live run being reclaimed -- which the reaper's status guard
- * already makes safe.
+ * adding liveness reporting had made runs *less* reliable. The worst case of missed
+ * stamps is a live run reclaimed as dead -- the campaign shows Partial and offers Resume
+ * mid-write (#791) -- which is why every phase that writes stamps it, and why the reaper
+ * also counts the run's own ledger rows as signs of life.
  */
-function heartbeat(runId: string, everyMs = 5_000) {
+function heartbeat(runId: string, everyMs = HEARTBEAT_EVERY_MS) {
   let last = 0;
 
   return async () => {
@@ -1215,6 +1244,18 @@ async function inlineWork(shopId: string, campaignId: string): Promise<InlineWor
 
 /** The states in which a full run holds the campaign's claim. */
 const CLAIMED: ReadonlySet<string> = new Set(["APPLYING", "REVERTING"]);
+
+/** A whole-campaign run that has not finished, if there is one (#791). */
+async function liveFullRun(campaignId: string): Promise<{ id: string; kind: string } | null> {
+  return prisma.campaignRun.findFirst({
+    where: {
+      campaignId,
+      NOT: { occurrenceKey: { startsWith: "VARIANT-" } },
+      status: { in: ["PLANNING", "QUEUED", "EXECUTING", "VERIFYING"] },
+    },
+    select: { id: true, kind: true },
+  });
+}
 
 /** A run over named variants that is still writing, if there is one. */
 async function liveScopedRun(campaignId: string): Promise<{ id: string } | null> {
