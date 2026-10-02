@@ -50,7 +50,9 @@ describe("creating a campaign", () => {
 
 describe("syncing the catalogue", () => {
   it("writes an entry", () => {
-    expect(HOME).toContain('action: "catalogue.synced"');
+    // Written by the sync itself, which runs in the worker since #801; Home starts it.
+    expect(sourceOf("app/services/sync-job.server.ts")).toContain('action: "catalogue.synced"');
+    expect(HOME).toContain("startSync(shop.id, toAdminClient(admin), actorFor(sessionToken, session.shop))");
   });
 
   it("records who pressed the button", () => {

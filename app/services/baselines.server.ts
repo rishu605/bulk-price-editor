@@ -32,6 +32,8 @@ export interface CaptureOptions {
   recapture?: boolean;
   source?: BaselineSource;
   capturedBy?: string;
+  /** Called after each chunk is written: surfaces captured so far, of how many (#801). */
+  onProgress?: (done: number, total: number) => void | Promise<void>;
 }
 
 /**
@@ -138,6 +140,7 @@ export async function captureBaselines(
         : []),
       prisma.baseline.createMany({ data: createChunk }),
     ]);
+    await options.onProgress?.(Math.min(i + CHUNK, toCreate.length), toCreate.length);
 
     result.captured += createChunk.length;
     result.superseded += supersedeChunk.length;

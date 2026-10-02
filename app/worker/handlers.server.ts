@@ -99,6 +99,28 @@ async function syncJob(ref: JobRef): Promise<void> {
   }
 
   const client = await adminClientForShop(shop.domain);
+
+  // The whole catalogue, from Home's Sync button (#801). Thrown rather than returned on a
+  // missing session, like a queued run (#707): a job that returns has succeeded, and Home
+  // would wait on a sync nobody is running until it went stale.
+  if (ref.fullSync) {
+    const { runFullSync } = await import("../services/sync-job.server");
+    if (!client) {
+      await prisma.shop.update({
+        where: { id: ref.shopId },
+        data: {
+          syncStartedAt: null,
+          syncPhase: null,
+          syncHeartbeatAt: null,
+          syncFailure: "The sync could not start: the app has no working session for this store. Open the app again from Shopify admin, then run it again.",
+        },
+      });
+      throw new Error(`No usable session for ${shop.domain}; the sync did not start.`);
+    }
+    await runFullSync(ref.shopId, client, ref.actor ?? "shopify");
+    return;
+  }
+
   if (!client) return;
 
   const { syncMarkets } = await import("../services/markets-sync.server");

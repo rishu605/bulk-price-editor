@@ -45,6 +45,22 @@ export interface OnboardingState {
   complete: boolean;
 }
 
+/**
+ * Whether the baselines step is done (#801): captured, not merely begun.
+ *
+ * It was `withBaseline > 0`, true the moment the first chunk of a capture committed, so a
+ * 102,132-variant store was told "Capture your baselines ✓" with 59,132 still to come.
+ * Done once a sync has finished, or once every surface has a baseline however it got one,
+ * and never while a sync is still running.
+ */
+export function baselinesCaptured(
+  health: { withBaseline: number; missing: number },
+  syncFinished: boolean,
+  syncing: boolean,
+): boolean {
+  return health.withBaseline > 0 && !syncing && (syncFinished || health.missing === 0);
+}
+
 export function onboarding(facts: OnboardingFacts): OnboardingState {
   const steps: OnboardingStep[] = [
     {

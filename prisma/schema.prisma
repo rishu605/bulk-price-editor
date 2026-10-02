@@ -85,6 +85,16 @@ model Shop {
 
   /// Set when the initial catalog import finishes; campaigns are blocked until then.
   initialSyncCompletedAt DateTime?
+  /// A catalogue sync in progress (#801): when it was claimed, which step it is on and how
+  /// far that step has got, and when it last showed signs of life. All null when no sync
+  /// is running. A sync is the first thing a new store does and the biggest: run inside a
+  /// request it outlived the proxy, so it runs in the worker and Home follows it here.
+  syncStartedAt   DateTime?
+  syncPhase       String?
+  syncProgress    Json?
+  syncHeartbeatAt DateTime?
+  /// Why the last sync stopped, in a sentence for the merchant. Cleared when one starts.
+  syncFailure     String?
 
   variants         VariantIndex[]
   surfaceEntries   PriceSurfaceEntry[]

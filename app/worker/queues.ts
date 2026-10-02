@@ -86,6 +86,8 @@ export interface JobRef {
    * inside Flow's ten seconds (#773). Carried on the sync queue.
    */
   recaptureSegmentId?: string;
+  /** A whole catalogue sync, started from Home and followed there (#801). On the sync queue. */
+  fullSync?: boolean;
   /** An execution job that continues a partial run rather than starting fresh (#790). */
   resume?: boolean;
   /** Who asked, so what the run resolves on their behalf is attributed to them. */
