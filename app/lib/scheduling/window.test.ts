@@ -16,6 +16,7 @@ import {
   scheduleWarnings,
   utcToLocalInput,
   windowClosed,
+  windowEndText,
 } from "./window";
 
 const at = (iso: string) => new Date(iso);
@@ -168,6 +169,16 @@ describe("timezone conversion", () => {
   it("renders midnight as 00:00, not 24:00", () => {
     const utc = localInputToUtc("2026-08-20T00:00", "Europe/London")!;
     expect(utcToLocalInput(utc, "Europe/London")).toBe("2026-08-20T00:00");
+  });
+});
+
+describe("windowEndText (#784)", () => {
+  it("names a window's end in the store's zone, and nothing for a window with none", () => {
+    expect(windowEndText({ kind: "window", startAt: "2026-11-27T14:00:00Z", endAt: "2026-12-01T04:59:00Z" }, "America/New_York")).toBe(
+      "Nov 30, 2026, 11:59 PM (America/New_York)",
+    );
+    expect(windowEndText({ kind: "window", startAt: "2026-11-27T14:00:00Z" }, "UTC")).toBeUndefined();
+    expect(windowEndText({ kind: "manual" }, "UTC")).toBeUndefined();
   });
 });
 
