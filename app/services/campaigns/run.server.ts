@@ -9,6 +9,8 @@
  * themselves.
  */
 
+import { Prisma } from "@prisma/client";
+
 import prisma from "../../db.server";
 import { formatAgo, formatCount } from "../../lib/format/display";
 import type { AdminClient } from "../../lib/execution/sync-executor";
@@ -20,7 +22,8 @@ import { loadCandidates, productMapFor } from "./candidates.server";
 import { isPractice, loadCampaignContext, scopeOf, importIdsOf} from "./model.server";
 import { astToWhere } from "../segments.server";
 import { DEFAULT_THRESHOLD } from "../../lib/planning/write-path";
-import { AppError } from "../../lib/errors/app-error";
+import { AppError, toAppError } from "../../lib/errors/app-error";
+import { LANDED } from "../../lib/execution/landed";
 import { guardrailsFor } from "../settings.server";
 import type { RunOutcome } from "./types";
 import { inChunksCounting } from "../../lib/db/chunk";
@@ -144,7 +147,7 @@ export async function runCampaign(
   const releaseTo = (options.claimedFrom ?? before?.status) as CampaignState | undefined;
 
   // Set by `executeCampaignRun` as soon as the run row exists; read by the catch below.
-  const started: { runId?: string } = {};
+  const started: Started = {};
 
   try {
     // Every line this run produces carries the shop and the campaign, and the run id
@@ -190,7 +193,34 @@ export async function runCampaign(
     // process behind it. #649 found it on the bulk path, where a refused submission
     // throws straight past the terminal update, but the gap was never specific to that
     // path — every `await` after the row is created had it.
-    await failRun(started.runId, error);
+    const failed = await failRun(started.runId, error, started.writing === true);
+
+    // It wrote, then threw (#802). Handing the campaign back to where it started -- Draft,
+    // for a manual apply -- told the merchant "nothing has been written to your storefront"
+    // over 54,168 prices at 10% off, nothing owned them, and Revert does not work on a
+    // draft. The honest state is Partial, with what the ledger says landed, and the message
+    // says prices changed. Only when this throw ended the run: one after it completed --
+    // the mirror refresh, a notification -- leaves the finished run's state alone. A run
+    // over named variants never held the campaign, so it has no state to move.
+    if (failed?.ended && started.writing && !options.variantGids) {
+      try {
+        await transitionCampaign(shopId, campaignId, "PARTIAL", {
+          reason:
+            `${options.revert ? "revert" : "apply"} stopped part-way, after ${failed.verified} of ${failed.planned} ` +
+            `prices were changed and read back: ${error instanceof Error ? error.message : String(error)}`,
+          runId: started.runId,
+        });
+      } catch (transitionError) {
+        const { logger } = await import("../../lib/logging/logger");
+        logger.error("a run stopped part-way and its campaign could not be marked partial", {
+          campaignId,
+          runId: started.runId,
+          error: transitionError instanceof Error ? transitionError.message : String(transitionError),
+        });
+      }
+      throw stoppedPartWay(error, failed, options);
+    }
+
     // Only release to a state that is not itself a claim. A campaign that was already
     // APPLYING when this was called -- a resume, a second worker -- has nowhere to be
     // put back to, and `releaseClaim` additionally refuses while any run is still live.
@@ -201,6 +231,24 @@ export async function runCampaign(
     }
     throw error;
   }
+}
+
+/** Filled in as a run gets going, for the catch in `runCampaign`. */
+interface Started {
+  /** The run row, once it exists. */
+  runId?: string;
+  /** Set as the first price is sent: from here, a failure may have changed the storefront. */
+  writing?: boolean;
+}
+
+interface FailedRun {
+  /** Whether this call ended the run, rather than finding it already finished. */
+  ended: boolean;
+  /** Rows written and read back (VERIFIED or CLAMPED). */
+  verified: number;
+  /** Rows written and never read back. */
+  applied: number;
+  planned: number;
 }
 
 /**
@@ -219,17 +267,31 @@ export async function runCampaign(
  * this safe to call unconditionally rather than only from the paths known to be early.
  *
  * It does not guess counts. A run that died mid-flight has whatever `variant_changes`
- * recorded before it stopped, and that ledger is the truth; writing zeroes here would
- * overwrite it with a tidier lie.
+ * recorded before it stopped, and that ledger is the truth. It used to write nothing at
+ * all, so a run with 55,000 verified rows read "Failed · 0 verified" (#802); it now copies
+ * the ledger's counts onto the run. A run that had started writing is PARTIAL, not FAILED --
+ * resumable, as a reclaimed run is -- and its rows caught mid-write go back to PENDING for
+ * the resume to settle.
  */
-async function failRun(runId: string | undefined, error: unknown): Promise<void> {
-  if (!runId) return;
+async function failRun(runId: string | undefined, error: unknown, writing = false): Promise<FailedRun | null> {
+  if (!runId) return null;
 
   try {
-    await prisma.campaignRun.updateMany({
+    const [verified, applied, failed, run] = await Promise.all([
+      prisma.variantChange.count({ where: { runId, status: { in: [...LANDED] } } }),
+      prisma.variantChange.count({ where: { runId, status: "APPLIED" } }),
+      prisma.variantChange.count({ where: { runId, status: "FAILED" } }),
+      prisma.campaignRun.findUnique({ where: { id: runId }, select: { plannedRows: true } }),
+    ]);
+    const ended = await prisma.campaignRun.updateMany({
       where: { id: runId, status: { in: ["PLANNING", "QUEUED", "EXECUTING", "VERIFYING"] } },
-      data: { status: "FAILED", finishedAt: new Date() },
+      data: { status: writing ? "PARTIAL" : "FAILED", finishedAt: new Date(), verifiedRows: verified, failedRows: failed },
     });
+    if (writing && ended.count > 0) {
+      await prisma.variantChange.updateMany({ where: { runId, status: "WRITING" }, data: { status: "PENDING" } });
+      await settleMirror(runId);
+    }
+    return { ended: ended.count > 0, verified, applied, planned: run?.plannedRows ?? 0 };
   } catch (failure) {
     // Imported here rather than at the top, matching the one other use in this file.
     const { logger } = await import("../../lib/logging/logger");
@@ -238,7 +300,79 @@ async function failRun(runId: string | undefined, error: unknown): Promise<void>
       cause: failure instanceof Error ? failure.message : String(failure),
       original: error instanceof Error ? error.message : String(error),
     });
+    return null;
   }
+}
+
+/**
+ * The mirror, for a run that threw after it started writing (#802).
+ *
+ * `refreshMirror` does this at the end of a run that finishes, from its results; a run that
+ * throws never gets there, so the mirror went on asserting every variant's pre-run price.
+ * A revert then planned the written ones as already at baseline, wrote nothing, and
+ * reported clean with the sale still live. The same rule, from the ledger: a row read back
+ * says its price is live; every other row this run may have sent is unknown, which the
+ * planner never treats as already correct, so the next run writes it.
+ */
+async function settleMirror(runId: string): Promise<void> {
+  const landed = Prisma.sql`c."runId" = ${runId} AND c."surfaceKind" = 'BASE' AND c."status" IN ('VERIFIED', 'CLAMPED') AND c."intendedPrice" IS NOT NULL`;
+  const unknown = Prisma.sql`c."runId" = ${runId} AND c."surfaceKind" = 'BASE' AND c."status" IN ('PENDING', 'WRITING', 'APPLIED', 'FAILED')`;
+
+  await prisma.$executeRaw`
+    UPDATE "price_surface_entries" e
+    SET "livePrice" = c."intendedPrice",
+        "liveCompareAt" = CASE WHEN c."intendedCompareAtSet" THEN c."intendedCompareAt" ELSE e."liveCompareAt" END,
+        "syncedAt" = NOW()
+    FROM "variant_changes" c
+    WHERE ${landed} AND e."shopId" = c."shopId" AND e."variantGid" = c."variantGid"
+      AND e."surfaceKind" = 'BASE' AND e."priceListGid" = ''`;
+  await prisma.$executeRaw`
+    UPDATE "variant_index" v
+    SET "price" = c."intendedPrice",
+        "compareAt" = CASE WHEN c."intendedCompareAtSet" THEN c."intendedCompareAt" ELSE v."compareAt" END,
+        "syncedAt" = NOW()
+    FROM "variant_changes" c
+    WHERE ${landed} AND v."shopId" = c."shopId" AND v."variantGid" = c."variantGid"`;
+  await prisma.$executeRaw`
+    UPDATE "price_surface_entries" e
+    SET "livePrice" = NULL, "liveCompareAt" = NULL, "syncedAt" = NOW()
+    FROM "variant_changes" c
+    WHERE ${unknown} AND e."shopId" = c."shopId" AND e."variantGid" = c."variantGid"
+      AND e."surfaceKind" = 'BASE' AND e."priceListGid" = ''`;
+  await prisma.$executeRaw`
+    UPDATE "variant_index" v
+    SET "price" = NULL, "compareAt" = NULL, "syncedAt" = NOW()
+    FROM "variant_changes" c
+    WHERE ${unknown} AND v."shopId" = c."shopId" AND v."variantGid" = c."variantGid"`;
+}
+
+/**
+ * What the merchant is told when a run fails after it started writing (#802).
+ *
+ * The failure's own code, status and retryability are kept -- Flow and the worker decide on
+ * those -- but its sentence is not: "The app's own database is not responding… Nothing was
+ * changed in your store" was the message on a run that had changed 55,000 prices. This says
+ * prices changed, how many, and the two ways forward.
+ */
+function stoppedPartWay(error: unknown, failed: FailedRun, options: RunOptions): AppError {
+  const app = toAppError(error);
+  const verb = options.revert ? "revert" : "apply";
+  const changed = failed.verified + failed.applied;
+  const what =
+    changed > 0
+      ? `${formatCount(changed)} of ${formatCount(failed.planned)} prices were changed before it did, so your storefront ` +
+        "has some of this campaign's prices and not others."
+      : "Some prices may have changed before it did.";
+  return new AppError({
+    code: app.code,
+    status: app.status,
+    retryable: app.retryable,
+    cause: error,
+    context: { ...app.context, stoppedPartWay: true, verified: failed.verified, applied: failed.applied },
+    userMessage:
+      `This ${verb} stopped part-way. ${what} The campaign is now Partial: Resume to finish the ${verb}, ` +
+      "or Revert to put every price back.",
+  });
 }
 
 async function executeCampaignRun(
@@ -252,7 +386,7 @@ async function executeCampaignRun(
    * An out-parameter rather than a return value because the thing that needs it is the
    * failure path, which by definition never reaches a return. See `failRun`.
    */
-  started: { runId?: string } = {},
+  started: Started = {},
 ): Promise<RunOutcome> {
   // Practice campaigns never write. Refused here, in the one function that writes
   // prices, rather than only in the UI that offers the button: the merchant was told
@@ -626,6 +760,9 @@ async function executeCampaignRun(
   // time went quiet for minutes and the reaper took it for dead while it was still
   // writing -- Partial, with a Resume button that would have started a second writer (#791).
   const beat = heartbeat(run.id);
+
+  // From here a failure may have changed the storefront (#802).
+  started.writing = true;
 
   const result = await executeRows(writable, {
     client,
