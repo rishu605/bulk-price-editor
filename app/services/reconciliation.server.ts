@@ -265,7 +265,7 @@ export async function reconcile(
  *
  * `DISTINCT ON` picks the newest verified write per cell, which is the one that explains
  * the price now. Postgres-specific and deliberately so: the alternative is a correlated
- * subquery per row. `variant_changes_drift_lookup` exists to serve that ordering; without
+ * subquery per row. `variant_changes_landed_lookup` exists to serve that ordering; without
  * it Postgres sorts the shop's whole verified ledger and spills to disk.
  *
  * A fragment rather than a whole query, because two callers ask about the same set and

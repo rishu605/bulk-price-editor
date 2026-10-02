@@ -71,7 +71,7 @@ export const REQUIRED_OBJECTS = {
     "variant_index_title_trgm",
     "variant_index_sku_trgm",
     "variant_index_barcode_trgm",
-    "variant_changes_drift_lookup",
+    "variant_changes_landed_lookup",
   ],
 } as const;
 
