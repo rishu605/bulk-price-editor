@@ -36,6 +36,14 @@ export const STALE_AFTER_MS = Number(
   process.env.RUN_STALE_AFTER_MS ?? 5 * 60_000,
 );
 
+/**
+ * How often a working run stamps its heartbeat: a tenth of the threshold, and never less
+ * often than every five seconds. Derived rather than set beside it, so the two cannot
+ * drift into a heartbeat slower than the reaper's patience -- ten missed beats, not one,
+ * is what it takes to be presumed dead.
+ */
+export const HEARTBEAT_EVERY_MS = Math.min(5_000, Math.floor(STALE_AFTER_MS / 10));
+
 /** Runs that have not finished and therefore have something left to reclaim. */
 const NON_TERMINAL = ["PLANNING", "QUEUED", "EXECUTING", "VERIFYING"] as const;
 
@@ -66,6 +74,35 @@ export function isStale(
   return now.getTime() - lastSeen.getTime() > staleAfterMs;
 }
 
+/** The later of two instants, either of which may be missing. */
+function latest(a: Date | null, b: Date | null): Date | null {
+  if (!a) return b;
+  if (!b) return a;
+  return a > b ? a : b;
+}
+
+/**
+ * When this run last wrote anything to its ledger: a price or tag row created, applied or
+ * verified. Only ever asked about a run that has already gone quiet, which is a handful at
+ * most.
+ */
+async function lastLedgerActivity(runId: string): Promise<Date | null> {
+  const [prices, tags] = await Promise.all([
+    prisma.variantChange.aggregate({
+      where: { runId },
+      _max: { createdAt: true, appliedAt: true, verifiedAt: true },
+    }),
+    prisma.tagChange.aggregate({
+      where: { runId },
+      _max: { createdAt: true, appliedAt: true, verifiedAt: true },
+    }),
+  ]);
+  return [...Object.values(prices._max), ...Object.values(tags._max)].reduce<Date | null>(
+    (acc, at) => latest(acc, at ?? null),
+    null,
+  );
+}
+
 export interface ReapResult {
   reclaimed: number;
   runIds: string[];
@@ -91,12 +128,22 @@ export async function reclaimStaleRuns(
     },
   });
 
-  const stale = candidates.filter((run) => isStale(run, now, staleAfterMs));
+  const quiet = candidates.filter((run) => isStale(run, now, staleAfterMs));
 
   const runIds: string[] = [];
 
-  for (const run of stale) {
+  for (const run of quiet) {
     try {
+      // The heartbeat is one signal; the run's own ledger is another, and the one that
+      // cannot be forgotten by a phase that writes. A run whose price or tag rows are still
+      // being written is alive however quiet its heartbeat, and reclaiming it showed the
+      // merchant Partial and a Resume button while it was writing (#791).
+      const activity = await lastLedgerActivity(run.id);
+      if (!isStale({ ...run, heartbeatAt: latest(run.heartbeatAt, activity) }, now, staleAfterMs)) {
+        logger.info("quiet run left alone: its ledger is still changing", { runId: run.id, campaignId: run.campaignId });
+        continue;
+      }
+
       // Counted from the ledger rather than trusted from the run row: the dead process
       // never got to write its own totals, so the row's counters are whatever they were
       // when it started.

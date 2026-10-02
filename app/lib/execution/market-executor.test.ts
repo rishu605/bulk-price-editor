@@ -263,6 +263,25 @@ describe("deleteMarketPrices", () => {
     expect(seen[0].variantIds).toEqual(["gid://v/1", "gid://v/2"]);
   });
 
+  it("reports each chunk as it goes, so a long revert keeps its run alive (#791)", async () => {
+    const calls: string[] = [];
+    const client: AdminClient = {
+      async request<T>(_q: string, variables: Record<string, unknown>) {
+        calls.push(`delete ${(variables.variantIds as string[]).length}`);
+        return { data: { priceListFixedPricesDelete: { deletedFixedPriceVariantIds: [], userErrors: [] } } as T };
+      },
+    };
+    const gids = Array.from({ length: MAX_PRICES_PER_REQUEST * 2 + 1 }, (_, i) => `gid://v/${i}`);
+
+    await deleteMarketPrices(client, "gid://PriceList/1", gids, () => {
+      calls.push("beat");
+    });
+
+    // Before every chunk, not once at the start: a list of 100,000 variants is 400
+    // requests, minutes with nothing else to say the run is alive.
+    expect(calls).toEqual(["beat", `delete ${MAX_PRICES_PER_REQUEST}`, "beat", `delete ${MAX_PRICES_PER_REQUEST}`, "beat", "delete 1"]);
+  });
+
   it("treats a variant with no fixed price as already reverted", async () => {
     // It is already where a revert wants it. Reporting it as a failure would fill a
     // revert with errors nobody can act on.
