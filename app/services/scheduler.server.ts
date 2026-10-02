@@ -19,7 +19,7 @@ import type { RunOutcome } from "./campaigns/types";
 import { nextAttemptKey } from "../lib/scheduling/attempts";
 import type { CampaignState } from "../lib/lifecycle/transitions";
 import { adminClientForShop } from "./admin-client.server";
-import { claimEnrollment, pendingEnrollments } from "./auto-enroll.server";
+import { claimEnrollment, endingSinceLastApply, pendingEnrollments } from "./auto-enroll.server";
 import { reclaimStaleRuns } from "./campaigns/reaper.server";
 import { noteCampaign } from "./campaigns/lifecycle.server";
 import { beat } from "./scheduler-heartbeat.server";
@@ -250,11 +250,12 @@ function isOffPeak(now: Date, timeZone: string): boolean {
 }
 
 /**
- * Re-applies campaigns that gained products while running.
+ * Prices the products campaigns gained while running.
  *
- * This is a plain apply, not a special path. The run is idempotent -- variants
- * already at the campaign price are planned as "already correct" and written to
- * nobody -- so the newly enrolled variants are the only ones that cost an API call.
+ * An apply over the enrolled variants and nothing else, resolved against every campaign
+ * like any run. It used to be a whole-campaign apply, idempotent in theory: after a revert
+ * stopped part-way it re-discounted everything the revert had restored, for one enrolled
+ * variant (#805). A campaign being reverted is not priced into at all; its mark is cleared.
  */
 async function drainEnrollments(
   result: TickResult,
@@ -271,6 +272,14 @@ async function drainEnrollments(
       continue;
     }
 
+    // Marked before a revert was asked for. The merchant is ending this sale; pricing its
+    // new products into it now would be a second writer against the revert, or a sale
+    // put back on products the revert has just restored.
+    if (await endingSinceLastApply(entry.id)) {
+      await claimEnrollment(entry.id);
+      continue;
+    }
+
     // The client before the claim. Claiming clears the mark, and clearing it for a run
     // that then could not start -- no session -- dropped the newly enrolled variants for
     // good (#707). Without a client the mark stays, and the next tick asks again.
@@ -282,11 +291,20 @@ async function drainEnrollments(
 
     // Another worker that got there first returns false, which is the whole point --
     // two workers must not re-apply the same campaign.
-    if (!(await claimEnrollment(entry.id))) continue;
+    const variantGids = await claimEnrollment(entry.id);
+    if (!variantGids) continue;
+    // A mark from before the variants were recorded with it names none. Nothing is lost
+    // that the variant's next edit does not enrol again.
+    if (variantGids.length === 0) continue;
 
     try {
-
-      await runCampaign(entry.shopId, entry.id, client, {});
+      // Named variants, so the run never holds the campaign: a revert pressed meanwhile
+      // finds it and asks the merchant to try again in a minute, and this run, finding the
+      // campaign claimed first, writes nothing (#763).
+      await runCampaign(entry.shopId, entry.id, client, {
+        variantGids,
+        occurrenceKey: `VARIANT-ENROLL-${Date.now()}`,
+      });
       result.enrolled++;
     } catch (error) {
       result.failures.push({
