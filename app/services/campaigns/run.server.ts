@@ -115,6 +115,8 @@ export interface RunOptions {
    * has to be explainable six weeks later.
    */
   skipVariantGids?: string[];
+  /** Why `skipVariantGids` were left alone, for their ledger rows. */
+  skipReason?: string;
 }
 
 export async function runCampaign(
@@ -568,7 +570,7 @@ async function executeCampaignRun(
   }
 
   await writeLedgerRows(run.id, shopId, writable);
-  await writeSparedRows(run.id, shopId, spared);
+  await writeSparedRows(run.id, shopId, spared, options.skipReason);
 
   // Record intents before writing: every price we write produces a products/update
   // webhook moments later, and without this the drift detector would flag our own
@@ -1037,6 +1039,7 @@ async function writeSparedRows(
   runId: string,
   shopId: string,
   rows: PlannedRow[],
+  reason = "Left as it is: this price was changed outside the app and you chose to keep that edit.",
 ): Promise<void> {
   if (rows.length === 0) return;
 
@@ -1054,8 +1057,7 @@ async function writeSparedRows(
       intendedCompareAt: row.intendedCompareAt ? BigInt(row.intendedCompareAt.amount) : null,
       intendedCompareAtSet: row.intendedCompareAtSet,
       status: "SKIPPED" as const,
-      failureReason:
-        "Left as it is: this price was changed outside the app and you chose to keep that edit.",
+      failureReason: reason,
       appliedAt: new Date(),
     })),
     skipDuplicates: true,

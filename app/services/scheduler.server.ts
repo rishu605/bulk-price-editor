@@ -338,10 +338,32 @@ async function runTransition(
 
   if (claimed.count === 0) return null; // someone else took it
 
+  // A held campaign's end still comes (#756), but the prices that held it were edited by
+  // somebody on purpose and are waiting for a decision in the drift queue. Ending the sale
+  // reverts everything else on time and leaves those as edited (#784): overwriting them
+  // unasked is the one thing the hold exists to prevent.
+  const edited =
+    transition === "revert" && before?.status === "HELD"
+      ? (
+          await prisma.driftEvent.findMany({
+            where: { shopId, campaignId, resolution: "PENDING", surfaceKind: "BASE" },
+            select: { variantGid: true },
+          })
+        ).map((event) => event.variantGid)
+      : [];
+
   return runCampaign(shopId, campaignId, client, {
     revert: transition === "revert",
     occurrenceKey,
     claimedFrom: before?.status as CampaignState | undefined,
+    ...(edited.length > 0
+      ? {
+          skipVariantGids: edited,
+          skipReason:
+            "Left as it is: this price was edited outside the app while the campaign was held, and the edit is still " +
+            "waiting for your decision in the drift queue. The rest of the sale ended on schedule.",
+        }
+      : {}),
   });
 }
 

@@ -219,7 +219,7 @@ describe("chaos: resolving price drift from the queue", () => {
     });
   });
 
-  it("still ends a held sale on its scheduled end date", async () => {
+  it("still ends a held sale on its scheduled end date, leaving the held edit for the merchant", async () => {
     await withChaos("drift-held-scheduled-end", CATALOG, async (chaos) => {
       const { shopId, campaignId, variantGids, baseline } = chaos.fixture;
       await applied(chaos);
@@ -245,17 +245,23 @@ describe("chaos: resolving price drift from the queue", () => {
 
       await tick(new Date());
       expect(await statusOf(campaignId), "a held sale ran past its end").toBe("COMPLETED");
-      for (const gid of variantGids) {
+
+      // Everything else ended on time (#756)...
+      const [edited, ...rest] = variantGids;
+      for (const gid of rest) {
         expect(Number(chaos.fake.priceOf(gid)!.replace(".", "")), `${gid} not back at baseline`).toBe(baseline.get(gid));
       }
+      // ...and the price that held it stays as the merchant set it, still waiting for their
+      // decision (#784): overwriting it unasked is what the hold exists to prevent.
+      expect(chaos.fake.priceOf(edited), "the scheduled end wrote over the held edit").toBe("1.23");
+      const event = await prisma.driftEvent.findFirstOrThrow({ where: { shopId, variantGid: edited } });
+      expect(event.resolution).toBe("PENDING");
+      expect(await prisma.auditLogEntry.count({ where: { shopId, action: "drift.overwritten" } })).toBe(0);
 
-      // The revert wrote over the merchant's edit: said so, and the queue no longer asks.
       const revert = await prisma.campaignRun.findFirstOrThrow({ where: { campaignId, kind: "REVERT" } });
-      const event = await prisma.driftEvent.findFirstOrThrow({ where: { shopId, variantGid: variantGids[0] } });
-      expect(event.resolution).toBe("REASSERTED");
-      expect(event.resolvedBy).toBe(`run:${revert.id}`);
-      const audit = await prisma.auditLogEntry.findFirstOrThrow({ where: { shopId, action: "drift.overwritten" } });
-      expect(audit.after).toMatchObject({ kind: "REVERT", events: 1 });
+      const spared = await prisma.variantChange.findFirstOrThrow({ where: { runId: revert.id, variantGid: edited } });
+      expect(spared.status).toBe("SKIPPED");
+      expect(spared.failureReason).toMatch(/edited outside the app while the campaign was held.*waiting for your decision/);
     });
   });
 });

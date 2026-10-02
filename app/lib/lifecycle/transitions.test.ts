@@ -92,6 +92,18 @@ describe("legal transitions", () => {
   });
 });
 
+describe("a held campaign with an end (#784)", () => {
+  it("says the end still comes, and what it does with the edited prices", () => {
+    const held = describeState("HELD", { heldUntil: "Nov 30, 2026, 11:59 PM (America/New_York)" });
+    expect(held.explanation).toContain("Its window still ends Nov 30, 2026, 11:59 PM (America/New_York)");
+    expect(held.explanation).toContain("the edited ones stay as edited until you decide");
+  });
+
+  it("says nothing about an end it does not have", () => {
+    expect(describeState("HELD").explanation).not.toContain("window");
+  });
+});
+
 describe("what the merchant is told", () => {
   it("describes every state without falling through", () => {
     for (const state of ALL_STATES) {

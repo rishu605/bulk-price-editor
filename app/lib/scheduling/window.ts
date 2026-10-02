@@ -199,6 +199,14 @@ export function formatScheduleInstant(iso: string, timeZone: string): string {
   }).format(new Date(iso));
 }
 
+/** When a window ends, as the page writes it, or undefined for one with no end (#784). */
+export function windowEndText(raw: unknown, timeZone: string): string | undefined {
+  const schedule = parseSchedule(raw);
+  return schedule.kind === "window" && schedule.endAt
+    ? `${formatScheduleInstant(schedule.endAt, timeZone)} (${timeZone})`
+    : undefined;
+}
+
 export function describeSchedule(schedule: Schedule, timeZone: string, status?: SchedulableStatus): string {
   if (schedule.kind !== "window") return "Runs when you apply it by hand.";
 

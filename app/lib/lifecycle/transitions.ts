@@ -113,7 +113,11 @@ export function describeState(
    * Which kind of run a Resume would continue: the one that left the campaign PARTIAL. A
    * partial revert resumes as a revert, and the button has to say so (#702).
    */
-  context: { resumes?: "APPLY" | "REVERT" } = {},
+  context: {
+    resumes?: "APPLY" | "REVERT";
+    /** When a held campaign's window ends, as the page writes it (#784). */
+    heldUntil?: string;
+  } = {},
 ): StateDescription {
   switch (state) {
     case "DRAFT":
@@ -150,7 +154,12 @@ export function describeState(
         label: "Held — price edited outside Anchor",
         tone: "warning",
         explanation:
-          "Someone changed a price this campaign controls, so the campaign stopped writing rather than overwrite a deliberate decision. Nothing has been lost; choose what should win.",
+          "Someone changed a price this campaign controls, so the campaign stopped writing rather than overwrite a deliberate decision. Nothing has been lost; choose what should win." +
+          // The end still comes while it is held (#784), and the merchant should know what
+          // it will do: everything else goes back on time, the edited prices stay.
+          (context.heldUntil
+            ? ` Its window still ends ${context.heldUntil}: then every other price reverts on schedule, and the edited ones stay as edited until you decide.`
+            : ""),
         nextAction: { label: "Review the drift queue", intent: "drift" },
       };
     case "REVERTING":
