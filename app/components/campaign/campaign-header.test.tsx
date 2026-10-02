@@ -59,6 +59,7 @@ const props = (over: Partial<CampaignDetailProps> = {}) =>
     busy: false,
     rollback: null,
     history: [],
+    runs: [],
     timeZone: "Europe/London",
     warnings: [],
     autoEnroll: false,
@@ -554,6 +555,28 @@ describe("the confirmation says what is about to happen", () => {
     expect(html).toContain("Raised from zero");
     expect(html).toContain("3 would reach zero or below");
     expect(html).not.toContain("guardrail");
+  });
+
+  it("says what the run is doing in place of Apply while it writes (#793)", () => {
+    const started = render(
+      <CampaignHeader
+        {...props({
+          lifecycle: describeState("APPLYING"),
+          state: "APPLYING",
+          timeZone: "UTC",
+          runs: [{ id: "r1", kind: "APPLY", status: "EXECUTING", planned: 1718, verified: 0, failed: 0, skipped: 0, startedAt: "2026-09-25T10:39:00.000Z", finishedAt: null }],
+        } as never)}
+      />,
+    );
+    expect(started, "a second Apply was offered beside Applying").not.toContain("Apply to storefront");
+    expect(started).toContain("Started Sep 25, 2026, 10:39");
+    expect(started).toContain("this page updates when it finishes");
+
+    // Handed to the worker (#790), which has not picked it up yet: no run row to date.
+    const queued = render(
+      <CampaignHeader {...props({ lifecycle: describeState("APPLYING"), state: "APPLYING", timeZone: "UTC", runs: [] } as never)} />,
+    );
+    expect(queued).toContain("Waiting for the background worker");
   });
 
   it("does not mention clamping when nothing clamps", () => {

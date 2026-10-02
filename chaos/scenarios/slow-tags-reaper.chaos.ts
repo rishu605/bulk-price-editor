@@ -126,11 +126,15 @@ describe("chaos: one writer per campaign", () => {
         data: { shopId, campaignId, kind: "APPLY", status: "EXECUTING", occurrenceKey: "APPLY-live", startedAt: new Date(), heartbeatAt: new Date() },
       });
 
-      for (const options of [{ resume: true }, {}, { revert: true }]) {
+      // The same action defers to the run doing it (#793); a revert waits for it to finish.
+      for (const options of [{ resume: true }, {}]) {
         const outcome = await runCampaign(shopId, campaignId, client, options);
-        expect(outcome.refused, `${JSON.stringify(options)} started a second writer`).toMatch(/still being applied by a run that has not finished/);
-        expect(outcome.transient).toBe(true);
+        expect(outcome.deferredTo, `${JSON.stringify(options)} started a second writer`).toBe(live.id);
+        expect(outcome.messages[0]).toMatch(/is still being applied by a run that started just now/);
       }
+      const revert = await runCampaign(shopId, campaignId, client, { revert: true });
+      expect(revert.refused, "a revert started beside a live apply").toMatch(/still being applied/);
+      expect(revert.transient).toBe(true);
       expect(await prisma.campaignRun.count({ where: { campaignId } }), "a second run row was created").toBe(1);
       expect(await statusOf(campaignId)).toBe("PARTIAL");
 

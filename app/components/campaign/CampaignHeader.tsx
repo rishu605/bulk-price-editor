@@ -35,6 +35,8 @@ import { ScheduleButtons, ScheduleModals } from "./ScheduleControls";
 import { ApplyConfirmation, APPLY_MODAL_ID } from "./ApplyConfirmation";
 import { RevertConfirmation, REVERT_MODAL_ID } from "./RevertConfirmation";
 import { SPACE } from "../../lib/ui/spacing";
+import { formatScheduleInstant } from "../../lib/scheduling/window";
+import { IN_FLIGHT } from "./useRunPolling";
 import type { CampaignDetailProps } from "./props";
 
 /** Links the "More actions" button to the menu it opens. */
@@ -59,6 +61,9 @@ export function CampaignHeader({
   keepersPending,
   heldEdits = 0,
   window,
+  state,
+  runs,
+  timeZone,
 }: CampaignDetailProps) {
   return (
     <>
@@ -79,8 +84,12 @@ export function CampaignHeader({
       </s-stack>
 
       <ActionRow>
-        {/* Not rendered at all for a practice campaign — see above. */}
-        {practice ? null : (
+        {/* Not rendered at all for a practice campaign — see above. While a run is writing,
+            what it is doing takes the button's place (#793): a second Apply has nothing to
+            do but stand down, and a black button beside "Applying" asked for one. */}
+        {practice ? null : IN_FLIGHT.has(state) ? (
+          <s-text color="subdued">{writing(runs, timeZone)}</s-text>
+        ) : (
           <>
             {/* Opens the confirmation rather than submitting.
                  *
@@ -296,4 +305,19 @@ export function CampaignHeader({
  */
 function supportHref(campaignId: string): string {
   return `/app/support?${new URLSearchParams({ campaign: campaignId, from: `/app/campaigns/${campaignId}` })}`;
+}
+
+/** The run statuses that are still writing. */
+const LIVE_RUN = new Set(["PLANNING", "QUEUED", "EXECUTING", "VERIFYING"]);
+
+/**
+ * What the header says while a run writes: when it started, or that the worker has yet to
+ * pick it up -- a run handed over by #790 has no row until it does.
+ */
+function writing(runs: ReadonlyArray<{ status: string; startedAt: string | null }>, timeZone: string): string {
+  const live = runs.find((run) => LIVE_RUN.has(run.status));
+  const when = live?.startedAt
+    ? `Started ${formatScheduleInstant(live.startedAt, timeZone)}`
+    : "Waiting for the background worker";
+  return `${when} · this page updates when it finishes`;
 }
