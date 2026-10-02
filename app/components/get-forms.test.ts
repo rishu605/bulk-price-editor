@@ -30,4 +30,15 @@ describe("forms that ask the loader", () => {
     expect(page).toContain('<input type="hidden" name="segment" value={segmentId} />');
     expect(page).toContain('<input type="hidden" name="scope" value={assessment.scope} />');
   });
+
+  it("will not replace baselines while the Scope field shows a scope nobody has checked (#780)", () => {
+    // Between picking a segment and pressing "Check this scope", everything below the
+    // field still describes the scope checked before -- so Replace would rewrite those.
+    const page = sourceOf("app/routes/app.prices.baselines.recapture.tsx");
+    expect(page).toMatch(/<s-select ref=\{scopeField\} name="segment"/);
+    // Natively: React 18 never delivers onChange from a Polaris field (#863).
+    expect(page).toMatch(/field\.addEventListener\("change", changed\)/);
+    expect(page).toMatch(/disabled=\{assessment\.scope === 0 \|\| unchecked \|\| undefined\}/);
+    expect(page).toContain("The scope you picked has not been checked yet.");
+  });
 });
