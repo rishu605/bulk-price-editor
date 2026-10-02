@@ -18,6 +18,11 @@ import { isPlanId, PLAN_ORDER, type PlanId } from "./plans";
 /** Statuses a shop pays for and gets its tier on. */
 const PAID = new Set(["ACTIVE", "ACCEPTED"]);
 
+/** Whether a subscription status is one the shop is paying on. */
+export function paysOn(status: string | null | undefined): boolean {
+  return PAID.has(status?.toUpperCase() ?? "");
+}
+
 /** Statuses a subscription never leaves. FROZEN is not one: a store that unfreezes resumes. */
 const ENDED = new Set(["CANCELLED", "DECLINED", "EXPIRED"]);
 

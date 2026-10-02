@@ -14,16 +14,28 @@ import { describe, expect, it, vi } from "vitest";
 import prisma from "../../app/db.server";
 import { withChaos } from "../harness/scenario";
 
-const deliveries: Array<{ shop: string; payload: unknown }> = [];
+const deliveries: Array<{ shop: string; payload: unknown; admin?: unknown }> = [];
 
 vi.mock("../../app/shopify.server", () => ({
   authenticate: {
     webhook: async () => {
       const next = deliveries.shift()!;
-      return { topic: "APP_SUBSCRIPTIONS_UPDATE", shop: next.shop, payload: next.payload };
+      return { topic: "APP_SUBSCRIPTIONS_UPDATE", shop: next.shop, payload: next.payload, admin: next.admin };
     },
   },
 }));
+
+/** The webhook's Admin API client, answering what Shopify lists as active -- or failing. */
+const shopifySays = (active: string[] | "unreachable") => ({
+  graphql: async () => {
+    if (active === "unreachable") throw new Error("fetch failed");
+    return {
+      json: async () => ({
+        data: { currentAppInstallation: { activeSubscriptions: active.map((id) => ({ id })) } },
+      }),
+    };
+  },
+});
 
 const OLD = "gid://shopify/AppSubscription/7091";
 const NEW = "gid://shopify/AppSubscription/7092";
@@ -32,8 +44,8 @@ const subscription = (gid: string, name: string, status: string) => ({
   app_subscription: { admin_graphql_api_id: gid, name, status },
 });
 
-async function deliver(shop: string, payload: unknown) {
-  deliveries.push({ shop, payload });
+async function deliver(shop: string, payload: unknown, admin?: unknown) {
+  deliveries.push({ shop, payload, admin });
   const { action } = await import("../../app/routes/webhooks.app.subscriptions_update");
   const response = await action({
     request: new Request("https://example.invalid/webhooks/app/subscriptions_update", { method: "POST" }),
@@ -118,6 +130,49 @@ describe("chaos: subscription webhooks out of order", () => {
         ]);
         expect((await planOf(shopId)).planTier, `round ${round}`).toBe("MARKETS");
       }
+    });
+  });
+
+  it("keeps a shop on its new plan when the old plan's ACTIVE is replayed after the switch (#787)", async () => {
+    // Shopify retries webhooks. A delayed ACTIVE for the plan the merchant left reads
+    // exactly like an upgrade -- the payload cannot tell them apart -- and applying it
+    // moved them back onto the old plan. Shopify's list of active subscriptions can.
+    await withChaos("subscription-replay", { catalog: { products: 1, variantsPerProduct: 1 } }, async (chaos) => {
+      const { shopId, domain } = chaos.fixture;
+      await prisma.shop.update({
+        where: { id: shopId },
+        data: { planTier: "MARKETS", subscriptionGid: NEW, subscriptionStatus: "ACTIVE" },
+      });
+
+      await deliver(domain, subscription(OLD, "Anchor Growth", "ACTIVE"), shopifySays([NEW]));
+
+      expect(await planOf(shopId), "a replayed ACTIVE for the old plan moved the merchant back onto it").toEqual({
+        planTier: "MARKETS",
+        subscriptionGid: NEW,
+        subscriptionStatus: "ACTIVE",
+      });
+      const ignored = await prisma.auditLogEntry.findFirstOrThrow({ where: { shopId, action: "billing.subscription-ignored" } });
+      expect(ignored.entityId).toBe(OLD);
+      expect(ignored.after).toMatchObject({ reason: expect.stringContaining("no longer lists") });
+
+      // Replayed again: the same answer, and still one plan.
+      await deliver(domain, subscription(OLD, "Anchor Growth", "ACTIVE"), shopifySays([NEW]));
+      expect((await planOf(shopId)).planTier).toBe("MARKETS");
+    });
+  });
+
+  it("still applies a real upgrade, and applies as before when Shopify cannot be asked", async () => {
+    await withChaos("subscription-upgrade", { catalog: { products: 1, variantsPerProduct: 1 } }, async (chaos) => {
+      const { shopId, domain } = chaos.fixture;
+
+      await onGrowth(shopId);
+      await deliver(domain, subscription(NEW, "Anchor Markets", "ACTIVE"), shopifySays([NEW]));
+      expect((await planOf(shopId)).planTier, "a genuine upgrade was refused").toBe("MARKETS");
+
+      // A failed lookup is not evidence: refusing would charge for a plan the app withholds.
+      await onGrowth(shopId);
+      await deliver(domain, subscription(NEW, "Anchor Markets", "ACTIVE"), shopifySays("unreachable"));
+      expect((await planOf(shopId)).planTier).toBe("MARKETS");
     });
   });
 });

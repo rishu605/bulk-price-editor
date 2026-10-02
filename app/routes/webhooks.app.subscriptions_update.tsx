@@ -10,12 +10,13 @@ import type { ActionFunctionArgs } from "react-router";
 
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { applySubscriptionUpdate } from "../services/billing.server";
+import { applySubscriptionUpdate, subscriptionStillActive } from "../services/billing.server";
+import { toAdminClient } from "../services/admin-client.server";
 import { parseSubscription } from "../lib/billing/subscription-payload";
 import { logger } from "../lib/logging/logger";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { payload, topic, shop } = await authenticate.webhook(request);
+  const { payload, topic, shop, admin } = await authenticate.webhook(request);
 
   const record = await prisma.shop.findUnique({ where: { domain: shop }, select: { id: true } });
   if (!record) {
@@ -25,7 +26,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return new Response();
   }
 
-  await applySubscriptionUpdate(record.id, parseSubscription(payload));
+  // With a session, Shopify is asked whether a subscription is still active before a paid
+  // event about it replaces the current one -- a replayed event about the plan the
+  // merchant left is not (#787). Without one, the update applies as it always did.
+  await applySubscriptionUpdate(record.id, parseSubscription(payload), {
+    ...(admin ? { stillActive: subscriptionStillActive(toAdminClient(admin)) } : {}),
+  });
 
   return new Response();
 };
