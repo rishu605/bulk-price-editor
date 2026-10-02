@@ -27,7 +27,9 @@ import {
   type Plan,
   type PlanId,
 } from "../lib/billing/plans";
-import { staleSubscriptionUpdate } from "../lib/billing/subscription-payload";
+import { paysOn, staleSubscriptionUpdate } from "../lib/billing/subscription-payload";
+import type { AdminClient } from "../lib/execution/sync-executor";
+import type { AnchorActiveSubscriptionsQuery } from "../types/admin.generated";
 import { logger } from "../lib/logging/logger";
 
 /** Shopify's subscription statuses that mean "this plan is real right now". */
@@ -130,9 +132,54 @@ const WRITE_ATTEMPTS = 3;
  * processes at once, and a check followed by a plain write would let the stale one win
  * anyway.
  */
+/**
+ * The subscriptions Shopify says this installation is paying on right now.
+ *
+ * Asked on receipt of a paid event about a subscription that is not the stored one
+ * (#787). Shopify redelivers webhooks, and their order is not guaranteed: a delayed
+ * "ACTIVE" for the plan a merchant left yesterday looks exactly like an upgrade, and
+ * applying it would put them back on the old plan. The payload cannot tell the two apart;
+ * the installation's own list can.
+ */
+export const ACTIVE_SUBSCRIPTIONS_QUERY = `#graphql
+  query AnchorActiveSubscriptions {
+    currentAppInstallation {
+      activeSubscriptions {
+        id
+      }
+    }
+  }
+`;
+
+/**
+ * Whether Shopify still lists a subscription as active, or null when it cannot say.
+ *
+ * Null -- a failed query, no client -- leaves the update to be applied as it always was:
+ * refusing a real upgrade because a lookup failed would charge a merchant for a plan the
+ * app then withholds.
+ */
+export function subscriptionStillActive(client: AdminClient): (gid: string) => Promise<boolean | null> {
+  return async (gid) => {
+    try {
+      const { data } = await client.request<AnchorActiveSubscriptionsQuery>(ACTIVE_SUBSCRIPTIONS_QUERY, {});
+      const active = data?.currentAppInstallation?.activeSubscriptions;
+      return active ? active.some((subscription) => subscription.id === gid) : null;
+    } catch (error) {
+      logger.warn("active subscriptions unavailable", {
+        reason: error instanceof Error ? error.message : "unknown",
+      });
+      return null;
+    }
+  };
+}
+
 export async function applySubscriptionUpdate(
   shopId: string,
   update: SubscriptionUpdate,
+  options: {
+    /** Asks Shopify whether a subscription is still active. See `subscriptionStillActive`. */
+    stillActive?: (gid: string) => Promise<boolean | null>;
+  } = {},
 ): Promise<void> {
   for (let attempt = 1; attempt <= WRITE_ATTEMPTS; attempt++) {
     const before = await prisma.shop.findUnique({
@@ -141,7 +188,23 @@ export async function applySubscriptionUpdate(
     });
     if (!before) return;
 
-    const stale = staleSubscriptionUpdate(before, update);
+    let stale = staleSubscriptionUpdate(before, update);
+
+    // A paid event that would replace the shop's subscription with another one. Shopify
+    // is asked whether that one is still active: a replay of the plan the merchant left
+    // is not, and applying it would move them back onto it (#787).
+    if (
+      !stale &&
+      options.stillActive &&
+      update.gid &&
+      before.subscriptionGid &&
+      update.gid !== before.subscriptionGid &&
+      paysOn(update.status) &&
+      (await options.stillActive(update.gid)) === false
+    ) {
+      stale = `${update.status} for ${update.gid}, which Shopify no longer lists among this shop's active subscriptions -- a delayed or replayed event`;
+    }
+
     if (stale) {
       await prisma.auditLogEntry.create({
         data: {
