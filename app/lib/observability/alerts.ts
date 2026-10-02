@@ -47,6 +47,12 @@ export interface SignalWindow {
    */
   unpriceableVariants: number | null;
   /**
+   * How long the web process's `/healthz` waited for the database, or null when it could
+   * not be asked (#803). Read over HTTP because the alerting job runs in the worker, whose
+   * pool is its own: the web process can be starved while the worker's queries are fine.
+   */
+  pagesDatabaseWaitMs: number | null;
+  /**
    * Errors and requests broken down by shop, or null when nobody has looked.
    *
    * The global rate above cannot see the incident this is for. One shop whose every
@@ -98,6 +104,19 @@ export const DIVERGENCE_RATE = 0.005;
 
 /** Execution jobs waiting. A backlog here means merchant campaigns are late. */
 export const EXECUTION_BACKLOG = 50;
+
+/**
+ * How long `/healthz`'s trivial query may wait before the app reads as degraded (#803).
+ *
+ * `SELECT 1` takes a millisecond; anything over this is time spent waiting for a pooled
+ * connection, which is what every page in the app is doing at the same moment. One shop's
+ * 102,132-variant apply ran the pool dry: the check took 6.8 to 10.4 seconds and still
+ * said "ok" while every shop's pages were blank.
+ */
+export const DATABASE_WAIT_DEGRADED_MS = 2_000;
+
+/** And how long before somebody is woken for it. */
+export const PAGES_DATABASE_WAIT_MS = 5_000;
 
 /**
  * Which alerts a window of signals fires.
@@ -211,6 +230,18 @@ export function evaluate(window: SignalWindow): AlertCondition[] {
         "a campaign silently skips them and the merchant is told nothing. It is how a whole " +
         "catalogue was once importable and unpriceable at the same time.",
       runbook: "docs/runbooks.md#alert-variants-that-cannot-be-priced",
+    });
+  }
+
+  if (window.pagesDatabaseWaitMs !== null && window.pagesDatabaseWaitMs > PAGES_DATABASE_WAIT_MS) {
+    firing.push({
+      id: "pages-waiting-for-database",
+      severity: "page",
+      title: "Pages are waiting for the database",
+      because:
+        "Every shop's pages are slow or blank, and a run writing prices in the web process can die of a " +
+        "pool timeout part-way, leaving prices half-changed (#802). One shop's large write ran the pool dry.",
+      runbook: "docs/runbooks.md#alert-pages-waiting-for-the-database",
     });
   }
 

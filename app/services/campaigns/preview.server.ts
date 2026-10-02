@@ -51,6 +51,46 @@ export interface PreviewOptions {
   client?: AdminClient;
 }
 
+/**
+ * The campaign page's preview: the plan, unless a run is writing this campaign (#803).
+ *
+ * A plan loads every candidate and baseline in scope. The page used to make one on every
+ * load and every tab switch, including while the campaign's own run was writing the same
+ * tables -- on a 102,132-variant apply, a merchant watching the run page held connections
+ * the run needed, the 10-connection pool ran dry, every shop's pages went blank and the run
+ * died of a pool timeout (#802). While a run writes, what it will change is already decided,
+ * and the run's own progress is the thing worth showing.
+ */
+export async function pagePreview(
+  shopId: string,
+  campaignId: string,
+  options: PreviewOptions = {},
+): Promise<CampaignPreview> {
+  const campaign = await prisma.campaign.findFirstOrThrow({
+    where: { id: campaignId, shopId },
+    select: { name: true, status: true },
+  });
+  if (campaign.status !== "APPLYING" && campaign.status !== "REVERTING") return previewCampaign(shopId, campaignId, options);
+
+  return {
+    campaignId,
+    name: campaign.name,
+    status: campaign.status,
+    counts: { planned: 0, noop: 0, skipped: 0, clamped: 0, clampedToMinimum: 0 },
+    rows: [],
+    writePath: "",
+    writePathReason: "",
+    markets: [],
+    margin: null,
+    blastRadius: false,
+    staleBaselines: 0,
+    writing:
+      `This campaign is being ${campaign.status === "REVERTING" ? "reverted" : "applied"} right now, so there is no ` +
+      "preview to show: what it changes is already decided. The Runs tab follows the run, and the preview comes back " +
+      "when it finishes.",
+  };
+}
+
 export async function previewCampaign(
   shopId: string,
   campaignId: string,

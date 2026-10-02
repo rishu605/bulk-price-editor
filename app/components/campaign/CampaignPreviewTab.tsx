@@ -31,6 +31,14 @@ import type { CampaignDetailProps } from "./props";
 import { Card } from "../Card";
 
 export function CampaignPreviewTab({ preview, approval, fetcher, busy }: CampaignDetailProps) {
+  // A run is writing this campaign: no plan was made, and none is needed (#803).
+  if (preview.writing) {
+    return (
+      <Card heading="Preview">
+        <s-paragraph>{preview.writing}</s-paragraph>
+      </Card>
+    );
+  }
 
   return (
     <>

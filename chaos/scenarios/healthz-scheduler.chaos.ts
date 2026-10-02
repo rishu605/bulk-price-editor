@@ -26,7 +26,7 @@ import { withChaos } from "../harness/scenario";
 
 type Health = {
   status: string;
-  database: { ok: boolean };
+  database: { ok: boolean; waitMs?: number; detail?: string };
   mail: { ok: boolean; detail?: string };
   scheduler: { ok: boolean; detail?: string; secondsSinceTick: number | null };
 };
@@ -100,6 +100,38 @@ describe("chaos: healthz reports the scheduler", () => {
         expect(missing.body.mail.detail).toContain("SUPPORT_EMAIL");
         expect(missing.body.status).toBe("degraded");
         expect(missing.status).toBe(200);
+      },
+    );
+  });
+
+  it("reads degraded, not ok, while pages wait seconds for a connection (#803)", async () => {
+    await withChaos(
+      "healthz-pool",
+      { catalog: { products: 1, variantsPerProduct: 1 }, percent: -10 },
+      async () => {
+        await beat(new Date());
+        const quick = await health();
+        expect(quick.body.status).toBe("ok");
+        expect(quick.body.database.waitMs).toBeLessThan(2_000);
+
+        // A pool run dry: the query waits for a connection. 25 Sep measured 6.8 to 10.4 s
+        // here, with "ok" in the body the whole time.
+        const queryRaw = prisma.$queryRaw.bind(prisma);
+        vi.spyOn(prisma, "$queryRaw").mockImplementation((async (...args: unknown[]) => {
+          await new Promise((resolve) => setTimeout(resolve, 2_200));
+          return (queryRaw as (...a: unknown[]) => unknown)(...args);
+        }) as never);
+        try {
+          const slow = await health();
+          expect(slow.body.status, "a starved pool read as healthy").toBe("degraded");
+          expect(slow.body.database.ok, "slow is not down").toBe(true);
+          expect(slow.body.database.waitMs).toBeGreaterThan(2_000);
+          expect(slow.body.database.detail).toMatch(/pages are waiting for database connections/);
+          // Never a 503: a deploy's health check would fail for load the release did not cause.
+          expect(slow.status).toBe(200);
+        } finally {
+          vi.restoreAllMocks();
+        }
       },
     );
   });

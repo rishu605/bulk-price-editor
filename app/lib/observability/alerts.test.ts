@@ -28,11 +28,24 @@ const quiet: SignalWindow = {
   divergenceRate: 0,
   executionQueueDepth: 0,
   unpriceableVariants: 0,
+  pagesDatabaseWaitMs: 0,
   shopRates: null,
 };
 
 const ids = (window: Partial<SignalWindow>) =>
   evaluate({ ...quiet, ...window }).map((alert) => alert.id);
+
+describe("pages waiting for the database (#803)", () => {
+  it("pages when the web process waits seconds for a connection", () => {
+    // The 25 Sep measurement: /healthz took 6.8 to 10.4 s while every page was blank.
+    expect(ids({ pagesDatabaseWaitMs: 6_800 })).toContain("pages-waiting-for-database");
+  });
+
+  it("stays quiet for an ordinary wait, and when nobody could ask", () => {
+    expect(ids({ pagesDatabaseWaitMs: 40 })).not.toContain("pages-waiting-for-database");
+    expect(ids({ pagesDatabaseWaitMs: null })).not.toContain("pages-waiting-for-database");
+  });
+});
 
 describe("a healthy window", () => {
   it("fires nothing", () => {
@@ -77,6 +90,7 @@ describe("what a missing signal means", () => {
         divergenceRate: null,
         executionQueueDepth: null,
         unpriceableVariants: null,
+        pagesDatabaseWaitMs: null,
         shopRates: null,
       }),
     ).toEqual([]);
@@ -124,6 +138,7 @@ describe("every alert is actionable", () => {
       divergenceRate: 0.5,
       executionQueueDepth: 5_000,
       unpriceableVariants: 400,
+      pagesDatabaseWaitMs: 60_000,
       shopRates: [{ shopId: "shop-1", errors: 40, requests: 100 }],
     });
 
@@ -153,6 +168,7 @@ describe("one shop failing while the rest are fine", () => {
     divergenceRate: 0,
     executionQueueDepth: 0,
     unpriceableVariants: 0,
+    pagesDatabaseWaitMs: 0,
   };
 
   const ids = (window: Parameters<typeof evaluate>[0]) => evaluate(window).map((a) => a.id);
@@ -246,13 +262,14 @@ describe("every alert leads somewhere", () => {
     divergenceRate: 0.5,
     executionQueueDepth: 5_000,
     unpriceableVariants: 400,
+    pagesDatabaseWaitMs: 60_000,
     shopRates: [{ shopId: "shop-1", errors: 40, requests: 100 }],
   });
 
   it("fires every condition, so this file cannot silently stop covering one", () => {
     // If a condition is added and this number is not, the assertions below stop being
     // exhaustive without failing — which is the same rot they exist to prevent.
-    expect(all.length).toBe(7);
+    expect(all.length).toBe(8);
   });
 
   for (const alert of all) {
