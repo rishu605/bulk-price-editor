@@ -63,6 +63,10 @@ async function runCampaignJob(ref: JobRef): Promise<void> {
   const { runCampaign } = await import("../services/campaigns/run.server");
   await runCampaign(ref.shopId, ref.campaignId, client, {
     revert: ref.revert === true,
+    resume: ref.resume === true,
+    actor: ref.actor,
+    skipVariantGids: ref.skipVariantGids,
+    skipReason: ref.skipReason,
     ...(ref.claimedFrom ? { claimedFrom: ref.claimedFrom as CampaignState } : {}),
   });
 }

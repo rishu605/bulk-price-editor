@@ -16,7 +16,7 @@ import {
   answerForError,
   answerForRun,
   FLOW_ACTOR,
-  FLOW_INLINE_ROWS,
+  FLOW_INLINE_BUDGET_MS,
   recordFlowRequest,
   respond,
   type FlowAnswer,
@@ -57,7 +57,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const outcome = await runCampaign(shop.id, campaign.id, toAdminClient(admin), {
       actor: FLOW_ACTOR,
       revert: true,
-      inlineRowLimit: FLOW_INLINE_ROWS,
+      inlineBudgetMs: FLOW_INLINE_BUDGET_MS,
     });
     answer = answerForRun(outcome, campaign.name, "ended");
   } catch (error) {

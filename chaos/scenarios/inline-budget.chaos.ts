@@ -48,9 +48,9 @@ describe("chaos: a run too large for its request is refused, not abandoned halfw
         });
         const pricesBefore = ctx.livePrices();
 
-        // Twelve variants against a limit of three. The real limit is 120,000; what is
-        // under test is the comparison and everything it protects, not the constant.
-        const refused = await ctx.apply({ inlineRowLimit: 3 });
+        // Four products against a budget of a millisecond. What is under test is the
+        // comparison and everything it protects, not the constant.
+        const refused = await ctx.apply({ inlineBudgetMs: 1 });
 
         expect(refused.refused, "a refusal has to say so in the outcome").toBeTruthy();
         expect(refused.refused, "and tell the merchant where to go next").toMatch(
@@ -112,7 +112,7 @@ describe("chaos: a run too large for its request is refused, not abandoned halfw
         // A limit far below the scope. Refusing here would strand a store at 20% off
         // because it is large -- the guard causing the incident it exists to prevent. With
         // no worker queue to hand it to, it runs here, as it always did.
-        const reverted = await ctx.revert({ inlineRowLimit: 1 });
+        const reverted = await ctx.revert({ inlineBudgetMs: 1 });
 
         expect(reverted.refused, "a revert is never gated, on anything").toBeFalsy();
         expect(reverted.clean).toBe(true);

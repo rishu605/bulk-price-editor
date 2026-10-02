@@ -20,13 +20,21 @@ import { logger } from "../../lib/logging/logger";
 import type { RunOutcome } from "../campaigns/types";
 
 /**
- * How many variants a Flow action writes before answering.
- *
- * At the measured 1.75 ms a variant this is about 3.5 seconds of writing, leaving room in
- * Flow's ten for authentication, planning and read-back. Anything larger is handed to the
- * background worker and answered at once.
+ * How many variants a Flow baseline capture takes on before answering; a larger capture
+ * is handed to the background worker (#773). Capturing writes no prices, so the price
+ * budget below does not apply to it.
  */
 export const FLOW_INLINE_ROWS = 2_000;
+
+/**
+ * How long a Flow action may spend writing prices before answering (#790).
+ *
+ * Half of Flow's ten seconds, leaving the rest for authentication, planning and
+ * read-back. At the measured cost of a product on the sync path that is a handful of
+ * products; anything larger is handed to the background worker and answered at once.
+ * See `inline-budget.ts`.
+ */
+export const FLOW_INLINE_BUDGET_MS = 5_000;
 
 export const FLOW_ACTOR = "shopify-flow";
 

@@ -1,5 +1,5 @@
 /**
- * How many variants one HTTP request can price before its connection is closed.
+ * How much writing one HTTP request can do before its connection is closed.
  *
  * `runCampaign` executes inline, so a campaign applied from the campaign page is written
  * by the web process during a single request. Railway's proxy closes a request after
@@ -7,66 +7,130 @@
  * it returns — so five minutes is the real ceiling, not the fifteen that applies to a
  * streaming response.
  *
- * Measured on `anchor-perf`: 62,535 variants took 109 seconds end to end, about 1.75ms
- * per variant. Five minutes therefore lands somewhere near 170,000 variants in one
- * campaign — not a hypothetical size for a product whose performance store exists at
- * 102,132 precisely because that is the scale it targets.
- *
  * **The failure it prevents is the bad kind.** Exceeding the ceiling does not cancel the
  * work. The proxy closes the connection while `runCampaign` carries on writing, so the
- * merchant sees an error and their storefront changes anyway — the one outcome this
+ * merchant sees a bare "502" and their storefront changes anyway — the one outcome this
  * product exists to prevent, arriving through a timeout nobody documented.
  *
- * So the limit is deliberately well under the ceiling rather than close to it. At
- * 120,000 the estimate is around three and a half minutes, which leaves room for a slow
- * shop, a throttled Admin API, and the fact that the per-variant figure came from one
- * store on one afternoon.
+ * **The budget is time, not rows (#790).** It used to be 120,000 variants, from 1.75 ms a
+ * variant measured on `anchor-perf` — on the bulk path, where 62,535 variants are one
+ * mutation and the wait is the whole cost. Two things were never in that figure:
  *
- * Above the limit the answer is not "no" — it is "not from a button". The scheduler
- * runs campaigns in the worker, which has no request attached and no deadline, so a
- * scope this size is a scheduling question rather than a refusal.
+ * - **Shopify's bulk queue.** A run over `DEFAULT_THRESHOLD` variants is submitted as one
+ *   bulk operation and polled until Shopify finishes it. The queue is shared with every
+ *   other app on the store and is not ours to know, so a bulk-path run has no estimate at
+ *   all, and never runs inside a request.
+ * - **Per-product calls.** The sync path writes one product per call, and a campaign's
+ *   tag kit is one `tagsAdd` per product after that. Both are network round trips,
+ *   measured below — about four hundred times the bulk figure per product.
  *
- * Checking costs a `variantIndex.count` before every inline apply. Measured on the same
- * store: 8ms for the 102,132-row catalogue, against a run of 109 seconds. The scope
- * columns are GIN-indexed, and the count the plan gate already needed is reused.
+ * A 3,666-variant campaign passed the old check at 3% of the limit, ran for 7½ minutes,
+ * and showed the merchant a bare "502" at five while it kept writing prices and tags. A
+ * 522-variant one on 318 products -- under the bulk threshold, so all of it sync -- takes
+ * 7 minutes 9 seconds with its tag kit, and this budget estimates it at 7 minutes 1.
+ *
+ * Above the budget the answer is not "no" — it is "not in this request". The worker has
+ * no request attached and no deadline, so the run is handed to it and the page follows
+ * the campaign's state until it finishes.
  */
 
 import { formatCount } from "../format/display";
-
-/** Milliseconds per variant, measured end to end including read-back verification. */
-export const MS_PER_VARIANT = 1.75;
+import { DEFAULT_THRESHOLD } from "../planning/write-path";
 
 /** What Railway allows a request with no data transferred. */
 export const REQUEST_CEILING_MS = 5 * 60 * 1000;
 
 /**
- * The most a synchronous apply may attempt.
+ * Milliseconds per product on the sync path: one `productVariantsBulkUpdate`, its share
+ * of the read-back, and the ledger rows either side.
  *
- * Not `REQUEST_CEILING_MS / MS_PER_VARIANT`. That is the cliff; this is the guardrail,
- * and the distance between them is the point.
+ * Measured on `boltify-apps`: 108 products (152 variants) applied in 70.1 s in August,
+ * about 650 ms a product; 318 products (522 variants) priced in 230 s on 2 Oct, about
+ * 725 ms. A product's variants share one call, so this is per product, not per variant.
  */
-export const MAX_INLINE_ROWS = 120_000;
+export const MS_PER_SYNC_PRODUCT = 725;
 
-/** Roughly how long a scope of this size will take, for a message a merchant can act on. */
-export function estimateMinutes(rows: number): number {
-  return Math.max(1, Math.round((rows * MS_PER_VARIANT) / 60_000));
+/**
+ * Milliseconds per product the tag kit touches: one `tagsAdd` (or `tagsRemove` on a
+ * revert), sequential, with its ledger row written before and after.
+ *
+ * Measured on `boltify-apps` (2 Oct): 110 products tagged in 67.2 s, about 610 ms each --
+ * as much as pricing the product took in the first place.
+ */
+export const MS_PER_TAGGED_PRODUCT = 600;
+
+/**
+ * What the campaign page may spend writing inside its request.
+ *
+ * Well under the ceiling, not at it: the per-product figures came from one store, a shop
+ * being throttled by the Admin API is slower, and planning, read-back and the market
+ * surfaces all happen inside the same five minutes.
+ */
+export const PAGE_INLINE_BUDGET_MS = 2 * 60 * 1000;
+
+/** What a run will do, counted before it starts. */
+export interface InlineWork {
+  /** Variants in scope. Over `DEFAULT_THRESHOLD` the run takes the bulk path. */
+  variants: number;
+  /** Products those variants belong to: the sync path writes one product per call. */
+  products: number;
+  /** Products the tag kit adds to or removes from. Zero for a campaign with no tags. */
+  taggedProducts: number;
 }
 
 /**
- * The refusal, or null when the scope fits.
+ * Roughly how long the writing takes, or null when it goes to Shopify's bulk queue,
+ * whose wait is not ours to estimate.
+ */
+export function estimateMs(work: InlineWork): number | null {
+  if (work.variants > DEFAULT_THRESHOLD) return null;
+  return work.products * MS_PER_SYNC_PRODUCT + work.taggedProducts * MS_PER_TAGGED_PRODUCT;
+}
+
+/**
+ * Why this run cannot finish inside `budgetMs`, in a sentence a merchant can read, or
+ * null when it can.
  *
- * Names the number, the reason and the way forward — the error taxonomy requires all
+ * It names the size and the reason; the caller adds what happens next, which differs
+ * between handing the run to the worker and refusing it.
+ */
+export function overBudget(work: InlineWork, budgetMs: number): string | null {
+  const ms = estimateMs(work);
+  const variants = `${formatCount(work.variants)} ${work.variants === 1 ? "variant" : "variants"}`;
+
+  if (ms === null) {
+    return (
+      `This campaign covers ${variants}, which go to Shopify as one bulk operation. Shopify ` +
+      "queues those behind every other app's on your store, and a request cannot wait on a " +
+      "queue nobody can see the end of."
+    );
+  }
+  if (ms <= budgetMs) return null;
+
+  const what =
+    work.taggedProducts > 0
+      ? `pricing and tagging ${formatCount(work.products)} products`
+      : `pricing ${formatCount(work.products)} products`;
+  return `This campaign covers ${variants}, and ${what} takes ${roughly(ms)} — longer than this request can wait.`;
+}
+
+/** "about 40 seconds", "about 3 minutes": never "0 minutes", never false precision. */
+function roughly(ms: number): string {
+  if (ms < 90_000) return `about ${Math.max(10, Math.round(ms / 10_000) * 10)} seconds`;
+  return `about ${Math.round(ms / 60_000)} minutes`;
+}
+
+/**
+ * The refusal, for a run over budget with no background worker to hand it to.
+ *
+ * Names the size, the reason and the way forward — the error taxonomy requires all
  * three, and "too large" on its own leaves a merchant with a campaign they cannot run
  * and no idea what to do about it.
  */
-export function refuseInline(rows: number, limit = MAX_INLINE_ROWS): string | null {
-  if (rows <= limit) return null;
-
+export function refuseInline(reason: string): string {
   return (
-    `This campaign covers ${formatCount(rows)} variants, and applying it from ` +
-    `here would take about ${estimateMinutes(rows)} minutes — longer than a browser ` +
-    `request is allowed to run. It would be cut off partway through while still writing ` +
-    `prices, which is worse than not starting. Schedule it instead: a scheduled campaign ` +
-    `runs in the background with no time limit, and reports the same result when it finishes.`
+    `${reason} Started from here, it would be cut off partway through while still writing ` +
+    "prices, which is worse than not starting. Schedule it instead: a scheduled campaign " +
+    "runs in the background with no time limit, and reports the same result when it finishes."
   );
 }
