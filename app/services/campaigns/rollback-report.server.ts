@@ -50,7 +50,7 @@ export async function rollbackReport(
   const [candidates, storeGuardrails, applied] = await Promise.all([
     loadCandidates(shopId, ast, undefined, importIdsOf(resolvable)),
     guardrailsFor(shopId),
-    appliedValues(campaignId),
+    appliedValues(campaignId, campaign.excludedVariantGids),
   ]);
 
   // The report is a list of what this campaign wrote, so the ledger defines the rows
@@ -191,7 +191,16 @@ async function mirrorState(
  * differing from its intent is not drift — it is the failure, and the run already
  * reports that.
  */
-async function appliedValues(campaignId: string): Promise<Map<string, bigint | null>> {
+async function appliedValues(
+  campaignId: string,
+  /**
+   * Variants this campaign has let go of -- "Revert this variant" -- whose live price is
+   * Anchor's own recompute, not somebody's edit. Comparing them with the sale price the
+   * campaign once wrote reported them as "changed since … someone edited those on
+   * purpose" and took the plain Revert away (#886). They are no longer the campaign's.
+   */
+  excluded: readonly string[] = [],
+): Promise<Map<string, bigint | null>> {
   const runs = await prisma.campaignRun.findMany({
     where: { campaignId, kind: "APPLY" },
     orderBy: { createdAt: "desc" },
@@ -204,6 +213,14 @@ async function appliedValues(campaignId: string): Promise<Map<string, bigint | n
     where: {
       runId: { in: runs.map((r) => r.id) },
       status: { in: ["VERIFIED", "APPLIED"] },
+      // The base price only, because that is what it is compared with: the mirror's base
+      // live price. Market rows are written after base rows, so "newest wins" picked a
+      // market price for every variant of a campaign with markets -- and every one of them
+      // read as "changed since … someone edited those on purpose" the moment it was
+      // applied (#777).
+      surfaceKind: "BASE",
+      priceListGid: "",
+      ...(excluded.length > 0 ? { variantGid: { notIn: [...excluded] } } : {}),
     },
     orderBy: { id: "desc" },
     select: { variantGid: true, intendedPrice: true },
