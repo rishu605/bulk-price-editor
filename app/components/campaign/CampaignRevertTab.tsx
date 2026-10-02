@@ -21,7 +21,9 @@ export function CampaignRevertTab({ rollback, preview, fetcher, busy }: Campaign
         <Card heading="If you revert this campaign">      <s-paragraph>
             <s-text>
               {rollback.straightforward
-                ? `All ${rollback.counts.total} variants are still at the price this campaign set. Reverting recomputes each one without it.`
+                ? rollback.counts.total === 1
+                  ? "The 1 variant is still at the price this campaign set. Reverting recomputes its price without this campaign."
+                  : `All ${rollback.counts.total} variants are still at the price this campaign set. Reverting recomputes each one without it.`
                 : `${rollback.counts.drifted} of ${rollback.counts.total} variants have been changed since this campaign set them. Someone edited those on purpose — tick any you want left alone, then revert.`}
             </s-text>
           </s-paragraph>
