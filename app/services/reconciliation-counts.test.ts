@@ -22,8 +22,10 @@
  * `reconciliation.chaos.ts`'s job, against a real engine and a real ledger.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
+
+import { rawSource } from "../lib/testing/source";
 
 import { describe, expect, it } from "vitest";
 
@@ -107,7 +109,7 @@ describe("the drift predicate still describes drift", () => {
       .filter((name) => !name.includes("."))
       .sort();
     const latest = migrations
-      .map((name) => readFileSync(join(process.cwd(), "prisma/migrations", name, "migration.sql"), "utf8"))
+      .map((name) => rawSource("prisma/migrations", name, "migration.sql"))
       .filter((sql) => sql.includes('"variant_changes_landed_lookup"'))
       .pop();
     expect(latest, "the index this query relies on is gone").toBeDefined();
