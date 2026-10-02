@@ -17,8 +17,13 @@
  *   prevent (edge case E6).
  *
  * Nothing here writes a price. The webhook must return quickly or Shopify retries it,
- * and a price write is far too slow; enrollment only marks the campaign, and the
- * scheduler applies on its next tick.
+ * and a price write is far too slow; enrollment only marks the campaign with the
+ * variants it gained, and the scheduler prices those variants on its next tick.
+ *
+ * And nothing here touches a campaign that is being ended (#805). A revert that died
+ * part-way left its campaign Active, the webhooks of the revert's own writes enrolled a
+ * handful of variants, and the re-apply they queued -- a whole-campaign run -- put the
+ * sale back on 19,000 variants the merchant had just asked to restore.
  */
 
 import prisma from "../db.server";
@@ -54,6 +59,12 @@ export async function enrollNewVariants(
   const matches: CampaignMatch[] = [];
 
   for (const campaign of campaigns) {
+    const history = await wholeRunHistory(campaign.id);
+    // Being ended: a revert asked for since its last apply, in flight or stopped part-way.
+    // It is not a campaign anything should join, and a lower-priority one that also covers
+    // the variant is what the revert itself resolves to -- so it does not compete here.
+    if (history.ending) continue;
+
     // Let the database apply the filter rather than re-implementing the AST here.
     const matched = await prisma.variantIndex.findMany({
       where: {
@@ -68,15 +79,23 @@ export async function enrollNewVariants(
     });
     if (matched.length === 0) continue;
 
-    // What this campaign has already priced. Product-update webhooks fire for stock,
+    // What this campaign has already planned. Product-update webhooks fire for stock,
     // title and tag edits constantly, so without this every edit to an on-sale
     // product would queue a fresh run.
+    //
+    // Any ledger row since the campaign last ended, whatever its state: a variant it wrote,
+    // skipped, failed or left pending is one it already knows about -- a Resume finishes
+    // those, not an enrolment. Counting only the rows that landed made every one of them
+    // look new on each edit (#805). Since the last revert, so a variant that left the scope
+    // in one occurrence and is back in the next is new again.
     const priced = await prisma.variantChange.findMany({
       where: {
         shopId,
         variantGid: { in: matched.map((row) => row.variantGid) },
-        run: { campaignId: campaign.id, kind: "APPLY" },
-        status: { in: ["APPLIED", "VERIFIED", "CLAMPED"] },
+        run: {
+          campaignId: campaign.id,
+          ...(history.lastRevertAt ? { createdAt: { gt: history.lastRevertAt } } : {}),
+        },
       },
       select: { variantGid: true },
       distinct: ["variantGid"],
@@ -102,9 +121,10 @@ export async function enrollNewVariants(
       source: "AUTO_ENROLL",
     });
 
+    // Appended in the database, so two webhooks enrolling at once both keep their variants.
     await prisma.campaign.update({
       where: { id: assignment.campaignId },
-      data: { enrollPendingAt: new Date() },
+      data: { enrollPendingAt: new Date(), enrollPendingVariantGids: { push: assignment.enroll } },
     });
 
     await prisma.auditLogEntry.create({
@@ -156,16 +176,53 @@ export async function pendingEnrollments(): Promise<
 }
 
 /**
- * Clears the pending mark before the re-apply runs, not after.
+ * Clears the pending mark before the re-apply runs, not after, and returns the variants it
+ * held -- or null when another worker claimed it first.
  *
  * Clearing afterwards would discard any enrolment that arrived *during* the run.
  * Clearing first costs at most one redundant re-apply -- which is idempotent, so it
  * writes nothing -- while the alternative silently drops products.
+ *
+ * Read and cleared under the row's lock, so a webhook enrolling at the same moment cannot
+ * lose its variants: its append lands either before this (and is returned) or after (and
+ * stays marked for the next tick).
  */
-export async function claimEnrollment(campaignId: string): Promise<boolean> {
-  const claimed = await prisma.campaign.updateMany({
-    where: { id: campaignId, enrollPendingAt: { not: null } },
-    data: { enrollPendingAt: null },
+export async function claimEnrollment(campaignId: string): Promise<string[] | null> {
+  return prisma.$transaction(async (tx) => {
+    const held = await tx.$queryRaw<Array<{ variantGids: string[] | null }>>`
+      SELECT "enrollPendingVariantGids" AS "variantGids" FROM "campaigns"
+       WHERE "id" = ${campaignId} AND "enrollPendingAt" IS NOT NULL
+         FOR UPDATE`;
+    if (held.length === 0) return null;
+    await tx.campaign.update({
+      where: { id: campaignId },
+      data: { enrollPendingAt: null, enrollPendingVariantGids: [] },
+    });
+    return [...new Set(held[0].variantGids ?? [])].sort();
   });
-  return claimed.count > 0;
+}
+
+/**
+ * Whether this campaign is being ended: its latest whole-campaign run is a revert -- asked
+ * for, writing, or stopped part-way -- so nothing should join it or be priced into it.
+ */
+export async function endingSinceLastApply(campaignId: string): Promise<boolean> {
+  return (await wholeRunHistory(campaignId)).ending;
+}
+
+/**
+ * The campaign's whole-campaign runs, as enrolment needs them. Runs over named variants --
+ * a single-variant revert, an enrolment -- say nothing about the campaign as a whole.
+ */
+async function wholeRunHistory(campaignId: string): Promise<{ ending: boolean; lastRevertAt: Date | null }> {
+  const whole = { campaignId, NOT: { occurrenceKey: { startsWith: "VARIANT-" } } };
+  const [latest, lastRevert] = await Promise.all([
+    prisma.campaignRun.findFirst({ where: whole, orderBy: { createdAt: "desc" }, select: { kind: true } }),
+    prisma.campaignRun.findFirst({
+      where: { ...whole, kind: "REVERT" },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true },
+    }),
+  ]);
+  return { ending: latest?.kind === "REVERT", lastRevertAt: lastRevert?.createdAt ?? null };
 }

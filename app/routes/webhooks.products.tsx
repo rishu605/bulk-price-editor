@@ -27,7 +27,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { logger } from "../lib/logging/logger";
 import { parseMoney } from "../lib/money/money";
-import { checkForDrift } from "../services/drift.server";
+import { checkForDrift, ourEchoes } from "../services/drift.server";
 import { enrollNewVariants } from "../services/auto-enroll.server";
 import { toAdminClient } from "../services/admin-client.server";
 import { giftCardFlagFor } from "../services/gift-card.server";
@@ -104,6 +104,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const isGiftCard = await giftCardFlagFor(shop.id, productGid, admin ? toAdminClient(admin) : null);
 
   const seenVariantGids: string[] = [];
+  const seenValues: Array<{ variantGid: string; price: bigint | null; compareAt: bigint | null }> = [];
 
   const tags = Array.isArray(product.tags)
     ? product.tags
@@ -190,6 +191,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     seenVariantGids.push(variantGid);
+    seenValues.push({ variantGid, price, compareAt });
   }
 
   // Variants that used to be on this product and are no longer on it.
@@ -249,8 +251,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // Failures here must not fail the webhook. Shopify would retry the whole payload,
   // re-running the mirror update for no benefit, and a missed enrolment is recovered
   // by the next product edit or catalogue sync -- whereas a retry storm is not.
+  //
+  // Not the echo of a price Anchor wrote: that is a variant some run already planned, and
+  // a revert's own writes enrolling variants is how a sale came back on products the
+  // merchant was restoring (#805).
   try {
-    await enrollNewVariants(shop.id, seenVariantGids);
+    const echoes = await ourEchoes(shop.id, seenValues);
+    await enrollNewVariants(
+      shop.id,
+      seenVariantGids.filter((variantGid) => !echoes.has(variantGid)),
+    );
   } catch (error) {
     // Through the logger: this is the enrolment path, which captures baselines, so
     // its failures are the ones in this file most likely to name a price.

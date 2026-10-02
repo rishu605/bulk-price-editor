@@ -98,6 +98,40 @@ export async function isOurEcho(
 }
 
 /**
+ * Which of these values are the echo of something we wrote recently: `isOurEcho` for a
+ * whole webhook's variants in one query.
+ */
+export async function ourEchoes(
+  shopId: string,
+  values: Array<{ variantGid: string; price: bigint | null; compareAt: bigint | null }>,
+): Promise<Set<string>> {
+  const priced = values.filter((value) => value.price !== null);
+  if (priced.length === 0) return new Set();
+
+  const hashesOf = (value: (typeof priced)[number]) => [
+    hashValue(value.price, value.compareAt),
+    hashValue(value.price, ANY_COMPARE_AT),
+  ];
+  const matches = await prisma.writeIntent.findMany({
+    where: {
+      shopId,
+      variantGid: { in: priced.map((value) => value.variantGid) },
+      valueHash: { in: priced.flatMap(hashesOf) },
+      writtenAt: { gte: new Date(Date.now() - INTENT_TTL_MS) },
+    },
+    select: { variantGid: true, valueHash: true },
+  });
+
+  // The query matched any variant's hash against any variant; only a variant's own counts.
+  const found = new Set(matches.map((match) => `${match.variantGid}|${match.valueHash}`));
+  return new Set(
+    priced
+      .filter((value) => hashesOf(value).some((hash) => found.has(`${value.variantGid}|${hash}`)))
+      .map((value) => value.variantGid),
+  );
+}
+
+/**
  * Examines an incoming price for a variant and records drift if warranted.
  *
  * Drift is deliberately narrow: it means the price changed *while a campaign

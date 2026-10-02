@@ -85,7 +85,7 @@ describe("duplicating a campaign", () => {
 
     const { data } = prisma.campaign.create.mock.calls[0]![0];
     expect(data.status).toBe("DRAFT");
-    for (const field of ["startAt", "endAt", "enrollPendingAt", "runs", "id"]) {
+    for (const field of ["startAt", "endAt", "enrollPendingAt", "enrollPendingVariantGids", "runs", "id"]) {
       expect(data, `a copy must not carry ${field}`).not.toHaveProperty(field);
     }
     // The window inside the blob as well: a copy runs by hand until somebody dates it.

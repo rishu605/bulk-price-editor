@@ -382,6 +382,10 @@ model Campaign {
   /// cleared once the scheduler has re-applied. A timestamp rather than a boolean
   /// so a queue that stops draining is visibly stuck rather than merely "true".
   enrollPendingAt DateTime?
+  /// The variants waiting behind `enrollPendingAt`, so the scheduler prices those and
+  /// nothing else. A whole-campaign re-apply for them re-discounted everything a
+  /// part-finished revert had just restored (#805). Cleared with the mark.
+  enrollPendingVariantGids String[] @default([])
 
   excludedVariantGids String[] @default([])
 
