@@ -15,8 +15,9 @@ import { describe, expect, it, vi } from "vitest";
 
 // `vi.mock` is hoisted above the imports, so the factory cannot close over a `const`
 // declared here — `vi.hoisted` is the way to share one spy with it.
-const { previewCampaign } = vi.hoisted(() => ({ previewCampaign: vi.fn() }));
+const { previewCampaign, scopeSize } = vi.hoisted(() => ({ previewCampaign: vi.fn(), scopeSize: vi.fn(async () => 5_000) }));
 vi.mock("./preview.server", () => ({ previewCampaign }));
+vi.mock("./scope-size.server", () => ({ scopeSize }));
 
 import { blastRadiusRefusal } from "./blast-radius.server";
 
@@ -39,7 +40,6 @@ describe("over the threshold", () => {
   it("accepts the word however it was typed", async () => {
     // A merchant who types "Apply" has confirmed. Case is not the point of the check.
     for (const typed of ["apply", "APPLY", " Apply "]) {
-      previewCampaign.mockResolvedValueOnce(preview());
       expect(await blastRadiusRefusal("shop", "c1", typed)).toBeNull();
     }
   });
@@ -69,5 +69,27 @@ describe("what it reads", () => {
     await blastRadiusRefusal("shop", "c1", "");
 
     expect(previewCampaign).toHaveBeenCalledWith("shop", "c1");
+  });
+});
+
+describe("asked without a plan where it can be (#803)", () => {
+  it("does not plan the campaign to check a word that was typed", async () => {
+    previewCampaign.mockClear();
+    expect(await blastRadiusRefusal("shop", "c1", "apply")).toBeNull();
+    expect(previewCampaign, "a full plan ran to check the word 'apply'").not.toHaveBeenCalled();
+  });
+
+  it("does not plan a scope too small to cross the threshold", async () => {
+    previewCampaign.mockClear();
+    scopeSize.mockResolvedValueOnce(1_000);
+    expect(await blastRadiusRefusal("shop", "c1", "")).toBeNull();
+    expect(previewCampaign).not.toHaveBeenCalled();
+  });
+
+  it("still plans a large scope with nothing typed, since only the plan knows what it writes", async () => {
+    previewCampaign.mockClear();
+    previewCampaign.mockResolvedValueOnce(preview());
+    expect(await blastRadiusRefusal("shop", "c1", "")).toContain("5,000");
+    expect(previewCampaign).toHaveBeenCalledTimes(1);
   });
 });

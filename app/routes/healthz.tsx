@@ -39,20 +39,33 @@
 
 import prisma from "../db.server";
 import { supportEmailConfigured } from "../services/support.server";
-import { TICK_SILENCE_SECONDS } from "../lib/observability/alerts";
+import { DATABASE_WAIT_DEGRADED_MS, TICK_SILENCE_SECONDS } from "../lib/observability/alerts";
 import { secondsSinceBeat } from "../services/scheduler-heartbeat.server";
 
 interface Check {
   ok: boolean;
   detail?: string;
+  /** How long the database took to answer `SELECT 1`, connection wait included (#803). */
+  waitMs?: number;
 }
 
 async function checkDatabase(): Promise<Check> {
+  const started = Date.now();
   try {
     await prisma.$queryRaw`SELECT 1`;
-    return { ok: true };
+    const waitMs = Date.now() - started;
+    if (waitMs > DATABASE_WAIT_DEGRADED_MS) {
+      return {
+        ok: true,
+        waitMs,
+        detail:
+          `The database took ${(waitMs / 1000).toFixed(1)} s to answer a trivial query: pages are waiting for ` +
+          "database connections, so the app is slow or blank for every shop. Something is holding the pool.",
+      };
+    }
+    return { ok: true, waitMs };
   } catch (error) {
-    return { ok: false, detail: error instanceof Error ? error.message : String(error) };
+    return { ok: false, waitMs: Date.now() - started, detail: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -133,7 +146,13 @@ export async function loader() {
 
   return new Response(
     JSON.stringify({
-      status: database.ok ? (redis.ok && scheduler.ok && mail.ok ? "ok" : "degraded") : "unhealthy",
+      // Slow is degraded, not down: a 503 would fail a deploy's health check for load the
+      // new release did not cause.
+      status: database.ok
+        ? redis.ok && scheduler.ok && mail.ok && (database.waitMs ?? 0) <= DATABASE_WAIT_DEGRADED_MS
+          ? "ok"
+          : "degraded"
+        : "unhealthy",
       database,
       redis,
       scheduler,

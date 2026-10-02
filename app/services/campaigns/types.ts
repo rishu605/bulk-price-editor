@@ -178,6 +178,12 @@ export interface CampaignPreview {
    * campaign was running on them, so their baselines are out of date (#745).
    */
   staleBaselines: number;
+  /**
+   * Set instead of a plan while a run is writing this campaign (#803): why the page shows
+   * no preview. Planning the whole scope on every load held database connections the run
+   * itself needed -- on a 102,132-variant apply, enough to starve every shop's pages.
+   */
+  writing?: string;
 }
 
 export interface RunOutcome {

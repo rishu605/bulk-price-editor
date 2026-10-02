@@ -1,4 +1,6 @@
 import { previewCampaign } from "./preview.server";
+import { scopeSize } from "./scope-size.server";
+import { BLAST_RADIUS_THRESHOLD } from "./types";
 import { formatCount } from "../../lib/format/display";
 
 /**
@@ -22,9 +24,16 @@ export async function blastRadiusRefusal(
   campaignId: string,
   typed: string,
 ): Promise<string | null> {
+  // Answered without a plan wherever it can be (#803). The Apply POST planned the whole
+  // campaign here and then `runCampaign` planned it again: on a 102,132-variant campaign,
+  // two full loads of candidates and baselines before a price moved, in the pool the
+  // pages and the run share. The word typed needs no plan to check, and a scope no larger
+  // than the threshold cannot write more than it.
+  if (typed.trim().toLowerCase() === "apply") return null;
+  if ((await scopeSize(shopId, campaignId)) <= BLAST_RADIUS_THRESHOLD) return null;
+
   const preview = await previewCampaign(shopId, campaignId);
   if (!preview.blastRadius) return null;
-  if (typed.trim().toLowerCase() === "apply") return null;
 
   return (
     `This campaign writes ${formatCount(preview.counts.planned)} prices. ` +

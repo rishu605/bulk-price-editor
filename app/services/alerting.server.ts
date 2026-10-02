@@ -120,6 +120,7 @@ export async function gather(now: Date = new Date()): Promise<SignalWindow> {
     // worth staying asleep over.
     unpriceableVariants: typeof audit?.unpriceable === "number" ? audit.unpriceable : null,
     executionQueueDepth: null,
+    pagesDatabaseWaitMs: await pagesDatabaseWait(),
     // Only shops that produced errors can be spiking, so the error groups drive the list
     // and the delivery counts supply each denominator. A shop with deliveries and no
     // errors is healthy and does not need a row.
@@ -143,6 +144,26 @@ export interface AlertDelivery {
  * Never throws. An alerting system that can fail the thing it watches is worse than no
  * alerting system, because it fails at exactly the moment something else is already wrong.
  */
+/**
+ * How long the web process's `/healthz` waited for the database (#803).
+ *
+ * Asked over HTTP because this runs in the worker, whose connection pool is separate: the
+ * pages can be starved while every query here is instant. A check that does not answer
+ * within the timeout waited at least that long. One that cannot connect at all is the
+ * deploy's health check's business, not this signal's, and reads as "we do not know".
+ */
+async function pagesDatabaseWait(timeoutMs = 20_000): Promise<number | null> {
+  const base = process.env.SHOPIFY_APP_URL;
+  if (!base) return null;
+  try {
+    const response = await fetch(new URL("/healthz", base), { signal: AbortSignal.timeout(timeoutMs) });
+    const body = (await response.json()) as { database?: { waitMs?: unknown } };
+    return typeof body.database?.waitMs === "number" ? body.database.waitMs : null;
+  } catch (error) {
+    return error instanceof Error && error.name === "TimeoutError" ? timeoutMs : null;
+  }
+}
+
 export async function checkAlerts(
   now: Date = new Date(),
   options: { queueDepth?: number | null } = {},

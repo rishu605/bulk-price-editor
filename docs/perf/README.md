@@ -166,6 +166,41 @@ reads were in flight:
 | 3 | 3 |
 | 25 | 25 |
 
+## A 100k-variant run while the pages are in use (#803)
+
+The question #516 left open: what the app feels like while one shop writes a whole large
+catalogue. On 25 Sep, in production, the answer was *blank*. anchor-perf's 102,132-variant
+apply ran inside a web request and shared the web process's 10 connections with every page
+of every shop: `/healthz`'s `SELECT 1` waited **6.8–10.4 s** and still said "ok", campaign
+pages stayed blank for minutes, and the apply itself died of a pool timeout part-way (#802).
+
+What changed since: a run too long for its request goes to the worker, whose pool is its
+own (#790); the campaign page no longer plans while a run writes (#803); the Apply POST no
+longer plans to check a typed word (#803); `/healthz` reports how long that query waited
+and reads degraded past 2 s, and the alerting job pages past 5 s (#803).
+
+Measured 2 Oct on a local dev preview (web and worker each with their own 10-connection
+pool, local Postgres): *QA 803*, 10% off all 102,132 anchor-perf variants, then reverted.
+
+| | Before (25 Sep, production) | After (2 Oct, local) |
+|---|---|---|
+| Apply request | outlived the proxy | **271 ms**, handed to the worker |
+| Apply run | died of a pool timeout at 55,000 rows | **102,132 verified in 2 min 12 s**, no pool timeout |
+| Revert run | — | **98,301 verified in 2 min 39 s** (see #906 for the 3,831 it skipped) |
+| `/healthz` database wait during the apply | 6.8–10.4 s, reported "ok" | median **1 ms**, max **73 ms** (41 samples) |
+| `/healthz` database wait during the revert | — | median **1 ms**, max **162 ms** (47 samples) |
+| The writing campaign's own page | blank for 5+ minutes | **38 ms**, **62 ms** server time (no plan made) |
+| That page while the campaign was still a draft | — | **3,091 ms** (one full plan of 102,132 variants) |
+
+The page measured is the worst case: the campaign whose run is writing, which is the page
+a merchant watches. Another shop's pages share the same web pool, which `/healthz` times
+directly, and it never waited more than 162 ms. Not measured: the same load in production,
+where web and worker share one Postgres over the network; the alert will say if it starves.
+
+The measurement found #906: the mirror refresh after a run is row by row and runs after
+the campaign reads Active, so a revert started inside those minutes plans against a stale
+mirror and skips rows.
+
 ## What these numbers do not cover
 
 Webhook lag under load. Twenty sequential edits on an idle store is the best

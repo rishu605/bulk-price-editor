@@ -99,6 +99,7 @@ describe("on-call expectations", () => {
     divergenceRate: 0.5,
     executionQueueDepth: 5_000,
     unpriceableVariants: 400,
+    pagesDatabaseWaitMs: 60_000,
     shopRates: [{ shopId: "shop-1", errors: 40, requests: 100 }],
   };
 

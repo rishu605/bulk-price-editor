@@ -8,7 +8,7 @@ import { ensureShop } from "../services/shop.server";
 import { toAdminClient } from "../services/admin-client.server";
 import {
   campaignRuns,
-  previewCampaign,
+  pagePreview,
   reinstateVariant,
   revertVariant,
   rollbackReport,
@@ -63,7 +63,7 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     // The client lets the review step say how each market will actually be written.
     // Without it the preview says the choice is made at run time, which is honest but
     // less useful than the answer.
-    previewCampaign(shop.id, campaignId, { client: toAdminClient(admin) }),
+    pagePreview(shop.id, campaignId, { client: toAdminClient(admin) }), // no plan while a run writes (#803)
     campaignRuns(shop.id, campaignId),
     prisma.campaign.findFirstOrThrow({
       where: { id: campaignId, shopId: shop.id },

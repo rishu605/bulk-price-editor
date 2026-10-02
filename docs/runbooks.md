@@ -246,6 +246,31 @@ single poison job, its failure is in `error_events` with the job id.
 
 ---
 
+## Alert: pages waiting for the database
+
+**Signal:** `/healthz` → `database.waitMs`, read by the worker's alerting job over HTTP. Pages
+at over 5 s; `/healthz` itself reads `degraded` from 2 s.
+
+**What it means.** `SELECT 1` takes a millisecond; the rest is the web process waiting for a
+pooled connection (10 per process, `app/lib/db/pool.ts`). Every page of every shop is waiting
+the same way, so the app is slow or blank for everybody. On 25 Sep one shop's 102,132-variant
+apply did this (#803): the check took 6.8–10.4 s, the pages went blank for minutes, and the
+apply itself died of a pool timeout part-way (#802).
+
+**Diagnose.** Find what holds the pool. In Postgres, `pg_stat_activity` for the web's
+connections: long queries against `variant_changes`, `baselines` or `price_surface_entries`
+point at a run or a preview over a large scope. Runs over the inline budget go to the worker
+(#790) and the campaign page no longer plans while a run writes (#803), so a web-side
+culprit is new information — note it on the issue.
+
+**Remediate.** Usually it drains when the large operation finishes. If a run in the web
+process is the cause and is still writing, let it finish rather than restarting the web
+service: a restart mid-write leaves a Partial campaign to resume. If nothing is running and
+the wait persists, restart the web service and look at `pg_stat_activity` for leaked
+connections.
+
+---
+
 ## Watch: a shop's budget saturated
 
 **Metric:** `budget.saturation`
@@ -387,7 +412,7 @@ Every alert the app can raise, and what to do when it arrives. Kept in step with
 `app/lib/observability/alerts.ts` by `runbook-coverage.test.ts`: a new alert, a removed one,
 or a changed severity fails CI until this table matches.
 
-**Wake up for these.** All six mean merchant prices are wrong or about to be, which is the
+**Wake up for these.** All seven mean merchant prices are wrong or about to be, which is the
 line `alerts.ts` draws between a page and a graph.
 
 | Alert | Response | Why it cannot wait |
@@ -398,6 +423,7 @@ line `alerts.ts` draws between a page and a graph.
 | `error-spike` | **Page** | Something is broken across shops. |
 | `shop-error-spike` | **Page** | One merchant's every campaign is failing inside a healthy global rate — the incident the overall error rate cannot see. |
 | `unpriceable-variants` | **Page** | Variants are mirrored, counted and shown, with no baseline — so campaigns silently skip them and the merchant is told nothing. |
+| `pages-waiting-for-database` | **Page** | Every shop's pages are blank, and a run writing in the web process can die of a pool timeout part-way, leaving prices half-changed. |
 
 **Look at these next working day.**
 
