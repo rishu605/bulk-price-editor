@@ -123,8 +123,9 @@ describe("chaos: importing costs", () => {
           expect(live).toBeLessThan(baseline.get(gid)!);
         }
 
+        // Recorded as clamped, not as the rule's own price (#792).
         const clamped = await prisma.variantChange.count({
-          where: { runId: applied.runId, status: "VERIFIED" },
+          where: { runId: applied.runId, status: "CLAMPED" },
         });
         expect(clamped).toBe(variantGids.length);
       },

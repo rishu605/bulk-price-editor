@@ -30,6 +30,7 @@ import type { AdminClient } from "../../lib/execution/sync-executor";
 import { priceListLabel } from "../../lib/markets/display-name";
 import { runCampaign } from "./run.server";
 import type { RunOutcome } from "./types";
+import { isLanded, LANDED } from "../../lib/execution/landed";
 
 export interface VariantRevertOptions {
   actor?: string;
@@ -144,7 +145,7 @@ async function describe(campaignName: string, outcome: RunOutcome, already: bool
 
   const rows = outcome.runId
     ? await prisma.variantChange.findMany({
-        where: { runId: outcome.runId, status: { in: ["VERIFIED", "FAILED", "APPLIED", "PENDING"] } },
+        where: { runId: outcome.runId, status: { in: [...LANDED, "FAILED", "APPLIED", "PENDING"] } },
         select: { surfaceKind: true, priceListGid: true, status: true },
       })
     : [];
@@ -157,8 +158,8 @@ async function describe(campaignName: string, outcome: RunOutcome, already: bool
     const list = lists.find((candidate) => candidate.priceListGid === row.priceListGid);
     return list ? `${priceListLabel(list)} (${list.currency})` : "a market";
   };
-  const done = [...new Set(rows.filter((row) => row.status === "VERIFIED").map(label))];
-  const notDone = [...new Set(rows.filter((row) => row.status !== "VERIFIED").map(label))];
+  const done = [...new Set(rows.filter((row) => isLanded(row.status)).map(label))];
+  const notDone = [...new Set(rows.filter((row) => !isLanded(row.status)).map(label))];
 
   if (rows.length === 0) {
     // Nothing to write: the storefront already shows what resolution says it should.

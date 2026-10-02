@@ -1,4 +1,5 @@
 import { humanise } from "../lib/format/label";
+import { reasonForRow } from "../lib/planning/reasons";
 import { MoneyCell } from "./MoneyCell";
 import { RowState } from "./RowState";
 import { EmptyState } from "./AsyncState";
@@ -104,7 +105,7 @@ export function PreviewTable({
               {/* Every row a campaign will write is "pending", so it is the whole
                   table. `clamped` and `skipped` are the rows worth finding. */}
               <RowState
-                label={`${humanise(row.status)}${row.reason ? ` \u00b7 ${row.reason}` : ""}`}
+                label={`${humanise(row.status)}${row.reason ? ` \u00b7 ${reasonForRow(row.reason)}` : ""}`}
                 tone={toneFor(PREVIEW_TONE, row.status)}
                 ordinary={row.status === "pending" && !row.reason}
               />
@@ -144,7 +145,7 @@ function describeCell(row: PreviewRow, priceListGid: string): MarketCell {
     return {
       kind: "text",
       text: cell.reason
-        ? `${humanise(cell.status)} \u00b7 ${cell.reason}`
+        ? `${humanise(cell.status)} \u00b7 ${reasonForRow(cell.reason)}`
         : humanise(cell.status),
     };
   }

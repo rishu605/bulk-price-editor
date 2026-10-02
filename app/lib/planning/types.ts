@@ -77,8 +77,14 @@ export interface PlanCounts {
   noop: number;
   /** Excluded by policy, with reasons. */
   skipped: number;
-  /** Written, but raised to a guardrail floor. */
+  /** Written, but raised: to a guardrail floor, or to the smallest price. */
   clamped: number;
+  /**
+   * Of `clamped`, rows raised to the smallest price because the rule reached zero or below
+   * (E10). Not a guardrail, and never described as one: a store with none set was told
+   * thirteen prices "would price below a guardrail" (#792).
+   */
+  clampedToMinimum: number;
 }
 
 export type PlanOutcome =

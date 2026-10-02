@@ -11,6 +11,7 @@ import { downloadCsv, filenameSlug } from "../../lib/reporting/csv";
 import { ledgerCsv } from "../../lib/reporting/ledger-csv";
 import type { CampaignDetailProps } from "./props";
 import { Card } from "../Card";
+import { isLanded } from "../../lib/execution/landed";
 
 export function CampaignLedgerTab({
   preview,
@@ -53,7 +54,7 @@ export function CampaignLedgerTab({
               // Only rows this campaign actually wrote. Offering to revert a row that
               // failed or was skipped would promise to undo something that never
               // happened.
-              row.status === "VERIFIED" || row.status === "APPLIED" ? (
+              isLanded(row.status) || row.status === "APPLIED" ? (
                 <fetcher.Form method="post">
                   <input type="hidden" name="intent" value="revert-variant" />
                   <input type="hidden" name="variantGid" value={row.variantGid} />

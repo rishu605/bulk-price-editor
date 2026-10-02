@@ -156,7 +156,7 @@ export interface CampaignPreview {
   campaignId: string;
   name: string;
   status: string;
-  counts: { planned: number; noop: number; skipped: number; clamped: number };
+  counts: { planned: number; noop: number; skipped: number; clamped: number; clampedToMinimum: number };
   rows: PreviewRow[];
   blocked?: { reason: string; variantGid: string };
   writePath: string;

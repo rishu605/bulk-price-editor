@@ -12,6 +12,7 @@
 import prisma from "../db.server";
 import { logger } from "../lib/logging/logger";
 import { notify, readPreferences } from "./notifications.server";
+import { LANDED } from "../lib/execution/landed";
 
 const WEEK_MS = 7 * 24 * 60 * 60_000;
 
@@ -51,7 +52,7 @@ export async function sendDueDigests(now: Date = new Date()): Promise<number> {
       const [campaignsRun, variantsChanged, driftOpen, partialRuns] = await Promise.all([
         prisma.campaignRun.count({ where: { shopId: shop.id, createdAt: { gte: since } } }),
         prisma.variantChange.count({
-          where: { shopId: shop.id, status: "VERIFIED", createdAt: { gte: since } },
+          where: { shopId: shop.id, status: { in: [...LANDED] }, createdAt: { gte: since } },
         }),
         prisma.driftEvent.count({ where: { shopId: shop.id, resolution: "PENDING" } }),
         prisma.campaignRun.count({

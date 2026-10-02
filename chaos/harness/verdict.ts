@@ -36,7 +36,7 @@ const surfaceKey = (variantGid: string, priceListGid: string | null) =>
   `${variantGid}@${priceListGid ?? ""}`;
 
 /** Rows the merchant does not have to act on; settled, not outstanding. */
-const SETTLED = new Set(["VERIFIED", "SKIPPED", "REVERTED"]);
+const SETTLED = new Set(["VERIFIED", "CLAMPED", "SKIPPED", "REVERTED"]);
 
 export async function judge(
   fixture: Fixture,
@@ -80,7 +80,9 @@ export async function judge(
   // that lie. This also catches a double-apply, since applying twice moves the live
   // price off the intended value computed from the baseline.
   for (const row of rows) {
-    if (row.status !== "VERIFIED") continue;
+    // CLAMPED is a write read back at the clamped price, and asserts it exactly as
+    // VERIFIED does (#792).
+    if (row.status !== "VERIFIED" && row.status !== "CLAMPED") continue;
 
     if (row.intendedPrice === null) continue;
 
@@ -92,7 +94,7 @@ export async function judge(
 
     if (live === undefined) {
       violations.push(
-        `${row.variantGid} is VERIFIED but has no price${where} in the store.`,
+        `${row.variantGid} is ${row.status} but has no price${where} in the store.`,
       );
       continue;
     }
@@ -102,7 +104,7 @@ export async function judge(
     const liveMinor = parseMoney(live, fake.currencyOf(row.priceListGid || null)).amount;
     if (liveMinor !== Number(row.intendedPrice)) {
       violations.push(
-        `${row.variantGid} is VERIFIED at ${row.intendedPrice} minor units${where} ` +
+        `${row.variantGid} is ${row.status} at ${row.intendedPrice} minor units${where} ` +
           `but the store says ${liveMinor}.`,
       );
     }
@@ -165,11 +167,11 @@ export async function judge(
   // which. This exact contradiction shipped: applying a draft wrote and verified
   // every price, then failed the illegal DRAFT -> ACTIVE move at the end, leaving
   // four VERIFIED rows behind a panel that read "nothing has been written".
-  const wroteSomething = rows.some((row) => row.status === "VERIFIED" || row.status === "APPLIED");
+  const wroteSomething = rows.some((row) => ["VERIFIED", "CLAMPED", "APPLIED"].includes(row.status));
   if (wroteSomething && (campaign.status === "DRAFT" || campaign.status === "SCHEDULED")) {
     violations.push(
       `The campaign reports ${campaign.status} -- which tells the merchant nothing has ` +
-        `been written -- but this run has ${rows.filter((r) => r.status === "VERIFIED").length} ` +
+        `been written -- but this run has ${rows.filter((r) => r.status === "VERIFIED" || r.status === "CLAMPED").length} ` +
         `verified rows in the ledger.`,
     );
   }

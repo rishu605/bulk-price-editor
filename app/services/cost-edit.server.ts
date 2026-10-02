@@ -22,6 +22,7 @@ import { applyCostRule, type CostRule } from "../lib/pricing/cost-rules";
 import { money, type Money } from "../lib/money/money";
 import { astToWhere, type FilterAst } from "./segments.server";
 import { guardrailsFor } from "./settings.server";
+import { LANDED } from "../lib/execution/landed";
 
 export interface CostEditResult {
   matched: number;
@@ -187,7 +188,8 @@ export async function newlyViolating(shopId: string): Promise<FloorViolation[]> 
   const written = await prisma.variantChange.findMany({
     where: {
       shopId,
-      status: "VERIFIED",
+      // A clamped row most of all: it sits at the floor a cost change moves (#792).
+      status: { in: [...LANDED] },
       surfaceKind: "BASE",
     },
     select: {

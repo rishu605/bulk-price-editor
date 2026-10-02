@@ -47,6 +47,7 @@ import type { ResolvableCampaign } from "../../lib/pricing/types";
 import { describeMarketSkips } from "../../lib/markets/guardrails";
 import { logger } from "../../lib/logging/logger";
 import { metric } from "../../lib/telemetry/metrics";
+import { LANDED } from "../../lib/execution/landed";
 
 /** Which surfaces a campaign writes to. Stored on the campaign as JSON. */
 export interface CampaignSurfaces {
@@ -562,7 +563,7 @@ export async function revertMarketSurfaces(
     where: {
       shopId,
       surfaceKind: "MARKET",
-      status: { in: ["APPLIED", "VERIFIED"] },
+      status: { in: ["APPLIED", ...LANDED] },
       run: { campaignId },
     },
     select: { variantGid: true, priceListGid: true },

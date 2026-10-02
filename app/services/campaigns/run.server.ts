@@ -1143,21 +1143,34 @@ async function priorLedger(campaignId: string, kind: "APPLY" | "REVERT") {
   }));
 }
 
+/** The Reason column for a clamped row, by what raised it. */
+const CLAMP_REASONS: ReadonlyArray<[string, string]> = [
+  ["below-floor", "Raised to your guardrail floor: the rule would have priced it below it."],
+  ["non-positive-price", "Raised to the smallest price: the rule would have priced it at zero or below."],
+];
+
 async function recordResults(
   runId: string,
   shopId: string,
   rows: ExecutedRows,
 ): Promise<string[]> {
-  const byStatus = new Map<"VERIFIED" | "APPLIED" | "FAILED" | "SKIPPED", string[]>();
+  const byStatus = new Map<"VERIFIED" | "CLAMPED" | "APPLIED" | "FAILED" | "SKIPPED", string[]>();
   const messages: string[] = [];
 
   for (const executed of rows) {
     // A variant deleted mid-run is SKIPPED, not FAILED. Recording it as a failure
     // would make an ordinary merchant action look like a defect, and a run full of
     // "failures" nobody needs to act on is a run nobody reads (E4).
+    //
+    // A clamped row is written and read back like any other, but at a price the rule did
+    // not ask for. CLAMPED says so; VERIFIED left the ledger claiming the rule's own price
+    // for thirteen free products raised to $0.01 (#792). Every reader of "what did we put
+    // on the storefront" counts both -- see `LANDED`.
     const status =
       executed.status === "verified"
-        ? "VERIFIED"
+        ? executed.row.status === "clamped"
+          ? "CLAMPED"
+          : "VERIFIED"
         : executed.status === "failed"
           ? "FAILED"
           : executed.status === "skipped-deleted"
@@ -1183,8 +1196,23 @@ async function recordResults(
         data: {
           status,
           appliedAt: status === "FAILED" ? null : now,
-          verifiedAt: status === "VERIFIED" ? now : null,
+          verifiedAt: status === "VERIFIED" || status === "CLAMPED" ? now : null,
         },
+      }),
+    );
+  }
+
+  // The reason itself, by what raised the price: the merchant's guardrail, or the rule
+  // that no price is ever zero or below -- which is not a guardrail (#792).
+  for (const [reason, text] of CLAMP_REASONS) {
+    const gids = rows
+      .filter((executed) => executed.status === "verified" && executed.row.status === "clamped" && (executed.row.reason ?? "below-floor") === reason)
+      .map((executed) => executed.row.ref.variantGid);
+    if (gids.length === 0) continue;
+    await inChunksCounting(gids, (batch) =>
+      prisma.variantChange.updateMany({
+        where: { runId, shopId, variantGid: { in: batch } },
+        data: { failureReason: text },
       }),
     );
   }

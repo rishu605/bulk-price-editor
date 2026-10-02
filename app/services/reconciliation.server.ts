@@ -29,6 +29,7 @@ import prisma from "../db.server";
 import { PRICES_MAY_BE_LIVE } from "../lib/lifecycle/transitions";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { formatMinorUnits } from "../lib/money/format";
+import { LANDED } from "../lib/execution/landed";
 
 const PAGE_SIZE = ROWS_PER_VIEW;
 
@@ -154,7 +155,7 @@ export async function reconcile(
   // Narrowed in SQL, not after paging, for the same reason.
   if (filters.campaignId) {
     const controlled = await prisma.variantChange.findMany({
-      where: { shopId, status: "VERIFIED", run: { campaignId: filters.campaignId } },
+      where: { shopId, status: { in: [...LANDED] }, run: { campaignId: filters.campaignId } },
       select: { variantGid: true },
       distinct: ["variantGid"],
       take: 5_000,
@@ -189,7 +190,7 @@ export async function reconcile(
     // The most recent verified write per cell. Ordered so the first row seen for a cell
     // is the newest, which is the one that explains the price now.
     prisma.variantChange.findMany({
-      where: { shopId, variantGid: { in: gids }, status: "VERIFIED" },
+      where: { shopId, variantGid: { in: gids }, status: { in: [...LANDED] } },
       orderBy: { verifiedAt: "desc" },
       select: {
         variantGid: true,
@@ -279,7 +280,7 @@ export function driftedFrom(shopId: string): Prisma.Sql {
       SELECT DISTINCT ON (c."variantGid", c."priceListGid")
              c."variantGid", c."priceListGid", c."intendedPrice"
       FROM "variant_changes" c
-      WHERE c."shopId" = ${shopId} AND c."status" = 'VERIFIED'
+      WHERE c."shopId" = ${shopId} AND c."status" IN ('VERIFIED', 'CLAMPED')
       ORDER BY c."variantGid", c."priceListGid", c."verifiedAt" DESC
     ) w ON w."variantGid" = e."variantGid" AND w."priceListGid" = e."priceListGid"
     WHERE e."shopId" = ${shopId}
@@ -333,7 +334,7 @@ export function staleBaselineFrom(
         WHERE c."shopId" = e."shopId"
           AND c."variantGid" = e."variantGid"
           AND c."priceListGid" = e."priceListGid"
-          AND c."status" = 'VERIFIED'
+          AND c."status" IN ('VERIFIED', 'CLAMPED')
           AND k."status" IN (${live})
       )
   `;
@@ -363,7 +364,7 @@ export async function uncontrolledAmong(shopId: string, offBaselineVariantGids: 
         shopId,
         variantGid: { in: offBaselineVariantGids.slice(i, i + 5_000) },
         priceListGid: "",
-        status: "VERIFIED",
+        status: { in: [...LANDED] },
         run: { campaign: { status: { in: [...PRICES_MAY_BE_LIVE] } } },
       },
       select: { variantGid: true },

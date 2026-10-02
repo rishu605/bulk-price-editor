@@ -577,3 +577,84 @@ describe("rounding and clamping order", () => {
     expect(result.price).toEqual(usd(6_699));
   });
 });
+
+describe("a free item stays free (#792)", () => {
+  const free = { price: usd(0) };
+  const reduceBy = (percent: number) =>
+    campaign({ ruleRows: [{ segmentIds: [], rule: { kind: "percent-change", percent: -percent } }] });
+
+  it.each(["clamp", "skip", "block"] as const)(
+    "leaves a $0.00 item alone under a discount, with no guardrails set (%s)",
+    (policy) => {
+      // The ticket exactly: 10% off, nothing configured, and thirteen free products were
+      // written at $0.01 under the positivity rule.
+      const result = resolve({
+        baseline: free,
+        surface: USD,
+        campaigns: [campaign({ ...reduceBy(10), guardrailViolationPolicy: policy })],
+        storeGuardrails: {},
+      });
+      expect(result.price, "a free product was given a price").toBeUndefined();
+      expect(result.meta.outcome, "a free product blocked or priced the run").toBe("skipped");
+      expect(result.meta.reason).toBe("free-item");
+    },
+  );
+
+  it("is not rounded up into a price either", () => {
+    // A .99 ending turns $0.00 into $0.99 if the check comes after rounding.
+    const result = resolve({
+      baseline: free,
+      surface: USD,
+      campaigns: [campaign({ ...reduceBy(10), roundingPolicy: policyOf(charm99) })],
+      storeGuardrails: {},
+    });
+    expect(result.price).toBeUndefined();
+    expect(result.meta.reason).toBe("free-item");
+  });
+
+  it("still takes a price a rule gives it on purpose", () => {
+    const result = resolve({
+      baseline: free,
+      surface: USD,
+      campaigns: [campaign({ ruleRows: [{ segmentIds: [], rule: { kind: "fixed-change", amount: usd(500) } }] })],
+      storeGuardrails: {},
+    });
+    expect(result.price).toEqual(usd(500));
+    expect(result.meta.clamped).toBe(false);
+  });
+
+  it("says a priced item raised from zero was the positivity rule, not a guardrail", () => {
+    // $3.00 less $5.00 is below zero. E10 still holds for a priced item -- and says so.
+    const result = resolve({
+      baseline: { price: usd(300) },
+      surface: USD,
+      campaigns: [campaign({ ruleRows: [{ segmentIds: [], rule: { kind: "fixed-change", amount: usd(-500) } }] })],
+      storeGuardrails: {},
+    });
+    expect(result.price).toEqual(usd(1));
+    expect(result.meta.clamped).toBe(true);
+    expect(result.meta.reason).toBe("non-positive-price");
+  });
+
+  it("names a guardrail floor as the guardrail", () => {
+    const result = resolve({
+      baseline: { price: usd(10_000), cost: usd(6_000) },
+      surface: USD,
+      campaigns: [reduceBy(50)],
+      storeGuardrails: { minMarginPercent: 25 },
+    });
+    expect(result.meta.clamped).toBe(true);
+    expect(result.meta.reason).toBe("below-floor");
+  });
+
+  it("names the positivity rule when a guardrail floor sits below the smallest price", () => {
+    const result = resolve({
+      baseline: { price: usd(300) },
+      surface: USD,
+      campaigns: [campaign({ ruleRows: [{ segmentIds: [], rule: { kind: "fixed-change", amount: usd(-500) } }] })],
+      storeGuardrails: { minPrice: usd(0) },
+    });
+    expect(result.price).toEqual(usd(1));
+    expect(result.meta.reason).toBe("non-positive-price");
+  });
+});

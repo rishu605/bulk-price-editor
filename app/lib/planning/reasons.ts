@@ -25,6 +25,7 @@ export const SKIP_REASON_GROUP: Record<ResolutionReason, string> = {
   "invalid-margin": "have a margin target that cannot be satisfied",
   "invalid-compare-at": "would have had a compare-at price below their price",
   "non-positive-price": "would have priced at or below zero",
+  "free-item": "are free, and the rule would leave them at zero, so they stay free",
 };
 
 /** Singular, for one row in a preview table. */
@@ -38,7 +39,17 @@ export const SKIP_REASON_ROW: Record<ResolutionReason, string> = {
   "invalid-margin": "Margin target cannot be met",
   "invalid-compare-at": "Compare-at would be below the price",
   "non-positive-price": "Would price at or below zero",
+  "free-item": "Free item, left free",
 };
+
+/**
+ * The row phrasing for any planned row, skipped or clamped, or the text itself when it is
+ * not a reason code. The campaign page's preview showed the code -- "Clamped ·
+ * non-positive-price" -- where the wizard's showed the phrase (#792).
+ */
+export function reasonForRow(reason: string): string {
+  return SKIP_REASON_ROW[reason as ResolutionReason] ?? reason;
+}
 
 /** The row phrasing, tolerant of a reason the planner did not attach. */
 export function skipReasonForRow(reason: string | undefined): string {

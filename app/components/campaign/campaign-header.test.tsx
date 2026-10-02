@@ -39,7 +39,7 @@ const preview = (over: Record<string, unknown> = {}) => ({
   campaignId: "c1",
   name: "Autumn sale",
   status: "DRAFT",
-  counts: { planned: 40, noop: 2, skipped: 1, clamped: 0 },
+  counts: { planned: 40, noop: 2, skipped: 1, clamped: 0, clampedToMinimum: 0 },
   rows: [],
   writePath: "sync",
   writePathReason: "under the threshold",
@@ -538,10 +538,22 @@ describe("the confirmation says what is about to happen", () => {
 
   it("calls out rows raised to a guardrail floor, which the rule did not ask for", () => {
     const html = render(
-      <CampaignHeader {...props({ preview: preview({ counts: { planned: 40, noop: 0, skipped: 0, clamped: 3 } }) })} />,
+      <CampaignHeader {...props({ preview: preview({ counts: { planned: 40, noop: 0, skipped: 0, clamped: 3, clampedToMinimum: 0 } }) })} />,
     );
 
     expect(html).toContain("Raised to a floor");
+  });
+
+  it("never calls the rule that no price reaches zero a guardrail (#792)", () => {
+    // A store with no guardrails set was told thirteen prices "would price below a
+    // guardrail" -- they were free products the positivity rule raised to $0.01.
+    const html = render(
+      <CampaignHeader {...props({ preview: preview({ counts: { planned: 40, noop: 0, skipped: 0, clamped: 3, clampedToMinimum: 3 } }) })} />,
+    );
+
+    expect(html).toContain("Raised from zero");
+    expect(html).toContain("3 would reach zero or below");
+    expect(html).not.toContain("guardrail");
   });
 
   it("does not mention clamping when nothing clamps", () => {
@@ -559,7 +571,7 @@ describe("the confirmation says what is about to happen", () => {
 describe("the typed confirmation appears only when it is earned", () => {
   it("asks for it over the blast-radius threshold", () => {
     const html = render(
-      <CampaignHeader {...props({ preview: preview({ blastRadius: true, staleBaselines: 0, counts: { planned: 5000, noop: 0, skipped: 0, clamped: 0 } }) })} />,
+      <CampaignHeader {...props({ preview: preview({ blastRadius: true, staleBaselines: 0, counts: { planned: 5000, noop: 0, skipped: 0, clamped: 0, clampedToMinimum: 0 } }) })} />,
     );
 
     expect(html).toContain("Type apply to confirm");
