@@ -237,6 +237,14 @@ Execution Time: 71.776 ms
 | Reconciliation, first page (p50) | 1,006 ms | **61 ms** |
 | Reconciliation, deep page (p50) | 1,006 ms | **59 ms** |
 
+**Replaced by `variant_changes_landed_lookup` (#792).** Clamped prices became their own
+landed state, so the query reads `status IN ('VERIFIED', 'CLAMPED')` — and a partial index
+on `VERIFIED` alone cannot serve that: on the same 125,070 rows the sort came straight back
+(external merge, 9 MB on disk, **1,060 ms**). Partial on both states, it is an index scan
+again at **93 ms**, and the previous release's `= 'VERIFIED'` query uses it too (56 ms), so
+a rollback keeps its index. `reconciliation-counts.test.ts` holds the query's filter and the
+index predicate together.
+
 **This degraded with use, not with catalogue size.** One ledger row per variant × surface
 × run, retained indefinitely because unlimited history is a deliberate free-tier feature;
 #183 puts an active store at ~7.8M rows a year, and this was at 125K. No larger seed would

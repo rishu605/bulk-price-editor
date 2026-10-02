@@ -126,6 +126,17 @@ export function resolve(input: ResolveInput): Resolution {
     throw error;
   }
 
+  // A free item stays free (#792). A baseline of zero is the merchant's decision -- a
+  // sample, a gift with purchase, a $0 add-on -- and a rule that leaves it at zero or below
+  // has nothing to say about it. The positivity rule below exists to stop a campaign
+  // pushing a *priced* item to nothing; applied here it raised every free product to
+  // $0.01 under "10% off", on a store with no guardrails at all. Checked before rounding:
+  // a .99 ending would otherwise turn $0.00 into $0.99. Skipped whatever the policy, since
+  // a free item is no reason to block a run either.
+  if (!isPositive(baseline.price) && !isPositive(unrounded)) {
+    return skipped(winner, "free-item", rule);
+  }
+
   // Rounded in the currency actually being written, not the store's. The same campaign
   // rounds dollars to .99 and yen to the nearest ten, because that is what each looks
   // right in — which is the entire point of pricing per market.
@@ -144,6 +155,9 @@ export function resolve(input: ResolveInput): Resolution {
 
   let price = rounded;
   let clamped = false;
+  // Which rule raised it: the merchant's floor, or the positivity rule (E10), which is not
+  // a guardrail and must not be described as one (#792).
+  let clampedBy: "below-floor" | "non-positive-price" = "below-floor";
 
   if (violatesFloor(price, effectiveFloor)) {
     switch (winner.guardrailViolationPolicy) {
@@ -162,6 +176,7 @@ export function resolve(input: ResolveInput): Resolution {
         }
         price = effectiveFloor as Money;
         clamped = true;
+        clampedBy = compare(effectiveFloor as Money, floor as Money) > 0 ? "non-positive-price" : "below-floor";
         break;
     }
   }
@@ -177,6 +192,7 @@ export function resolve(input: ResolveInput): Resolution {
       case "clamp":
         price = smallestPositive(currency);
         clamped = true;
+        clampedBy = "non-positive-price";
         break;
     }
   }
@@ -198,6 +214,7 @@ export function resolve(input: ResolveInput): Resolution {
       controlledBy: winner.id,
       appliedRule: rule,
       clamped,
+      ...(clamped ? { reason: clampedBy } : {}),
       floor: effectiveFloor,
       unroundedPrice: unrounded,
     },

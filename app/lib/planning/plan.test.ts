@@ -516,3 +516,37 @@ describe("a campaign is offered only the variants its scope covers (#752)", () =
     expect(out.rows.map((row) => row.campaignId)).toEqual(["broad", "broad"]);
   });
 });
+
+describe("free items and the two kinds of clamp (#792)", () => {
+  const amountOff = campaign({ ruleRows: [{ segmentIds: [], rule: { kind: "fixed-change", amount: usd(-500) } }] });
+
+  it("leaves a free item out, and counts a raise from zero apart from a guardrail floor", () => {
+    const out = planRun({
+      campaigns: [amountOff],
+      candidates: [
+        // Free: stays free, written nowhere.
+        candidate({ ref: baseRef("gid://Variant/free"), baseline: { price: usd(0) }, livePrice: usd(0) }),
+        // $3.00 less $5.00, with no guardrails: the positivity rule raises it to $0.01.
+        candidate({ ref: baseRef("gid://Variant/cheap"), baseline: { price: usd(300) }, livePrice: usd(300) }),
+      ],
+    });
+    if (out.kind !== "ok") throw new Error(out.kind);
+
+    expect(out.rows.find((row) => row.ref.variantGid.endsWith("free"))).toMatchObject({ status: "skipped", reason: "free-item" });
+    expect(out.rows.find((row) => row.ref.variantGid.endsWith("cheap"))).toMatchObject({ status: "clamped", reason: "non-positive-price" });
+    expect(out.counts).toMatchObject({ skipped: 1, clamped: 1, clampedToMinimum: 1 });
+  });
+
+  it("counts a guardrail floor as a guardrail", () => {
+    // $10.00 less $5.00 under a 40% margin on a $4.00 cost: the floor is $6.67.
+    const out = planRun({
+      campaigns: [amountOff],
+      candidates: [candidate({ baseline: { price: usd(1_000), cost: usd(400) }, livePrice: usd(1_000) })],
+      storeGuardrails: { minMarginPercent: 40 },
+    });
+    if (out.kind !== "ok") throw new Error(out.kind);
+
+    expect(out.rows[0]).toMatchObject({ status: "clamped", reason: "below-floor" });
+    expect(out.counts).toMatchObject({ clamped: 1, clampedToMinimum: 0 });
+  });
+});

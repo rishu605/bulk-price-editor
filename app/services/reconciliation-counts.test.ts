@@ -22,6 +22,11 @@
  * `reconciliation.chaos.ts`'s job, against a real engine and a real ledger.
  */
 
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
+
+import { rawSource } from "../lib/testing/source";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -89,11 +94,27 @@ describe("the drift predicate still describes drift", () => {
   const sql = text(driftedFrom("shop_1"));
 
   it("reads the newest verified write per cell", () => {
-    // `DISTINCT ON` with this ordering is what `variant_changes_drift_lookup` was built
+    // `DISTINCT ON` with this ordering is what `variant_changes_landed_lookup` was built
     // to serve. Reordering the sort keys silently returns Postgres to sorting the whole
     // ledger — a 14x regression that no result-level assertion would notice.
     expect(sql).toContain('DISTINCT ON (c."variantGid", c."priceListGid")');
     expect(sql).toContain('ORDER BY c."variantGid", c."priceListGid", c."verifiedAt" DESC');
+  });
+
+  it("filters on exactly the states its index is partial on (#792)", () => {
+    // A partial index serves only a query whose filter implies its predicate. Clamped rows
+    // became a landed state, and an index still partial on VERIFIED alone sent this query
+    // back to sorting 125,070 rows on disk: 1,060 ms against 93.
+    const migrations = readdirSync(join(process.cwd(), "prisma/migrations"))
+      .filter((name) => !name.includes("."))
+      .sort();
+    const latest = migrations
+      .map((name) => rawSource("prisma/migrations", name, "migration.sql"))
+      .filter((sql) => sql.includes('"variant_changes_landed_lookup"'))
+      .pop();
+    expect(latest, "the index this query relies on is gone").toBeDefined();
+    expect(latest).toContain(`WHERE "status" IN ('VERIFIED', 'CLAMPED')`);
+    expect(sql).toContain(`c."status" IN ('VERIFIED', 'CLAMPED')`);
   });
 
   it("considers only cells a campaign has written", () => {

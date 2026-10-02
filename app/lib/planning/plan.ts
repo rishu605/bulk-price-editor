@@ -58,7 +58,7 @@ export function planRun(input: PlanInput): PlanOutcome {
   }
 
   const rows: PlannedRow[] = [];
-  const counts: PlanCounts = { planned: 0, noop: 0, skipped: 0, clamped: 0 };
+  const counts: PlanCounts = { planned: 0, noop: 0, skipped: 0, clamped: 0, clampedToMinimum: 0 };
 
   // `variant_changes` is unique on (runId, variantGid, surfaceKind, priceListGid).
   // Two candidates for the same cell would violate that at INSERT, surfacing as an
@@ -167,12 +167,13 @@ export function planRun(input: PlanInput): PlanOutcome {
       intendedCompareAt: compareAtSet ? resolution.compareAtPrice : undefined,
       intendedCompareAtSet: compareAtSet,
       status: resolution.meta.clamped ? "clamped" : "pending",
-      reason: resolution.meta.clamped ? "below-floor" : undefined,
+      reason: resolution.meta.clamped ? (resolution.meta.reason ?? "below-floor") : undefined,
       campaignId: resolution.meta.controlledBy,
     });
 
     counts.planned++;
     if (resolution.meta.clamped) counts.clamped++;
+    if (resolution.meta.clamped && resolution.meta.reason === "non-positive-price") counts.clampedToMinimum++;
   }
 
   return { kind: "ok", rows, counts };

@@ -32,6 +32,7 @@ import {
   type RollbackRow,
   type RollbackRowKind,
 } from "../../lib/reporting/rollback";
+import { LANDED } from "../../lib/execution/landed";
 
 export {
   classifyRollbackRow,
@@ -212,7 +213,7 @@ async function appliedValues(
   const changes = await prisma.variantChange.findMany({
     where: {
       runId: { in: runs.map((r) => r.id) },
-      status: { in: ["VERIFIED", "APPLIED"] },
+      status: { in: [...LANDED, "APPLIED"] },
       // The base price only, because that is what it is compared with: the mirror's base
       // live price. Market rows are written after base rows, so "newest wins" picked a
       // market price for every variant of a campaign with markets -- and every one of them

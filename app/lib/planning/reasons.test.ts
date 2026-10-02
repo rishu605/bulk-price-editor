@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { SKIP_REASON_GROUP, SKIP_REASON_ROW, skipReasonForRow } from "./reasons";
+import { reasonForRow, SKIP_REASON_GROUP, SKIP_REASON_ROW, skipReasonForRow } from "./reasons";
 
 describe("the two phrasings stay in step", () => {
   it("cover the same reasons", () => {
@@ -50,5 +50,17 @@ describe("a reason the planner did not attach", () => {
 
   it("uses the real wording when there is one", () => {
     expect(skipReasonForRow("below-floor")).toBe("Below your price floor");
+  });
+});
+
+describe("a planned row's reason, skipped or clamped (#792)", () => {
+  it("is phrased, never shown as the code", () => {
+    expect(reasonForRow("non-positive-price")).toBe("Would price at or below zero");
+    expect(reasonForRow("free-item")).toBe("Free item, left free");
+    expect(reasonForRow("below-floor")).toBe("Below your price floor");
+  });
+
+  it("passes through text that is not a code, rather than replacing it", () => {
+    expect(reasonForRow("Excluded by hand")).toBe("Excluded by hand");
   });
 });

@@ -16,6 +16,7 @@
  */
 
 import type { PlannedRow } from "../planning/types";
+import { isLanded } from "./landed";
 
 /** The ledger states a row can be in when a run is picked back up. */
 export type LedgerState =
@@ -46,8 +47,9 @@ export interface ResumePlan {
 /**
  * States that count as settled -- a resumed run must not touch them.
  *
- * SKIPPED and CLAMPED are settled because they were decisions, not failures: the row
- * was deliberately not written, and re-deciding it would produce the same answer.
+ * SKIPPED was a decision, not a failure: the row was deliberately not written, and
+ * re-deciding it would produce the same answer. CLAMPED was written and read back at the
+ * clamped price, like VERIFIED (#792).
  */
 const SETTLED: ReadonlySet<LedgerState> = new Set<LedgerState>([
   "VERIFIED",
@@ -83,7 +85,7 @@ export function planResume(
     }
 
     if (SETTLED.has(previous.status)) {
-      if (previous.status === "VERIFIED") alreadyVerified++;
+      if (isLanded(previous.status)) alreadyVerified++;
       continue;
     }
 
@@ -119,7 +121,7 @@ export function runOutcome(rows: readonly PriorRow[]): {
   let outstanding = 0;
 
   for (const row of rows) {
-    if (row.status === "VERIFIED") verified++;
+    if (isLanded(row.status)) verified++;
     else if (!SETTLED.has(row.status)) outstanding++;
   }
 

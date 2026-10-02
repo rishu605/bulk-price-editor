@@ -24,6 +24,7 @@
 import prisma from "../../db.server";
 import { logger } from "../../lib/logging/logger";
 import { transitionCampaign } from "./lifecycle.server";
+import { LANDED } from "../../lib/execution/landed";
 
 /**
  * How quiet a run must go before it is presumed dead.
@@ -149,7 +150,7 @@ export async function reclaimStaleRuns(
       // when it started.
       const [verified, failed, skipped] = await Promise.all([
         prisma.variantChange.count({
-          where: { runId: run.id, status: "VERIFIED" },
+          where: { runId: run.id, status: { in: [...LANDED] } },
         }),
         prisma.variantChange.count({
           where: { runId: run.id, status: "FAILED" },

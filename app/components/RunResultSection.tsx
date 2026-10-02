@@ -42,7 +42,7 @@ export function RunResultSection({ result }: { result: CampaignResult }) {
       <CountsRow
         items={[
           { label: "Verified", value: counts.verified },
-          { label: "Clamped by a guardrail", value: counts.clamped },
+          { label: "Raised to a floor", value: counts.clamped },
           { label: "Needed no change", value: counts.skipped },
           { label: "Reverted since", value: counts.reverted },
           { label: "Not read back", value: counts.unverified },

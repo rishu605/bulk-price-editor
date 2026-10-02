@@ -194,11 +194,17 @@ export interface ResolutionMeta {
   controlledBy?: string;
   /** The rule that produced the price, for preview attribution. */
   appliedRule?: AdjustmentRule;
-  /** True when a guardrail floor raised the computed price. */
+  /**
+   * True when the computed price was raised: by a guardrail floor, or by the rule that a
+   * price is never zero or below (E10). `reason` says which.
+   */
   clamped: boolean;
   /** The floor that applied, when one was computed. */
   floor?: Money;
-  /** Machine-readable reason for a skip or block. */
+  /**
+   * Machine-readable reason for a skip or block, or, on a clamped price, what raised it:
+   * `below-floor` for a guardrail, `non-positive-price` for the positivity rule.
+   */
   reason?: ResolutionReason;
   /** The price before rounding, for explaining preview output. */
   unroundedPrice?: Money;
@@ -230,7 +236,13 @@ export type ResolutionReason =
    * close to the price that the margin floor is higher than the baseline. Clamping would
    * have raised the price on a "Reduce by" campaign; the row is left alone instead (#740).
    */
-  | "floor-above-baseline";
+  | "floor-above-baseline"
+  /**
+   * The variant's normal price is zero and the rule leaves it at zero or below. A free
+   * item stays free: the positivity rule raised these to the smallest price, $0.01, under
+   * a discount and with no guardrails set (#792).
+   */
+  | "free-item";
 
 export interface Resolution {
   /** The price to write. Absent when nothing should be written. */

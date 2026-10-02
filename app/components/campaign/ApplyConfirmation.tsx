@@ -123,11 +123,19 @@ export function ApplyConfirmation({
           ) : null}
 
           {/* Clamped rows are the one count that changes a price to something the rule
-              did not ask for, so it is never folded into "planned" here. */}
-          {counts.clamped > 0 ? (
+              did not ask for, so it is never folded into "planned" here. A guardrail and
+              the rule that no price reaches zero are two different reasons, and only one
+              of them is something the merchant set (#792). */}
+          {counts.clamped - counts.clampedToMinimum > 0 ? (
             <Fact label="Raised to a floor">
-              {formatCount(counts.clamped)} would price below a guardrail and will be
-              written at the floor instead
+              {formatCount(counts.clamped - counts.clampedToMinimum)} would price below a
+              guardrail and will be written at the floor instead
+            </Fact>
+          ) : null}
+          {counts.clampedToMinimum > 0 ? (
+            <Fact label="Raised from zero">
+              {formatCount(counts.clampedToMinimum)} would reach zero or below and will be
+              written at the smallest price instead
             </Fact>
           ) : null}
 

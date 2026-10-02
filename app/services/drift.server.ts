@@ -27,6 +27,7 @@ import { formatMinorUnits } from "../lib/money/format";
 import { isKnownCurrency } from "../lib/money/currency";
 import { formatMoneyForDisplay, money } from "../lib/money/money";
 import { holdForDrift, releaseHold } from "./campaigns/lifecycle.server";
+import { LANDED } from "../lib/execution/landed";
 
 /** How long a write intent stays valid. Generous: webhook delivery is not instant. */
 const INTENT_TTL_MS = 15 * 60 * 1000;
@@ -147,7 +148,7 @@ export async function checkForDrift(
       shopId,
       variantGid,
       surfaceKind: "BASE",
-      status: "VERIFIED",
+      status: { in: [...LANDED] },
       run: { campaign: { status: "ACTIVE" } },
     },
     orderBy: { createdAt: "desc" },

@@ -17,7 +17,7 @@ import { describe, expect, it } from "vitest";
 import { keepersAfterRevert } from "./keepers.server";
 
 const preview = (owners: Array<string | undefined>, planned = owners.length) => ({
-  counts: { planned, noop: 0, skipped: 0, clamped: 0 },
+  counts: { planned, noop: 0, skipped: 0, clamped: 0, clampedToMinimum: 0 },
   rows: owners.map((campaignId, index) => ({
     variantGid: `gid://v/${index}`,
     title: `Variant ${index}`,

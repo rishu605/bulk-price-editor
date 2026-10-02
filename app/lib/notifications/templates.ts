@@ -214,7 +214,7 @@ function countLines(counts: RunCounts): string[] {
   if (counts.failed > 0) lines.push(`Failed: ${counts.failed}`);
   if (counts.unverified > 0) lines.push(`Applied but not confirmed: ${counts.unverified}`);
   if (counts.skipped > 0) lines.push(`Skipped: ${counts.skipped}`);
-  if (counts.clamped > 0) lines.push(`Adjusted to stay within your guardrails: ${counts.clamped}`);
+  if (counts.clamped > 0) lines.push(`Raised to a floor instead of the rule's price: ${counts.clamped}`);
   return lines;
 }
 
