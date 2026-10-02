@@ -10,6 +10,7 @@
  */
 
 import prisma from "../../db.server";
+import { formatAgo, formatCount } from "../../lib/format/display";
 import type { AdminClient } from "../../lib/execution/sync-executor";
 import { executeRows } from "./execute.server";
 import type { PlannedRow } from "../../lib/planning/types";
@@ -298,13 +299,7 @@ async function executeCampaignRun(
   // the retry it needs.
   if (!options.variantGids) {
     const live = await liveFullRun(campaignId);
-    if (live) {
-      const message =
-        `This campaign is still being ${live.kind === "REVERT" ? "reverted" : "applied"} by a run that has not ` +
-        "finished, so nothing new was started. That run finishes on its own, and this page updates when it " +
-        "does; the Runs tab shows how far it has got.";
-      return { runId: "", planned: 0, verified: 0, failed: 0, unverified: 0, clean: true, messages: [message], refused: message, transient: true };
-    }
+    if (live) return standDown(campaignId, live, options, 0);
   }
 
   // What this run will write, for the inline budget (#790). Counted only for a caller
@@ -507,12 +502,23 @@ async function executeCampaignRun(
       select: { id: true, status: true },
     });
 
+
     // Standing down is right only when the other run is still going. Deferring to a run
     // that already finished left the campaign claimed -- REVERTING or APPLYING -- with
     // nothing behind it, forever (#700). Thrown, so the claim is released like any other
     // failure before the run existed.
     if (existing && FINISHED_RUN.has(existing.status)) {
       throw new OccurrenceFinishedError(occurrenceKey, existing.id, existing.status);
+    }
+
+    // A whole-campaign run is live -- this occurrence's, or another one the database refused
+    // a second of (#793). Two presses of Apply, a second tab, a Flow resend: whichever got
+    // past the check above at the same moment, only one run row can exist, and this one
+    // stands down to it having written nothing. Presses in the same millisecond share an
+    // occurrence; the rest collide on `campaign_runs_one_live_run`. Either way, one message.
+    if (!options.variantGids) {
+      const live = await liveFullRun(campaignId);
+      if (live) return standDown(campaignId, live, options, outcome.counts.planned);
     }
 
     return {
@@ -1273,16 +1279,69 @@ async function inlineWork(shopId: string, campaignId: string): Promise<InlineWor
 /** The states in which a full run holds the campaign's claim. */
 const CLAIMED: ReadonlySet<string> = new Set(["APPLYING", "REVERTING"]);
 
-/** A whole-campaign run that has not finished, if there is one (#791). */
-async function liveFullRun(campaignId: string): Promise<{ id: string; kind: string } | null> {
+interface LiveRun {
+  id: string;
+  kind: string;
+  startedAt: Date | null;
+  plannedRows: number;
+}
+
+/**
+ * A whole-campaign run that has not finished, if there is one (#791).
+ *
+ * There can be at most one: `campaign_runs_one_live_run` is a unique index over exactly
+ * these rows (#793).
+ */
+async function liveFullRun(campaignId: string): Promise<LiveRun | null> {
   return prisma.campaignRun.findFirst({
     where: {
       campaignId,
       NOT: { occurrenceKey: { startsWith: "VARIANT-" } },
       status: { in: ["PLANNING", "QUEUED", "EXECUTING", "VERIFYING"] },
     },
-    select: { id: true, kind: true },
+    select: { id: true, kind: true, startedAt: true, plannedRows: true },
   });
+}
+
+/**
+ * The outcome for a run that found another whole-campaign run already writing.
+ *
+ * The same action already under way is a deferral -- what was asked for is happening, so
+ * Flow hears 200 and does not resend it into a second apply. A different action -- a
+ * revert while the apply is still writing -- is refused for now: it clears on its own,
+ * the page says to wait, and Flow's resend is the retry it needs.
+ */
+async function standDown(campaignId: string, live: LiveRun, options: RunOptions, planned: number): Promise<RunOutcome> {
+  const message = await stillRunning(campaignId, live);
+  const nothing = { runId: "", planned, verified: 0, failed: 0, unverified: 0, clean: true, messages: [message] };
+  return live.kind === (options.revert ? "REVERT" : "APPLY")
+    ? { ...nothing, runId: live.id, deferredTo: live.id }
+    : { ...nothing, refused: message, transient: true };
+}
+
+/**
+ * Why nothing new started: the campaign, the run already writing it -- when it started and
+ * how much it covers -- and what to do instead (#793).
+ *
+ * Not how far it has got. Rows settle in the ledger when a run finishes, so a count taken
+ * mid-run reads "nothing written yet" while prices are being written -- the very sentence
+ * the issue quotes from the Runs tab.
+ */
+async function stillRunning(campaignId: string, live: LiveRun): Promise<string> {
+  const campaign = await prisma.campaign.findUnique({
+    where: { id: campaignId },
+    select: { name: true, shop: { select: { timezone: true } } },
+  });
+  const verb = live.kind === "REVERT" ? "reverted" : "applied";
+  const started = live.startedAt
+    ? ` that started ${formatAgo(live.startedAt, new Date(), campaign?.shop.timezone ?? "UTC")}`
+    : "";
+  const size = live.plannedRows > 0 ? ` over ${formatCount(live.plannedRows)} variants` : "";
+  return (
+    `"${campaign?.name ?? "This campaign"}" is still being ${verb} by a run${started}${size}, so nothing new was ` +
+    "started and nothing is written twice. That run finishes on its own, and this page updates when it does; " +
+    "watch it on the Runs tab."
+  );
 }
 
 /** A run over named variants that is still writing, if there is one. */

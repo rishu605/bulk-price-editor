@@ -10,12 +10,12 @@
  *   The deposed leader must find out. A worker that keeps renewing a lock it no longer
  *   holds is worse than one that crashes, because it stays confidently wrong.
  *
- *   Two workers applying the same campaign at once must not compound. This is the
- *   payoff for the rule that campaign math reads the baseline and never the live price
- *   -- a relative edit against live values would have the second run discount the
- *   first run's output, and the merchant would end up at 0.8 x 0.8. Reading the
- *   baseline makes a concurrent double-apply merely redundant instead of destructive,
- *   which is why the rule is an architectural constraint rather than a preference.
+ *   Two workers applying the same campaign at once must not compound. Since #793 the
+ *   second never runs: one live whole-campaign run per campaign is a unique index. Behind
+ *   that is the rule that campaign math reads the baseline and never the live price -- a
+ *   relative edit against live values would have a second run discount the first run's
+ *   output, landing the merchant at 0.8 x 0.8 -- which is why the rule is an
+ *   architectural constraint rather than a preference.
  */
 
 import Redis from "ioredis";
@@ -71,7 +71,8 @@ describe("chaos: Redis restarts mid-run", () => {
           // ------------------------------------------- both tick the same campaign
           //
           // Two layers protect against a double-apply here, and both are tested,
-          // because either one alone would be a thin promise.
+          // because either one alone would be a thin promise: the occurrence key for the
+          // same occurrence, the database for any other.
 
           // Layer 1 -- the occurrence key. Both workers decide the same occurrence is
           // due, so only one may start a run for it. The loser must stand down
@@ -88,7 +89,7 @@ describe("chaos: Redis restarts mid-run", () => {
           const started = contended.filter((run) => !run.deferredTo);
           expect(started).toHaveLength(1);
           expect(deferred).toHaveLength(1);
-          expect(deferred[0].messages[0]).toMatch(/already being applied/i);
+          expect(deferred[0].messages[0]).toMatch(/is still being applied by a run that started/i);
 
           const runsForOccurrence = await prisma.campaignRun.count({
             where: { campaignId: chaos.fixture.campaignId, occurrenceKey: shared },
@@ -96,32 +97,29 @@ describe("chaos: Redis restarts mid-run", () => {
           expect(runsForOccurrence).toBe(1);
           await chaos.expectHonest(started[0].runId);
 
-          // Layer 2 -- baseline-relative math. Suppose the key had not saved us and
-          // two applies genuinely both ran. Because every campaign computes from the
-          // baseline rather than the live price, the second is redundant instead of
-          // destructive. This is the payoff for that architectural rule: a relative
-          // edit against live values would land the merchant at 0.8 x 0.8.
+          // Layer 2 -- the database (#793). Two applies under *different* occurrences are
+          // what the key cannot catch, and what a second tab or a Flow resend produces. Both
+          // used to run, and baseline-relative math was all that kept the result at one
+          // application rather than 0.8 x 0.8. Now only one whole-campaign run can be live,
+          // so the second stands down to the first and nothing is written twice. The
+          // math still holds behind it -- the resolver's idempotency property tests (I2)
+          // prove that -- but it is no longer the last line.
           await chaos.revert();
           const writesBefore = chaos.fake.writeLog.length;
 
-          const [first, second] = await Promise.all([
+          const both = await Promise.all([
             chaos.apply({ occurrenceKey: `${shared}-a` }),
             chaos.apply({ occurrenceKey: `${shared}-b` }),
           ]);
-
-          await chaos.expectHonest(first.runId);
-          await chaos.expectHonest(second.runId);
-
-          // Both runs genuinely did the work, or this proves nothing about
-          // concurrency -- if one had planned nothing because the other finished
-          // first, it would be a single apply wearing a costume.
-          expect(first.planned).toBeGreaterThan(0);
-          expect(second.planned).toBeGreaterThan(0);
-          expect(chaos.fake.writeLog.length - writesBefore).toBeGreaterThan(
+          const ran = both.filter((run) => !run.deferredTo);
+          expect(ran, "two whole-campaign runs wrote at once").toHaveLength(1);
+          expect(both.find((run) => run.deferredTo)?.deferredTo).toBe(ran[0].runId);
+          await chaos.expectHonest(ran[0].runId);
+          expect(chaos.fake.writeLog.length - writesBefore, "a variant was written twice").toBe(
             chaos.fixture.variantGids.length,
           );
 
-          // The claim. Applied twice concurrently, every price sits exactly where one
+          // The claim. Asked for twice at once, every price sits exactly where one
           // application puts it.
           for (const variantGid of chaos.fixture.variantGids) {
             const once = Math.round(chaos.fixture.baseline.get(variantGid)! * 0.8);
