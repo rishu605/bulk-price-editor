@@ -45,12 +45,13 @@ export async function campaignRuns(
 export async function runLedger(
   shopId: string,
   runId: string,
-  limit = ROWS_PER_VIEW * 4,
+  /** Rows to return; null for every row, which is what an export reads (#819). */
+  limit: number | null = ROWS_PER_VIEW * 4,
 ): Promise<LedgerRow[]> {
   const changes = await prisma.variantChange.findMany({
     where: { shopId, runId },
-    orderBy: { createdAt: "asc" },
-    take: limit,
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    ...(limit === null ? {} : { take: limit }),
   });
 
   const titles = await titleMapFor(shopId, changes.map((c) => c.variantGid));

@@ -6,6 +6,8 @@
  * sale?" or "who turned the cost floor off?" without opening a database client.
  */
 
+import { ExportButton } from "../components/ExportButton";
+import { exportQuery, activityFiltersFrom } from "../lib/reporting/export-filters";
 import { formatCount } from "../lib/format/display";
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useLoaderData, useSearchParams } from "react-router";
@@ -14,14 +16,12 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
 import { activity } from "../services/activity.server";
-import { activityCsv } from "../lib/reporting/activity-csv";
 import { ActivityTable } from "../components/ActivityTable";
 import { ActionRow } from "../components/ActionRow";
 import { Pagination } from "../components/Pagination";
 import { EmptyState, NoMatches } from "../components/AsyncState";
 import { FilterForm, clearedSearch } from "../components/FilterForm";
 import { RouteBoundary } from "../components/RouteBoundary";
-import { downloadCsv } from "../lib/reporting/csv";
 import { describeAction } from "../lib/audit/action";
 import { describeActor } from "../lib/audit/actor";
 import { withGuard } from "../lib/errors/guard.server";
@@ -50,12 +50,8 @@ export const loader = withGuard("/app/activity", async ({ request }: LoaderFunct
   const shop = await ensureShop(session.shop);
 
   const url = new URL(request.url);
-  const filters = {
-    actor: url.searchParams.get("actor") ?? undefined,
-    action: url.searchParams.get("action") ?? undefined,
-    from: url.searchParams.get("from") ?? undefined,
-    to: url.searchParams.get("to") ?? undefined,
-  };
+  // Shared with the export, so it reads exactly these rows (#819).
+  const filters = activityFiltersFrom(url.searchParams);
   const page = Math.max(1, Number(url.searchParams.get("page") ?? 1) || 1);
 
   const result = await activity(shop.id, filters, page);
@@ -143,14 +139,8 @@ export default function Activity() {
                 {formatCount(total)} entr{total === 1 ? "y" : "ies"} · times shown in{" "}
                 {timeZone}
               </s-text>
-              <s-button
-                type="button"
-                variant="tertiary"
-                icon="download"
-                onClick={() => downloadCsv("anchor-activity.csv", activityCsv(entries))}
-              >
-                Export this page (CSV)
-              </s-button>
+              {/* Every entry the filters select, read on the server (#819). It was this page's 15. */}
+              <ExportButton href={`/app/export/activity${exportQuery(params)}`} filename="anchor-activity.csv" rows={total} noun="entries" />
             </ActionRow>
 
             <TableBlock

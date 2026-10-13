@@ -58,6 +58,8 @@ export async function browseBaselines(
   shopDomain: string,
   filters: BaselineFilters = {},
   page = 1,
+  /** Rows a page. The screen's by default; an export reads all of them in larger pages (#819). */
+  pageSize = PAGE_SIZE,
 ): Promise<BaselinePage> {
   const ast: FilterAst = { groups: [] };
   const where = astToWhere(shopId, ast) as Record<string, unknown>;
@@ -87,9 +89,11 @@ export async function browseBaselines(
   const [variants, total, vendors] = await Promise.all([
     prisma.variantIndex.findMany({
       where,
-      orderBy: { title: "asc" },
-      skip: (Math.max(1, page) - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
+      // Titles repeat across variants; `variantGid` makes the order total, so no page
+      // boundary repeats or skips a variant (#819).
+      orderBy: [{ title: "asc" }, { variantGid: "asc" }],
+      skip: (Math.max(1, page) - 1) * pageSize,
+      take: pageSize,
       select: {
         variantGid: true,
         productGid: true,

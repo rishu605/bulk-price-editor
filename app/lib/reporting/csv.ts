@@ -90,3 +90,18 @@ export function downloadCsv(filename: string, csv: string): void {
 export function filenameSlug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
+
+/**
+ * Fetches a server export and saves it, or returns why it could not (#819).
+ *
+ * `fetch` from the embedded app is signed with the session token by App Bridge, which a
+ * plain link to the route would not be. A refusal comes back as a sentence -- too many rows,
+ * a run still writing -- and is returned for the page to show.
+ */
+export async function downloadExport(path: string, filename: string): Promise<string | null> {
+  const response = await fetch(path);
+  const body = await response.text();
+  if (!response.ok) return body.trim() || `The export didn't finish (HTTP ${response.status}). Try again in a moment.`;
+  downloadCsv(filename, body);
+  return null;
+}

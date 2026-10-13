@@ -41,15 +41,19 @@ export async function activity(
   shopId: string,
   filters: ActivityFilters = {},
   page = 1,
+  /** Rows a page. The screen's by default; an export reads all of them in larger pages (#819). */
+  pageSize = PAGE_SIZE,
 ): Promise<ActivityPage> {
   const where = buildWhere(shopId, filters);
 
   const [rows, total, actors, actions] = await Promise.all([
     prisma.auditLogEntry.findMany({
       where,
-      orderBy: { createdAt: "desc" },
-      skip: (Math.max(1, page) - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
+      // `id` breaks ties, so a page boundary between two entries written in the same
+      // millisecond neither repeats nor skips one (#819, #769).
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      skip: (Math.max(1, page) - 1) * pageSize,
+      take: pageSize,
     }),
     prisma.auditLogEntry.count({ where }),
     // Distinct over the whole shop, not the filtered set: a filter control that only
