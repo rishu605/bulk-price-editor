@@ -41,8 +41,14 @@ export interface MarketList {
    * `contextualPricing` is keyed by country rather than by price list, and every country
    * in a market sees the same price, so any one region answers for all of them. Null for a
    * B2B catalogue, which is priced by company location and read from the mirror instead.
+   *
+   * Required, not optional. The preview used to load its lists without it, so before a
+   * campaign's first apply every percentage-priced market fell through to the list's own
+   * prices, which answer in the shop's currency, and was refused as "not converted" --
+   * while the run, loading the whole row, priced it fine (#840). A caller that leaves it
+   * out now fails to compile instead of previewing something the run will not do.
    */
-  contextCountry?: string | null;
+  contextCountry: string | null;
 }
 
 export interface MarketPlan {
