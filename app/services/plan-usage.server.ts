@@ -35,10 +35,12 @@ export interface PlanUsage {
   catalogueVariants: number;
   /** Whether the catalogue alone could exceed what one campaign may cover. */
   couldExceed: boolean;
+  /** A development store: every feature, nothing charged, whatever plan it is on. */
+  exempt: boolean;
 }
 
 export async function planUsage(shopId: string): Promise<PlanUsage> {
-  const [{ plan }, catalogueVariants] = await Promise.all([
+  const [{ plan, exempt }, catalogueVariants] = await Promise.all([
     billingFor(shopId),
     prisma.variantIndex.count({ where: { shopId } }),
   ]);
@@ -48,5 +50,6 @@ export async function planUsage(shopId: string): Promise<PlanUsage> {
     variantLimit: plan.variantLimit,
     catalogueVariants,
     couldExceed: plan.variantLimit !== null && catalogueVariants > plan.variantLimit,
+    exempt,
   };
 }
