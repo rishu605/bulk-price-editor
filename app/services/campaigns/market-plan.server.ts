@@ -10,7 +10,7 @@
 import { Prisma } from "@prisma/client";
 
 import prisma from "../../db.server";
-import { readContextualPrices, readDerivedPrices } from "../../lib/execution/market-executor";
+import { readContextualPrices, readDerivedPrices, readFixedPriceVariants } from "../../lib/execution/market-executor";
 import { unconvertedMessage } from "../../lib/markets/conversion-check";
 import { AppError } from "../../lib/errors/app-error";
 import { readLadders } from "../../lib/execution/quantity-executor";
@@ -417,6 +417,8 @@ async function captureMarketBaselines(
   client: AdminClient,
 ): Promise<Map<string, Money>> {
   const found = new Map<string, Money>();
+  // Which of those prices the merchant set by hand on the list, for the revert (#930).
+  const handSet = new Set<string>();
 
   // Ask Shopify what a shopper in this market pays, and take that as the baseline.
   //
@@ -449,6 +451,7 @@ async function captureMarketBaselines(
 
       found.set(variantGid, parseMoney(price.amount, list.currency));
     }
+    for (const gid of await readFixedPriceVariants(client, list.priceListGid, [...found.keys()])) handSet.add(gid);
   } else {
     // A list with no market behind it — a B2B catalogue, priced by company location rather
     // than by country, so there is no country context to ask about.
@@ -475,6 +478,7 @@ async function captureMarketBaselines(
 
     for (const entry of entries) {
       found.set(entry.variantGid, money(Number(entry.livePrice), entry.currency || list.currency));
+      handSet.add(entry.variantGid);
     }
 
     if (list.adjustmentBps !== null) {
@@ -524,6 +528,7 @@ async function captureMarketBaselines(
         // shape is already validated by `serialiseLadder`, which is the check that matters.
         quantityBreaks: (serialiseLadder(ladders.get(variantGid) ?? []) ??
           undefined) as Prisma.InputJsonValue | undefined,
+        handSet: handSet.has(variantGid),
         source: "AUTO_ENROLL" as const,
       })),
       skipDuplicates: true,

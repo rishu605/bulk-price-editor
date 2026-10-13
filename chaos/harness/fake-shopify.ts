@@ -274,6 +274,9 @@ export class FakeShopify {
     // mentions the field — the markets sync explains why it needs a country, and doing so
     // sent the price-list query here and returned zero markets. An operation name cannot
     // collide by accident that way.
+    if (query.includes("AnchorFixedPriceVariants")) {
+      return this.fixedPrices(variables) as { data?: T; extensions?: { cost?: QueryCost } };
+    }
     if (query.includes("AnchorContextualPrices")) {
       return this.contextualPrices(variables) as { data?: T; extensions?: { cost?: QueryCost } };
     }
@@ -666,6 +669,24 @@ export class FakeShopify {
   }
 
   /** Serves `priceList.prices(originType: RELATIVE)`, filtered by variant id. */
+  /** `priceList.prices(originType: FIXED)` for the variants named in the query (#930). */
+  private fixedPrices(variables: Record<string, unknown>) {
+    const list = this.priceLists.find((l) => l.id === String(variables.priceListId ?? ""));
+    const ids = new Set(
+      String(variables.query ?? "")
+        .split(" OR ")
+        .map((term) => term.replace("variant_id:", "").trim())
+        .filter(Boolean),
+    );
+    const nodes = (list?.prices ?? [])
+      .filter((p) => p.originType === "FIXED" && (ids.size === 0 || ids.has(p.variantGid.split("/").pop() ?? "")))
+      .map((p) => ({ variant: { id: p.variantGid } }));
+    return {
+      data: { priceList: list ? { prices: { nodes, pageInfo: { hasNextPage: false, endCursor: null } } } : null },
+      extensions: this.cost(nodes.length + 1),
+    };
+  }
+
   private derivedPrices(variables: Record<string, unknown>) {
     const list = this.priceLists.find((l) => l.id === String(variables.priceListId ?? ""));
     const ids = new Set(

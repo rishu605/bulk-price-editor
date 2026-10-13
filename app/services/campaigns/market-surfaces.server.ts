@@ -48,6 +48,7 @@ import { describeMarketSkips, describeMovedMarket } from "../../lib/markets/guar
 import { logger } from "../../lib/logging/logger";
 import { metric } from "../../lib/telemetry/metrics";
 import { LANDED } from "../../lib/execution/landed";
+import { inChunks } from "../../lib/db/chunk";
 
 /** Which surfaces a campaign writes to. Stored on the campaign as JSON. */
 export interface CampaignSurfaces {
@@ -569,6 +570,11 @@ export async function revertMarketSurfaces(
   client: AdminClient,
   /** Called as each chunk is deleted, so the run's heartbeat stays fresh (#791). */
   onProgress?: () => void | Promise<void>,
+  /**
+   * The revert run, and every campaign but this one: what a hand-set price is recomputed
+   * from and ledgered under (#930). Without it every price is deleted, as it always was.
+   */
+  recompute?: { runId: string; campaigns: readonly ResolvableCampaign[] },
 ): Promise<MarketSurfaceOutcome[]> {
   // Markets repriced by a single percentage are undone by restoring the merchant's
   // own percentage, not by deleting per-product prices — there are none to delete.
@@ -601,20 +607,96 @@ export async function revertMarketSurfaces(
 
   for (const [priceListGid, variantGids] of byList) {
     const list = await prisma.priceListRecord.findFirst({ where: { shopId, priceListGid } });
-    const result = await deleteMarketPrices(client, priceListGid, variantGids, onProgress);
 
-    await prisma.variantChange.updateMany({
-      where: { shopId, priceListGid, variantGid: { in: variantGids }, run: { campaignId } },
-      data: { status: result.clean ? "REVERTED" : "FAILED" },
-    });
+    // Recompute, not delete, where the price before the campaign was the merchant's own
+    // (#930). Deleting a fixed price returns a variant to the list's percentage, which is
+    // right for one that followed the store price and wrong for one the merchant set by
+    // hand: their ¥15,000 came back as whatever the percentage derived. Such a variant is
+    // planned without this campaign -- its own baseline, or another campaign's price --
+    // and written back, ledgered under the revert like any other write.
+    const handSet =
+      recompute && list
+        ? new Set(
+            (
+              await inChunks(variantGids, (batch) =>
+                prisma.baseline.findMany({
+                  where: { shopId, surfaceKind: "MARKET", priceListGid, supersededAt: null, handSet: true, variantGid: { in: batch } },
+                  select: { variantGid: true },
+                }),
+              )
+            ).map((row) => row.variantGid),
+          )
+        : new Set<string>();
+    const followed = variantGids.filter((gid) => !handSet.has(gid));
+
+    const deleted = followed.length > 0 ? await deleteMarketPrices(client, priceListGid, followed, onProgress) : null;
+    if (deleted) {
+      await prisma.variantChange.updateMany({
+        where: { shopId, priceListGid, variantGid: { in: followed }, run: { campaignId } },
+        data: { status: deleted.clean ? "REVERTED" : "FAILED" },
+      });
+    }
+
+    const restored = recompute && list && handSet.size > 0 ? await rewriteHandSet(shopId, list, [...handSet], recompute, client, onProgress) : null;
+    if (restored) {
+      await prisma.variantChange.updateMany({
+        where: { shopId, priceListGid, variantGid: { in: [...handSet] }, run: { campaignId }, NOT: { runId: recompute!.runId } },
+        data: { status: restored.clean ? "REVERTED" : "FAILED" },
+      });
+    }
 
     outcomes.push({
-      ...summarise(list ?? { priceListGid, name: priceListGid, currency: "" }, result),
+      ...summarise(list ?? { priceListGid, name: priceListGid, currency: "" }, combine(deleted, restored)),
       path: "per-product",
     });
   }
 
   return [...outcomes, ...wideOutcomes(wideMessages)];
+}
+
+/**
+ * A revert's hand-set market prices, planned without the campaign and written back (#930).
+ * Ledgered before the write and read back, as every price is (I4, rule 5).
+ */
+async function rewriteHandSet(
+  shopId: string,
+  list: { priceListGid: string; name: string; currency: string; adjustmentBps: number | null; contextCountry: string | null; catalogTitle?: string | null; surfaceKind?: string },
+  variantGids: string[],
+  recompute: { runId: string; campaigns: readonly ResolvableCampaign[] },
+  client: AdminClient,
+  onProgress?: () => void | Promise<void>,
+): Promise<MarketWriteResult | null> {
+  const plan = await planMarket(shopId, list, variantGids, recompute.campaigns, client);
+  if (!plan || plan.outcome.kind !== "ok") return null;
+  const rows: MarketPriceRow[] = plan.outcome.rows
+    .filter((row) => row.status !== "skipped" && row.intendedPrice)
+    .map((row) => ({
+      variantGid: row.ref.variantGid,
+      price: row.intendedPrice!,
+      // As the apply path writes it: set or cleared when the plan decides it, left alone
+      // when it does not.
+      compareAt: row.intendedCompareAtSet ? (row.intendedCompareAt ?? null) : undefined,
+    }));
+  if (rows.length === 0) return null;
+  const result = await writeMarketPrices(client, list.priceListGid, list.currency, rows, async (chunk, index) => {
+    await ledgerChunk(recompute.runId, shopId, list, chunk, index);
+    await onProgress?.();
+  });
+  await recordResults(recompute.runId, shopId, list.priceListGid, result);
+  return result;
+}
+
+/** One market's deletes and rewrites, as one result. */
+function combine(a: MarketWriteResult | null, b: MarketWriteResult | null): MarketWriteResult {
+  const empty: MarketWriteResult = { rows: [], verified: 0, failed: 0, chunks: 0, clean: true };
+  const [x, y] = [a ?? empty, b ?? empty];
+  return {
+    rows: [...x.rows, ...y.rows],
+    verified: x.verified + y.verified,
+    failed: x.failed + y.failed,
+    chunks: x.chunks + y.chunks,
+    clean: x.clean && y.clean,
+  };
 }
 
 /** Markets that could not have their own percentage put back, as an outcome row. */

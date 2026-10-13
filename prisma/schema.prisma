@@ -282,6 +282,13 @@ model Baseline {
   /// restored, and restoring is what this product deliberately does not do.
   quantityBreaks Json?
 
+  /// A market baseline only: whether the merchant had set this price by hand on the list
+  /// (a fixed price) rather than the list deriving it from the store price (#930). A
+  /// revert writes a hand-set price back, recomputed without the campaign, and deletes a
+  /// derived one so it follows the store price again. Null where it was never recorded --
+  /// every baseline captured before this -- which a revert treats as derived.
+  handSet Boolean?
+
   source     BaselineSource
   capturedAt DateTime       @default(now())
   capturedBy String?
