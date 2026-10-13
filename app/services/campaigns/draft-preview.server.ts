@@ -18,6 +18,8 @@
  * would resolve the overlap by priority and do something else.
  */
 
+import { catalogueState } from "../catalogue-state.server";
+import type { CatalogueState } from "../../lib/catalogue/state";
 import { format } from "../../lib/money/format";
 import type { Money } from "../../lib/money/money";
 import { planRun } from "../../lib/planning/plan";
@@ -136,6 +138,12 @@ export interface DraftPreview {
    * sale discounts from the old price and ending it puts the old price back.
    */
   staleBaselines: number;
+  /**
+   * Set when nothing matched because there is nothing to match yet (#800): the store has
+   * not been synced, a first sync is running, or it has no products. The panel says that
+   * instead of telling the merchant to loosen conditions they may not have set.
+   */
+  catalogue?: Exclude<CatalogueState, "ready">;
 }
 
 const EMPTY: DraftPreview = {
@@ -205,6 +213,12 @@ export async function previewDraft(
   ]);
 
   if (candidates.length === 0) {
+    // Nothing matched: asked whether there is anything to match at all, which costs one
+    // count and only on this branch (#800).
+    if (matched === 0) {
+      const catalogue = await catalogueState(shopId);
+      if (catalogue !== "ready") return { ...EMPTY, catalogue };
+    }
     // Matched but unpriceable: every variant in scope is missing a baseline. Reported
     // rather than shown as "0 variants match", which would send the merchant to fix
     // their filter when the filter is fine.

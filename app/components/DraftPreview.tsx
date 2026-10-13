@@ -1,3 +1,4 @@
+import { catalogueNotice } from "../lib/catalogue/state";
 import { formatCount } from "../lib/format/display";
 import { MoneyCell } from "./MoneyCell";
 import { ActionRow } from "./ActionRow";
@@ -72,6 +73,10 @@ export function DraftPreview({
       </s-banner>
     );
   }
+
+  // No catalogue to match against yet: not the merchant's conditions (#800).
+  const notice = preview.catalogue ? catalogueNotice(preview.catalogue) : null;
+  if (notice) return <EmptyState {...notice} />;
 
   if (preview.matched === 0) {
     return (

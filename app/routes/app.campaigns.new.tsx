@@ -1,3 +1,5 @@
+import { catalogueNotice } from "../lib/catalogue/state";
+import { catalogueState } from "../services/catalogue-state.server";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { Form, redirect, useFetcher, useLoaderData } from "react-router";
@@ -200,6 +202,9 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
     roundingOptions: roundingChoices(currency),
     sample: sampleLine(currency),
     facets: available,
+    // Whether there is a catalogue to narrow at all (#800). On a store that has never
+    // synced, the pickers are empty and the guided button waits for something it cannot get.
+    catalogue: catalogueNotice(await catalogueState(shop.id)),
     segments,
     usingSegment: segment ? { id: segment.id, name: segment.name, kind: segment.kind } : null,
     practice,
@@ -326,6 +331,17 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
     });
   }
 
+  // A campaign on a store Anchor has not read prices nothing, and its times would be
+  // read in a zone the first sync has not recorded yet (#799). Refused with where to go
+  // (#800).
+  const catalogue = catalogueNotice(await catalogueState(shop.id));
+  if (catalogue) {
+    throw new AppError({
+      code: "VALIDATION",
+      userMessage: `${catalogue.title}, so this campaign would price nothing. ${catalogue.description} Nothing was created.`,
+    });
+  }
+
   const campaign = await createCampaign(
     shop.id,
     {
@@ -355,6 +371,7 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
 export default function NewCampaign() {
   const {
     facets: available,
+    catalogue,
     selected,
     segments,
     usingSegment,
@@ -563,7 +580,13 @@ export default function NewCampaign() {
           </s-paragraph>
           {/* The promise, kept. Saying "start small" and defaulting to everything left
               the merchant one obvious button away from a whole-catalogue sale. */}
-          {needsScope ? (
+          {catalogue ? (
+            // Nothing to pick from yet, so say why the button waits (#800).
+            <s-paragraph>
+              <s-text type="strong">{catalogue.title}.</s-text> {catalogue.description}{" "}
+              <s-link href={catalogue.action.href}>{catalogue.action.label}</s-link>
+            </s-paragraph>
+          ) : needsScope ? (
             <s-paragraph>
               <s-text type="strong">
                 Pick a collection, a vendor, a tag or a title to narrow this down — the
