@@ -24,6 +24,7 @@
 import prisma from "../../db.server";
 import { logger } from "../../lib/logging/logger";
 import { transitionCampaign } from "./lifecycle.server";
+import { settleMirror } from "./mirror.server";
 import { LANDED } from "../../lib/execution/landed";
 
 /**
@@ -195,6 +196,12 @@ export async function reclaimStaleRuns(
           data: { status: "PENDING" },
         });
       }
+
+      // The mirror, from the ledger, as a run that throws settles it (#903). Only a run
+      // that finishes refreshed it, so a reclaimed run left every variant it had written
+      // reading its pre-run price -- and a Revert from Partial planned those as already at
+      // baseline, wrote nothing for them, and reported clean with the sale still live.
+      await settleMirror(run.id);
 
       // Best-effort, and deliberately after the run is already reclaimed. A campaign
       // cancelled while its run was in flight cannot legally move to PARTIAL, and an
