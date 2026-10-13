@@ -133,4 +133,38 @@ describe("chaos: Apply prices a market once the store price is already right", (
       }
     });
   });
+
+  it("leaves a market to the campaign that wins it: a lower sale neither prices nor ends it", async () => {
+    await withChaos("market-after-base-overlap", SPEC, async (chaos) => {
+      const { shopId, variantGids } = chaos.fixture;
+      handSetMarket(chaos, EUR, "EUR", "DE", "50.00");
+      await targetMarkets(chaos, [EUR]);
+
+      // A, the fixture campaign (-20%), wins every variant; B (-10%) sits under it on the same market.
+      await chaos.expectHonest((await chaos.apply()).runId);
+      for (const gid of variantGids) expect(chaos.fake.priceOf(gid, EUR)).toBe("40.00");
+
+      const { createCampaign } = await import("../../app/services/campaigns/model.server");
+      const { runCampaign } = await import("../../app/services/campaigns/run.server");
+      const lower = await createCampaign(shopId, {
+        name: "chaos/market-after-base-overlap lower",
+        priority: 100,
+        rule: { kind: "percent-change", percent: -10 },
+        compareAtPolicy: { kind: "leave" },
+        rounding: { default: "none", byCurrency: {} },
+        ast: { groups: [{ conditions: [{ field: "tag", value: "chaos" }] }] },
+        schedule: { kind: "manual" },
+      });
+      await prisma.campaign.update({ where: { id: lower.id }, data: { surfaces: { base: true, priceLists: [EUR] } as never } });
+      const client = chaosAdminClient(chaos.server.endpoint());
+      const applied = await runCampaign(shopId, lower.id, client, { verifySampleRate: 1 });
+      expect(await marketRows(applied.runId, EUR), "the lower sale ledgered market prices it does not win").toHaveLength(0);
+
+      // Ending the lower sale must leave the higher one's market prices where they are.
+      await runCampaign(shopId, lower.id, client, { revert: true, verifySampleRate: 1 });
+      for (const gid of variantGids) {
+        expect(chaos.fake.priceOf(gid, EUR), "ending the lower sale took the higher sale off the market").toBe("40.00");
+      }
+    });
+  });
 });

@@ -718,12 +718,18 @@ async function executeCampaignRun(
       ...[...settledLanded].filter((gid) => !leaveAlone.has(gid)),
     ]),
   ];
-  // What the market steps cover: every in-scope variant the plan did not set aside, the
-  // ones already at their base price included, and each market makes its own no-op check
-  // (#841). Inheriting the base surface's write set meant a market skipped, failed or
-  // added later was never priced once the base was right.
+  // What the market and tag steps cover: every in-scope variant the plan did not set
+  // aside, the ones already at their base price included. Each market makes its own no-op
+  // check (#841), and tagging claims what this campaign tagged before rather than adding
+  // it again (#926). Inheriting the base surface's write set meant a market or a tag
+  // skipped, failed or added later was never put right once the base price was.
   const marketVariants = [
-    ...new Set([...marketScope(candidates, outcome.rows).filter((gid) => !leaveAlone.has(gid)), ...followers]),
+    ...new Set([
+      ...(outcome.kind === "ok" ? marketScope(campaignId, outcome.rows, outcome.unchanged) : []).filter(
+        (gid) => !leaveAlone.has(gid),
+      ),
+      ...followers,
+    ]),
   ];
 
   // One run per (campaign, occurrence, kind), enforced by a unique index. Two workers
@@ -845,7 +851,15 @@ async function executeCampaignRun(
     })),
   );
 
-  const products = await productMapFor(shopId, followers);
+  // A revert's takeover reaches past what it writes: the variants an earlier attempt put
+  // back, which plan as unchanged (#926). Their products are needed for the winner's tags.
+  const handedBack =
+    options.revert && outcome.kind === "ok"
+      ? outcome.unchanged.filter((row) => !leaveAlone.has(row.ref.variantGid))
+      : [];
+  const products = await productMapFor(shopId, [
+    ...new Set([...marketVariants, ...handedBack.map((row) => row.ref.variantGid)]),
+  ]);
 
   // Honour the planner's path choice. A 1,600-row campaign executed synchronously
   // would take roughly one variant every two seconds against a standard shop's
@@ -955,7 +969,11 @@ async function executeCampaignRun(
   // Tags after prices, deliberately. A badge on a product still showing full price is
   // worse than a price change nobody has badged yet, so the storefront never claims a
   // sale that has not landed.
-  const tagOutcome = await syncTags(shopId, campaignId, run.id, writable, followers, products, client, options, beat);
+  // A revert hands its variants to whoever prices them next, those an earlier attempt
+  // already put back included: they plan as unchanged, and their new winner's tags were
+  // never applied if that attempt died before its tag step (#926).
+  const takeover = [...writable, ...handedBack];
+  const tagOutcome = await syncTags(shopId, campaignId, run.id, takeover, marketVariants, products, client, options, beat);
   if (tagOutcome) messages.push(...tagOutcome.messages);
 
   // Markets, after the base surface. A campaign that only ever touched the base price
@@ -1187,8 +1205,9 @@ async function syncTags(
   shopId: string,
   campaignId: string,
   runId: string,
-  rows: PlannedRow[],
-  /** Every variant whose product this run tags: `rows`, and any a settled bulk operation landed. */
+  /** Whom each variant goes to, for a revert's takeover tags. */
+  rows: readonly WinnerRow[],
+  /** Every variant whose product this run tags: the whole scope the plan did not set aside. */
   variantGids: readonly string[],
   products: Map<string, string>,
   client: AdminClient,
@@ -1269,8 +1288,11 @@ async function syncTags(
 }
 
 /** The products a revert handed to each campaign still running, keyed by that campaign. */
+/** A variant and the campaign that prices it after this run. */
+type WinnerRow = { ref: { variantGid: string }; campaignId?: string };
+
 function productsByWinner(
-  rows: readonly PlannedRow[],
+  rows: readonly WinnerRow[],
   products: ReadonlyMap<string, string>,
 ): Map<string, string[]> {
   const out = new Map<string, Set<string>>();

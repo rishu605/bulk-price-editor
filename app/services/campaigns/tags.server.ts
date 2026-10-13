@@ -137,6 +137,11 @@ export async function applyCampaignTags(
 
   const current = await liveTags(client, productGids);
   const claimedByOthers = await tagsOwedByOthers(shopId, campaignId, sharedWith);
+  // This campaign's own tags from its earlier runs, which are its own and not the merchant's
+  // (#926). A resume, or an apply after one, tags every product in scope again; read as
+  // "already present" they were ledgered as the merchant's and reported as "already on
+  // their products and left as they are", about tags Anchor had put there.
+  const ownEarlier = await tagsOwnedBy(shopId, campaignId);
   const messages: string[] = [];
   let tagged = 0;
   let failed = 0;
@@ -148,7 +153,7 @@ export async function applyCampaignTags(
       productGid,
       kit,
       current.get(productGid) ?? [],
-      claimedByOthers.get(productGid),
+      new Set([...(claimedByOthers.get(productGid) ?? []), ...(ownEarlier.get(productGid) ?? [])]),
     );
     leftAlone += plan.alreadyPresent.length;
 
@@ -393,6 +398,21 @@ export async function removeCampaignTags(
  * HELD is one: a campaign held for drift is paused, not ended.
  */
 const LIVE_STATUSES: CampaignStatus[] = ["ACTIVE", "APPLYING", "PARTIAL", "HELD"];
+
+/** The tags this campaign itself added, by product, across its runs (#926). */
+async function tagsOwnedBy(shopId: string, campaignId: string): Promise<Map<string, Set<string>>> {
+  const rows = await prisma.tagChange.findMany({
+    where: { shopId, campaignId, status: { in: ["APPLIED", "VERIFIED"] } },
+    select: { productGid: true, addedTags: true },
+  });
+  const owned = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const set = owned.get(row.productGid) ?? new Set<string>();
+    for (const tag of row.addedTags) set.add(normaliseTag(tag));
+    owned.set(row.productGid, set);
+  }
+  return owned;
+}
 
 /**
  * Tags other still-running campaigns have claimed on each product.

@@ -28,6 +28,7 @@ import type {
   PlanInput,
   PlanOutcome,
   PlannedRow,
+  PlanUnchanged,
 } from "./types";
 
 /** Stable identity of one writable cell, matching the ledger's unique constraint. */
@@ -59,6 +60,7 @@ export function planRun(input: PlanInput): PlanOutcome {
   }
 
   const rows: PlannedRow[] = [];
+  const unchanged: PlanUnchanged[] = [];
   const counts: PlanCounts = { planned: 0, noop: 0, skipped: 0, clamped: 0, clampedToMinimum: 0 };
   const coverage = new Map<string, PlanCoverage>();
   const share = (campaignId: string) => {
@@ -194,6 +196,7 @@ export function planRun(input: PlanInput): PlanOutcome {
 
     if (isNoop(resolution, candidate)) {
       counts.noop++;
+      unchanged.push({ ref: candidate.ref, campaignId: resolution.meta.controlledBy });
       continue;
     }
 
@@ -216,7 +219,7 @@ export function planRun(input: PlanInput): PlanOutcome {
     if (resolution.meta.clamped && resolution.meta.reason === "non-positive-price") counts.clampedToMinimum++;
   }
 
-  return { kind: "ok", rows, counts, coverage: [...coverage.values()] };
+  return { kind: "ok", rows, counts, coverage: [...coverage.values()], unchanged };
 }
 
 /** A resolved price, or compare-at, in a currency other than the surface's own. */

@@ -107,8 +107,18 @@ export interface PlanCoverage {
   yieldsTo: Record<string, number>;
 }
 
+/**
+ * A variant in scope that is already at the price the plan resolves for it, so it gets no
+ * row -- and who prices it. A revert's takeover tags need the winner of every variant it
+ * hands over, including the ones an earlier attempt already put back (#926).
+ */
+export interface PlanUnchanged {
+  ref: SurfaceRef;
+  campaignId?: string;
+}
+
 export type PlanOutcome =
-  | { kind: "ok"; rows: PlannedRow[]; counts: PlanCounts; coverage: PlanCoverage[] }
+  | { kind: "ok"; rows: PlannedRow[]; counts: PlanCounts; coverage: PlanCoverage[]; unchanged: PlanUnchanged[] }
   /**
    * A "block" policy was violated. No rows are returned and nothing may be written —
    * a blocking guardrail must stop the entire run, not merely the offending variant.
