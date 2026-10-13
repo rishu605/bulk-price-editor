@@ -62,6 +62,7 @@ vi.mock("../../lib/planning/plan", () => ({
     kind: "ok",
     counts: { planned: 1, noop: 0, skipped: 0, clamped: 0 },
     coverage: [],
+    unchanged: [],
     rows: [
       {
         ref: { variantGid: "gid://v/1" },

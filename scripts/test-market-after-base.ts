@@ -132,8 +132,34 @@ async function main() {
       second.messages.some((m) => m.includes("not priced separately")),
       true,
     );
+
+    console.log("3. a lower sale on the same products and market, applied and ended (#937)");
+    const lower = await createCampaign(shop.id, {
+      name: `Market after base test (lower) ${Date.now()}`,
+      priority: 100,
+      rule: { kind: "percent-change", percent: -10 },
+      compareAtPolicy: { kind: "leave" },
+      rounding: { default: "none", byCurrency: {} },
+      ast: { groups: [{ conditions: [{ field: "tag", value: TAG }] }] },
+      schedule: { kind: "manual" },
+    });
+    try {
+      await prisma.campaign.update({ where: { id: lower.id }, data: { surfaces: { base: true, priceLists: [jpy.priceListGid] } as never } });
+      await transitionCampaign(shop.id, lower.id, "APPLYING", { reason: "test: lower sale" });
+      const lowerRun = await runCampaign(shop.id, lower.id, client, {});
+      check(
+        "the lower sale ledgers no market price it does not win",
+        await prisma.variantChange.count({ where: { runId: lowerRun.runId, priceListGid: jpy.priceListGid } }),
+        0,
+      );
+      await runCampaign(shop.id, lower.id, client, { revert: true });
+      const kept = await shopperPrices(client, variantGids, jpy.contextCountry);
+      for (const gid of variantGids) check(`${jpy.name} still on the higher sale after the lower one ended`, kept.get(gid), "12000.0");
+    } finally {
+      await prisma.campaign.delete({ where: { id: lower.id } });
+    }
   } finally {
-    console.log("3. revert");
+    console.log("4. revert");
     await runCampaign(shop.id, campaign.id, client, { revert: true }).catch((error) => console.log(`   revert: ${error}`));
     const base = await shopperPrices(client, variantGids, null);
     check("store prices back", variantGids.every((gid) => base.get(gid) === (baseline.get(gid)! / 100).toFixed(2)), true);

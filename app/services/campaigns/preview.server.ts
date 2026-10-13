@@ -157,7 +157,14 @@ export async function previewCampaign(
   const decision = selectWritePath(outcome.rows.length);
   // Over the same variants the run prices markets for: the already-correct ones the rows
   // leave out included (#841).
-  const markets = await marketPathPreview(shopId, campaignId, resolvable, marketScope(candidates, outcome.rows), options);
+  // A revert preview keeps the rows it plans: a revert does not price markets from a scope.
+  const markets = await marketPathPreview(
+    shopId,
+    campaignId,
+    resolvable,
+    options.revert ? outcome.rows.map((row) => row.ref.variantGid) : marketScope(campaignId, outcome.rows, outcome.unchanged),
+    options,
+  );
 
   // What this does to margin, before it happens. Computed over the whole plan rather
   // than the shown page: a merchant asking "what does this cost me" means the campaign,
