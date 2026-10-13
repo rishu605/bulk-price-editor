@@ -120,3 +120,12 @@ describe("a shop that has not synced yet", () => {
     expect(uncapped.detail).toContain("whatever size it turns out to be");
   });
 });
+
+describe("a development store", () => {
+  it("says it is one, rather than naming the tier it is treated as (#860)", () => {
+    const line = usageLine({ planName: "Wholesale", variantLimit: null, catalogueVariants: 3_688, couldExceed: false, synced: true, exempt: true });
+    expect(line.headline).toBe("Development store · every feature included");
+    expect(line.headline).not.toContain("Wholesale");
+    expect(line.detail).toMatch(/test charge/);
+  });
+});

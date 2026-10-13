@@ -34,7 +34,20 @@ export function usageLine(usage: {
    * because nobody has looked. See the branch below.
    */
   synced: boolean;
+  /** A development store, which has every feature whatever plan it is on. */
+  exempt?: boolean;
 }): UsageLine {
+  // Said as what it is. Home used to name the tier a development store is *treated* as --
+  // "Wholesale" -- while the plan page said "You are on Free", and billing is the first
+  // thing App Review checks on exactly this kind of store (#860).
+  if (usage.exempt) {
+    return {
+      headline: "Development store · every feature included",
+      detail: "Nothing is charged here. Changing plan creates a test charge, so you can try it from See plans.",
+      attention: false,
+    };
+  }
+
   const catalogue = `${formatCount(usage.catalogueVariants)} variants`;
   const cap = usage.variantLimit === null ? null : formatCount(usage.variantLimit);
 
