@@ -147,6 +147,10 @@ async function describe(campaignName: string, outcome: RunOutcome, already: bool
     ? await prisma.variantChange.findMany({
         where: { runId: outcome.runId, status: { in: [...LANDED, "FAILED", "APPLIED", "PENDING"] } },
         select: { surfaceKind: true, priceListGid: true, status: true },
+        // The base price first ("" sorts first), then markets in a fixed order. Read in
+        // heap order, a row updated as it was verified could come back before the base
+        // row, so the same revert named its surfaces in either order (#909).
+        orderBy: [{ priceListGid: "asc" }, { surfaceKind: "asc" }],
       })
     : [];
   const lists = await prisma.priceListRecord.findMany({
