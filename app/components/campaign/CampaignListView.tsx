@@ -1,6 +1,7 @@
 import type { useFetcher } from "react-router";
 import { Blank } from "../Blank";
 
+import { formatCount } from "../../lib/format/display";
 import { humanise } from "../../lib/format/label";
 import { ActionRow } from "../ActionRow";
 import { EmptyState, NoMatches } from "../AsyncState";
@@ -10,6 +11,25 @@ import { SPACE } from "../../lib/ui/spacing";
 import type { listCampaigns, CampaignFilters } from "../../services/campaigns/list.server";
 
 type List = Awaited<ReturnType<typeof listCampaigns>>;
+
+type LastRun = NonNullable<List["campaigns"][number]["lastRun"]>;
+
+/**
+ * What the campaign's latest run did, in one line. While its bulk operation's results are
+ * unread the run's own counts are zero, and "0 verified" over an hour of prices going live
+ * read as nothing happening (#832). So it says how far Shopify has got while a run is
+ * polling, and how many were sent once nothing is -- a count nobody is updating would
+ * read "0 of 4" long after Shopify finished.
+ */
+function describeLastRun(run: LastRun): string {
+  const sent = run.atShopify;
+  const counts = sent
+    ? sent.live
+      ? `${formatCount(sent.done)} of ${formatCount(sent.of)} at Shopify`
+      : `${formatCount(sent.of)} sent to Shopify`
+    : `${run.verified} verified${run.failed > 0 ? `, ${run.failed} failed` : ""}`;
+  return `${humanise(run.kind)} · ${humanise(run.status)} · ${counts}`;
+}
 
 /** The status filters. "Needs a decision" is not a status — it spans several. */
 const STATUSES = [
@@ -229,13 +249,7 @@ export function CampaignListView({
                     <s-table-cell>{campaign.scope}</s-table-cell>
                     <s-table-cell>{campaign.priority}</s-table-cell>
                     <s-table-cell>
-                      {campaign.lastRun
-                        ? `${humanise(campaign.lastRun.kind)} · ${humanise(campaign.lastRun.status)} · ${campaign.lastRun.verified} verified${
-                            campaign.lastRun.failed > 0
-                              ? `, ${campaign.lastRun.failed} failed`
-                              : ""
-                          }`
-                        : <Blank />}
+                      {campaign.lastRun ? describeLastRun(campaign.lastRun) : <Blank />}
                     </s-table-cell>
                     <s-table-cell>
                       <ActionRow>

@@ -177,10 +177,24 @@ export async function reclaimStaleRuns(
       // Rows the dead process had claimed but never settled. Back to PENDING so a
       // resume treats them as outstanding work; leaving them WRITING would have them
       // read as in-flight forever by a process that no longer exists.
-      await prisma.variantChange.updateMany({
-        where: { runId: run.id, status: "WRITING" },
-        data: { status: "PENDING" },
+      //
+      // Except rows inside a bulk operation Shopify accepted (#832): Shopify goes on
+      // applying those after the process that sent them stops watching, so they are sent,
+      // not unsent, and stay WRITING until the campaign's next run asks Shopify how the
+      // operation ended. Finished or not: a process that dies reading a 100,000-row result
+      // file leaves an operation that is done and rows nobody has read back.
+      const operation = await prisma.bulkOperationRecord.findFirst({
+        where: { runId: run.id, kind: "MUTATION" },
+        orderBy: { submittedAt: "desc" },
+        select: { shopifyGid: true, status: true },
       });
+      const sent = operation ? await prisma.variantChange.count({ where: { runId: run.id, status: "WRITING" } }) : 0;
+      if (!operation) {
+        await prisma.variantChange.updateMany({
+          where: { runId: run.id, status: "WRITING" },
+          data: { status: "PENDING" },
+        });
+      }
 
       // Best-effort, and deliberately after the run is already reclaimed. A campaign
       // cancelled while its run was in flight cannot legally move to PARTIAL, and an
@@ -188,9 +202,16 @@ export async function reclaimStaleRuns(
       // campaign would stop the scheduler from doing anything for every shop.
       try {
         await transitionCampaign(run.shopId, run.campaignId, "PARTIAL", {
-          reason:
-            `Run ${run.id} stopped responding and was reclaimed. ` +
-            `${verified} rows verified before it stopped; the rest are unchanged and can be resumed.`,
+          reason: operation && sent > 0
+            ? `Run ${run.id} stopped responding and was reclaimed ` +
+              (operation.status === "CREATED" || operation.status === "RUNNING"
+                ? `while Shopify was still running its bulk operation ${operation.shopifyGid}. `
+                : `after Shopify finished its bulk operation ${operation.shopifyGid}, before its results were read. `) +
+              `${sent} prices were sent to Shopify and may already be live; ` +
+              `${verified} rows were verified before it stopped. Resume asks Shopify how that operation ended ` +
+              `before sending anything again.`
+            : `Run ${run.id} stopped responding and was reclaimed. ` +
+              `${verified} rows verified before it stopped; the rest are unchanged and can be resumed.`,
           runId: run.id,
         });
       } catch (error) {

@@ -33,8 +33,13 @@ export interface RunCounts {
   failed: number;
   /** Written by this run, and taken back since by a revert. */
   reverted: number;
-  /** Still queued or in flight. */
+  /** Still queued: not sent to Shopify yet. */
   pending: number;
+  /**
+   * Sent to Shopify and not yet answered: a submitted bulk operation's rows (#832). Not
+   * "nothing written" -- Shopify may already have applied them -- and not verified either.
+   */
+  sent: number;
   total: number;
 }
 
@@ -85,6 +90,7 @@ export function tallyStatuses(
     failed: 0,
     reverted: 0,
     pending: 0,
+    sent: 0,
     total: 0,
   };
 
@@ -108,6 +114,9 @@ export function tallyStatuses(
         break;
       case "FAILED":
         counts.failed += count;
+        break;
+      case "WRITING":
+        counts.sent += count;
         break;
       case "REVERTED":
         // Settled, not outstanding. This run did write the price; a later revert took it
@@ -162,7 +171,7 @@ export function summariseRun(rows: readonly ResultRow[], targetPercent: number |
  * definitions of "clean" that can disagree is precisely the bug this is here to prevent.
  */
 export function isClean(counts: RunCounts): boolean {
-  return counts.failed === 0 && counts.pending === 0 && counts.unverified === 0;
+  return counts.failed === 0 && counts.pending === 0 && counts.sent === 0 && counts.unverified === 0;
 }
 
 /**
@@ -171,9 +180,27 @@ export function isClean(counts: RunCounts): boolean {
  * Bad news first and never softened: a partial run that opens by congratulating itself on
  * the rows that worked is the failure mode this whole product exists to avoid.
  */
-export function describeRun(result: RunResult): string {
+export function describeRun(
+  result: RunResult,
+  /** The bulk operation this run sent its rows in, when it has one (#832). */
+  bulk?: { running: boolean; submittedAt: string; applied: number | null } | null,
+): string {
   const { counts } = result;
   const parts: string[] = [];
+
+  // Sent and not yet answered. This used to read "100139 still to run. Nothing has been
+  // written." for over an hour while Shopify was applying every one of those prices.
+  if (counts.sent > 0 && bulk && !bulk.running) {
+    // Finished at Shopify, and its result file never read: the run stopped first.
+    parts.push(`${counts.sent} sent to Shopify, whose bulk operation has finished`);
+  } else if (counts.sent > 0) {
+    const progress =
+      bulk?.applied !== null && bulk?.applied !== undefined ? `; Shopify has worked through ${bulk.applied} so far` : "";
+    const started = bulk ? ` (started ${bulk.submittedAt})` : "";
+    parts.push(
+      `${counts.sent} sent to Shopify${progress}; their results arrive when the bulk operation finishes${started}`,
+    );
+  }
 
   if (counts.failed > 0) {
     parts.push(`${counts.failed} row${counts.failed === 1 ? "" : "s"} failed`);
@@ -196,7 +223,9 @@ export function describeRun(result: RunResult): string {
   // fill in. A run that wrote nothing should say so in words.
   const good =
     wrote === 0
-      ? "Nothing has been written"
+      ? counts.sent > 0
+        ? "None is read back yet"
+        : "Nothing has been written"
       : `${wrote} price${wrote === 1 ? "" : "s"} changed and verified`;
 
   if (parts.length === 0) {

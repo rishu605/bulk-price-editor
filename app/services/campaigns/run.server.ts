@@ -9,10 +9,12 @@
  * themselves.
  */
 
+import type { BulkOperationState } from "../../lib/execution/bulk-executor";
 import { Prisma } from "@prisma/client";
 
 import prisma from "../../db.server";
 import { formatAgo, formatCount } from "../../lib/format/display";
+import { CLAMP_REASONS } from "../../lib/campaigns/clamp-reasons";
 import type { AdminClient } from "../../lib/execution/sync-executor";
 import { executeRows } from "./execute.server";
 import type { PlannedRow } from "../../lib/planning/types";
@@ -27,7 +29,7 @@ import { AppError, toAppError } from "../../lib/errors/app-error";
 import { LANDED } from "../../lib/execution/landed";
 import { guardrailsFor } from "../settings.server";
 import type { RunOutcome } from "./types";
-import { inChunksCounting } from "../../lib/db/chunk";
+import { chunk, inChunksCounting } from "../../lib/db/chunk";
 import { overBudget, refuseInline, type InlineWork } from "../../lib/execution/inline-budget";
 import { releaseClaim, transitionCampaign } from "./lifecycle.server";
 import type { CampaignState } from "../../lib/lifecycle/transitions";
@@ -85,6 +87,14 @@ export interface RunOptions {
    * scenario down each of them without seeding a thousand variants.
    */
   forcePath?: "sync" | "bulk";
+  /**
+   * How long a bulk run waits for Shopify before it stops watching, in place of the
+   * poll's thirty minutes.
+   *
+   * For tests only: the chaos suite cannot wait half an hour to prove what happens when an
+   * operation outlives the wait (#832).
+   */
+  bulkWaitMs?: number;
   /**
    * Continue an interrupted run instead of starting fresh.
    *
@@ -258,6 +268,22 @@ async function pricesWrittenBy(shopId: string, campaignId: string): Promise<stri
   return rows.map((row) => row.variantGid);
 }
 
+/** A bulk operation's state as its record keeps it: status, how far it has got, and when it ended. */
+function bulkProgress(operation: BulkOperationState) {
+  // Anything Shopify reports that the record has no word for (CANCELING) is still running.
+  const status = (
+    ["CREATED", "RUNNING", "COMPLETED", "FAILED", "CANCELED", "EXPIRED"].includes(operation.status) ? operation.status : "RUNNING"
+  ) as "CREATED" | "RUNNING" | "COMPLETED" | "FAILED" | "CANCELED" | "EXPIRED";
+  const count = Number(operation.objectCount ?? Number.NaN);
+  return {
+    status,
+    ...(Number.isFinite(count) ? { objectCount: BigInt(Math.trunc(count)) } : {}),
+    ...(operation.url ? { resultUrl: operation.url } : {}),
+    ...(operation.errorCode ? { errorCode: operation.errorCode } : {}),
+    ...(status !== "CREATED" && status !== "RUNNING" ? { finishedAt: new Date() } : {}),
+  };
+}
+
 /** Filled in as a run gets going, for the catch in `runCampaign`. */
 interface Started {
   /** The run row, once it exists. */
@@ -273,6 +299,8 @@ interface FailedRun {
   verified: number;
   /** Rows written and never read back. */
   applied: number;
+  /** Rows inside a bulk operation Shopify accepted, outcome not yet read (#832). */
+  sent: number;
   planned: number;
 }
 
@@ -312,11 +340,21 @@ async function failRun(runId: string | undefined, error: unknown, writing = fals
       where: { id: runId, status: { in: ["PLANNING", "QUEUED", "EXECUTING", "VERIFYING"] } },
       data: { status: writing ? "PARTIAL" : "FAILED", finishedAt: new Date(), verifiedRows: verified, failedRows: failed },
     });
+    let sent = 0;
     if (writing && ended.count > 0) {
-      await prisma.variantChange.updateMany({ where: { runId, status: "WRITING" }, data: { status: "PENDING" } });
+      // Rows inside a bulk operation Shopify accepted are sent, not unsent: Shopify goes on
+      // applying them, and a resume asks it how the operation ended (#832). Finished or not
+      // -- a run that dies reading a 100,000-row result file has an operation that is done
+      // and rows nobody has read back.
+      const inBulk = await prisma.bulkOperationRecord.count({ where: { runId, kind: "MUTATION" } });
+      if (inBulk === 0) {
+        await prisma.variantChange.updateMany({ where: { runId, status: "WRITING" }, data: { status: "PENDING" } });
+      } else {
+        sent = await prisma.variantChange.count({ where: { runId, status: "WRITING" } });
+      }
       await settleMirror(runId);
     }
-    return { ended: ended.count > 0, verified, applied, planned: run?.plannedRows ?? 0 };
+    return { ended: ended.count > 0, verified, applied, sent, planned: run?.plannedRows ?? 0 };
   } catch (failure) {
     // Imported here rather than at the top, matching the one other use in this file.
     const { logger } = await import("../../lib/logging/logger");
@@ -402,7 +440,9 @@ function stoppedPartWay(error: unknown, failed: FailedRun, options: RunOptions):
     changed > 0
       ? `${formatCount(changed)} of ${formatCount(failed.planned)} prices were changed before it did, so your storefront ` +
         "has some of this campaign's prices and not others."
-      : "Some prices may have changed before it did.";
+      : failed.sent > 0
+        ? `${formatCount(failed.sent)} prices were sent to Shopify in bulk and may already be live.`
+        : "Some prices may have changed before it did.";
   return new AppError({
     code: app.code,
     status: app.status,
@@ -474,6 +514,39 @@ async function executeCampaignRun(
   if (!options.variantGids) {
     const live = await liveFullRun(campaignId);
     if (live) return standDown(campaignId, live, options, 0);
+  }
+
+  // Before anything writes, asks Shopify how the campaign's last bulk operation ended
+  // (#832). Its rows were sent and may be live. Still running, nothing writes: a revert
+  // sent now would be overwritten as Shopify works through the apply, and a resume would
+  // send the same prices twice. The variants it settles as landed never got their tags or
+  // market prices -- the run died before either -- and a resume writes no base price for
+  // them, so they are carried to both below.
+  const settledLanded = new Set<string>();
+  let settledNote: string | null = null;
+  {
+    const { settleSubmittedBulk } = await import("./execute.server");
+    const bulk = await settleSubmittedBulk(shopId, campaignId, client);
+    if (bulk && "stillRunning" in bulk) {
+      return { runId: "", planned: 0, verified: 0, failed: 0, unverified: 0, clean: true, messages: [bulk.stillRunning], refused: bulk.stillRunning, transient: true };
+    }
+    if (bulk) {
+      for (const gid of bulk.landed) settledLanded.add(gid);
+      // Said first, because this run's own counts do not include them: "apply finished:
+      // 0 verified" straight after reading four verified prices from Shopify read as if
+      // nothing had happened.
+      settledNote =
+        `Shopify had finished bulk operation ${bulk.operation}: ${formatCount(bulk.landed.length)} price(s) read back from its result file` +
+        (bulk.failed > 0 ? `, ${formatCount(bulk.failed)} failed` : "") +
+        (bulk.unreported > 0 ? `, ${formatCount(bulk.unreported)} not in it` : "") +
+        ".";
+      await settleMirror(bulk.settledRunId);
+      const [verified, failed] = await Promise.all([
+        prisma.variantChange.count({ where: { runId: bulk.settledRunId, status: { in: [...LANDED] } } }),
+        prisma.variantChange.count({ where: { runId: bulk.settledRunId, status: "FAILED" } }),
+      ]);
+      await prisma.campaignRun.update({ where: { id: bulk.settledRunId }, data: { verifiedRows: verified, failedRows: failed } });
+    }
   }
 
   // What this run will write, for the inline budget (#790). Counted only for a caller
@@ -676,6 +749,17 @@ async function executeCampaignRun(
     }
   }
 
+  // What the tag and market steps cover: every row this run writes, and the variants a
+  // settled bulk operation landed (#832). The run that sent those died before tagging them
+  // or pricing their markets, and this one plans them as no change -- the mirror already
+  // has their price -- so they are carried by id.
+  const followers = [
+    ...new Set([
+      ...writable.map((row) => row.ref.variantGid),
+      ...[...settledLanded].filter((gid) => !leaveAlone.has(gid)),
+    ]),
+  ];
+
   // One run per (campaign, occurrence, kind), enforced by a unique index. Two workers
   // ticking the same campaign at once -- which is exactly what happens in the window
   // after a Redis restart drops the leader lock -- have one of them lose this race,
@@ -795,10 +879,7 @@ async function executeCampaignRun(
     })),
   );
 
-  const products = await productMapFor(
-    shopId,
-    writable.map((row) => row.ref.variantGid),
-  );
+  const products = await productMapFor(shopId, followers);
 
   // Honour the planner's path choice. A 1,600-row campaign executed synchronously
   // would take roughly one variant every two seconds against a standard shop's
@@ -848,7 +929,47 @@ async function executeCampaignRun(
     productOf: (gid) => products.get(gid) ?? gid,
     verifySampleRate: options.verifySampleRate ?? 1,
     forcePath: options.forcePath,
+    bulkWaitMs: options.bulkWaitMs,
     onProgress: beat,
+    // A bulk operation, once accepted, applies its prices whatever happens to this
+    // process. Its rows say "sent to Shopify" from that moment, in the same step that
+    // records which operation holds them (#832). Until now they stayed Pending -- "Nothing
+    // has been written" -- for over an hour while Shopify applied 100,139 prices.
+    onSubmitted: async (operation) => {
+      await prisma.$transaction([
+        prisma.bulkOperationRecord.upsert({
+          where: { shopifyGid: operation.id },
+          create: { shopId, runId: run.id, shopifyGid: operation.id, kind: "MUTATION", ...bulkProgress(operation) },
+          update: { shopId, runId: run.id, kind: "MUTATION", submittedAt: new Date(), finishedAt: null, ...bulkProgress(operation) },
+        }),
+        prisma.variantChange.updateMany({
+          where: { runId: run.id, shopId, status: "PENDING", surfaceKind: "BASE", priceListGid: "" },
+          data: { status: "WRITING" },
+        }),
+        // Why a clamped row's price is not the rule's, said now rather than with the
+        // results. A run that dies before they arrive leaves the next run to settle these
+        // rows from the result file, and the ledger is all it has to tell clamped from
+        // verified by (#792).
+        ...CLAMP_REASONS.flatMap(([reason, text]) =>
+          chunk(
+            writable
+              .filter((row) => row.status === "clamped" && (row.reason ?? "below-floor") === reason)
+              .map((row) => row.ref.variantGid),
+          ).map((batch) =>
+            prisma.variantChange.updateMany({
+              where: { runId: run.id, shopId, variantGid: { in: batch } },
+              data: { failureReason: text },
+            }),
+          ),
+        ),
+      ]);
+    },
+    onPoll: async (operation) => {
+      await prisma.bulkOperationRecord.updateMany({
+        where: { shopifyGid: operation.id },
+        data: { ...bulkProgress(operation), lastPolledAt: new Date() },
+      });
+    },
   });
 
   const messages = await recordResults(run.id, shopId, result.rows);
@@ -868,7 +989,7 @@ async function executeCampaignRun(
   // Tags after prices, deliberately. A badge on a product still showing full price is
   // worse than a price change nobody has badged yet, so the storefront never claims a
   // sale that has not landed.
-  const tagOutcome = await syncTags(shopId, campaignId, run.id, writable, products, client, options, beat);
+  const tagOutcome = await syncTags(shopId, campaignId, run.id, writable, followers, products, client, options, beat);
   if (tagOutcome) messages.push(...tagOutcome.messages);
 
   // Markets, after the base surface. A campaign that only ever touched the base price
@@ -901,7 +1022,7 @@ async function executeCampaignRun(
             campaignId,
             run.id,
             resolvable,
-            writable.map((row) => row.ref.variantGid),
+            followers,
             client,
             refusedMarkets,
             { onProgress: beat },
@@ -974,7 +1095,9 @@ async function executeCampaignRun(
       : "PARTIAL";
 
   await transitionCampaign(shopId, campaignId, finalState, {
-    reason: `${options.revert ? "revert" : "apply"} finished: ${result.verified} verified, ${result.failed} failed`,
+    reason:
+      `${options.revert ? "revert" : "apply"} finished: ${result.verified} verified, ${result.failed} failed` +
+      (settledNote ? `. ${settledNote}` : ""),
     runId: run.id,
   });
 
@@ -1026,6 +1149,7 @@ async function executeCampaignRun(
     unverified: result.unverified,
     clean: result.clean,
     messages: [
+      ...(settledNote ? [settledNote] : []),
       // Lead with what was skipped. "Applied 3 variants" after a 1,500-row campaign
       // looks like a catastrophe until you know the other 1,497 were already correct
       // and deliberately left alone.
@@ -1097,6 +1221,8 @@ async function syncTags(
   campaignId: string,
   runId: string,
   rows: PlannedRow[],
+  /** Every variant whose product this run tags: `rows`, and any a settled bulk operation landed. */
+  variantGids: readonly string[],
   products: Map<string, string>,
   client: AdminClient,
   options: RunOptions,
@@ -1139,7 +1265,7 @@ async function syncTags(
     if (!campaign?.tagKit.length) return null;
 
     const productGids = [
-      ...new Set(rows.map((row) => products.get(row.ref.variantGid)).filter((gid): gid is string => !!gid)),
+      ...new Set(variantGids.map((gid) => products.get(gid)).filter((gid): gid is string => !!gid)),
     ];
 
     const outcome = await applyCampaignTags(
@@ -1381,12 +1507,6 @@ async function priorLedger(campaignId: string, kind: "APPLY" | "REVERT") {
     attempt: change.attempt,
   }));
 }
-
-/** The Reason column for a clamped row, by what raised it. */
-const CLAMP_REASONS: ReadonlyArray<[string, string]> = [
-  ["below-floor", "Raised to your guardrail floor: the rule would have priced it below it."],
-  ["non-positive-price", "Raised to the smallest price: the rule would have priced it at zero or below."],
-];
 
 async function recordResults(
   runId: string,
