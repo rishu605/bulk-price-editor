@@ -242,7 +242,14 @@ export type AnchorAppHandleQuery = { currentAppInstallation: { app: Pick<AdminTy
 export type AnchorActiveSubscriptionsQueryVariables = AdminTypes.Exact<{ [key: string]: never; }>;
 
 
-export type AnchorActiveSubscriptionsQuery = { currentAppInstallation: { activeSubscriptions: Array<Pick<AdminTypes.AppSubscription, 'id'>> } };
+export type AnchorActiveSubscriptionsQuery = { currentAppInstallation: { activeSubscriptions: Array<Pick<AdminTypes.AppSubscription, 'id' | 'name' | 'status' | 'trialDays' | 'createdAt'>> } };
+
+export type AnchorSubscriptionStatusQueryVariables = AdminTypes.Exact<{
+  id: AdminTypes.Scalars['ID']['input'];
+}>;
+
+
+export type AnchorSubscriptionStatusQuery = { node?: AdminTypes.Maybe<Pick<AdminTypes.AppSubscription, 'id' | 'status'>> };
 
 export type AnchorProductTagsQueryVariables = AdminTypes.Exact<{
   ids: Array<AdminTypes.Scalars['ID']['input']> | AdminTypes.Scalars['ID']['input'];
@@ -436,7 +443,8 @@ interface GeneratedQueryTypes {
   "#graphql\n      query AnchorProbeMarkets {\n        markets(first: 1) { nodes { id } }\n      }\n    ": {return: AnchorProbeMarketsQuery, variables: AnchorProbeMarketsQueryVariables},
   "#graphql\n      query AnchorProbeCompanies {\n        companies(first: 1) { nodes { id } }\n      }\n    ": {return: AnchorProbeCompaniesQuery, variables: AnchorProbeCompaniesQueryVariables},
   "#graphql\n  query AnchorAppHandle {\n    currentAppInstallation {\n      app {\n        handle\n      }\n    }\n  }\n": {return: AnchorAppHandleQuery, variables: AnchorAppHandleQueryVariables},
-  "#graphql\n  query AnchorActiveSubscriptions {\n    currentAppInstallation {\n      activeSubscriptions {\n        id\n      }\n    }\n  }\n": {return: AnchorActiveSubscriptionsQuery, variables: AnchorActiveSubscriptionsQueryVariables},
+  "#graphql\n  query AnchorActiveSubscriptions {\n    currentAppInstallation {\n      activeSubscriptions {\n        id\n        name\n        status\n        trialDays\n        createdAt\n      }\n    }\n  }\n": {return: AnchorActiveSubscriptionsQuery, variables: AnchorActiveSubscriptionsQueryVariables},
+  "#graphql\n  query AnchorSubscriptionStatus($id: ID!) {\n    node(id: $id) {\n      ... on AppSubscription {\n        id\n        status\n      }\n    }\n  }\n": {return: AnchorSubscriptionStatusQuery, variables: AnchorSubscriptionStatusQueryVariables},
   "#graphql\n  query AnchorProductTags($ids: [ID!]!) {\n    nodes(ids: $ids) {\n      ... on Product { id tags }\n    }\n  }\n": {return: AnchorProductTagsQuery, variables: AnchorProductTagsQueryVariables},
   "#graphql\n  query AnchorCurrentBulkQuery {\n    currentBulkOperation(type: QUERY) {\n      id status url partialDataUrl objectCount errorCode\n    }\n  }\n": {return: AnchorCurrentBulkQueryQuery, variables: AnchorCurrentBulkQueryQueryVariables},
   "#graphql\n  query AnchorProductVariantsPage($id: ID!, $cursor: String) {\n    product(id: $id) {\n      featuredImage { url }\n      variants(first: 250, after: $cursor) {\n        pageInfo { hasNextPage endCursor }\n        nodes {\n          id\n          title\n          sku\n          barcode\n          price\n          compareAtPrice\n          inventoryQuantity\n          inventoryItem { unitCost { amount currencyCode } }\n        }\n      }\n    }\n  }\n": {return: AnchorProductVariantsPageQuery, variables: AnchorProductVariantsPageQueryVariables},

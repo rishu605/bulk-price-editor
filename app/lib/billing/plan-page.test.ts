@@ -22,24 +22,32 @@ import { sourceOf } from "../testing/source";
 const page = sourceOf("app/routes/app.settings.plan.tsx");
 
 describe("changing plan", () => {
-  it("is offered on the plan page", () => {
-    expect(page, "1.2.3 requires an in-app way to change plan").toMatch(
-      /<s-button[^>]*href=\{pricingUrl\}/,
-    );
+  it("is offered on the plan page, one form per plan", () => {
+    expect(page, "1.2.3 requires an in-app way to change plan").toMatch(/<fetcher\.Form method="post"/);
+    expect(page).toMatch(/name="plan" value=\{plan\.id\}/);
   });
 
-  it("goes to Shopify's own picker, which is the only thing that can take the money", () => {
-    expect(page).toContain("pricingPlansUrl(");
+  it("charges through the Billing API, and cancels for Free (#860)", () => {
+    expect(page).toContain("billing.request(");
+    expect(page).toContain("billing.cancel(");
   });
 
-  it("reads the handle rather than carrying a copy of it", () => {
-    // A handle in an env var is wrong after a rename, and the symptom is a 404 on the one
-    // page where somebody decided to pay.
-    expect(page).toContain("appHandle(");
-    expect(page).not.toMatch(/APP_HANDLE|process\.env/);
+  it("never links to App Pricing's hosted picker, which was the 404 App Review found", () => {
+    expect(page).not.toMatch(/pricing_plans|pricingPlansUrl|pricingUrl/);
   });
 
-  it("shows nothing on a development store, where nothing is charged", () => {
-    expect(page).toMatch(/billing\.exempt \?\s*null/);
+  it("says whether a charge is a test, rather than taking the library's default of yes", () => {
+    // `billing.request` defaults `isTest` to true: left out, no merchant would ever pay.
+    expect(page).toMatch(/isTest,/);
+    expect(page).toContain("isTestCharge(");
+  });
+
+  it("offers it on a development store too, so App Review can try the charge flow", () => {
+    expect(page).not.toMatch(/exempt \?\s*null\s*:\s*pricing/);
+    expect(page).not.toMatch(/\{exempt \? null : <ActionRow/);
+  });
+
+  it("reads the plan back from Shopify on load, so the page shows what was just approved", () => {
+    expect(page).toContain("syncSubscription(");
   });
 });

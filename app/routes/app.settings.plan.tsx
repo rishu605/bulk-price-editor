@@ -9,19 +9,29 @@
 
 import { formatCount, formatDay } from "../lib/format/display";
 import { Blank } from "../components/Blank";
-import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useLoaderData } from "react-router";
+import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
-import { billingFrom, campaignsAffectedBy } from "../services/billing.server";
+import {
+  activeSubscriptionIds,
+  applySubscriptionUpdate,
+  billingFrom,
+  campaignsAffectedBy,
+  isTestCharge,
+  syncSubscription,
+} from "../services/billing.server";
 import { appHandle } from "../services/app-handle.server";
 import { toAdminClient } from "../services/admin-client.server";
-import { pricingPlansUrl } from "../lib/billing/pricing-plans";
+import { fetchShopBasics } from "../services/catalog-sync.server";
+import { billingPlanName, planReturnUrl, trialDaysFor } from "../lib/billing/billing-api";
+import { paysOn } from "../lib/billing/subscription-payload";
 import { ActionRow } from "../components/ActionRow";
-import { PLAN_ORDER, PLANS } from "../lib/billing/plans";
+import { isPlanId, PLAN_ORDER, PLANS, planFor, type PlanId } from "../lib/billing/plans";
+import { logger } from "../lib/logging/logger";
 import { formatMinorUnits } from "../lib/money/format";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
@@ -32,10 +42,16 @@ export const loader = withGuard("/app/settings/plan", async ({ request }: Loader
   const { admin, session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
 
+  // What Shopify says this shop pays on, before the row is read (#860). A merchant back
+  // from approving a charge sees the plan they approved, whether or not the webhook has
+  // landed yet.
+  await syncSubscription(shop.id, toAdminClient(admin));
+
   const record = await prisma.shop.findUniqueOrThrow({
     where: { id: shop.id },
     select: {
       planTier: true,
+      subscriptionGid: true,
       subscriptionStatus: true,
       trialEndsAt: true,
       developerStore: true,
@@ -47,20 +63,33 @@ export const loader = withGuard("/app/settings/plan", async ({ request }: Loader
     where: { shopId: shop.id, deletedAt: null },
   });
 
+  // The plan this shop subscribes to. A development store has every feature whatever it
+  // is on, but it still has a plan of its own, so a plan change made there -- App Review
+  // trying the charge flow -- shows as one.
+  const current: PlanId = record.developerStore ? planFor(record.planTier.toLowerCase()).id : billing.plan.id;
+  const trialEndsAt = current !== "free" && record.trialEndsAt && record.trialEndsAt > new Date() ? record.trialEndsAt : null;
+
+  // Shopify sends the merchant back with `charge_id` whether they approved or declined.
+  // Approved is the charge the shop now pays on; anything else was not approved.
+  const chargeId = new URL(request.url).searchParams.get("charge_id");
+  const returned = chargeId
+    ? record.subscriptionGid?.endsWith(`/${chargeId}`) && paysOn(record.subscriptionStatus)
+      ? ("approved" as const)
+      : ("declined" as const)
+    : null;
+
   return {
     timeZone: shop.timezone,
-    current: billing.plan.id,
+    current,
     exempt: billing.exempt,
-    trialing: billing.trialing,
-    trialEndsAt: billing.trialEndsAt?.toISOString() ?? null,
+    testCharges: isTestCharge(record.developerStore),
+    trialing: trialEndsAt !== null,
+    trialEndsAt: trialEndsAt?.toISOString() ?? null,
+    returned,
     variants,
     // What would stop being startable on the free plan, so the downgrade copy is about
     // this merchant's campaigns rather than about plans in the abstract.
     affected: await campaignsAffectedBy(shop.id, PLANS.free),
-    // Null on a development store, where nothing is charged and the picker would be a
-    // link to a decision the merchant cannot make, and null if the handle did not
-    // arrive. Both render no button rather than a dead one.
-    pricingUrl: billing.exempt ? null : pricingPlansUrl(await appHandle(toAdminClient(admin))),
     plans: PLAN_ORDER.map((id) => {
       const plan = PLANS[id];
       return {
@@ -81,9 +110,76 @@ export const loader = withGuard("/app/settings/plan", async ({ request }: Loader
   };
 });
 
+type ActionData = { ok: boolean; message: string };
+
+/**
+ * Changing plan (#860, App Store 1.2.3).
+ *
+ * A paid plan is a Billing API charge: `billing.request` creates it and sends the merchant
+ * to Shopify's approval screen, which brings them back to this page. Free is the absence
+ * of a subscription, so it cancels the one the shop has.
+ */
+export const action = withGuard("/app/settings/plan", async ({ request }: ActionFunctionArgs): Promise<ActionData> => {
+  const { admin, session, billing } = await authenticate.admin(request);
+  const shop = await ensureShop(session.shop);
+  const client = toAdminClient(admin);
+  const form = await request.formData();
+  const plan = String(form.get("plan") ?? "");
+  if (!isPlanId(plan)) {
+    return { ok: false, message: "That plan doesn't exist. Reload the page and choose one of the plans listed." };
+  }
+
+  // Asked of Shopify at the moment of charging, not read from the synced row: a reviewer
+  // can open this page before the first catalogue sync has recorded what kind of store it is.
+  const { developerStore } = await fetchShopBasics(admin);
+  const isTest = isTestCharge(developerStore);
+
+  if (plan === "free") {
+    const ids = await activeSubscriptionIds(client);
+    for (const subscriptionId of ids) {
+      // Prorated, so the unused part of the month comes back to the merchant as a credit.
+      await billing.cancel({ subscriptionId, isTest, prorate: true });
+    }
+    const last = ids.at(-1);
+    if (last) await applySubscriptionUpdate(shop.id, { gid: last, status: "CANCELLED", planId: "free" });
+    return {
+      ok: true,
+      message:
+        ids.length > 0
+          ? "Your subscription is cancelled and you're on Free. Running campaigns still finish, scheduled reverts included."
+          : "You're on Free. There was no subscription to cancel.",
+    };
+  }
+
+  const record = await prisma.shop.findUniqueOrThrow({ where: { id: shop.id }, select: { trialEndsAt: true } });
+  try {
+    // Throws the redirect to Shopify's approval screen; nothing after it runs on success.
+    await billing.request({
+      plan: billingPlanName(plan),
+      isTest,
+      returnUrl: planReturnUrl(session.shop, await appHandle(client)),
+      trialDays: trialDaysFor(plan, record.trialEndsAt),
+    });
+  } catch (error) {
+    if (error instanceof Response) throw error;
+    const detail = (error as { errorData?: Array<{ message?: string }> })?.errorData?.[0]?.message;
+    logger.error("billing request failed", { plan, reason: detail ?? (error instanceof Error ? error.message : "unknown") });
+    return {
+      ok: false,
+      message:
+        `Shopify didn't create the charge for ${PLANS[plan].name}${detail ? `: ${detail}` : ""}. ` +
+        "Nothing was charged and your plan is unchanged. Try again, or contact support from Help if it keeps happening.",
+    };
+  }
+  return { ok: false, message: "Shopify didn't return an approval page. Nothing was charged; try again." };
+});
+
 export default function PlanPage() {
-  const { current, exempt, trialing, trialEndsAt, variants, plans, affected, timeZone, pricingUrl } =
+  const { current, exempt, testCharges, trialing, trialEndsAt, returned, variants, plans, affected, timeZone } =
     useLoaderData<typeof loader>();
+  const fetcher = useFetcher<ActionData>();
+  const choosing = fetcher.state !== "idle" ? String(fetcher.formData?.get("plan") ?? "") : "";
+  const currentName = PLANS[current as keyof typeof PLANS].name;
 
   return (
     <PageShell heading="Plan">
@@ -91,8 +187,37 @@ export default function PlanPage() {
         <s-banner tone="info">
           <s-paragraph>
             This is a development store, so every feature is available and nothing is
-            charged.
+            charged. Changing plan here creates a test charge: Shopify asks you to approve
+            it, and no money moves.
           </s-paragraph>
+        </s-banner>
+      ) : testCharges ? (
+        <s-banner tone="info">
+          <s-paragraph>Plan changes on this deploy are test charges. No money moves.</s-paragraph>
+        </s-banner>
+      ) : null}
+
+      {returned === "approved" ? (
+        <s-banner tone="success">
+          <s-paragraph>
+            You&rsquo;re on {currentName}.{" "}
+            {testCharges
+              ? "It's a test charge, so nothing is billed."
+              : `Shopify bills it with your store's invoice${trialing ? ", once the trial ends" : ""}.`}
+          </s-paragraph>
+        </s-banner>
+      ) : returned === "declined" ? (
+        <s-banner tone="warning">
+          <s-paragraph>
+            The charge wasn&rsquo;t approved, so nothing changed: you&rsquo;re still on {currentName}.
+            Choose a plan again whenever you&rsquo;re ready.
+          </s-paragraph>
+        </s-banner>
+      ) : null}
+
+      {fetcher.data ? (
+        <s-banner tone={fetcher.data.ok ? "success" : "critical"}>
+          <s-paragraph>{fetcher.data.message}</s-paragraph>
         </s-banner>
       ) : null}
 
@@ -122,7 +247,7 @@ export default function PlanPage() {
         lede={
           <>
             <s-text type="strong">
-              You are on {PLANS[current as keyof typeof PLANS].name}
+              You are on {currentName}
             </s-text>
             {" — "}
             {formatCount(variants)} variants in your catalogue.
@@ -171,17 +296,27 @@ export default function PlanPage() {
           </s-table-body>
         </s-table>
 
-        {pricingUrl ? (
-          <ActionRow>
-            {/* Shopify hosts the page that actually takes the money; this is the only
-                thing standing between a merchant who has decided and the checkout. The
-                table above used to be the whole card, so "See plans" from Home led here
-                and stopped. */}
-            <s-button href={pricingUrl} variant="primary">
-              Change plan
-            </s-button>
-          </ActionRow>
-        ) : null}
+        {/* Every plan but the current one, each its own form. A paid plan goes to Shopify's
+            approval screen and comes back here; Free cancels the subscription. The table
+            above used to be the whole card, so "See plans" from Home led here and stopped
+            -- and then to Shopify's 404, which is what App Review found (#860). */}
+        <ActionRow>
+          {plans
+            .filter((plan) => plan.id !== current)
+            .map((plan) => (
+              <fetcher.Form method="post" key={plan.id}>
+                <input type="hidden" name="plan" value={plan.id} />
+                <s-button
+                  type="submit"
+                  variant={plan.id !== "free" && PLAN_ORDER.indexOf(plan.id) > PLAN_ORDER.indexOf(current) ? "primary" : "secondary"}
+                  loading={choosing === plan.id || undefined}
+                  disabled={(choosing !== "" && choosing !== plan.id) || undefined}
+                >
+                  {plan.id === "free" ? "Switch to Free" : `Switch to ${plan.name}`}
+                </s-button>
+              </fetcher.Form>
+            ))}
+        </ActionRow>
       </Card>
 
       <Card

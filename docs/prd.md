@@ -97,7 +97,7 @@ validate first.
 | A-5.3 | CSV import/export | core | Exports: preview, ledger, reconciliation, baselines, audit. Imports: exact prices, baselines, costs by SKU/handle/gid, ≤500K rows, streamed validation with row-level error file. Matrixify-compatible headers. |
 | A-5.4 | Onboarding | core | Install → baseline capture progress (explained) → guided first campaign on ≤5 products → practice mode (preview-only). Checklist until first verified-clean campaign. |
 | A-5.5 | Settings | core | Guardrails, rounding profiles, drift policy, blast-radius thresholds, notifications, timezone display, data export, danger zone. |
-| A-5.6 | Billing & plans | core | Managed pricing; tier gates (variant caps, surfaces); in-context upgrade prompts; downgrade → gated surfaces read-only, reverts always allowed, no data deletion. |
+| A-5.6 | Billing & plans | core | Billing API recurring plans (manual pricing, D9); tier gates (variant caps, surfaces); in-context upgrade prompts; downgrade → gated surfaces read-only, reverts always allowed, no data deletion. |
 | A-5.7 | Margin & campaign P&L | launch+ | Preview margin deltas; post-campaign units/revenue vs trailing window (directional, clearly labelled). Needs `read_orders` + protected-data approval. |
 | A-5.8 | Shopify Flow | launch+ | Triggers: campaign started/ended/held. Actions: start/end campaign, capture baseline. |
 | A-5.9 | Approvals | later | Two-person rule above thresholds; approver named in audit log. |

@@ -7,6 +7,7 @@ import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prism
 import prisma from "./db.server";
 import { API_VERSION } from "./lib/shopify/api-version";
 import { EncryptedSessionStorage } from "./services/encrypted-session-storage.server";
+import { billingConfig } from "./lib/billing/billing-api";
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
@@ -20,6 +21,8 @@ const shopify = shopifyApp({
   // yields working access tokens for every connected store.
   sessionStorage: new EncryptedSessionStorage(new PrismaSessionStorage(prisma)),
   distribution: AppDistribution.AppStore,
+  // The paid plans, charged through the Billing API (#860). Built from `plans.ts`.
+  billing: billingConfig(),
   future: {
     expiringOfflineAccessTokens: true,
   },
