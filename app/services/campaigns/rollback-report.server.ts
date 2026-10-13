@@ -183,7 +183,8 @@ async function mirrorState(
 }
 
 /**
- * What this campaign last wrote for each variant, from the ledger.
+ * What this campaign last wrote for each variant, from the ledger: its sale price, or the
+ * price its own revert put back.
  *
  * The ledger, not the mirror: the mirror holds what is live, which is precisely the
  * value being compared against. Reading both from the same place would compare a
@@ -203,8 +204,13 @@ async function appliedValues(
    */
   excluded: readonly string[] = [],
 ): Promise<Map<string, bigint | null>> {
+  // Reverts as well as applies (#910). A revert that stopped part-way has put some prices
+  // back; measured against the sale price alone, every one of those read as "changed
+  // since … someone edited those on purpose", and the header offered "Review 37 edited
+  // before reverting" in place of Resume. Nobody edited them: the revert did, and its
+  // landed row is the newest thing this campaign wrote there.
   const runs = await prisma.campaignRun.findMany({
-    where: { campaignId, kind: "APPLY" },
+    where: { campaignId, kind: { in: ["APPLY", "REVERT"] } },
     orderBy: { createdAt: "desc" },
     select: { id: true },
     take: 20,
@@ -224,7 +230,9 @@ async function appliedValues(
       priceListGid: "",
       ...(excluded.length > 0 ? { variantGid: { notIn: [...excluded] } } : {}),
     },
-    orderBy: { id: "desc" },
+    // Newest by when it was written, so a revert's row outranks the apply before it and an
+    // apply after the revert outranks both.
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     select: { variantGid: true, intendedPrice: true },
   });
 
