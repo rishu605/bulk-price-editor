@@ -31,6 +31,7 @@ export function RuleValueField({
   onKindChange,
   name = "ruleValue",
   selectName = "ruleKind",
+  initial,
 }: {
   currency: string;
   /**
@@ -45,6 +46,8 @@ export function RuleValueField({
   onKindChange: (kind: string) => void;
   name?: string;
   selectName?: string;
+  /** The amount and direction a link opened the editor with, for `kind` (#718, #771). */
+  initial?: { direction: "down" | "up"; magnitude: string };
 }) {
   const money = kind === "fixed-change" || kind === "set-exact";
   /* An exact price is not a change, so it has no direction — a sign on it would be a
@@ -104,10 +107,12 @@ export function RuleValueField({
           number still reduces rather than quietly inverting. */}
       {directional ? (
         <s-select name="ruleDirection" label="Which way">
-          <s-option value="down" defaultSelected>
+          <s-option value="down" defaultSelected={initial?.direction !== "up"}>
             Reduce by
           </s-option>
-          <s-option value="up">Increase by</s-option>
+          <s-option value="up" defaultSelected={initial?.direction === "up"}>
+            Increase by
+          </s-option>
         </s-select>
       ) : null}
 
@@ -115,7 +120,7 @@ export function RuleValueField({
         <s-money-field
           name={name}
           label={kind === "set-exact" ? `Price (${currency})` : `Amount (${currency})`}
-          value={kind === "set-exact" ? "" : DRAFT_DEFAULTS.fixedMagnitude}
+          value={initial?.magnitude ?? (kind === "set-exact" ? "" : DRAFT_DEFAULTS.fixedMagnitude)}
           details={
             kind === "set-exact"
               ? "Every variant in scope gets this exact price."
@@ -126,7 +131,7 @@ export function RuleValueField({
         <s-number-field
           name={name}
           label="Percentage"
-          value={DRAFT_DEFAULTS.percentMagnitude}
+          value={initial?.magnitude ?? DRAFT_DEFAULTS.percentMagnitude}
           details="Of each variant's baseline."
         />
       )}

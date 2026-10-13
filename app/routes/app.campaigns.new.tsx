@@ -1,3 +1,4 @@
+import { editorRuleFrom } from "../lib/campaigns/editor-rule";
 import { catalogueNotice } from "../lib/catalogue/state";
 import { catalogueState } from "../services/catalogue-state.server";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -47,7 +48,6 @@ import { PageSections, PageShell } from "../components/PageShell";
 import { UnsavedChanges } from "../components/UnsavedChanges";
 import { DraftPreview } from "../components/DraftPreview";
 import { FROM_FILE, RuleValueField } from "../components/RuleValueField";
-import { DRAFT_DEFAULTS } from "../lib/campaigns/draft-defaults";
 import {
   ImportForm,
   ImportReport,
@@ -68,6 +68,7 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
   const shop = await ensureShop(session.shop);
 
   const url = new URL(request.url);
+  const initialRule = editorRuleFrom(url.searchParams);
   const segmentId = url.searchParams.get("segment") ?? "";
   const practice = url.searchParams.get("practice") === "1";
   const guided = url.searchParams.get("guided") === "1";
@@ -211,11 +212,22 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
     guided,
     // Set when the merchant arrived by clicking a day on the calendar.
     presetStart: presetStartFor(url.searchParams.get("startAt")),
-    // Which way prices change, when a link says so. Four old import URLs redirect here
-    // with `ruleKind=from-file`, and a merchant following one of them should land on the
-    // file, not on a percentage.
-    initialRuleKind:
-      url.searchParams.get("ruleKind") === FROM_FILE ? FROM_FILE : DRAFT_DEFAULTS.ruleKind,
+    // The rule a link opened the editor with, rendered by the fields themselves (#718,
+    // #771): the full preview's "Back to the campaign" carries the whole form, and Home's
+    // "Or set a scope…" carries the % typed there. The first preview already prices these
+    // values, so a form showing the defaults beside it was a preview of a different rule.
+    // Four old import URLs arrive with `ruleKind=from-file` and land on the file.
+    initialRule,
+    initialRuleKind: initialRule.kind,
+    // Rounding as the form shows it: the link's, where it carries any, over the store's.
+    formRounding: {
+      default: initialRule.rounding.default ?? settings.rounding.default,
+      byCurrency: Object.fromEntries(
+        Object.entries({ ...settings.rounding.byCurrency, ...initialRule.rounding.byCurrency }).filter(
+          ([, profile]) => profile && profile !== "inherit",
+        ),
+      ),
+    },
     priceImports: priceImports.map((row) => ({
       ...row,
       // `formatWhen`, not a second call to toLocaleString: the locale is centralised
@@ -381,6 +393,8 @@ export default function NewCampaign() {
     timeZone,
     timeZoneNow,
     initialRuleKind,
+    initialRule,
+    formRounding,
     priceImports,
     priceLists,
     currencies,
@@ -643,6 +657,8 @@ export default function NewCampaign() {
                 currency={baseCurrency}
                 kind={ruleKind}
                 onKindChange={setRuleKind}
+                // Only for the kind the link named: switching kind starts that kind afresh.
+                initial={ruleKind === initialRule.kind ? initialRule : undefined}
               />
 
               {/* Everything below is about arithmetic on a baseline, and a file has
@@ -663,11 +679,15 @@ export default function NewCampaign() {
                 label="Compare-at price"
                 details="Setting it to the baseline is what shows a customer the old price struck through."
               >
-                <s-option value="set-to-baseline" defaultSelected>
+                <s-option value="set-to-baseline" defaultSelected={initialRule.compareAt === "set-to-baseline"}>
                   Set to baseline
                 </s-option>
-                <s-option value="leave">Leave unchanged</s-option>
-                <s-option value="clear">Clear it</s-option>
+                <s-option value="leave" defaultSelected={initialRule.compareAt === "leave"}>
+                  Leave unchanged
+                </s-option>
+                <s-option value="clear" defaultSelected={initialRule.compareAt === "clear"}>
+                  Clear it
+                </s-option>
               </s-select>
 
               {/* The whole row, because these six options are the longest text in the
@@ -690,7 +710,7 @@ export default function NewCampaign() {
                   <s-option
                     key={option.value}
                     value={option.value}
-                    defaultSelected={option.value === storeRounding.default}
+                    defaultSelected={option.value === formRounding.default}
                   >
                     {/* The example is in the option and not under the select, so all six
                         explain themselves while the merchant is comparing them. A single
@@ -971,7 +991,7 @@ export default function NewCampaign() {
               <s-select key={code} name={`rounding.${code}`} label={`Rounding for ${code}`}>
                 <s-option
                   value="inherit"
-                  defaultSelected={!storeRounding.byCurrency[code]}
+                  defaultSelected={!formRounding.byCurrency[code]}
                 >
                   Same as this campaign&rsquo;s rounding (
                   {roundingLabel(profileNameFor(storeRounding, code), code).toLowerCase()})
@@ -980,7 +1000,7 @@ export default function NewCampaign() {
                   <s-option
                     key={option.value}
                     value={option.value}
-                    defaultSelected={storeRounding.byCurrency[code] === option.value}
+                    defaultSelected={formRounding.byCurrency[code] === option.value}
                   >
                     {option.label}
                   </s-option>

@@ -1,12 +1,12 @@
 import { actorFor } from "../lib/audit/actor";
 import { formatAgo, formatCount, formatDay } from "../lib/format/display";
-import type { ReactNode } from "react";
-import { quickCampaignName, readQuickPercent } from "../lib/campaigns/quick-campaign";
+import { useRef, type ReactNode } from "react";
+import { moreOptionsHref, quickCampaignName, readQuickPercent } from "../lib/campaigns/quick-campaign";
 import { merchantFacing } from "../lib/audit/housekeeping";
 import { createCampaign } from "../services/campaigns/index.server";
 import { readSettings } from "../services/settings.server";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { redirect, useFetcher, useLoaderData } from "react-router";
+import { redirect, useFetcher, useLoaderData, useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
@@ -292,6 +292,8 @@ export default function Dashboard() {
     sync,
   } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
+  const navigate = useNavigate();
+  const quickForm = useRef<HTMLFormElement>(null);
   // Which submit is in flight, not merely whether one is. There is one fetcher for the
   // whole page, so a single `state !== "idle"` put every button on the page into its
   // loading state at once: resolving a market notice spun the Re-sync button too.
@@ -717,7 +719,7 @@ export default function Dashboard() {
           is the safety property; trading it for parity would be trading away the reason to
           choose us — so the card says so before the button rather than after. */}
       {sections.quickCreate ? (
-        <Card heading="Put everything on sale">      <fetcher.Form method="post">
+        <Card heading="Put everything on sale">      <fetcher.Form method="post" ref={quickForm}>
             <input type="hidden" name="intent" value="quick-campaign" />
             <s-stack gap={SPACE.item}>
               {/* One two-digit number, so a control the width of the card would be
@@ -739,7 +741,14 @@ export default function Dashboard() {
                 <s-button type="submit" variant="primary" loading={busy("quick-campaign") || undefined}>
                   Create the draft
                 </s-button>
-                <s-button variant="secondary" href="/app/campaigns/new">
+                {/* Carries the % typed above into the editor (#771). A plain link here
+                    opened an editor at 20% for a merchant who had just typed 35. Read at
+                    click time: Polaris fields are uncontrolled. */}
+                <s-button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => navigate(moreOptionsHref(String(new FormData(quickForm.current ?? undefined).get("percent") ?? "")))}
+                >
                   Or set a scope, a schedule and more
                 </s-button>
               </ActionRow>

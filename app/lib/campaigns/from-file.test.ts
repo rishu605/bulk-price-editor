@@ -12,6 +12,7 @@
  * editor posts to the same action rather than growing its own.
  */
 
+import { editorRuleFrom } from "./editor-rule";
 import { describe, expect, it } from "vitest";
 
 import { FROM_FILE } from "../../components/RuleValueField";
@@ -110,7 +111,9 @@ describe("the URLs that used to lead here", () => {
   });
 
   it("opens on the file when the URL says so", () => {
-    // A merchant following an old bookmark lands on the file, not on a percentage.
-    expect(EDITOR).toContain('url.searchParams.get("ruleKind") === FROM_FILE');
+    // A merchant following an old bookmark lands on the file, not on a percentage. The
+    // editor reads every rule field from the URL now (#718), this one included.
+    expect(editorRuleFrom(new URLSearchParams("ruleKind=from-file")).kind).toBe("from-file");
+    expect(EDITOR).toContain("initialRuleKind: initialRule.kind");
   });
 });
