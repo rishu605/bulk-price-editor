@@ -1,3 +1,5 @@
+import { ExportButton } from "../components/ExportButton";
+import { exportQuery, reconciliationFiltersFrom } from "../lib/reporting/export-filters";
 import { formatCount } from "../lib/format/display";
 import { ActionRow } from "../components/ActionRow";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
@@ -9,8 +11,6 @@ import { ensureShop } from "../services/shop.server";
 import { reconcile } from "../services/reconciliation.server";
 import { auditMirror } from "../services/mirror-audit.server";
 import { toAdminClient } from "../services/admin-client.server";
-import { reconciliationCsv } from "../lib/reporting/reconciliation-csv";
-import { downloadCsv } from "../lib/reporting/csv";
 import { ReconciliationTable } from "../components/ReconciliationTable";
 import { clearedSearch } from "../components/FilterForm";
 import { Pagination } from "../components/Pagination";
@@ -47,12 +47,8 @@ export const loader = withGuard("/app/prices/live", async ({ request }: LoaderFu
     shop.id,
     shop.domain,
     {
-      q: url.searchParams.get("q") ?? undefined,
-      priceListGid: url.searchParams.get("surface") ?? undefined,
-      campaignId: url.searchParams.get("campaign") || undefined,
-      driftedOnly: state === "drifted",
-      offBaselineOnly: state === "off-baseline",
-      staleBaselineOnly: state === "stale-baseline",
+      // Shared with the export, so it reads exactly these rows (#819).
+      ...reconciliationFiltersFrom(url.searchParams),
     },
     page,
   );
@@ -259,14 +255,8 @@ export default function Reconciliation() {
           <ReconciliationTable rows={rows} clearHref={clearedSearch(params, RECONCILE_FIELDS)} />
         </TableBlock>
 
-        <s-button
-          type="button"
-          variant="tertiary"
-          icon="download"
-          onClick={() => downloadCsv("anchor-reconciliation.csv", reconciliationCsv(rows))}
-        >
-          Export this page (CSV)
-        </s-button>
+        {/* Every row the filters select, read on the server (#819). It was this page. */}
+        <ExportButton href={`/app/export/live${exportQuery(params)}`} filename="anchor-reconciliation.csv" rows={total} />
       </Card>
     </PageShell>
   );

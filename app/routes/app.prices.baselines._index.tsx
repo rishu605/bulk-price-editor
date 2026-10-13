@@ -15,6 +15,8 @@
  * both the import and recapture pages into showing this table instead.
  */
 
+import { ExportButton } from "../components/ExportButton";
+import { exportQuery, baselineFiltersFrom } from "../lib/reporting/export-filters";
 import { humanise } from "../lib/format/label";
 import { Blank } from "../components/Blank";
 import { MoneyCell } from "../components/MoneyCell";
@@ -40,8 +42,6 @@ import { EmptyState, NoMatches } from "../components/AsyncState";
 import { clearedSearch } from "../components/FilterForm";
 import { VariantSearch } from "../components/prices/VariantSearch";
 import { Pagination } from "../components/Pagination";
-import { baselinesCsv } from "../lib/reporting/baselines-csv";
-import { downloadCsv } from "../lib/reporting/csv";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
@@ -58,12 +58,8 @@ export const loader = withGuard("/app/prices/baselines", async ({ request }: Loa
   const shop = await ensureShop(session.shop);
 
   const url = new URL(request.url);
-  const filters = {
-    q: url.searchParams.get("q") ?? undefined,
-    vendor: url.searchParams.get("vendor") ?? undefined,
-    source: url.searchParams.get("source") ?? undefined,
-    divergedOnly: url.searchParams.get("diverged") === "1",
-  };
+  // Shared with the export, so it reads exactly these rows (#819).
+  const filters = baselineFiltersFrom(url.searchParams);
   const page = Math.max(1, Number(url.searchParams.get("page") ?? 1) || 1);
 
   const result = await browseBaselines(shop.id, shop.domain, filters, page);
@@ -238,14 +234,7 @@ export default function Baselines() {
                 {/* Exports what the filters currently show, not the whole catalogue. A
                     merchant who narrowed to one vendor means that vendor, and handing them
                     500K rows instead is not being generous. */}
-                <s-button
-                  type="button"
-                  variant="tertiary"
-                  icon="download"
-                  onClick={() => downloadCsv("anchor-baselines.csv", baselinesCsv(rows))}
-                >
-                  Export these (CSV)
-                </s-button>
+                <ExportButton href={`/app/export/baselines${exportQuery(params)}`} filename="anchor-baselines.csv" rows={total} noun="baselines" />
               </ActionRow>
 
               <TableBlock

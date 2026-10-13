@@ -7,8 +7,8 @@
 
 import { LedgerTable } from "../../components/LedgerTable";
 import { ActionRow } from "../ActionRow";
-import { downloadCsv, filenameSlug } from "../../lib/reporting/csv";
-import { ledgerCsv } from "../../lib/reporting/ledger-csv";
+import { filenameSlug } from "../../lib/reporting/csv";
+import { ExportButton } from "../ExportButton";
 import type { CampaignDetailProps } from "./props";
 import { Card } from "../Card";
 import { isLanded } from "../../lib/execution/landed";
@@ -17,6 +17,7 @@ export function CampaignLedgerTab({
   preview,
   ledger,
   ledgerTotal,
+  selectedRunId,
   fetcher,
   busy,
 }: CampaignDetailProps) {
@@ -32,19 +33,14 @@ export function CampaignLedgerTab({
             </s-text>
           </s-paragraph>
           <ActionRow>
-            <s-button
-              type="button"
-              variant="tertiary"
-              icon="download"
-              onClick={() =>
-                downloadCsv(
-                  `ledger-${filenameSlug(preview.name) || "campaign"}.csv`,
-                  ledgerCsv(ledger),
-                )
-              }
-            >
-              Export this ledger (CSV)
-            </s-button>
+            {/* Every row of the run, read on the server (#819). It was the ~60 on screen. */}
+            {selectedRunId ? (
+              <ExportButton
+                href={`/app/export/ledger?run=${encodeURIComponent(selectedRunId)}`}
+                filename={`ledger-${filenameSlug(preview.name) || "campaign"}.csv`}
+                rows={ledgerTotal}
+              />
+            ) : null}
           </ActionRow>
 
           <LedgerTable

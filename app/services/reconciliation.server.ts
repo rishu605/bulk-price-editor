@@ -86,6 +86,8 @@ export async function reconcile(
   shopDomain: string,
   filters: ReconciliationFilters = {},
   page = 1,
+  /** Rows a page. The screen's by default; an export reads all of them in larger pages (#819). */
+  pageSize = PAGE_SIZE,
 ): Promise<ReconciliationPage> {
   const [lists, campaigns] = await Promise.all([
     prisma.priceListRecord.findMany({
@@ -170,8 +172,8 @@ export async function reconcile(
     prisma.priceSurfaceEntry.findMany({
       where,
       orderBy: [{ variantGid: "asc" }, { priceListGid: "asc" }],
-      skip: (Math.max(1, page) - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
+      skip: (Math.max(1, page) - 1) * pageSize,
+      take: pageSize,
     }),
     prisma.priceSurfaceEntry.count({ where }),
   ]);

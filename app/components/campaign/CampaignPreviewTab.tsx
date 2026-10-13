@@ -24,8 +24,8 @@
 
 import { CountsRow } from "../../components/CountsRow";
 import { PreviewTable } from "../../components/PreviewTable";
-import { downloadCsv, filenameSlug } from "../../lib/reporting/csv";
-import { previewCsv } from "../../lib/reporting/preview-csv";
+import { filenameSlug } from "../../lib/reporting/csv";
+import { ExportButton } from "../ExportButton";
 import { ActionRow } from "../ActionRow";
 import type { CampaignDetailProps } from "./props";
 import { Card } from "../Card";
@@ -133,19 +133,13 @@ export function CampaignPreviewTab({ preview, approval, fetcher, busy }: Campaig
         />
 
         <ActionRow>
-          <s-button
-            type="button"
-            variant="tertiary"
-            icon="download"
-            onClick={() =>
-              downloadCsv(
-                `preview-${filenameSlug(preview.name) || "campaign"}.csv`,
-                previewCsv(preview.rows, preview.markets),
-              )
-            }
-          >
-            Export this preview (CSV)
-          </s-button>
+          {/* Every planned row, read on the server (#819). It was the screenful on display,
+              and the only way to review a large plan before typing "apply". */}
+          <ExportButton
+            href={`/app/export/preview?campaign=${encodeURIComponent(preview.campaignId)}`}
+            filename={`preview-${filenameSlug(preview.name) || "campaign"}.csv`}
+            rows={preview.counts.planned + preview.counts.skipped}
+          />
         </ActionRow>
       </Card>
 
