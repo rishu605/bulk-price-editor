@@ -26,6 +26,7 @@ export const SKIP_REASON_GROUP: Record<ResolutionReason, string> = {
   "invalid-compare-at": "would have had a compare-at price below their price",
   "non-positive-price": "would have priced at or below zero",
   "free-item": "are free, and the rule would leave them at zero, so they stay free",
+  "held-edit": "were edited by hand under another campaign, which is waiting for your decision on them",
 };
 
 /** Singular, for one row in a preview table. */
@@ -40,6 +41,7 @@ export const SKIP_REASON_ROW: Record<ResolutionReason, string> = {
   "invalid-compare-at": "Compare-at would be below the price",
   "non-positive-price": "Would price at or below zero",
   "free-item": "Free item, left free",
+  "held-edit": "Edited by hand, waiting on another campaign",
 };
 
 /**

@@ -31,10 +31,28 @@ export interface KeepersAfterRevert {
  * the count to be right more than they need every name.
  */
 export function keepersAfterRevert(
-  preview: Pick<CampaignPreview, "counts" | "rows">,
+  preview: Pick<CampaignPreview, "counts" | "rows" | "overlaps">,
   revertingCampaignId: string,
   names: Map<string, string> = new Map(),
 ): KeepersAfterRevert {
+  // From the planner's coverage when the preview has it (#821). The rows leave out every
+  // variant already at its price, which is exactly a variant another campaign keeps, so a
+  // sale entirely under a higher-priority one was told "no other campaign covers these
+  // variants" by the dialog about to revert it.
+  if (preview.overlaps) {
+    return {
+      repriced: preview.counts.planned,
+      keepers: preview.overlaps
+        .filter((overlap) => overlap.keeps > 0 && overlap.campaignId !== revertingCampaignId)
+        .map((overlap) => ({
+          campaignId: overlap.campaignId,
+          name: names.get(overlap.campaignId) ?? overlap.name,
+          variants: overlap.keeps,
+        }))
+        .sort((a, b) => b.variants - a.variants),
+    };
+  }
+
   const counts = new Map<string, number>();
 
   for (const row of preview.rows) {

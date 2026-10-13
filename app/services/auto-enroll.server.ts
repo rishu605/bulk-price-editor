@@ -29,7 +29,7 @@
 import prisma from "../db.server";
 import { captureBaselines } from "./baselines.server";
 import { astToWhere } from "./segments.server";
-import { scopeOf, toResolvable } from "./campaigns/model.server";
+import { endingAmong, scopeOf, toResolvable } from "./campaigns/model.server";
 import { assignEnrollments, type CampaignMatch } from "../lib/enrollment/assign";
 
 export interface EnrollResult {
@@ -207,7 +207,7 @@ export async function claimEnrollment(campaignId: string): Promise<string[] | nu
  * for, writing, or stopped part-way -- so nothing should join it or be priced into it.
  */
 export async function endingSinceLastApply(campaignId: string): Promise<boolean> {
-  return (await wholeRunHistory(campaignId)).ending;
+  return (await endingAmong([campaignId])).has(campaignId);
 }
 
 /**
@@ -215,14 +215,13 @@ export async function endingSinceLastApply(campaignId: string): Promise<boolean>
  * a single-variant revert, an enrolment -- say nothing about the campaign as a whole.
  */
 async function wholeRunHistory(campaignId: string): Promise<{ ending: boolean; lastRevertAt: Date | null }> {
-  const whole = { campaignId, NOT: { occurrenceKey: { startsWith: "VARIANT-" } } };
-  const [latest, lastRevert] = await Promise.all([
-    prisma.campaignRun.findFirst({ where: whole, orderBy: { createdAt: "desc" }, select: { kind: true } }),
+  const [ending, lastRevert] = await Promise.all([
+    endingSinceLastApply(campaignId),
     prisma.campaignRun.findFirst({
-      where: { ...whole, kind: "REVERT" },
+      where: { campaignId, kind: "REVERT", NOT: { occurrenceKey: { startsWith: "VARIANT-" } } },
       orderBy: { createdAt: "desc" },
       select: { createdAt: true },
     }),
   ]);
-  return { ending: latest?.kind === "REVERT", lastRevertAt: lastRevert?.createdAt ?? null };
+  return { ending, lastRevertAt: lastRevert?.createdAt ?? null };
 }

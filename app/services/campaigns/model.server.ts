@@ -21,6 +21,7 @@ import type { AdjustmentRule,
   Guardrails,
   ResolvableCampaign,
 } from "../../lib/pricing/types";
+import { PRICING_STATES } from "../../lib/lifecycle/transitions";
 import { astToWhere, segmentToAst, type FilterAst } from "../segments.server";
 import { readSettings } from "../settings.server";
 import type { CampaignInput } from "./types";
@@ -254,27 +255,88 @@ export function toResolvable(
 }
 
 /**
- * Loads a campaign plus the other ACTIVE campaigns on the shop.
+ * Loads a campaign plus every other campaign it resolves against.
  *
  * The others take part in resolution so overlap resolves the same way it will at
- * execution time, rather than being previewed in isolation.
+ * execution time, rather than being previewed in isolation. `heldEdits` goes to the
+ * planner beside them: variants none of this campaign's runs may write (#821).
  */
 export async function loadCampaignContext(shopId: string, campaignId: string) {
   const campaign = await prisma.campaign.findFirstOrThrow({
     where: { id: campaignId, shopId },
   });
 
-  const others = await prisma.campaign.findMany({
-    where: { shopId, status: "ACTIVE", id: { not: campaignId } },
-  });
+  const others = await competingCampaigns(shopId, campaignId);
 
   return {
     campaign,
     // The campaign being planned covers its own candidates by construction; every other
     // one is offered only the variants inside its own scope (#752).
     resolvable: [toResolvable(campaign), ...(await withScopes(shopId, others))],
+    heldEdits: await heldEditsOf(shopId, others),
+    // By name, priority and state, for saying who wins what (#821).
+    others: others.map(({ id, name, priority, status }) => ({ id, name, priority, status })),
     ast: await scopeOf(shopId, campaign),
   };
+}
+
+/**
+ * The campaigns every other one resolves against: those meant to be pricing their
+ * variants, whatever their exact state (#821).
+ *
+ * The one list, for the run, its preview, the rollback report and the editor's draft
+ * preview alike. Each had its own `status: "ACTIVE"`, so a campaign held by one hand edit
+ * vanished from all of them at once: a priority-50 sale wrote over a priority-100 one and
+ * its revert put baselines under it, while every dialog said nothing else covered them.
+ */
+export async function competingCampaigns(shopId: string, besides?: string): Promise<Campaign[]> {
+  const campaigns = await prisma.campaign.findMany({
+    where: { shopId, status: { in: [...PRICING_STATES] }, ...(besides ? { id: { not: besides } } : {}) },
+  });
+  const ending = await endingAmong(campaigns.map((campaign) => campaign.id));
+  return campaigns.filter((campaign) => !ending.has(campaign.id));
+}
+
+/**
+ * Which of these campaigns are being ended: the latest whole-campaign run is a revert --
+ * asked for, writing, or stopped part-way (#805). Runs over named variants, a single
+ * variant's revert or an enrolment, say nothing about the campaign as a whole.
+ */
+export async function endingAmong(campaignIds: readonly string[]): Promise<Set<string>> {
+  if (campaignIds.length === 0) return new Set();
+  const latest = await prisma.campaignRun.findMany({
+    where: { campaignId: { in: [...campaignIds] }, NOT: { occurrenceKey: { startsWith: "VARIANT-" } } },
+    orderBy: { createdAt: "desc" },
+    distinct: ["campaignId"],
+    select: { campaignId: true, kind: true },
+  });
+  return new Set(latest.filter((run) => run.kind === "REVERT").map((run) => run.campaignId));
+}
+
+/**
+ * Variants a hand edit has held in another campaign, by the campaign holding them (#821).
+ *
+ * The merchant has been asked whether to keep that price, and until they answer no other
+ * campaign's run may write it -- not the sale below it, which would overwrite their edit,
+ * and not a revert, which would put the held campaign's price back over it. The holding
+ * campaign's own Apply and Revert decide it with the merchant (#755) and are not affected.
+ */
+export async function heldEditsOf(
+  shopId: string,
+  holders: readonly Pick<Campaign, "id">[],
+): Promise<Map<string, string>> {
+  if (holders.length === 0) return new Map();
+  const pending = await prisma.driftEvent.findMany({
+    where: {
+      shopId,
+      resolution: "PENDING",
+      surfaceKind: "BASE",
+      priceListGid: "",
+      campaignId: { in: holders.map((holder) => holder.id) },
+    },
+    select: { variantGid: true, campaignId: true },
+  });
+  return new Map(pending.flatMap((event) => (event.campaignId ? [[event.variantGid, event.campaignId] as const] : [])));
 }
 
 /**

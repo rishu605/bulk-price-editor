@@ -24,6 +24,7 @@ import type { Resolution } from "../pricing/types";
 import type {
   PlanCandidate,
   PlanCounts,
+  PlanCoverage,
   PlanInput,
   PlanOutcome,
   PlannedRow,
@@ -39,7 +40,7 @@ export function refKey(ref: {
 }
 
 export function planRun(input: PlanInput): PlanOutcome {
-  const { candidates, storeGuardrails, excludeCampaignId } = input;
+  const { candidates, storeGuardrails, excludeCampaignId, heldEdits } = input;
 
   // Revert is resolution with the ending campaign removed, not a restore of saved
   // numbers (invariant I3).
@@ -59,6 +60,20 @@ export function planRun(input: PlanInput): PlanOutcome {
 
   const rows: PlannedRow[] = [];
   const counts: PlanCounts = { planned: 0, noop: 0, skipped: 0, clamped: 0, clampedToMinimum: 0 };
+  const coverage = new Map<string, PlanCoverage>();
+  const share = (campaignId: string) => {
+    let entry = coverage.get(campaignId);
+    if (!entry) coverage.set(campaignId, (entry = { campaignId, covers: 0, wins: 0, yieldsTo: {} }));
+    return entry;
+  };
+  const won = (winner: string, covering: readonly { id: string }[]) => {
+    share(winner).wins++;
+    for (const campaign of covering) {
+      if (campaign.id === winner) continue;
+      const yields = share(campaign.id).yieldsTo;
+      yields[winner] = (yields[winner] ?? 0) + 1;
+    }
+  };
 
   // `variant_changes` is unique on (runId, variantGid, surfaceKind, priceListGid).
   // Two candidates for the same cell would violate that at INSERT, surfacing as an
@@ -87,6 +102,29 @@ export function planRun(input: PlanInput): PlanOutcome {
         !exclusions.get(campaign.id)?.has(variantGid),
     );
 
+    // Who covers this variant and who prices it, counted before any row is dropped as
+    // already correct -- see `PlanCoverage`. The base price only, so the counts are variants.
+    const onBase = candidate.ref.surfaceKind === "base" && candidate.ref.priceListGid === "";
+    if (onBase) for (const campaign of applicable) share(campaign.id).covers++;
+
+    // A hand edit another campaign is holding (#821): the merchant's price stays until they
+    // decide, whichever campaign would otherwise win the variant.
+    const heldBy = onBase ? heldEdits?.get(variantGid) : undefined;
+    if (heldBy) {
+      won(heldBy, applicable);
+      counts.skipped++;
+      rows.push({
+        ref: candidate.ref,
+        beforePrice: candidate.livePrice,
+        beforeCompareAt: candidate.liveCompareAt,
+        intendedCompareAtSet: false,
+        status: "skipped",
+        reason: "held-edit",
+        campaignId: heldBy,
+      });
+      continue;
+    }
+
     const resolution = resolve({
       baseline: candidate.baseline,
       surface: {
@@ -105,6 +143,8 @@ export function planRun(input: PlanInput): PlanOutcome {
       variantSegmentIds: candidate.segmentIds,
       importedPrices: candidate.importedPrices,
     });
+
+    if (onBase && resolution.meta.controlledBy) won(resolution.meta.controlledBy, applicable);
 
     // A blocking policy stops the whole run. Returning partial rows here would let
     // a caller write some of them, which is exactly what "block" must prevent.
@@ -176,7 +216,7 @@ export function planRun(input: PlanInput): PlanOutcome {
     if (resolution.meta.clamped && resolution.meta.reason === "non-positive-price") counts.clampedToMinimum++;
   }
 
-  return { kind: "ok", rows, counts };
+  return { kind: "ok", rows, counts, coverage: [...coverage.values()] };
 }
 
 /** A resolved price, or compare-at, in a currency other than the surface's own. */

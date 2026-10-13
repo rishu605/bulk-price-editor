@@ -20,18 +20,19 @@ import { StaticRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 
 import { OverlapPanel } from "./OverlapPanel";
-import type { DraftOverlap } from "../services/campaigns/draft-preview.server";
+import type { Overlap } from "../lib/planning/overlaps";
 
-const overlap = (over: Partial<DraftOverlap> = {}): DraftOverlap => ({
+const overlap = (over: Partial<Overlap> = {}): Overlap => ({
   campaignId: "c_autumn",
   name: "Autumn sale",
-  variants: 1240,
-  keepsThem: true,
+  keeps: 1240,
+  yields: 0,
   priority: 200,
+  status: "ACTIVE",
   ...over,
 });
 
-const render = (overlaps: DraftOverlap[]) =>
+const render = (overlaps: Overlap[]) =>
   renderToStaticMarkup(
     <StaticRouter location="/app/campaigns/new">
       <OverlapPanel overlaps={overlaps} />
@@ -75,7 +76,7 @@ describe("when nothing overlaps", () => {
 });
 
 describe("more than one", () => {
-  const html = render([overlap(), overlap({ campaignId: "c_clear", name: "Clearance", variants: 12, priority: 150 })]);
+  const html = render([overlap(), overlap({ campaignId: "c_clear", name: "Clearance", keeps: 12, priority: 150 })]);
 
   it("counts them together at the top", () => {
     expect(html).toContain("1,252");
@@ -89,13 +90,26 @@ describe("more than one", () => {
 
 describe("one variant", () => {
   it("does not say 1 variants are", () => {
-    const html = render([overlap({ variants: 1 })]);
+    const html = render([overlap({ keeps: 1 })]);
 
     expect(html).toContain("1 variant in this scope is");
     expect(html).not.toContain("1 variants");
   });
 
   it("says keeps it, not keeps 1 of them", () => {
-    expect(render([overlap({ variants: 1 })])).toContain("keeps it");
+    expect(render([overlap({ keeps: 1 })])).toContain("keeps it");
+  });
+});
+
+describe("a campaign this one outranks, and one that is held (#821)", () => {
+  it("says this campaign takes the variants, and that reverting gives them back", () => {
+    const html = render([overlap({ name: "Clearance", campaignId: "c_clear", keeps: 0, yields: 12, priority: 50 })]);
+    expect(html).toContain("also in another campaign, which this one outranks");
+    expect(html).toContain("This campaign outranks");
+    expect(html).toContain("Reverting this campaign hands");
+  });
+
+  it("names a held campaign as held, because it still keeps its prices", () => {
+    expect(render([overlap({ status: "HELD" })])).toContain("(held for a hand edit)");
   });
 });

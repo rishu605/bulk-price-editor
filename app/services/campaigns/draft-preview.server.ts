@@ -26,7 +26,8 @@ import { planRun } from "../../lib/planning/plan";
 import { loadCandidates, variantDisplayFor } from "./candidates.server";
 import { uncontrolledAmong } from "../reconciliation.server";
 import { offBaseline } from "./off-baseline";
-import { importIdsOf, withScopes } from "./model.server";
+import { competingCampaigns, heldEditsOf, importIdsOf, withScopes } from "./model.server";
+import { overlapsFrom, type Overlap } from "../../lib/planning/overlaps";
 import { guardrailsFor, readSettings } from "../settings.server";
 import { skipReasonForRow } from "../../lib/planning/reasons";
 import { liveIfDrifted } from "../../lib/pricing/drift-note";
@@ -83,27 +84,8 @@ export interface DraftPreviewRow {
   skippedReason: string | null;
 }
 
-/**
- * A campaign already running over some of the variants this draft would price.
- *
- * The thing no competitor can say. All three compute against the live price and none of
- * them resolves overlap: RUBIX puts a warning in its editor telling merchants not to
- * create a second task over the same products, and its FAQ explains with worked numbers
- * that reverting out of order leaves a product wrong for ever. NA and Sami do the same
- * thing and say nothing at all.
- *
- * We resolve it, by priority, and a revert recomputes rather than restoring — so the
- * honest thing is not a warning but a statement of what will happen.
- */
-export interface DraftOverlap {
-  campaignId: string;
-  name: string;
-  /** Variants in this draft's scope that the other campaign currently prices. */
-  variants: number;
-  /** True when the other campaign keeps those variants — it outranks the draft. */
-  keepsThem: boolean;
-  priority: number;
-}
+/** Another campaign sharing this draft's variants, and who prices them (#821). */
+export type DraftOverlap = Overlap;
 
 export interface DraftPreview {
   /** Variants the scope matches, whether or not their price moves. */
@@ -197,7 +179,8 @@ export async function previewDraft(
   limit = 25,
 ): Promise<DraftPreview> {
   const [others, settings] = await Promise.all([
-    prisma.campaign.findMany({ where: { shopId, status: "ACTIVE" } }),
+    // Every campaign meant to be pricing its variants, as in a run (#821).
+    competingCampaigns(shopId),
     readSettings(shopId),
   ]);
   const resolvable = [
@@ -205,6 +188,7 @@ export async function previewDraft(
     // Each offered only what its own scope covers, as in a run (#752).
     ...(await withScopes(shopId, others)),
   ];
+  const heldEdits = await heldEditsOf(shopId, others);
 
   const [candidates, storeGuardrails, matched] = await Promise.all([
     loadCandidates(shopId, draft.ast, undefined, importIdsOf(resolvable)),
@@ -225,7 +209,7 @@ export async function previewDraft(
     return { ...EMPTY, matched, withoutBaseline: matched };
   }
 
-  const outcome = planRun({ campaigns: resolvable, candidates, storeGuardrails });
+  const outcome = planRun({ campaigns: resolvable, candidates, storeGuardrails, heldEdits });
 
   if (outcome.kind === "blocked") {
     return {
@@ -246,8 +230,10 @@ export async function previewDraft(
   // These fall out of the same `planRun` that produced the draft's own rows, so they are
   // the resolver's answer rather than a second opinion assembled from a query. A campaign
   // in this list is one the merchant is about to write over, or one that is about to
-  // write over them — and which of the two is a fact we can state.
-  const overlaps = overlapsFrom(outcome.rows, others);
+  // write over them — and which of the two is a fact we can state. From the coverage, not
+  // the rows: a variant another campaign keeps is usually already at its price, and the
+  // rows leave those out (#821).
+  const overlaps = overlapsFrom(outcome.coverage, DRAFT_ID, others);
 
   const changing = ours.filter((row) => row.status !== "skipped" && !isNoop(row));
   const alreadyCorrect = ours.filter((row) => row.status !== "skipped" && isNoop(row));
@@ -295,44 +281,6 @@ export async function previewDraft(
       };
     }),
   };
-}
-
-/**
- * Which existing campaigns share variants with this draft, and who keeps them.
- *
- * Counted from the planned rows rather than from the scopes: two campaigns whose filters
- * both say "Outerwear" may still not meet, because a third campaign outranks them both on
- * some of it. The resolver has already worked that out and the rows say who won.
- *
- * Sorted by size, because a merchant reading this wants the one that matters first, and a
- * campaign that owns four variants of three thousand is a footnote.
- */
-export function overlapsFrom(
-  rows: Array<{ campaignId?: string }>,
-  others: Array<{ id: string; name: string; priority: number }>,
-): DraftOverlap[] {
-  const counts = new Map<string, number>();
-  for (const row of rows) {
-    if (!row.campaignId || row.campaignId === DRAFT_ID) continue;
-    counts.set(row.campaignId, (counts.get(row.campaignId) ?? 0) + 1);
-  }
-
-  return [...counts.entries()]
-    .map(([campaignId, variants]) => {
-      const other = others.find((candidate) => candidate.id === campaignId);
-      return {
-        campaignId,
-        name: other?.name ?? "Another campaign",
-        variants,
-        priority: other?.priority ?? 0,
-        // A row the resolver gave to them is a row they keep — that *is* the answer, and
-        // recomputing "who should win" from the priorities here would be a second
-        // implementation free to disagree with the first.
-        keepsThem: true,
-      };
-    })
-    .filter((overlap) => overlap.variants > 0)
-    .sort((a, b) => b.variants - a.variants);
 }
 
 /** A row whose price does not move. */

@@ -5,6 +5,7 @@
  * run that follows.
  */
 
+import { overlapsFrom } from "../../lib/planning/overlaps";
 import { format } from "../../lib/money/format";
 import { money, type Money } from "../../lib/money/money";
 import { planRun } from "../../lib/planning/plan";
@@ -97,7 +98,7 @@ export async function previewCampaign(
   campaignId: string,
   options: PreviewOptions = {},
 ): Promise<CampaignPreview> {
-  const { campaign, resolvable, ast } = await loadCampaignContext(shopId, campaignId);
+  const { campaign, resolvable, heldEdits, others, ast } = await loadCampaignContext(shopId, campaignId);
   const [candidates, storeGuardrails] = await Promise.all([
     loadCandidates(shopId, ast, undefined, importIdsOf(resolvable)),
     guardrailsFor(shopId),
@@ -108,6 +109,7 @@ export async function previewCampaign(
     candidates,
     storeGuardrails,
     excludeCampaignId: options.revert ? campaignId : undefined,
+    heldEdits,
   });
 
   if (outcome.kind === "blocked") {
@@ -213,6 +215,9 @@ export async function previewCampaign(
     writePathReason: decision.reason,
     blastRadius: outcome.counts.planned > BLAST_RADIUS_THRESHOLD,
     staleBaselines,
+    // From the planner's coverage, every candidate included: a variant another campaign
+    // keeps is usually already at its price, and the rows leave those out (#821).
+    overlaps: overlapsFrom(outcome.coverage, campaignId, others),
   };
 }
 
