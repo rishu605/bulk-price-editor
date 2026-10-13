@@ -54,3 +54,16 @@ export function readQuickPercent(raw: string): QuickPercent {
 export function quickCampaignName(percent: number, today: string): string {
   return `${percent}% off · ${today}`;
 }
+
+/**
+ * Where Home's "Or set a scope, a schedule and more" goes: the full editor, carrying the % off
+ * the merchant typed beside it (#771). It used to be a plain link, so a merchant who typed 35
+ * and asked for more options got an editor set to 20. Nothing typed, or something the quick
+ * card would refuse, opens the editor at its own defaults.
+ */
+export function moreOptionsHref(raw: string): string {
+  const read = readQuickPercent(raw);
+  if (!read.ok) return "/app/campaigns/new";
+  const query = new URLSearchParams({ ruleKind: "percent-change", ruleDirection: "down", ruleValue: String(read.percent) });
+  return `/app/campaigns/new?${query}`;
+}
