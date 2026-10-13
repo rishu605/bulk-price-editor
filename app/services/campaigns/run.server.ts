@@ -19,6 +19,7 @@ import type { PlannedRow } from "../../lib/planning/types";
 import { planRun } from "../../lib/planning/plan";
 import { recordWriteIntents, resolveOverwrittenDrift } from "../drift.server";
 import { loadCandidates, productMapFor } from "./candidates.server";
+import { refreshBasePrices } from "../live-prices.server";
 import { isPractice, loadCampaignContext, scopeOf, importIdsOf} from "./model.server";
 import { astToWhere } from "../segments.server";
 import { DEFAULT_THRESHOLD } from "../../lib/planning/write-path";
@@ -233,6 +234,30 @@ export async function runCampaign(
   }
 }
 
+/**
+ * The variants whose base price this campaign has written since it last finished
+ * reverting: what a whole-campaign revert has to take back (#828). Deleted variants are
+ * left out -- there is nothing on the storefront to revert.
+ */
+async function pricesWrittenBy(shopId: string, campaignId: string): Promise<string[]> {
+  const lastRevert = await prisma.campaignRun.findFirst({
+    where: { campaignId, kind: "REVERT", status: "COMPLETED", NOT: { occurrenceKey: { startsWith: "VARIANT-" } } },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  });
+  const rows = await prisma.$queryRaw<Array<{ variantGid: string }>>`
+    SELECT DISTINCT c."variantGid"
+    FROM "variant_changes" c
+    JOIN "campaign_runs" r ON r."id" = c."runId"
+    JOIN "variant_index" v ON v."shopId" = c."shopId" AND v."variantGid" = c."variantGid"
+    WHERE r."campaignId" = ${campaignId} AND r."kind" = 'APPLY'
+      AND c."shopId" = ${shopId} AND c."surfaceKind" = 'BASE' AND c."priceListGid" = ''
+      AND c."status" IN ('VERIFIED', 'CLAMPED')
+      AND v."deletedAt" IS NULL
+      ${lastRevert ? Prisma.sql`AND r."createdAt" > (${lastRevert.createdAt}::timestamptz AT TIME ZONE 'UTC')` : Prisma.empty}`;
+  return rows.map((row) => row.variantGid);
+}
+
 /** Filled in as a run gets going, for the catch in `runCampaign`. */
 interface Started {
   /** The run row, once it exists. */
@@ -322,31 +347,41 @@ async function failRun(runId: string | undefined, error: unknown, writing = fals
 async function settleMirror(runId: string): Promise<void> {
   const landed = Prisma.sql`c."runId" = ${runId} AND c."surfaceKind" = 'BASE' AND c."status" IN ('VERIFIED', 'CLAMPED') AND c."intendedPrice" IS NOT NULL`;
   const unknown = Prisma.sql`c."runId" = ${runId} AND c."surfaceKind" = 'BASE' AND c."status" IN ('PENDING', 'WRITING', 'APPLIED', 'FAILED')`;
+  // In UTC, like every Prisma write to these columns. The columns hold no zone, and both
+  // `NOW()` and a bare timestamp parameter are converted into the database session's zone
+  // on the way in: on one that is not UTC, these rows sat hours off from the ones webhooks
+  // and syncs stamp (#911). Converted to UTC explicitly.
+  const now = Prisma.sql`(${new Date()}::timestamptz AT TIME ZONE 'UTC')`;
 
   await prisma.$executeRaw`
     UPDATE "price_surface_entries" e
     SET "livePrice" = c."intendedPrice",
         "liveCompareAt" = CASE WHEN c."intendedCompareAtSet" THEN c."intendedCompareAt" ELSE e."liveCompareAt" END,
-        "syncedAt" = NOW()
+        "syncedAt" = ${now}
     FROM "variant_changes" c
     WHERE ${landed} AND e."shopId" = c."shopId" AND e."variantGid" = c."variantGid"
       AND e."surfaceKind" = 'BASE' AND e."priceListGid" = ''`;
+  // The version of the variant this write produced, as far as webhooks are concerned
+  // (#828). The products webhook skips a delivery older than `remoteUpdatedAt`; left where
+  // it was, a delayed payload from before this write was applied over it and put the old
+  // price back in the mirror -- and a revert planned from that mirror found nothing to do.
   await prisma.$executeRaw`
     UPDATE "variant_index" v
     SET "price" = c."intendedPrice",
         "compareAt" = CASE WHEN c."intendedCompareAtSet" THEN c."intendedCompareAt" ELSE v."compareAt" END,
-        "syncedAt" = NOW()
+        "remoteUpdatedAt" = GREATEST(COALESCE(v."remoteUpdatedAt", c."verifiedAt"), COALESCE(c."verifiedAt", v."remoteUpdatedAt")),
+        "syncedAt" = ${now}
     FROM "variant_changes" c
     WHERE ${landed} AND v."shopId" = c."shopId" AND v."variantGid" = c."variantGid"`;
   await prisma.$executeRaw`
     UPDATE "price_surface_entries" e
-    SET "livePrice" = NULL, "liveCompareAt" = NULL, "syncedAt" = NOW()
+    SET "livePrice" = NULL, "liveCompareAt" = NULL, "syncedAt" = ${now}
     FROM "variant_changes" c
     WHERE ${unknown} AND e."shopId" = c."shopId" AND e."variantGid" = c."variantGid"
       AND e."surfaceKind" = 'BASE' AND e."priceListGid" = ''`;
   await prisma.$executeRaw`
     UPDATE "variant_index" v
-    SET "price" = NULL, "compareAt" = NULL, "syncedAt" = NOW()
+    SET "price" = NULL, "compareAt" = NULL, "syncedAt" = ${now}
     FROM "variant_changes" c
     WHERE ${unknown} AND v."shopId" = c."shopId" AND v."variantGid" = c."variantGid"`;
 }
@@ -554,18 +589,55 @@ async function executeCampaignRun(
   const startedAt = Date.now();
   const { campaign: campaignRecord, resolvable, heldEdits, ast } = await loadCampaignContext(shopId, campaignId);
   const campaignName = campaignRecord.name;
-  const [candidates, storeGuardrails] = await Promise.all([
+  const [scoped, storeGuardrails] = await Promise.all([
     loadCandidates(shopId, ast, options.variantGids, importIdsOf(resolvable)),
     guardrailsFor(shopId),
   ]);
 
-  const outcome = planRun({
-    campaigns: resolvable,
-    candidates,
-    storeGuardrails,
-    excludeCampaignId: options.revert ? campaignId : undefined,
-    heldEdits,
-  });
+  // A whole-campaign revert takes back every price this campaign wrote, not only the ones
+  // still inside its scope (#828, edge case E6): a variant untagged mid-campaign keeps the
+  // sale price otherwise, and nothing else would ever revert it.
+  const wholeRevert = options.revert === true && !options.variantGids;
+  const written = wholeRevert ? await pricesWrittenBy(shopId, campaignId) : [];
+  const inScope = new Set(scoped.map((candidate) => candidate.ref.variantGid));
+  const strays = written.filter((gid) => !inScope.has(gid));
+  const plan = async (base: typeof scoped) => {
+    const candidates =
+      strays.length > 0 ? [...base, ...(await loadCandidates(shopId, { groups: [] }, strays, importIdsOf(resolvable)))] : base;
+    return {
+      candidates,
+      outcome: planRun({
+        campaigns: resolvable,
+        candidates,
+        storeGuardrails,
+        excludeCampaignId: options.revert ? campaignId : undefined,
+        heldEdits,
+      }),
+    };
+  };
+  let { candidates, outcome } = await plan(scoped);
+
+  // The ones this revert is about to leave alone are asked of Shopify, not of the mirror
+  // (#828). A scheduled sale's end planned zero rows from a mirror that said "baseline",
+  // marked the campaign "Completed · prices are back", and every sale price stayed live.
+  // Asked only about those -- a revert over a correct mirror plans every variant it wrote
+  // and pays nothing for this. Where the mirror was wrong, it is corrected and the revert
+  // planned again from what Shopify holds.
+  let unplanned: string[] = [];
+  if (wholeRevert && outcome.kind === "ok" && written.length > 0) {
+    const planned = new Set(outcome.rows.filter((row) => row.ref.priceListGid === "").map((row) => row.ref.variantGid));
+    const skippedOver = written.filter((gid) => !planned.has(gid));
+    const corrected = await refreshBasePrices(shopId, client, skippedOver);
+    if (corrected.size > 0) {
+      const replanned = await plan(await loadCandidates(shopId, ast, options.variantGids, importIdsOf(resolvable)));
+      candidates = replanned.candidates;
+      outcome = replanned.outcome;
+    }
+    // Still nowhere to plan them from: no baseline to return to. Said, and the revert
+    // ends Partial rather than claiming prices are back.
+    const plannable = new Set(candidates.map((candidate) => candidate.ref.variantGid));
+    unplanned = written.filter((gid) => !plannable.has(gid));
+  }
 
   if (outcome.kind === "blocked") {
     throw new Error(
@@ -781,6 +853,17 @@ async function executeCampaignRun(
 
   const messages = await recordResults(run.id, shopId, result.rows);
   messages.unshift(...messagesBeforeExecution);
+
+  // Prices this campaign wrote that the revert had no baseline to take them back to. The
+  // revert is not over while they stand, so it does not say it is (#828).
+  if (unplanned.length > 0) {
+    result.clean = false;
+    messages.push(
+      `${unplanned.length} variant${unplanned.length === 1 ? "" : "s"} this campaign priced ${unplanned.length === 1 ? "has" : "have"} no ` +
+        "baseline to go back to, so they still show the campaign's price. Capture their baselines on Prices → Baselines, " +
+        "then Resume to finish the revert.",
+    );
+  }
 
   // Tags after prices, deliberately. A badge on a product still showing full price is
   // worse than a price change nobody has badged yet, so the storefront never claims a
