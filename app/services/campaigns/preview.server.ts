@@ -23,6 +23,7 @@ import {
 } from "./market-plan.server";
 import { describeMarketSkips } from "../../lib/markets/guardrails";
 import { parseSurfaces } from "./market-surfaces.server";
+import { priceListLabel } from "../../lib/markets/display-name";
 import type { AdminClient } from "../../lib/execution/sync-executor";
 import prisma from "../../db.server";
 import {
@@ -239,10 +240,7 @@ async function marketPathPreview(
   const surfaces = parseSurfaces(campaign?.surfaces);
   if (surfaces.priceLists.length === 0) return [];
 
-  const lists = await prisma.priceListRecord.findMany({
-    where: { shopId, priceListGid: { in: surfaces.priceLists } },
-    select: { priceListGid: true, name: true, currency: true, adjustmentBps: true },
-  });
+  const lists = await namedLists(shopId, surfaces.priceLists);
 
   if (!options.client) {
     return lists.map((list) => ({
@@ -355,10 +353,7 @@ async function marketCellsFor(
   const surfaces = parseSurfaces(campaign?.surfaces);
   if (surfaces.priceLists.length === 0) return cells;
 
-  const lists = await prisma.priceListRecord.findMany({
-    where: { shopId, priceListGid: { in: surfaces.priceLists } },
-    select: { priceListGid: true, name: true, currency: true, adjustmentBps: true },
-  });
+  const lists = await namedLists(shopId, surfaces.priceLists);
 
   for (const list of lists) {
     // Refused the same way, and for the same reason, as in `marketPathPreview` above.
@@ -425,4 +420,23 @@ async function costsFor(shopId: string, variantGids: readonly string[]) {
   return new Map(
     rows.map((row) => [row.variantGid, money(Number(row.cost), row.currency)] as const),
   );
+}
+
+/**
+ * The campaign's price lists, each under the name the editor gave it (#778).
+ *
+ * Shopify names a market's list after its handle -- `pricing_by_market.19853246698_…` --
+ * and the preview printed that in its column headers, the Markets card, the Apply dialog
+ * and the CSV, where the editor had said "United States". Named once here, so every
+ * sentence built from a list below uses the same words.
+ */
+async function namedLists(shopId: string, priceListGids: readonly string[]) {
+  const lists = await prisma.priceListRecord.findMany({
+    where: { shopId, priceListGid: { in: [...priceListGids] } },
+    select: { priceListGid: true, name: true, currency: true, adjustmentBps: true, catalogTitle: true, surfaceKind: true },
+  });
+  return lists.map(({ catalogTitle, surfaceKind, ...list }) => ({
+    ...list,
+    name: priceListLabel({ name: list.name, catalogTitle, surfaceKind }),
+  }));
 }
