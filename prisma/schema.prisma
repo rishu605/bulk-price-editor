@@ -557,6 +557,11 @@ model VariantChange {
 
   appliedAt  DateTime?
   verifiedAt DateTime?
+  /// Shopify's own timestamp for this write: the product's `updatedAt` from the mutation's
+  /// response, to the second, on Shopify's clock (#932). What the mirror is stamped with, so
+  /// webhook ordering compares Shopify's clock with Shopify's clock. Null on rows written
+  /// before it was recorded, and for any write whose response did not carry it.
+  remoteUpdatedAt DateTime?
   createdAt  DateTime  @default(now())
 
   shop Shop        @relation(fields: [shopId], references: [id], onDelete: Cascade)

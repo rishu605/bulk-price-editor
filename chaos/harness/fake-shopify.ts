@@ -382,7 +382,19 @@ export class FakeShopify {
       });
     });
 
-    return { productVariants, userErrors };
+    return { product: { updatedAt: this.storeNow() }, productVariants, userErrors };
+  }
+
+  /**
+   * How far the store's clock runs from ours, in milliseconds (#932). Shopify stamps a
+   * product's `updatedAt` on its own clock and to the second; a negative skew is a store
+   * whose clock is behind the app's.
+   */
+  storeClockSkewMs = 0;
+
+  /** The store's clock now, as Shopify writes it: ISO, to the second. */
+  storeNow(): string {
+    return new Date(Math.floor((Date.now() + this.storeClockSkewMs) / 1000) * 1000).toISOString().replace(".000Z", "Z");
   }
 
   private bulkUpdate(variables: Record<string, unknown>) {

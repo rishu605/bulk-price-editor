@@ -1291,6 +1291,23 @@ async function syncTags(
 }
 
 /** The products a revert handed to each campaign still running, keyed by that campaign. */
+/** Executed rows by the Shopify timestamp their write produced (#932). */
+function groupByRemoteStamp(rows: readonly { row: { ref: { variantGid: string } }; remoteUpdatedAt?: string }[]): Map<Date, string[]> {
+  const byText = new Map<string, string[]>();
+  for (const executed of rows) {
+    if (!executed.remoteUpdatedAt) continue;
+    const gids = byText.get(executed.remoteUpdatedAt) ?? [];
+    gids.push(executed.row.ref.variantGid);
+    byText.set(executed.remoteUpdatedAt, gids);
+  }
+  const out = new Map<Date, string[]>();
+  for (const [text, gids] of byText) {
+    const at = new Date(text);
+    if (!Number.isNaN(at.getTime())) out.set(at, gids);
+  }
+  return out;
+}
+
 /** A variant and the campaign that prices it after this run. */
 type WinnerRow = { ref: { variantGid: string }; campaignId?: string };
 
@@ -1549,6 +1566,18 @@ async function recordResults(
           appliedAt: status === "FAILED" ? null : now,
           verifiedAt: status === "VERIFIED" || status === "CLAMPED" ? now : null,
         },
+      }),
+    );
+  }
+
+  // Shopify's own timestamp for each write, which the mirror is stamped with (#932). A
+  // product's variants share it and it is to the second, so grouped: a few statements per
+  // second of writing, not one per row.
+  for (const [stamp, gids] of groupByRemoteStamp(rows)) {
+    await inChunksCounting(gids, (batch) =>
+      prisma.variantChange.updateMany({
+        where: { runId, shopId, variantGid: { in: batch } },
+        data: { remoteUpdatedAt: stamp },
       }),
     );
   }

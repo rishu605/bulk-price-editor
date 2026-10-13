@@ -58,6 +58,13 @@ export interface ExecutedRow {
   failureClass?: FailureClass;
   /** Machine-readable, so the UI can group rows that failed for the same reason. */
   failureCode?: FailureReason;
+  /**
+   * Shopify's own timestamp for the write: the product's `updatedAt` from the mutation's
+   * response, which is what a products webhook carries as `updated_at` (#932). The mirror
+   * is stamped with this rather than our clock, so a merchant's edit a second later is
+   * never taken for a delivery from before the write.
+   */
+  remoteUpdatedAt?: string;
 }
 
 export interface ExecuteResult {
@@ -98,6 +105,7 @@ export interface ExecuteOptions {
 export const PRODUCT_VARIANTS_BULK_UPDATE = `#graphql
   mutation AnchorProductVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
     productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+      product { updatedAt }
       productVariants { id price compareAtPrice }
       userErrors { field message code }
     }
@@ -114,6 +122,7 @@ export const VARIANT_PRICES_QUERY = `#graphql
 
 interface BulkUpdateResponse {
   productVariantsBulkUpdate?: {
+    product?: { updatedAt?: string | null } | null;
     productVariants?: Array<{ id: string; price: string; compareAtPrice: string | null }>;
     userErrors?: Array<{ field?: string[] | null; message: string; code?: string | null }>;
   };
@@ -217,7 +226,11 @@ export async function executeSync(
         const reason = errorsByIndex.get(index) ?? groupWideError;
 
         if (!reason) {
-          results.set(row.ref.variantGid, { row, status: "applied-unverified" });
+          results.set(row.ref.variantGid, {
+            row,
+            status: "applied-unverified",
+            remoteUpdatedAt: payload?.product?.updatedAt ?? undefined,
+          });
           return;
         }
 

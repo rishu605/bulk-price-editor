@@ -135,6 +135,21 @@ describe("result parsing", () => {
     ]);
   });
 
+  it("carries the product's updatedAt, Shopify's own timestamp for the write (#932)", async () => {
+    const line = JSON.stringify({
+      data: {
+        productVariantsBulkUpdate: {
+          product: { updatedAt: "2026-10-13T23:32:32Z" },
+          productVariants: [{ id: "gid://v/1", price: "80.00", compareAtPrice: null }],
+          userErrors: [],
+        },
+      },
+      __lineNumber: 0,
+    });
+    const out = (await collect(parseResults(streamLines(fromString(line))))) as Array<{ remoteUpdatedAt?: string }>;
+    expect(out[0].remoteUpdatedAt).toBe("2026-10-13T23:32:32Z");
+  });
+
   it("attributes a positional userError to the right variant", async () => {
     const line = JSON.stringify({
       data: {

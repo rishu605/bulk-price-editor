@@ -91,9 +91,8 @@ async function main() {
     check("both prices verified", (await runCampaign(shop.id, campaign.id, client, {})).verified, 2);
 
     console.log("2. edit the first price in Shopify: the campaign is held");
-    // Not within a second of the run: Shopify stamps `updated_at` to the second on its own
-    // clock, and an edit that close to our read-back can look older than the mirror (#932).
-    await new Promise((r) => setTimeout(r, 5_000));
+    // Straight after the run: the mirror is stamped on Shopify's clock, so an edit a second
+    // later is newer however our clock and Shopify's disagree (#932).
     await setPrice(client, products[0], "75.00");
     await until(async () => (await status()) === "HELD", "the first edit to hold the campaign");
     check("campaign held", await status(), "HELD");
