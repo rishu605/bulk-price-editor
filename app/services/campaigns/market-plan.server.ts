@@ -57,6 +57,11 @@ export interface MarketPlan {
   baselines: Map<string, Money>;
   outcome: PlanOutcome;
   /**
+   * Variants this market is not priced for: their price here is derived from a store price
+   * a campaign had already moved, so no baseline could be recorded for them (#841).
+   */
+  moved: string[];
+  /**
    * The market is priced in the store's own currency, so recorded costs and the store's
    * minimum price apply to it as they do to the base price. In any other currency they
    * cannot be checked, and a cost-based guardrail leaves the market's rows alone.
@@ -99,8 +104,8 @@ export async function planMarket(
   campaigns: readonly ResolvableCampaign[],
   client: AdminClient,
 ): Promise<MarketPlan | null> {
-  const baselines = await marketBaselines(shopId, list, [...variantGids], client);
-  if (baselines.size === 0) return null;
+  const { prices: baselines, moved } = await marketBaselines(shopId, list, [...variantGids], client);
+  if (baselines.size === 0 && moved.length === 0) return null;
 
   const inStoreCurrency = list.currency === (await shopCurrency(shopId));
   const costs = inStoreCurrency ? await recordedCosts(shopId, list.currency, [...baselines.keys()]) : new Map();
@@ -129,7 +134,7 @@ export async function planMarket(
     })),
   });
 
-  return { shopId, list, baselines, outcome, inStoreCurrency };
+  return { shopId, list, baselines, outcome, moved, inStoreCurrency };
 }
 
 /** Each variant's recorded cost, the way the base surface reads it: baseline first, then mirror. */
@@ -242,7 +247,7 @@ export async function marketBaselines(
   list: MarketList,
   variantGids: string[],
   client: AdminClient,
-): Promise<Map<string, Money>> {
+): Promise<{ prices: Map<string, Money>; moved: string[] }> {
   const stored = await prisma.baseline.findMany({
     where: {
       shopId,
@@ -262,12 +267,72 @@ export async function marketBaselines(
   );
 
   const missing = variantGids.filter((gid) => !out.has(gid));
-  if (missing.length === 0) return out;
+  if (missing.length === 0) return { prices: out, moved: [] };
 
-  const captured = await captureMarketBaselines(shopId, list, missing, client);
+  const moved = await movedSinceBaseline(shopId, list, missing);
+  const captured = await captureMarketBaselines(
+    shopId,
+    list,
+    missing.filter((gid) => !moved.has(gid)),
+    client,
+  );
   for (const [variantGid, price] of captured) out.set(variantGid, price);
 
-  return out;
+  return { prices: out, moved: [...moved] };
+}
+
+/**
+ * Variants whose untouched price in this market can no longer be read (#841).
+ *
+ * A price derived from the store price -- a percentage list, or a B2B catalogue's rule --
+ * moves when the store price does. Read after a campaign has moved the store price, it is
+ * the sale price, and recording it as the market's "before" would have the campaign
+ * discount it a second time: the contamination #259 was about. Every run captures market
+ * baselines before it writes the store price, so this only arises for a variant whose
+ * store price was already moved when its market was first priced -- a market added to a
+ * running campaign, or a variant already at its sale price.
+ *
+ * A hand-set price on the list does not follow the store price and is always safe. So is
+ * a variant whose store price still equals its baseline, or that has no baseline at all
+ * (no campaign can have moved it).
+ */
+async function movedSinceBaseline(
+  shopId: string,
+  list: MarketList,
+  variantGids: readonly string[],
+): Promise<Set<string>> {
+  if (variantGids.length === 0) return new Set();
+
+  const [handSet, live, base] = await Promise.all([
+    inChunks(variantGids, (batch) =>
+      prisma.priceSurfaceEntry.findMany({
+        where: { shopId, priceListGid: list.priceListGid, variantGid: { in: batch }, livePrice: { not: null } },
+        select: { variantGid: true },
+      }),
+    ),
+    inChunks(variantGids, (batch) =>
+      prisma.variantIndex.findMany({
+        where: { shopId, variantGid: { in: batch } },
+        select: { variantGid: true, price: true },
+      }),
+    ),
+    inChunks(variantGids, (batch) =>
+      prisma.baseline.findMany({
+        where: { shopId, surfaceKind: "BASE", priceListGid: "", supersededAt: null, variantGid: { in: batch } },
+        select: { variantGid: true, basePrice: true },
+      }),
+    ),
+  ]);
+
+  const fixed = new Set(handSet.map((row) => row.variantGid));
+  const livePrice = new Map(live.map((row) => [row.variantGid, row.price]));
+  const moved = new Set<string>();
+  for (const row of base) {
+    if (fixed.has(row.variantGid)) continue;
+    const now = livePrice.get(row.variantGid);
+    if (now !== null && now !== undefined && now !== row.basePrice) moved.add(row.variantGid);
+  }
+  return moved;
 }
 
 /**

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { money } from "../money/money";
-import { describeMarketSkips, marketGuardrails } from "./guardrails";
+import { describeMarketSkips, describeMovedMarket, marketGuardrails } from "./guardrails";
 
 describe("marketGuardrails", () => {
   it("drops a minimum price set in another currency, keeping the rest", () => {
@@ -68,5 +68,19 @@ describe("describeMarketSkips", () => {
 
   it("says nothing when nothing was skipped", () => {
     expect(describeMarketSkips("Europe", "EUR", [{ status: "pending" }])).toEqual([]);
+  });
+});
+
+describe("describeMovedMarket", () => {
+  it("says nothing when every variant could be priced", () => {
+    expect(describeMovedMarket("Europe", 0)).toEqual([]);
+  });
+
+  it("names the market, the count, why, and what to do (#841)", () => {
+    const [sentence] = describeMovedMarket("Europe", 3);
+    expect(sentence).toMatch(/^Europe: 3 variants not priced separately\./);
+    expect(sentence).toMatch(/follows the store price/);
+    expect(sentence).toMatch(/Revert the campaign and apply it again to price them\.$/);
+    expect(describeMovedMarket("Europe", 1)[0]).toMatch(/^Europe: 1 variant not priced/);
   });
 });

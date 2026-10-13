@@ -44,7 +44,7 @@ import {
 import type { AdminClient } from "../../lib/execution/sync-executor";
 import type { QuantityTier } from "../../lib/pricing/quantity-breaks";
 import type { ResolvableCampaign } from "../../lib/pricing/types";
-import { describeMarketSkips } from "../../lib/markets/guardrails";
+import { describeMarketSkips, describeMovedMarket } from "../../lib/markets/guardrails";
 import { logger } from "../../lib/logging/logger";
 import { metric } from "../../lib/telemetry/metrics";
 import { LANDED } from "../../lib/execution/landed";
@@ -226,6 +226,11 @@ export async function applyMarketSurfaces(
     perProductOnly?: boolean;
     /** Called as each chunk is written, so the run's heartbeat stays fresh (#791). */
     onProgress?: () => void | Promise<void>;
+    /**
+     * A run being resumed: each market leaves alone the variants whose row on that market
+     * landed in it, as the base surface leaves its verified rows (#841).
+     */
+    alreadyLandedIn?: string;
   } = {},
 ): Promise<MarketSurfaceOutcome[]> {
   const campaign = await prisma.campaign.findUnique({
@@ -305,9 +310,21 @@ export async function applyMarketSurfaces(
     //
     // Reported the same way a deleted market is, a few lines above: the campaign carries
     // on, and the merchant is told which market was skipped and why.
+    const landed = options.alreadyLandedIn
+      ? new Set(
+          (
+            await prisma.variantChange.findMany({
+              where: { runId: options.alreadyLandedIn, priceListGid: list.priceListGid, status: { in: ["VERIFIED", "CLAMPED"] } },
+              select: { variantGid: true },
+            })
+          ).map((row) => row.variantGid),
+        )
+      : new Set<string>();
+    const todo = landed.size > 0 ? variantGids.filter((gid) => !landed.has(gid)) : variantGids;
+
     let plan;
     try {
-      plan = await planMarket(shopId, list, variantGids, campaigns, client);
+      plan = await planMarket(shopId, list, todo, campaigns, client);
     } catch (error) {
       if (!(error instanceof UnconvertedMarketError)) throw error;
 
@@ -360,12 +377,10 @@ export async function applyMarketSurfaces(
     // rows out and moving on meant a store guardrail could take every row of a market
     // out of the sale with no outcome and no message, and the run still read as clean
     // (#691).
-    const skipNotes = describeMarketSkips(
-      priceListLabel(list),
-      list.currency,
-      outcome.rows,
-      plan.inStoreCurrency,
-    );
+    const skipNotes = [
+      ...describeMarketSkips(priceListLabel(list), list.currency, outcome.rows, plan.inStoreCurrency),
+      ...describeMovedMarket(priceListLabel(list), plan.moved.length),
+    ];
 
     if (rows.length === 0) {
       if (skipNotes.length > 0) {

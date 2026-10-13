@@ -15,6 +15,7 @@ import { Prisma } from "@prisma/client";
 import prisma from "../../db.server";
 import { formatAgo, formatCount } from "../../lib/format/display";
 import { CLAMP_REASONS } from "../../lib/campaigns/clamp-reasons";
+import { marketScope } from "../../lib/planning/market-scope";
 import type { AdminClient } from "../../lib/execution/sync-executor";
 import { executeRows } from "./execute.server";
 import type { PlannedRow } from "../../lib/planning/types";
@@ -740,7 +741,13 @@ async function executeCampaignRun(
   // mirror could be stale enough to make an already-correct row look like it needs
   // rewriting.
   let resumedFrom: { verified: number; quarantined: number } | null = null;
+  // The run being resumed, whose market rows that landed a resume leaves alone too: its
+  // markets now cover every in-scope variant (#841), and re-sending the ones already
+  // priced would cost a resume of a large campaign a write per variant per market.
+  let marketsLandedIn: string | undefined;
   if (options.resume && !options.revert) {
+    const resumed = await runToResume(campaignId);
+    if (resumed?.kind === kind) marketsLandedIn = resumed.id;
     const prior = await priorLedger(campaignId, kind);
     if (prior.length > 0) {
       const plan = planResume(writable, prior);
@@ -758,6 +765,13 @@ async function executeCampaignRun(
       ...writable.map((row) => row.ref.variantGid),
       ...[...settledLanded].filter((gid) => !leaveAlone.has(gid)),
     ]),
+  ];
+  // What the market steps cover: every in-scope variant the plan did not set aside, the
+  // ones already at their base price included, and each market makes its own no-op check
+  // (#841). Inheriting the base surface's write set meant a market skipped, failed or
+  // added later was never priced once the base was right.
+  const marketVariants = [
+    ...new Set([...marketScope(candidates, outcome.rows).filter((gid) => !leaveAlone.has(gid)), ...followers]),
   ];
 
   // One run per (campaign, occurrence, kind), enforced by a unique index. Two workers
@@ -904,9 +918,9 @@ async function executeCampaignRun(
     const baselines = await captureMarketBaselinesFirst(
       shopId,
       campaignId,
-      // A scoped run's whole scope, not only the rows its base surface writes: a variant
-      // already at its base price may still need its markets priced (#763).
-      options.variantGids ?? writable.map((row) => row.ref.variantGid),
+      // The run's whole scope, not only the rows its base surface writes: a variant already
+      // at its base price may still need its markets priced (#763, #841).
+      options.variantGids ?? marketVariants,
       client,
     );
     messagesBeforeExecution.push(...baselines.messages);
@@ -1022,10 +1036,10 @@ async function executeCampaignRun(
             campaignId,
             run.id,
             resolvable,
-            followers,
+            marketVariants,
             client,
             refusedMarkets,
-            { onProgress: beat },
+            { onProgress: beat, alreadyLandedIn: marketsLandedIn },
           );
 
     for (const market of markets) {
