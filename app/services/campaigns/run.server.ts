@@ -191,6 +191,7 @@ export async function runCampaign(
     ) {
       await releaseClaim(shopId, campaignId, releaseTo, {
         reason: outcome.refused,
+        actor: options.actor,
         // The scheduler asks every tick while the reason stands. One activity entry
         // says why; a new one every thirty seconds would bury it.
         quietIfRepeated: true,
@@ -222,6 +223,7 @@ export async function runCampaign(
             `${options.revert ? "revert" : "apply"} stopped part-way, after ${failed.verified} of ${failed.planned} ` +
             `prices were changed and read back: ${error instanceof Error ? error.message : String(error)}`,
           runId: started.runId,
+          actor: options.actor,
         });
       } catch (transitionError) {
         const { logger } = await import("../../lib/logging/logger");
@@ -240,6 +242,7 @@ export async function runCampaign(
     if (releaseTo && releaseTo !== "APPLYING" && releaseTo !== "REVERTING") {
       await releaseClaim(shopId, campaignId, releaseTo, {
         reason: error instanceof Error ? error.message : String(error),
+        actor: options.actor,
       });
     }
     throw error;
@@ -576,8 +579,13 @@ async function executeCampaignRun(
   }
 
   if (!options.variantGids) {
+    // Whoever asked, on every move the run makes for them (#912). Without it the record
+    // falls back to "system", which the page shows as the Scheduler -- so an Apply pressed
+    // by a merchant read as the app starting a sale on its own. A scheduled run passes
+    // none and still records "system".
     await transitionCampaign(shopId, campaignId, options.revert ? "REVERTING" : "APPLYING", {
       reason: options.resume ? "resume requested" : options.revert ? "revert requested" : "apply requested",
+      actor: options.actor,
     });
 
     // One writer at a time, whichever kind (rule 2, #763). A run over one variant never
@@ -1057,6 +1065,7 @@ async function executeCampaignRun(
       `${options.revert ? "revert" : "apply"} finished: ${result.verified} verified, ${result.failed} failed` +
       (settledNote ? `. ${settledNote}` : ""),
     runId: run.id,
+    actor: options.actor,
   });
 
   // A held campaign can still be applied; whatever this run wrote over an edit made
