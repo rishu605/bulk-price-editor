@@ -36,6 +36,21 @@ export function marketGuardrails(store: Guardrails, currency: string): Guardrail
  * have recorded a cost, just not in this currency, and "have no cost recorded" would send
  * them to fix something that is fine. In the store's own currency it means what it says.
  */
+/**
+ * The variants a market cannot be priced for because its price there follows a store price
+ * a campaign has already changed (#841). Their price before the campaign is gone, and
+ * recording what they cost now as "before" would discount them twice.
+ */
+export function describeMovedMarket(market: string, count: number): string[] {
+  if (count === 0) return [];
+  const variants = `${count} ${count === 1 ? "variant" : "variants"}`;
+  return [
+    `${market}: ${variants} not priced separately. Their price here follows the store price, which a campaign ` +
+      `had already changed before this market was priced, so what they cost here before it can no longer be read. ` +
+      `Revert the campaign and apply it again to price them.`,
+  ];
+}
+
 export function describeMarketSkips(
   market: string,
   currency: string,

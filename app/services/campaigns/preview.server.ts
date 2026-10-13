@@ -7,6 +7,7 @@
 
 import { overlapsFrom } from "../../lib/planning/overlaps";
 import { format } from "../../lib/money/format";
+import { marketScope } from "../../lib/planning/market-scope";
 import { money, type Money } from "../../lib/money/money";
 import { planRun } from "../../lib/planning/plan";
 import { selectWritePath } from "../../lib/planning/write-path";
@@ -22,7 +23,7 @@ import {
   planMarket,
   UnconvertedMarketError,
 } from "./market-plan.server";
-import { describeMarketSkips } from "../../lib/markets/guardrails";
+import { describeMarketSkips, describeMovedMarket } from "../../lib/markets/guardrails";
 import { parseSurfaces } from "./market-surfaces.server";
 import { priceListLabel } from "../../lib/markets/display-name";
 import type { AdminClient } from "../../lib/execution/sync-executor";
@@ -154,7 +155,9 @@ export async function previewCampaign(
     options,
   );
   const decision = selectWritePath(outcome.rows.length);
-  const markets = await marketPathPreview(shopId, campaignId, resolvable, outcome, options);
+  // Over the same variants the run prices markets for: the already-correct ones the rows
+  // leave out included (#841).
+  const markets = await marketPathPreview(shopId, campaignId, resolvable, marketScope(candidates, outcome.rows), options);
 
   // What this does to margin, before it happens. Computed over the whole plan rather
   // than the shown page: a merchant asking "what does this cost me" means the campaign,
@@ -234,7 +237,8 @@ async function marketPathPreview(
   shopId: string,
   campaignId: string,
   resolvable: readonly Parameters<typeof planMarket>[3][number][],
-  outcome: Extract<ReturnType<typeof planRun>, { kind: "ok" }>,
+  /** Every variant the markets are planned over, as the run plans them (`marketScope`). */
+  variantGids: readonly string[],
   options: PreviewOptions,
 ): Promise<MarketPreview[]> {
   const campaign = await prisma.campaign.findUnique({
@@ -262,7 +266,6 @@ async function marketPathPreview(
     }));
   }
 
-  const variantGids = outcome.rows.map((row) => row.ref.variantGid);
   const previews: MarketPreview[] = [];
 
   for (const list of lists) {
@@ -299,10 +302,12 @@ async function marketPathPreview(
     const counts = plan.outcome.kind === "ok" ? plan.outcome.counts : { clamped: 0, skipped: 0 };
     // The run's own sentences for what this market leaves at full price, so the review
     // step names the reason the run will report rather than only a count (#691).
-    const skipNotes =
-      plan.outcome.kind === "ok"
+    const skipNotes = [
+      ...(plan.outcome.kind === "ok"
         ? describeMarketSkips(list.name, list.currency, plan.outcome.rows, plan.inStoreCurrency)
-        : [];
+        : []),
+      ...describeMovedMarket(list.name, plan.moved.length),
+    ];
 
     previews.push({
       priceListGid: list.priceListGid,
