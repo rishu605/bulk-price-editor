@@ -46,7 +46,7 @@ export async function rollbackReport(
   shopId: string,
   campaignId: string,
 ): Promise<RollbackReport> {
-  const { campaign, resolvable, ast } = await loadCampaignContext(shopId, campaignId);
+  const { campaign, resolvable, heldEdits, ast } = await loadCampaignContext(shopId, campaignId);
 
   const [candidates, storeGuardrails, applied] = await Promise.all([
     loadCandidates(shopId, ast, undefined, importIdsOf(resolvable)),
@@ -68,6 +68,7 @@ export async function rollbackReport(
     candidates,
     storeGuardrails,
     excludeCampaignId: campaignId,
+    heldEdits,
   });
 
   const [titles, mirror] = await Promise.all([

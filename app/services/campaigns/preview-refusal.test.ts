@@ -40,6 +40,8 @@ vi.mock("./model.server", () => ({
   loadCampaignContext: vi.fn().mockResolvedValue({
     campaign: { name: "Black Friday", status: "SCHEDULED" },
     resolvable: [],
+    heldEdits: new Map(),
+    others: [],
     ast: {},
   }),
   importIdsOf: () => [],
@@ -59,6 +61,7 @@ vi.mock("../../lib/planning/plan", () => ({
   planRun: () => ({
     kind: "ok",
     counts: { planned: 1, noop: 0, skipped: 0, clamped: 0 },
+    coverage: [],
     rows: [
       {
         ref: { variantGid: "gid://v/1" },

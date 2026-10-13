@@ -242,7 +242,12 @@ export type ResolutionReason =
    * item stays free: the positivity rule raised these to the smallest price, $0.01, under
    * a discount and with no guardrails set (#792).
    */
-  | "free-item";
+  | "free-item"
+  /**
+   * A hand edit holds this variant in another campaign, and the merchant has not yet said
+   * whether to keep it (#821). No other campaign writes it until they do.
+   */
+  | "held-edit";
 
 export interface Resolution {
   /** The price to write. Absent when nothing should be written. */

@@ -69,6 +69,26 @@ export const PRICES_MAY_BE_LIVE: ReadonlySet<CampaignState> = new Set<CampaignSt
   "PARTIAL",
 ]);
 
+/**
+ * States whose campaign is meant to be pricing its variants, so every other campaign
+ * resolves against it (#821).
+ *
+ * Overlap counted ACTIVE alone. A campaign held by one hand edit -- routine -- still has
+ * its sale live, yet a lower-priority campaign planned as if it were not there, wrote over
+ * it, and reverting that one wrote baselines under it.
+ *
+ * `PRICES_MAY_BE_LIVE` without REVERTING: a campaign being ended may still have prices up,
+ * but it must not win a variant from anyone, or another campaign's revert would write its
+ * sale back (#805). A Partial campaign stopped part-way through a revert is being ended
+ * too; telling that apart needs its run history, which `competingCampaigns` reads.
+ */
+export const PRICING_STATES: ReadonlySet<CampaignState> = new Set<CampaignState>([
+  "APPLYING",
+  "ACTIVE",
+  "HELD",
+  "PARTIAL",
+]);
+
 export function canTransition(from: CampaignState, to: CampaignState): boolean {
   // Idempotence: asking for the state you are already in always succeeds and changes
   // nothing. See the note at the top about duplicate ticks.

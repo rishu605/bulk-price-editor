@@ -22,6 +22,7 @@
  * that the Approve and Decline buttons were reliably off screen.
  */
 
+import { OverlapPanel } from "../OverlapPanel";
 import { CountsRow } from "../../components/CountsRow";
 import { PreviewTable } from "../../components/PreviewTable";
 import { filenameSlug } from "../../lib/reporting/csv";
@@ -85,6 +86,10 @@ export function CampaignPreviewTab({ preview, approval, fetcher, busy }: Campaig
           </ActionRow>
         </Card>
       ) : null}
+
+      {/* Which other live campaigns share these variants and who wins them (#821). Nothing
+          renders when nothing overlaps. */}
+      <OverlapPanel overlaps={preview.overlaps ?? []} />
 
       <Card heading="Preview">    <CountsRow
           items={[

@@ -1,6 +1,6 @@
 import { formatCount } from "../lib/format/display";
 import { SPACE } from "../lib/ui/spacing";
-import type { DraftOverlap } from "../services/campaigns/draft-preview.server";
+import { stateNote, type Overlap } from "../lib/planning/overlaps";
 import { Secondary } from "./Type";
 
 /**
@@ -26,32 +26,49 @@ import { Secondary } from "./Type";
  * Nothing renders when nothing overlaps. A panel that says "no overlaps" on every draft
  * is a panel a merchant stops reading before the one that matters.
  */
-export function OverlapPanel({ overlaps }: { overlaps: DraftOverlap[] }) {
+export function OverlapPanel({ overlaps }: { overlaps: Overlap[] }) {
   if (overlaps.length === 0) return null;
 
-  const total = overlaps.reduce((sum, overlap) => sum + overlap.variants, 0);
+  const kept = overlaps.reduce((sum, overlap) => sum + overlap.keeps, 0);
+  const yielded = overlaps.reduce((sum, overlap) => sum + overlap.yields, 0);
+  const variants = (count: number) => `${formatCount(count)} ${count === 1 ? "variant" : "variants"}`;
 
   return (
     <s-banner tone="info">
       <s-stack gap={SPACE.tight}>
         <s-paragraph>
           <s-text type="strong">
-            {formatCount(total)} {total === 1 ? "variant" : "variants"} in this scope{" "}
-            {total === 1 ? "is" : "are"} already priced by another campaign.
+            {kept > 0
+              ? `${variants(kept)} in this scope ${kept === 1 ? "is" : "are"} already priced by another campaign.`
+              : `${variants(yielded)} in this scope ${yielded === 1 ? "is" : "are"} also in another campaign, which this one outranks.`}
           </s-text>
         </s-paragraph>
 
         {overlaps.map((overlap) => (
-          <s-paragraph key={overlap.campaignId}>
-            <s-text>
-              <s-link href={`/app/campaigns/${overlap.campaignId}`}>{overlap.name}</s-link>{" "}
-              {overlap.variants === 1
-                ? "keeps it"
-                : `keeps ${formatCount(overlap.variants)} of them`}{" "}
-              &mdash; it outranks this campaign. Raise this campaign&rsquo;s priority above{" "}
-              {overlap.priority} to take {overlap.variants === 1 ? "it" : "them"}.
-            </s-text>
-          </s-paragraph>
+          <s-stack key={overlap.campaignId} gap={SPACE.tight}>
+            {overlap.keeps > 0 ? (
+              <s-paragraph>
+                <s-text>
+                  <s-link href={`/app/campaigns/${overlap.campaignId}`}>{overlap.name}</s-link>
+                  {stateNote(overlap.status)}{" "}
+                  {overlap.keeps === 1 ? "keeps it" : `keeps ${formatCount(overlap.keeps)} of them`}{" "}
+                  &mdash; it outranks this campaign. Raise this campaign&rsquo;s priority above{" "}
+                  {overlap.priority} to take {overlap.keeps === 1 ? "it" : "them"}.
+                </s-text>
+              </s-paragraph>
+            ) : null}
+            {overlap.yields > 0 ? (
+              <s-paragraph>
+                <s-text>
+                  This campaign outranks{" "}
+                  <s-link href={`/app/campaigns/${overlap.campaignId}`}>{overlap.name}</s-link>
+                  {stateNote(overlap.status)} on {overlap.yields === 1 ? "one variant" : variants(overlap.yields)}, so
+                  it prices {overlap.yields === 1 ? "it" : "them"} instead. Reverting this campaign hands{" "}
+                  {overlap.yields === 1 ? "it" : "them"} back.
+                </s-text>
+              </s-paragraph>
+            ) : null}
+          </s-stack>
         ))}
 
         {/* The half a competitor cannot write. Their revert restores a number, so the

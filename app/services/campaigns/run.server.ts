@@ -552,7 +552,7 @@ async function executeCampaignRun(
   }
 
   const startedAt = Date.now();
-  const { campaign: campaignRecord, resolvable, ast } = await loadCampaignContext(shopId, campaignId);
+  const { campaign: campaignRecord, resolvable, heldEdits, ast } = await loadCampaignContext(shopId, campaignId);
   const campaignName = campaignRecord.name;
   const [candidates, storeGuardrails] = await Promise.all([
     loadCandidates(shopId, ast, options.variantGids, importIdsOf(resolvable)),
@@ -564,6 +564,7 @@ async function executeCampaignRun(
     candidates,
     storeGuardrails,
     excludeCampaignId: options.revert ? campaignId : undefined,
+    heldEdits,
   });
 
   if (outcome.kind === "blocked") {

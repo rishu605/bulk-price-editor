@@ -5,6 +5,7 @@
  * each stay focused without importing one another just for a type.
  */
 
+import type { Overlap } from "../../lib/planning/overlaps";
 import type { AdjustmentRule, CompareAtPolicy, Guardrails } from "../../lib/pricing/types";
 import type { PlannedRow } from "../../lib/planning/types";
 import type { MarginRow } from "../../lib/pricing/margin";
@@ -184,6 +185,11 @@ export interface CampaignPreview {
    * itself needed -- on a 102,132-variant apply, enough to starve every shop's pages.
    */
   writing?: string;
+  /**
+   * Every live campaign sharing this one's variants, and who prices them (#821). On a
+   * revert preview, the ones that keep the variants this campaign gives up.
+   */
+  overlaps?: Overlap[];
 }
 
 export interface RunOutcome {

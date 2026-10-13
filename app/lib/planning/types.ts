@@ -87,8 +87,28 @@ export interface PlanCounts {
   clampedToMinimum: number;
 }
 
+/**
+ * One campaign's share of a plan's variants: how many its scope covers, and how many of
+ * those the resolver gives it (#821).
+ *
+ * Counted over every candidate, the already-correct ones included. Overlap used to be read
+ * off the planned rows, and the rows leave out a variant already at its price -- which is
+ * exactly the variant another campaign is keeping. So a sale entirely under a
+ * higher-priority one found no overlap at all, and its revert dialog said nothing else
+ * covered its variants.
+ */
+export interface PlanCoverage {
+  campaignId: string;
+  /** Base-price variants in this plan inside the campaign's own scope. */
+  covers: number;
+  /** Of those, the ones it prices: the resolver's winner, or the holder of a hand edit. */
+  wins: number;
+  /** Of the ones it covers and does not price, how many each other campaign prices instead. */
+  yieldsTo: Record<string, number>;
+}
+
 export type PlanOutcome =
-  | { kind: "ok"; rows: PlannedRow[]; counts: PlanCounts }
+  | { kind: "ok"; rows: PlannedRow[]; counts: PlanCounts; coverage: PlanCoverage[] }
   /**
    * A "block" policy was violated. No rows are returned and nothing may be written —
    * a blocking guardrail must stop the entire run, not merely the offending variant.
@@ -104,6 +124,12 @@ export interface PlanInput {
    * so the result is `resolve(without C)` — invariant I3.
    */
   excludeCampaignId?: string;
+  /**
+   * Variants a hand edit holds in another campaign, by the campaign holding them (#821).
+   * Planned as skipped, whoever would win them: the merchant has been asked whether to
+   * keep that price, and no other campaign's run writes it until they answer.
+   */
+  heldEdits?: ReadonlyMap<string, string>;
 }
 
 export type WritePath = "sync" | "bulk";

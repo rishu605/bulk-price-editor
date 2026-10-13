@@ -1,3 +1,4 @@
+import { overlapSentences } from "../../lib/planning/overlaps";
 import { useRef, type ElementRef } from "react";
 
 import { describeRunDuration } from "../../lib/planning/duration";
@@ -136,6 +137,15 @@ export function ApplyConfirmation({
             <Fact label="Raised from zero">
               {formatCount(counts.clampedToMinimum)} would reach zero or below and will be
               written at the smallest price instead
+            </Fact>
+          ) : null}
+
+          {/* Who else prices these variants, and who wins (#821): the decision is being
+              made here, and the campaign a merchant is about to write over may be held or
+              partly applied rather than plainly running. */}
+          {overlapSentences(preview.overlaps ?? []).length > 0 ? (
+            <Fact label="Other campaigns">
+              {overlapSentences(preview.overlaps ?? []).join(" ")}
             </Fact>
           ) : null}
 

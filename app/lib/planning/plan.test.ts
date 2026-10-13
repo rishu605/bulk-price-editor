@@ -550,3 +550,58 @@ describe("free items and the two kinds of clamp (#792)", () => {
     expect(out.counts).toMatchObject({ clamped: 1, clampedToMinimum: 0 });
   });
 });
+
+describe("who covers each variant, and who prices it (#821)", () => {
+  const high = campaign({ id: "high", priority: 100, ruleRows: [{ segmentIds: [], rule: { kind: "percent-change", percent: -10 } }] });
+  const low = campaign({ id: "low", priority: 50, ruleRows: [{ segmentIds: [], rule: { kind: "percent-change", percent: -30 } }] });
+
+  it("counts a variant another campaign keeps even when it is already at that campaign's price", () => {
+    // The live price is the higher campaign's 90.00: no row, so the rows alone saw no overlap.
+    const out = planRun({ campaigns: [low, high], candidates: [candidate({ livePrice: usd(9000) })] });
+    if (out.kind !== "ok") throw new Error("blocked");
+
+    expect(out.rows).toHaveLength(0);
+    expect(out.coverage).toEqual(
+      expect.arrayContaining([
+        { campaignId: "high", covers: 1, wins: 1, yieldsTo: {} },
+        { campaignId: "low", covers: 1, wins: 0, yieldsTo: { high: 1 } },
+      ]),
+    );
+  });
+
+  it("holds a hand edit another campaign is waiting on: skipped, whoever would win it", () => {
+    // Without the hold, the higher campaign's 90.00 would be written over the merchant's 95.00.
+    const out = planRun({
+      campaigns: [low, high],
+      candidates: [candidate({ livePrice: usd(9500) })],
+      heldEdits: new Map([["gid://Variant/1", "high"]]),
+    });
+    if (out.kind !== "ok") throw new Error("blocked");
+
+    expect(out.rows).toEqual([expect.objectContaining({ status: "skipped", reason: "held-edit", campaignId: "high" })]);
+    expect(out.counts).toMatchObject({ planned: 0, skipped: 1 });
+    expect(out.coverage.find((entry) => entry.campaignId === "high")).toMatchObject({ wins: 1 });
+  });
+
+  it("holds it on a revert too, so ending the lower sale does not put the held one's price back", () => {
+    const out = planRun({
+      campaigns: [low, high],
+      candidates: [candidate({ livePrice: usd(9500) })],
+      excludeCampaignId: "low",
+      heldEdits: new Map([["gid://Variant/1", "high"]]),
+    });
+    if (out.kind !== "ok") throw new Error("blocked");
+    expect(out.rows).toEqual([expect.objectContaining({ status: "skipped", reason: "held-edit" })]);
+  });
+
+  it("holds only the base price: drift is recorded for it alone", () => {
+    const market = { ...baseRef("gid://Variant/1"), surfaceKind: "market" as const, priceListGid: "gid://PriceList/eu", currency: "USD" };
+    const out = planRun({
+      campaigns: [high],
+      candidates: [candidate({ ref: market, livePrice: usd(10000) })],
+      heldEdits: new Map([["gid://Variant/1", "high"]]),
+    });
+    if (out.kind !== "ok") throw new Error("blocked");
+    expect(out.rows).toEqual([expect.objectContaining({ status: "pending" })]);
+  });
+});
