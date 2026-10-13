@@ -27,6 +27,7 @@ export const SKIP_REASON_GROUP: Record<ResolutionReason, string> = {
   "non-positive-price": "would have priced at or below zero",
   "free-item": "are free, and the rule would leave them at zero, so they stay free",
   "held-edit": "were edited by hand under another campaign, which is waiting for your decision on them",
+  "discount-below-rounding-step": "would be discounted by less than the rounding step, so rounding would have raised them; they keep their price",
 };
 
 /** Singular, for one row in a preview table. */
@@ -42,6 +43,7 @@ export const SKIP_REASON_ROW: Record<ResolutionReason, string> = {
   "non-positive-price": "Would price at or below zero",
   "free-item": "Free item, left free",
   "held-edit": "Edited by hand, waiting on another campaign",
+  "discount-below-rounding-step": "Discount smaller than the rounding step",
 };
 
 /**

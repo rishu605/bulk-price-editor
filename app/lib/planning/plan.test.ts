@@ -6,6 +6,7 @@ import { NO_ROUNDING } from "../money/rounding";
 import { policyOf } from "../money/rounding-policy";
 import type { ResolvableCampaign } from "../pricing/types";
 import { planRun, priceDelta, refKey, rowsNeedingWrite } from "./plan";
+import { reasonForRow } from "./reasons";
 import { DEFAULT_THRESHOLD, selectWritePath, thresholdFromEnv } from "./write-path";
 import type { PlanCandidate, PlanInput, SurfaceRef } from "./types";
 
@@ -603,5 +604,23 @@ describe("who covers each variant, and who prices it (#821)", () => {
     });
     if (out.kind !== "ok") throw new Error("blocked");
     expect(out.rows).toEqual([expect.objectContaining({ status: "pending" })]);
+  });
+});
+
+describe("a reduction too small for the rounding step (#825)", () => {
+  it("is planned as skipped, with a reason the preview can say, rather than written at or above the original", () => {
+    const out = planRun({
+      campaigns: [
+        campaign({
+          ruleRows: [{ segmentIds: [], rule: { kind: "percent-change", percent: -1 } }],
+          roundingPolicy: policyOf({ mode: "charm", ending: 99, direction: "nearest" }),
+        }),
+      ],
+      candidates: [candidate({ baseline: { price: usd(99) }, livePrice: usd(99) })],
+    });
+    if (out.kind !== "ok") throw new Error("blocked");
+    expect(out.rows).toEqual([expect.objectContaining({ status: "skipped", reason: "discount-below-rounding-step" })]);
+    expect(out.counts).toMatchObject({ planned: 0, skipped: 1 });
+    expect(reasonForRow("discount-below-rounding-step")).toBe("Discount smaller than the rounding step");
   });
 });
