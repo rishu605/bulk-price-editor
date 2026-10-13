@@ -1,8 +1,8 @@
 /**
  * This app's own handle, as Shopify knows it.
  *
- * It is the one piece of the managed-pricing link that is not a constant, and it is
- * deliberately not configuration. A handle in an env var is a second copy of a fact
+ * Shopify's approval screen sends the merchant back to the plan page by it (#860), and it
+ * is deliberately not configuration. A handle in an env var is a second copy of a fact
  * Shopify already owns: it is set once, forgotten, and then wrong after a rename, which
  * surfaces as a 404 on the page where a merchant was about to pay.
  *

@@ -20,7 +20,7 @@ production there:
 | React Router 7 + `@shopify/shopify-app-react-router` | ✅ same package |
 | Postgres + Prisma | ✅ `provider = "postgresql"`, `env("DATABASE_URL")` |
 | Redis + BullMQ, separate worker process | ✅ `bullmq` + `ioredis`, standalone worker entry |
-| Managed pricing | ✅ plus `app_subscriptions/update` webhook |
+| Billing API (manual pricing; see D9, revisited) | ✅ `billing.request` / `billing.cancel` plus `app_subscriptions/update` webhook |
 
 This is about as good as pre-build validation gets: the stack is not theoretical here.
 

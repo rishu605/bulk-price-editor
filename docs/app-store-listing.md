@@ -138,6 +138,10 @@ charged is a review nobody recovers from.
 
 14-day free trial on paid plans. Development stores free.
 
+**In the Partner Dashboard this is _manual pricing_**, with these four plans entered as they
+are here. The app charges through the Billing API (D9, revisited), and Shopify refuses those
+charges if the listing is switched to managed pricing.
+
 **Say on the listing:** preview, guardrails, full history and rollback are on every plan
 including free. It is unusual in the category and it is the reason to trust the rest.
 

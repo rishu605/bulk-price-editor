@@ -46,6 +46,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (record && !record.uninstalledAt) {
     await markUninstalled(shop);
 
+    // Shopify cancels the app's subscription with the uninstall, and no webhook about it
+    // reaches an app that is gone. Left as it was, a reinstall came back on the paid tier
+    // with nothing approved; App Store 1.2.2 asks that a reinstall request approval again.
+    // The trial's end is kept, so a reinstall does not start a second trial (#860).
+    await db.shop.update({
+      where: { id: record.id },
+      data: { planTier: "FREE", subscriptionGid: null, subscriptionStatus: null, planChangedAt: new Date() },
+    });
+
     // Prices a campaign wrote stay on the storefront, and with no session the app can no
     // longer revert them. Said once, in the record, with what was live -- the question a
     // merchant or support asks after a reinstall is "what did it leave behind?".

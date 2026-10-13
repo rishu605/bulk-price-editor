@@ -28,8 +28,9 @@ import {
   type PlanId,
 } from "../lib/billing/plans";
 import { paysOn, staleSubscriptionUpdate } from "../lib/billing/subscription-payload";
+import { currentSubscription } from "../lib/billing/billing-api";
 import type { AdminClient } from "../lib/execution/sync-executor";
-import type { AnchorActiveSubscriptionsQuery } from "../types/admin.generated";
+import type { AnchorActiveSubscriptionsQuery, AnchorSubscriptionStatusQuery } from "../types/admin.generated";
 import { logger } from "../lib/logging/logger";
 
 /** Shopify's subscription statuses that mean "this plan is real right now". */
@@ -146,6 +147,22 @@ export const ACTIVE_SUBSCRIPTIONS_QUERY = `#graphql
     currentAppInstallation {
       activeSubscriptions {
         id
+        name
+        status
+        trialDays
+        createdAt
+      }
+    }
+  }
+`;
+
+/** One subscription's status, for the one the shop was paying on when it is no longer active. */
+export const SUBSCRIPTION_STATUS_QUERY = `#graphql
+  query AnchorSubscriptionStatus($id: ID!) {
+    node(id: $id) {
+      ... on AppSubscription {
+        id
+        status
       }
     }
   }
@@ -235,7 +252,10 @@ export async function applySubscriptionUpdate(
         subscriptionStatus: update.status,
         planTier: update.planId.toUpperCase() as Shop["planTier"],
         planChangedAt: new Date(),
-        ...(update.trialEndsAt === undefined ? {} : { trialEndsAt: update.trialEndsAt }),
+        // Set or moved, never cleared. Shopify's webhook carries no trial at all, and taking
+        // its silence for "no trial" wiped the end of a 14-day trial the moment it began; a
+        // cleared one would also hand a shop a second trial on its next plan (#860).
+        ...(update.trialEndsAt ? { trialEndsAt: update.trialEndsAt } : {}),
       },
     });
     if (written.count === 0) continue; // another webhook moved the row; judge again
@@ -263,6 +283,81 @@ export async function applySubscriptionUpdate(
   // Shopify redelivers a webhook that fails, so throwing here gets it judged again later
   // rather than dropped.
   throw new Error(`subscription update for ${shopId} kept racing another; retry`);
+}
+
+/**
+ * Brings the shop's tier into line with what Shopify says it is paying on (#860).
+ *
+ * The Billing API's `activeSubscriptions` is the truth; the `app_subscriptions/update`
+ * webhook is the news. Read on the plan page, so a merchant back from approving a charge
+ * sees the plan they paid for at once rather than whenever the webhook lands, and a shop
+ * whose subscription ended while no webhook arrived drops to Free instead of keeping a
+ * paid tier for nothing. Applied through `applySubscriptionUpdate`, so its ordering guard
+ * and its audit entry hold here too.
+ *
+ * Never throws: a lookup that fails leaves the stored tier as it was, and the page still
+ * renders.
+ */
+export async function syncSubscription(shopId: string, client: AdminClient): Promise<void> {
+  try {
+    const { data } = await client.request<AnchorActiveSubscriptionsQuery>(ACTIVE_SUBSCRIPTIONS_QUERY, {});
+    const listed = data?.currentAppInstallation?.activeSubscriptions;
+    if (!listed) return;
+
+    const stored = await prisma.shop.findUnique({
+      where: { id: shopId },
+      select: { planTier: true, subscriptionGid: true, subscriptionStatus: true, trialEndsAt: true },
+    });
+    if (!stored) return;
+
+    const current = currentSubscription(listed);
+    if (current) {
+      // The trial too: the webhook usually lands first, and it says nothing about one.
+      const unchanged =
+        current.gid === stored.subscriptionGid &&
+        current.status === stored.subscriptionStatus?.toUpperCase() &&
+        current.planId.toUpperCase() === stored.planTier &&
+        (!current.trialEndsAt || current.trialEndsAt.getTime() === stored.trialEndsAt?.getTime());
+      if (!unchanged) await applySubscriptionUpdate(shopId, current);
+      return;
+    }
+
+    // Nothing active, while the shop is recorded as paying: that subscription ended --
+    // cancelled, declined, frozen. Its own status is asked for rather than assumed, because a
+    // frozen store's subscription comes back when the store unfreezes, and recording it as
+    // cancelled would refuse that.
+    if (stored.subscriptionGid && paysOn(stored.subscriptionStatus)) {
+      const { data: node } = await client.request<AnchorSubscriptionStatusQuery>(SUBSCRIPTION_STATUS_QUERY, {
+        id: stored.subscriptionGid,
+      });
+      const status = (node?.node && "status" in node.node ? node.node.status : null) ?? "CANCELLED";
+      if (paysOn(status)) return;
+      await applySubscriptionUpdate(shopId, { gid: stored.subscriptionGid, status, planId: "free" });
+    }
+  } catch (error) {
+    logger.warn("subscription sync failed; kept the stored plan", {
+      shopId,
+      reason: error instanceof Error ? error.message : "unknown",
+    });
+  }
+}
+
+/**
+ * Whether a charge for this shop is a test charge.
+ *
+ * A development store cannot be charged at all: Shopify only lets it approve a test
+ * charge, which is also how App Review tries a plan change. `BILLING_TEST_CHARGES=true`
+ * makes every charge a test one, for a staging deploy. Anywhere else the charge is real --
+ * the library's own default is a test charge, which would never have taken a payment.
+ */
+export function isTestCharge(developerStore: boolean): boolean {
+  return developerStore || process.env.BILLING_TEST_CHARGES === "true";
+}
+
+/** The subscriptions to end when a merchant moves to Free. */
+export async function activeSubscriptionIds(client: AdminClient): Promise<string[]> {
+  const { data } = await client.request<AnchorActiveSubscriptionsQuery>(ACTIVE_SUBSCRIPTIONS_QUERY, {});
+  return (data?.currentAppInstallation?.activeSubscriptions ?? []).map((subscription) => subscription.id);
 }
 
 /**

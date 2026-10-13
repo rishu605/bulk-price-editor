@@ -10,7 +10,7 @@ import type { ActionFunctionArgs } from "react-router";
 
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { applySubscriptionUpdate, subscriptionStillActive } from "../services/billing.server";
+import { applySubscriptionUpdate, subscriptionStillActive, syncSubscription } from "../services/billing.server";
 import { toAdminClient } from "../services/admin-client.server";
 import { parseSubscription } from "../lib/billing/subscription-payload";
 import { logger } from "../lib/logging/logger";
@@ -32,6 +32,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   await applySubscriptionUpdate(record.id, parseSubscription(payload), {
     ...(admin ? { stillActive: subscriptionStillActive(toAdminClient(admin)) } : {}),
   });
+
+  // Then settle on what Shopify lists as active (#860). An upgrade activates the new plan
+  // and cancels the old, and the old one's CANCELLED often lands first, while the shop is
+  // still recorded on it: applied alone, that put a merchant who had just paid for
+  // Wholesale on Free until the new plan's ACTIVE arrived. Never throws.
+  if (admin) await syncSubscription(record.id, toAdminClient(admin));
 
   return new Response();
 };

@@ -117,7 +117,7 @@ reconciliation; billing enforced; first paying customers.
 | P5.5 | Campaign calendar (month/week, overlap badges, create-from-slot) | A-5.2 | Beta merchants schedule from the calendar unprompted |
 | P5.6 | Reconciliation view (store-wide, filters, spot-check action) | A-4.6 | 1,000-variant spot check matches fresh reads |
 | P5.7 | Remaining CSV I/O: price/cost imports, all exports, Matrixify headers | A-5.3 | Round-trip on 50K rows with an error file |
-| P5.8 | Managed pricing: 4 tiers, gates (variant caps, surfaces), trial, downgrade read-only behavior | A-5.6, E8 | Upgrade/downgrade tested in billing test mode |
+| P5.8 | Billing API plans (D9, revisited in #860): 4 tiers, gates (variant caps, surfaces), trial, downgrade read-only behavior | A-5.6, E8 | Upgrade/downgrade tested in billing test mode |
 | P5.9 | Listing: copy, screenshots (reconciliation + per-market compare-at lead), screencast, demo store | GTM | Listing submitted |
 | P5.10 | App review submission + fix loop; launch comms to beta (review ask post verified-clean campaign) | GTM | App public; first 10 reviews in motion |
 

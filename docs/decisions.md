@@ -21,7 +21,7 @@ appending a new one, and note the reasoning.
 | D6 | App name + App Store listing name | **Proposed, pending availability** | App name "Anchor"; listing name "Anchor: Bulk Price Editor & Market Pricing". The listing name carries the terms merchants type, because search rank in this category depends on it; the app name stays short because that is what sits in the admin sidebar daily. Cannot be *closed* until the Partner dashboard confirms availability — a taken name makes every other choice here moot. Copy drafted in `docs/app-store-listing.md`. |
 | D7 | Free-tier cap (500 vs 250 variants) | post-launch data | Start at 500 — deliberately aggressive against NA's 100 changes/month. Tighten if conversion suffers; never tighten the safety features. |
 | D8 | Pull B2B surface forward into P5 | beta signal | Swap with the calendar if the beta cohort skews B2B-heavy. |
-| D9 | Managed pricing vs the newer usage-billing App Events path | **Resolved P5.8** | Managed pricing. Variant caps are enforced in-app against the campaign's own scope, which needs no usage reporting at all — and usage billing would have meant emitting an App Event per priced variant, which is both a per-change meter by another name (contradicting D3) and a second source of truth about what we did. |
+| D9 | Managed pricing vs the newer usage-billing App Events path | **Resolved P5.8, revised 13 Oct 2026 (#860)** | Flat recurring plans, never usage billing. Variant caps are enforced in-app against the campaign's own scope, which needs no usage reporting at all — and usage billing would have meant emitting an App Event per priced variant, which is both a per-change meter by another name (contradicting D3) and a second source of truth about what we did. **Charged through the Billing API, with the listing on manual pricing** — not Shopify App Pricing; see below. |
 
 ### D4, in more detail
 
@@ -131,6 +131,40 @@ used. It was rejected for three reasons:
 The decision to revisit if: a merchant asks to be charged for a one-off large campaign
 rather than upgrading a tier for a month. That is a real shape and managed pricing serves
 it badly.
+
+### D9, revisited: the Billing API, not Shopify App Pricing (13 Oct 2026, #860)
+
+App Review paused the submission under requirement 1.2.1. The plan page sent merchants to
+Shopify App Pricing's hosted picker, but the Partner Dashboard listing is on **manual
+pricing** and no App Pricing plans were ever created, so the picker was Shopify's 404. The
+reviewer could not find a working charge.
+
+Two ways out, and the Billing API is the one taken:
+
+- **It is what the listing already says.** Manual pricing means the app creates its own
+  charges. App Pricing would have meant switching the listing, building the four plans in
+  the Partner Dashboard, and — because App Pricing stopped sending subscription webhooks
+  after 28 Apr 2026 — a Partner API client to read plan state from. That adds a credential
+  and a second API to the billing path.
+- **Everything runs on the Admin token the app already holds.** `appSubscriptionCreate`
+  makes the charge; `currentAppInstallation.activeSubscriptions` is the truth;
+  `app_subscriptions/update` still arrives for Billing API subscriptions, and #709's
+  ordering guard applies to it unchanged.
+- **The plans live in `plans.ts`.** `billing-api.ts` builds the library's `billing` config
+  from it, so what Shopify charges, what the app gates and what the listing promises
+  (`listing-parity.test.ts`) come from one table.
+
+What it commits us to:
+
+- Prices and trials are changed in code, and the Partner Dashboard's manual-pricing
+  details must be edited to match on the same release.
+- A trial is given once per shop. Changing plan carries over what is left, and cancelling or
+  reinstalling does not start another, because `trialEndsAt` is kept through both.
+- Switching to Free cancels the subscription with proration, so the unused part of the
+  month comes back to the merchant as a credit.
+- Development stores keep every feature free, but can still change plan with **test
+  charges**. That is how App Review tries the flow.
+- Uninstalling resets the plan to Free, so a reinstall asks for approval again (1.2.2).
 
 ## Reversed during planning
 
