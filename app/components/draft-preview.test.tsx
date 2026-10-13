@@ -140,6 +140,15 @@ describe("the states that are not a table", () => {
     expect(html).toContain("updating");
   });
 
+  it("says the catalogue has not been read, not that the conditions match nothing (#800)", () => {
+    // Every filter blank on a store that has never synced: there is no condition to loosen.
+    const html = render(preview({ matched: 0, changing: 0, rows: [], catalogue: "unsynced" }));
+
+    expect(html).toContain("Anchor hasn&#x27;t read your catalogue yet");
+    expect(html).toContain('href="/app"');
+    expect(html).not.toContain("Nothing matches this scope");
+  });
+
   it("names the scope as the thing that matched nothing", () => {
     const html = render(preview({ matched: 0, changing: 0, rows: [] }));
 

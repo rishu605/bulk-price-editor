@@ -37,6 +37,7 @@ import { PageShell } from "../components/PageShell";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { ActionRow } from "../components/ActionRow";
 import { EmptyState } from "../components/AsyncState";
+import { catalogueNotice } from "../lib/catalogue/state";
 import { HelpNote } from "../components/HelpNote";
 import { withGuard } from "../lib/errors/guard.server";
 import { formatCount } from "../lib/format/display";
@@ -62,6 +63,8 @@ export const loader = withGuard("/app/campaigns/preview", async ({ request }: Lo
   const total = preview.changing + preview.alreadyCorrect + preview.skipped;
 
   return {
+    // No catalogue to match against yet, rather than conditions matching nothing (#800).
+    catalogue: preview.catalogue ? catalogueNotice(preview.catalogue) : null,
     rows,
     total,
     page,
@@ -76,7 +79,7 @@ export const loader = withGuard("/app/campaigns/preview", async ({ request }: Lo
 });
 
 export default function FullPreview() {
-  const { rows, total, page, pages, counts } = useLoaderData<typeof loader>();
+  const { rows, total, page, pages, counts, catalogue } = useLoaderData<typeof loader>();
   const [params] = useSearchParams();
 
   const pageHref = (next: number) => {
@@ -100,7 +103,9 @@ export default function FullPreview() {
             </s-text>
           </s-paragraph>
 
-          {rows.length === 0 ? (
+          {catalogue ? (
+            <EmptyState {...catalogue} />
+          ) : rows.length === 0 ? (
             <EmptyState
               title="Nothing matches this scope"
               description="No variant matches every condition on this campaign. Loosen one, or leave them all blank to target the whole catalogue."
