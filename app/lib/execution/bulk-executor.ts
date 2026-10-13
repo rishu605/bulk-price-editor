@@ -245,6 +245,25 @@ export const DEFAULT_BULK_MUTATION = `
   }
 `;
 
+/** One operation by id: how a resume learns how a run's operation ended (#832). */
+export const BULK_OPERATION_BY_ID = `#graphql
+  query AnchorBulkOperationById($id: ID!) {
+    node(id: $id) {
+      ... on BulkOperation { id status url partialDataUrl objectCount errorCode }
+    }
+  }
+`;
+
+/** That operation's state, or null when Shopify no longer knows it (it expires after a week). */
+export async function bulkOperationById(client: AdminClient, id: string): Promise<BulkOperationState | null> {
+  const response = await withRetry(
+    () => client.request<{ node?: BulkOperationState | null }>(BULK_OPERATION_BY_ID, { id }),
+    isThrottledError,
+  );
+  const node = response.data?.node;
+  return node && "status" in node ? node : null;
+}
+
 /** Terminal states: no further polling will change the outcome. */
 export function isTerminal(status: BulkOperationStatus): boolean {
   return status === "COMPLETED" || status === "FAILED" || status === "CANCELED" || status === "EXPIRED";
@@ -259,6 +278,8 @@ export interface PollOptions {
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
   maxAttempts?: number;
+  /** Called with each answer, so a caller can record how far Shopify has got (#832). */
+  onPoll?: (state: BulkOperationState) => void | Promise<void>;
 }
 
 /**
@@ -279,6 +300,7 @@ export async function pollUntilTerminal(
     now = () => Date.now(),
     sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms)),
     maxAttempts = 5,
+    onPoll,
   } = options;
 
   const deadline = now() + timeoutMs;
@@ -295,6 +317,7 @@ export async function pollUntilTerminal(
     );
 
     last = response.data?.currentBulkOperation ?? last;
+    if (last) await onPoll?.(last);
     if (last && isTerminal(last.status)) return last;
     if (now() >= deadline) return last;
 

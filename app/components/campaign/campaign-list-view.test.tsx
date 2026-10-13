@@ -173,3 +173,50 @@ describe("what a merchant reads before the first campaign", () => {
     expect(route).toContain('view === "calendar"');
   });
 });
+
+describe("a run Shopify is still applying in bulk", () => {
+  it("says how far Shopify has got, rather than 0 verified (#832)", () => {
+    // The run's own counts stay at zero until the bulk operation finishes, and "0
+    // verified" over an hour of prices going live read as nothing happening.
+    const html = render({
+      list: list({
+        campaigns: [
+          campaign({
+            state: "APPLYING" as never,
+            lastRun: { kind: "APPLY", status: "EXECUTING", verified: 0, failed: 0, atShopify: { done: 40_000, of: 100_139, live: true } },
+          }),
+        ],
+      }),
+    });
+
+    expect(html).toContain("40,000 of 100,139 at Shopify");
+    expect(html).not.toContain("0 verified");
+  });
+
+  it("says how many were sent once no run is polling, rather than a count nobody updates", () => {
+    const html = render({
+      list: list({
+        campaigns: [
+          campaign({
+            state: "PARTIAL" as never,
+            lastRun: { kind: "APPLY", status: "PARTIAL", verified: 0, failed: 0, atShopify: { done: 0, of: 4, live: false } },
+          }),
+        ],
+      }),
+    });
+
+    expect(html).toContain("4 sent to Shopify");
+    expect(html).not.toContain("0 of 4");
+  });
+
+  it("goes back to the verified count once the operation is done", () => {
+    const html = render({
+      list: list({
+        campaigns: [campaign({ lastRun: { kind: "APPLY", status: "COMPLETED", verified: 4, failed: 0, atShopify: null } })],
+      }),
+    });
+
+    expect(html).toContain("4 verified");
+    expect(html).not.toContain("at Shopify");
+  });
+});

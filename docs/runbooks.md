@@ -139,6 +139,14 @@ looking at an old incident, that is why.
 marks them PARTIAL, which is resumable and visible to the merchant. Nothing needs manual
 database editing.
 
+A run that died, or stopped waiting after thirty minutes, on the bulk path may have left an
+operation running at Shopify, which goes on applying prices with nobody watching. Its rows stay `WRITING` ("sent to Shopify") rather
+than going back to `PENDING`, and the campaign's next run of any kind asks Shopify how that
+operation ended before it writes. While it is still running every run of that campaign is
+refused with "Shopify is still applying this campaign's prices in bulk", and that clears by
+itself. Do not set those rows back to `PENDING` by hand: a resume would then send every
+price again (#832).
+
 **Escalate** if the lock is held by a worker that is alive but not ticking — that is a bug
 worth waking somebody for, because the lock will not expire while it is being renewed.
 

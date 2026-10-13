@@ -30,6 +30,7 @@ function result(over: Partial<CampaignResult> = {}): CampaignResult {
       skipped: 0,
       failed: 0,
       reverted: 0,
+      sent: 0,
       pending: 0,
       total: 4,
     },

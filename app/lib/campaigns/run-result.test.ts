@@ -128,7 +128,7 @@ describe("a run is only clean when nothing is outstanding", () => {
     expect(summariseRun([row("VERIFIED"), row("SKIPPED")], null).clean).toBe(true);
   });
 
-  it.each(["FAILED", "APPLIED", "PENDING"])("is not clean with a %s row", (status) => {
+  it.each(["FAILED", "APPLIED", "PENDING", "WRITING"])("is not clean with a %s row", (status) => {
     expect(summariseRun([row("VERIFIED"), row(status)], null).clean).toBe(false);
   });
 });
@@ -166,6 +166,37 @@ describe("the sentence a merchant reads", () => {
 
     expect(text).toContain("Nothing has been written");
     expect(text).not.toContain("0 prices");
+  });
+
+  it("calls rows Shopify is applying in bulk sent, never unwritten (#832)", () => {
+    // A 100,139-row bulk apply read "100139 still to run. Nothing has been written." for
+    // over an hour while Shopify was applying every one of those prices.
+    const result = summariseRun([row("WRITING"), row("WRITING"), row("PENDING")], null);
+    const text = describeRun(result);
+
+    expect(result.counts.sent).toBe(2);
+    expect(result.counts.pending).toBe(1);
+    expect(text).not.toContain("Nothing has been written");
+    expect(text).toMatch(/^2 sent to Shopify; their results arrive when the bulk operation finishes, 1 still to run\. None is read back yet\.$/);
+  });
+
+  it("says how far Shopify has got and when the operation started, when it knows", () => {
+    const text = describeRun(summariseRun([row("WRITING")], null), { running: true, submittedAt: "14:05", applied: 40_000 });
+
+    expect(text).toContain("Shopify has worked through 40000 so far");
+    expect(text).toContain("(started 14:05)");
+  });
+
+  it("does not claim progress Shopify has not reported", () => {
+    const text = describeRun(summariseRun([row("WRITING")], null), { running: true, submittedAt: "14:05", applied: null });
+
+    expect(text).not.toContain("worked through");
+  });
+
+  it("says Shopify has finished when the run stopped before reading its results", () => {
+    const text = describeRun(summariseRun([row("WRITING")], null), { running: false, submittedAt: "14:05", applied: 1 });
+
+    expect(text).toBe("1 sent to Shopify, whose bulk operation has finished. None is read back yet.");
   });
 
   it("counts clamped rows as changed, because they were", () => {
@@ -234,6 +265,13 @@ describe("tallying a database aggregate", () => {
 
     expect(counts.pending).toBe(7);
     expect(counts.total).toBe(7);
+  });
+
+  it("counts rows sent in a bulk operation as sent, not as still to run", () => {
+    const counts = tallyStatuses([{ status: "WRITING", count: 100_139 }]);
+
+    expect(counts.sent).toBe(100_139);
+    expect(counts.pending).toBe(0);
   });
 
   it("counts nothing as nothing", () => {

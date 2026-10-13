@@ -82,7 +82,20 @@ export async function listCampaigns(shopId: string, filters: CampaignFilters) {
       skip: (filters.page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
       include: {
-        runs: { orderBy: { createdAt: "desc" }, take: 1 },
+        runs: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+          // Its bulk operation and the rows sent in it, for how far Shopify has got (#832).
+          include: {
+            bulkOps: {
+              where: { kind: "MUTATION" },
+              orderBy: { submittedAt: "desc" },
+              select: { objectCount: true },
+              take: 1,
+            },
+            _count: { select: { changes: { where: { status: "WRITING" } } } },
+          },
+        },
         // Named so the row can say what the campaign applies to. A segment replaces the
         // inline filter rather than narrowing it, so where there is one it *is* the
         // scope — see `describeScope`.
@@ -123,6 +136,18 @@ export async function listCampaigns(shopId: string, filters: CampaignFilters) {
             status: c.runs[0].status,
             verified: c.runs[0].verifiedRows,
             failed: c.runs[0].failedRows,
+            // The rows the run sent in a bulk operation and has not read back. Its own counts
+            // stay at zero until the results are read, and "0 verified" over an hour of
+            // prices going live read as nothing happening (#832). `live` is whether a
+            // process is still polling it -- only then is Shopify's count current.
+            atShopify:
+              c.runs[0].bulkOps[0] && c.runs[0]._count.changes > 0
+                ? {
+                    done: Number(c.runs[0].bulkOps[0].objectCount ?? 0),
+                    of: c.runs[0]._count.changes,
+                    live: ["PLANNING", "QUEUED", "EXECUTING", "VERIFYING"].includes(c.runs[0].status),
+                  }
+                : null,
           }
         : null,
     };

@@ -8,6 +8,7 @@
 
 import prisma from "../../db.server";
 import { readSettings } from "../settings.server";
+import { formatClock } from "../../lib/format/display";
 import {
   describeRun,
   isClean,
@@ -58,13 +59,21 @@ export async function campaignResult(
   });
   if (!run) return null;
 
-  const [byStatus, settings] = await Promise.all([
+  const [byStatus, settings, operation, shop] = await Promise.all([
     prisma.variantChange.groupBy({
       by: ["status"],
       where: { shopId, runId },
       _count: { _all: true },
     }),
     readSettings(shopId),
+    // The bulk operation this run sent its rows in, if any: whether it is still running,
+    // when it started and how far Shopify has got, for the summary (#832).
+    prisma.bulkOperationRecord.findFirst({
+      where: { shopId, runId, kind: "MUTATION" },
+      orderBy: { submittedAt: "desc" },
+      select: { submittedAt: true, objectCount: true, status: true },
+    }),
+    prisma.shop.findUnique({ where: { id: shopId }, select: { timezone: true } }),
   ]);
 
   // Classified by the same function the pure summariser uses, so the aggregate path and
@@ -87,7 +96,16 @@ export async function campaignResult(
   return {
     ...result,
     runId,
-    summary: describeRun(result),
+    summary: describeRun(
+      result,
+      operation
+        ? {
+            running: operation.status === "CREATED" || operation.status === "RUNNING",
+            submittedAt: formatClock(operation.submittedAt, shop?.timezone ?? "UTC"),
+            applied: operation.objectCount === null ? null : Number(operation.objectCount),
+          }
+        : null,
+    ),
     marginCoveredRows: counts.total > MARGIN_ROW_LIMIT ? rows.length : null,
     unavailable: UNAVAILABLE,
   };

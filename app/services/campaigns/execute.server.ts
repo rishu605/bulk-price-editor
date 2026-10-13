@@ -15,11 +15,19 @@
  */
 
 import {
+  bulkOperationById,
+  isTerminal,
   reconcileResults,
   submitBulkMutation,
   pollUntilTerminal,
+  type BulkOperationState,
   type StagedTarget,
 } from "../../lib/execution/bulk-executor";
+import prisma from "../../db.server";
+import { AppError } from "../../lib/errors/app-error";
+import { isClampReason } from "../../lib/campaigns/clamp-reasons";
+import { chunk } from "../../lib/db/chunk";
+import { money } from "../../lib/money/money";
 import { executeSync, type AdminClient, type ExecutedRow } from "../../lib/execution/sync-executor";
 import { readBackVerdict } from "../../lib/execution/read-back";
 import type { PlannedRow } from "../../lib/planning/types";
@@ -59,6 +67,15 @@ export interface ExecuteContext {
    * reaper declare every long bulk run dead.
    */
   onProgress?: (done: number, total: number) => void | Promise<void>;
+  /**
+   * The bulk operation has been accepted by Shopify (#832). From here its rows may be
+   * live whatever happens to this process, and the run has to say so.
+   */
+  onSubmitted?: (operation: BulkOperationState) => Promise<void>;
+  /** Each poll of that operation, and its final state. */
+  onPoll?: (operation: BulkOperationState) => void | Promise<void>;
+  /** How long to wait for that operation before giving up on watching it. Tests only. */
+  bulkWaitMs?: number;
 }
 
 /** Uploads a JSONL body to a staged target using multipart form data. */
@@ -133,6 +150,7 @@ async function executeBulk(
     upload: uploadToStagedTarget,
     productOf: context.productOf,
   });
+  await context.onSubmitted?.(operation);
 
   // The finish webhook is faster when it arrives, but it is documented to go
   // missing; polling is the fallback that stops a run hanging forever (E13).
@@ -142,12 +160,30 @@ async function executeBulk(
   // without it the reaper would mistake every large run for a dead process.
   const finished = await pollUntilTerminal({
     client: context.client,
+    onPoll: context.onPoll,
+    timeoutMs: context.bulkWaitMs,
     sleep: async (ms) => {
       await context.onProgress?.(0, writable.length);
       await new Promise<void>((resolve) => setTimeout(resolve, ms));
     },
   });
   const finalState = finished ?? operation;
+
+  // Shopify is still applying it and the wait is over. There is no result file to read,
+  // and settling every row as "not present in the result file" let a resume send them all
+  // again while Shopify was still writing them (#832). They stay sent; the campaign's next
+  // run asks Shopify how the operation ended before it writes anything.
+  if (!isTerminal(finalState.status)) {
+    throw new AppError({
+      code: "UNKNOWN",
+      retryable: false,
+      context: { operation: finalState.id, status: finalState.status, rows: writable.length },
+      userMessage:
+        `Shopify is still applying this campaign's ${writable.length} prices in bulk (operation ${finalState.id}), ` +
+        "and the app has stopped waiting for it. They may already be live. The campaign's next run asks Shopify " +
+        "how it ended before writing anything.",
+    });
+  }
 
   const submittedGids = writable.map((row) => row.ref.variantGid);
   const { outcomes, unreported } = await reconcileResults(
@@ -216,4 +252,143 @@ async function* fetchResultFile(url: string): AsyncGenerator<string> {
     yield decoder.decode(value, { stream: true });
   }
   yield decoder.decode();
+}
+
+/** A run in one of these has a process behind it. */
+const LIVE_RUN: readonly string[] = ["PLANNING", "QUEUED", "EXECUTING", "VERIFYING"];
+
+/**
+ * Before a run writes anything, asks Shopify how the campaign's last bulk operation ended
+ * (#832). A run reclaimed or failed after Shopify accepted one leaves its rows WRITING:
+ * sent, outcome unknown -- whether the operation was still running or had finished and its
+ * result file was never read. Re-sending them blind would write prices that may already be
+ * there, and calling them unchanged would be false.
+ *
+ * Still running: nothing writes, and the run says why. Finished: its result file settles
+ * those rows -- verified, failed, or written but not reported -- exactly as the run would
+ * have, and the run carries on with what is left. Returns the run whose rows it settled, so the
+ * caller can bring that run's mirror and counts up to date, and the variants whose prices
+ * landed: the run died before its tags and market prices, so the resume owes them both.
+ */
+export async function settleSubmittedBulk(
+  shopId: string,
+  campaignId: string,
+  client: AdminClient,
+): Promise<
+  | { stillRunning: string }
+  | { settledRunId: string; operation: string; landed: string[]; failed: number; unreported: number }
+  | null
+> {
+  const record = await prisma.bulkOperationRecord.findFirst({
+    where: { shopId, kind: "MUTATION", run: { campaignId, changes: { some: { status: "WRITING" } } } },
+    orderBy: { submittedAt: "desc" },
+    include: { run: { select: { status: true } } },
+  });
+  if (!record?.runId) return null;
+
+  const stillRunning = (done: number | null) => ({
+    stillRunning:
+      `Shopify is still applying this campaign's prices in bulk (operation ${record.shopifyGid}` +
+      `${done === null ? "" : `, ${done} done so far`}). Nothing was sent. Try again once it has finished.`,
+  });
+
+  // The run that sent it is alive and polling: its rows are its own to settle, one writer
+  // per occurrence, and it will.
+  if (record.run && LIVE_RUN.includes(record.run.status)) {
+    return stillRunning(record.objectCount === null ? null : Number(record.objectCount));
+  }
+
+  const state = await bulkOperationById(client, record.shopifyGid);
+  if (state && !isTerminal(state.status)) {
+    const done = Number(state.objectCount ?? Number.NaN);
+    await prisma.bulkOperationRecord.update({
+      where: { id: record.id },
+      data: { status: "RUNNING", lastPolledAt: new Date(), ...(Number.isFinite(done) ? { objectCount: BigInt(done) } : {}) },
+    });
+    return stillRunning(Number.isFinite(done) ? done : null);
+  }
+
+  const rows = await prisma.variantChange.findMany({
+    where: { runId: record.runId, shopId, status: "WRITING" },
+    select: { id: true, variantGid: true, intendedPrice: true, currency: true, failureReason: true },
+  });
+  // Shopify no longer knows the operation: nothing can be read from it, so the rows are
+  // what they were -- written, not read back -- and the resume writes them again.
+  const finalState: BulkOperationState = state ?? { id: record.shopifyGid, status: "EXPIRED" };
+  const { outcomes, unreported } = state
+    ? await reconcileResults(finalState, rows.map((row) => row.variantGid), fetchResultFile)
+    : { outcomes: new Map(), unreported: rows.map((row) => row.variantGid) };
+  const missing = new Set(unreported);
+  const now = new Date();
+
+  // Recorded as `recordResults` would have recorded them, had the run lived: the same
+  // statuses, stamps and failure bookkeeping. Grouped by outcome so 100,000 rows are a
+  // few dozen statements, not 100,000; failures go one by one, as they do there, because
+  // each carries its own reason and the price Shopify holds.
+  const verified: string[] = [];
+  const clamped: string[] = [];
+  const landed: string[] = [];
+  const unverified: string[] = [];
+  const failed: Array<{ id: string; reason: string; observed?: bigint }> = [];
+  for (const row of rows) {
+    if (missing.has(row.variantGid)) {
+      unverified.push(row.id);
+      continue;
+    }
+    const outcome = outcomes.get(row.variantGid);
+    const intended = row.intendedPrice === null ? undefined : money(Number(row.intendedPrice), row.currency);
+    const verdict = outcome?.ok ? readBackVerdict(intended, outcome.price) : null;
+    if (verdict?.ok) {
+      // The submit step wrote a clamped row's reason up front; nothing else tells them apart.
+      (isClampReason(row.failureReason) ? clamped : verified).push(row.id);
+      landed.push(row.variantGid);
+      continue;
+    }
+    failed.push(
+      verdict && !verdict.ok
+        ? { id: row.id, reason: verdict.reason, observed: verdict.observed ? BigInt(verdict.observed.amount) : undefined }
+        : { id: row.id, reason: outcome?.failureReason ?? "Unknown failure" },
+    );
+  }
+
+  const settle = (ids: string[], data: Parameters<typeof prisma.variantChange.updateMany>[0]["data"]) =>
+    chunk(ids).map((batch) => prisma.variantChange.updateMany({ where: { id: { in: batch } }, data }));
+  await prisma.$transaction([
+    ...settle(verified, { status: "VERIFIED", appliedAt: now, verifiedAt: now }),
+    ...settle(clamped, { status: "CLAMPED", appliedAt: now, verifiedAt: now }),
+    ...settle(unverified, {
+      status: "APPLIED",
+      appliedAt: now,
+      failureReason: `Not present in the bulk result file (operation ${finalState.status}). Left unverified rather than assumed successful.`,
+    }),
+    ...failed.map((row) =>
+      prisma.variantChange.update({
+        where: { id: row.id },
+        data: {
+          status: "FAILED",
+          appliedAt: null,
+          failureReason: row.reason,
+          ...(row.observed !== undefined ? { appliedPrice: row.observed } : {}),
+          // Counts toward quarantine, as a failure recorded by the run itself does.
+          attempt: { increment: 1 },
+        },
+      }),
+    ),
+    prisma.bulkOperationRecord.update({
+      where: { id: record.id },
+      data: {
+        status: finalState.status === "CREATED" || finalState.status === "RUNNING" ? "EXPIRED" : finalState.status,
+        finishedAt: record.finishedAt ?? now,
+        lastPolledAt: now,
+        ...(finalState.url ? { resultUrl: finalState.url } : {}),
+      },
+    }),
+  ]);
+  return {
+    settledRunId: record.runId,
+    operation: record.shopifyGid,
+    landed,
+    failed: failed.length,
+    unreported: unverified.length,
+  };
 }

@@ -27,6 +27,11 @@ import { FakeShopify } from "./fake-shopify";
 export class FakeShopifyServer implements BlobStore {
   readonly faults = new FaultBoard();
   readonly fake: FakeShopify;
+  /**
+   * Result files answer 503 while set: a bulk operation finishes and its results cannot be
+   * read, the window a dead process leaves behind on a 100,000-row run (#832).
+   */
+  resultFilesDown = false;
 
   private server?: Server;
   private readonly blobs = new Map<string, string>();
@@ -93,6 +98,10 @@ export class FakeShopifyServer implements BlobStore {
       return this.stagedUpload(request, response);
     }
     if (request.method === "GET" && url.pathname.startsWith("/blob/")) {
+      if (this.resultFilesDown) {
+        response.writeHead(503).end("result files unavailable");
+        return;
+      }
       const body = this.blobs.get(decodeURIComponent(url.pathname.slice("/blob/".length)));
       if (body === undefined) {
         response.writeHead(404).end("no such blob");

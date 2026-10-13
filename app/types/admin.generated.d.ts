@@ -26,6 +26,13 @@ export type AnchorCurrentBulkOperationQueryVariables = AdminTypes.Exact<{ [key: 
 
 export type AnchorCurrentBulkOperationQuery = { currentBulkOperation?: AdminTypes.Maybe<Pick<AdminTypes.BulkOperation, 'id' | 'status' | 'url' | 'partialDataUrl' | 'objectCount' | 'errorCode'>> };
 
+export type AnchorBulkOperationByIdQueryVariables = AdminTypes.Exact<{
+  id: AdminTypes.Scalars['ID']['input'];
+}>;
+
+
+export type AnchorBulkOperationByIdQuery = { node?: AdminTypes.Maybe<Pick<AdminTypes.BulkOperation, 'id' | 'status' | 'url' | 'partialDataUrl' | 'objectCount' | 'errorCode'>> };
+
 export type AnchorPriceListFixedPricesAddMutationVariables = AdminTypes.Exact<{
   priceListId: AdminTypes.Scalars['ID']['input'];
   prices: Array<AdminTypes.PriceListPriceInput> | AdminTypes.PriceListPriceInput;
@@ -435,6 +442,7 @@ export type SeedBulkStatusQuery = { currentBulkOperation?: AdminTypes.Maybe<Pick
 
 interface GeneratedQueryTypes {
   "#graphql\n  query AnchorCurrentBulkOperation {\n    currentBulkOperation(type: MUTATION) {\n      id status url partialDataUrl objectCount errorCode\n    }\n  }\n": {return: AnchorCurrentBulkOperationQuery, variables: AnchorCurrentBulkOperationQueryVariables},
+  "#graphql\n  query AnchorBulkOperationById($id: ID!) {\n    node(id: $id) {\n      ... on BulkOperation { id status url partialDataUrl objectCount errorCode }\n    }\n  }\n": {return: AnchorBulkOperationByIdQuery, variables: AnchorBulkOperationByIdQueryVariables},
   "#graphql\n  query AnchorPriceListDerivedPrices($priceListId: ID!, $query: String!, $first: Int!, $after: String) {\n    priceList(id: $priceListId) {\n      currency\n      prices(originType: RELATIVE, query: $query, first: $first, after: $after) {\n        nodes {\n          variant { id }\n          price { amount currencyCode }\n        }\n        pageInfo { hasNextPage endCursor }\n      }\n    }\n  }\n": {return: AnchorPriceListDerivedPricesQuery, variables: AnchorPriceListDerivedPricesQueryVariables},
   "#graphql\n  query AnchorContextualPrices($ids: [ID!]!, $context: ContextualPricingContext!) {\n    nodes(ids: $ids) {\n      ... on ProductVariant {\n        id\n        contextualPricing(context: $context) {\n          price { amount currencyCode }\n          compareAtPrice { amount currencyCode }\n        }\n      }\n    }\n  }\n": {return: AnchorContextualPricesQuery, variables: AnchorContextualPricesQueryVariables},
   "#graphql\n  query AnchorPriceListParent($id: ID!) {\n    priceList(id: $id) {\n      id\n      currency\n      parent {\n        adjustment { type value }\n        settings { compareAtMode }\n      }\n      fixed: prices(originType: FIXED, first: 1) {\n        nodes { variant { id } }\n      }\n    }\n  }\n": {return: AnchorPriceListParentQuery, variables: AnchorPriceListParentQueryVariables},

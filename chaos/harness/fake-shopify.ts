@@ -150,7 +150,7 @@ export class FakeShopify {
   polls = 0;
 
   private readonly blobs: BlobStore;
-  private readonly pollsBeforeComplete: number;
+  private pollsBeforeComplete: number;
   private throttle: ThrottleStatus;
 
   /** When the bucket was last recomputed, so it restores with the clock. */
@@ -258,6 +258,9 @@ export class FakeShopify {
     }
     if (query.includes("currentBulkOperation")) {
       return this.currentBulkOperation() as { data?: T; extensions?: { cost?: QueryCost } };
+    }
+    if (query.includes("on BulkOperation")) {
+      return this.bulkOperationById(variables) as { data?: T; extensions?: { cost?: QueryCost } };
     }
     if (query.includes("priceListUpdate")) {
       return this.priceListUpdate(variables) as { data?: T; extensions?: { cost?: QueryCost } };
@@ -1097,6 +1100,21 @@ export class FakeShopify {
     }
 
     return { data: { currentBulkOperation: this.bulk }, extensions: this.cost(1) };
+  }
+
+  /**
+   * One operation by id, as a resume asks for it (#832). The same clock as polling: each
+   * lookup is a poll, so an operation finishes after the same number of looks either way.
+   */
+  private bulkOperationById(variables: Record<string, unknown>) {
+    if (!this.bulk || this.bulk.id !== variables.id) return { data: { node: null }, extensions: this.cost(1) };
+    const { data } = this.currentBulkOperation();
+    return { data: { node: data.currentBulkOperation }, extensions: this.cost(1) };
+  }
+
+  /** Lets an operation held running by a large `pollsBeforeComplete` finish on its next poll. */
+  finishBulkOnNextPoll(): void {
+    this.pollsBeforeComplete = 0;
   }
 
   /** Applies the uploaded JSONL and publishes a Shopify-shaped result file. */
