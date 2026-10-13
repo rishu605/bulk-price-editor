@@ -239,6 +239,7 @@ export async function submitBulkMutation(
 export const DEFAULT_BULK_MUTATION = `
   mutation call($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
     productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+      product { updatedAt }
       productVariants { id price compareAtPrice }
       userErrors { field message code }
     }

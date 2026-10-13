@@ -46,11 +46,19 @@ export async function settleMirror(runId: string): Promise<void> {
   // (#828). The products webhook skips a delivery older than `remoteUpdatedAt`; left where
   // it was, a delayed payload from before this write was applied over it and put the old
   // price back in the mirror -- and a revert planned from that mirror found nothing to do.
+  //
+  // Shopify's own timestamp for the write where the row has it (#932). The webhook's
+  // `updated_at` is on Shopify's clock and to the second, and our read-back time ran ahead
+  // of it: an edit made a second after the write compared older and was dropped. Our
+  // verifiedAt only for rows written before that was recorded.
   await prisma.$executeRaw`
     UPDATE "variant_index" v
     SET "price" = c."intendedPrice",
         "compareAt" = CASE WHEN c."intendedCompareAtSet" THEN c."intendedCompareAt" ELSE v."compareAt" END,
-        "remoteUpdatedAt" = GREATEST(COALESCE(v."remoteUpdatedAt", c."verifiedAt"), COALESCE(c."verifiedAt", v."remoteUpdatedAt")),
+        "remoteUpdatedAt" = GREATEST(
+          COALESCE(v."remoteUpdatedAt", c."remoteUpdatedAt", c."verifiedAt"),
+          COALESCE(c."remoteUpdatedAt", c."verifiedAt", v."remoteUpdatedAt")
+        ),
         "syncedAt" = ${now}
     FROM "variant_changes" c
     WHERE ${landed} AND v."shopId" = c."shopId" AND v."variantGid" = c."variantGid"`;

@@ -60,6 +60,7 @@ export interface BulkResultLine {
   __lineNumber?: number;
   data?: {
     productVariantsBulkUpdate?: {
+      product?: { updatedAt?: string | null } | null;
       productVariants?: Array<{ id: string; price?: string; compareAtPrice?: string | null }>;
       userErrors?: Array<{ field?: string[] | null; message: string; code?: string | null }>;
     };
@@ -74,6 +75,8 @@ export interface VariantOutcome {
   price?: string;
   compareAtPrice?: string | null;
   failureReason?: string;
+  /** The product's `updatedAt` after this line's write: Shopify's clock, to the second (#932). */
+  remoteUpdatedAt?: string;
 }
 
 /**
@@ -161,6 +164,7 @@ export async function* parseResults(
         price: variant.price,
         compareAtPrice: variant.compareAtPrice,
         failureReason: reason,
+        remoteUpdatedAt: payload.product?.updatedAt ?? undefined,
       };
     }
 

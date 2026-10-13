@@ -225,7 +225,7 @@ async function executeBulk(
       };
     }
 
-    return { row, status: "verified", observedPrice: verdict.observed };
+    return { row, status: "verified", observedPrice: verdict.observed, remoteUpdatedAt: outcome.remoteUpdatedAt };
   });
 
   const rows = [...executed, ...skipped];
@@ -330,6 +330,8 @@ export async function settleSubmittedBulk(
   const landed: string[] = [];
   const unverified: string[] = [];
   const failed: Array<{ id: string; reason: string; observed?: bigint }> = [];
+  // Shopify's own timestamp for each landed write, for the mirror, as a live run records it (#932).
+  const stamps = new Map<string, string[]>();
   for (const row of rows) {
     if (missing.has(row.variantGid)) {
       unverified.push(row.id);
@@ -342,6 +344,7 @@ export async function settleSubmittedBulk(
       // The submit step wrote a clamped row's reason up front; nothing else tells them apart.
       (isClampReason(row.failureReason) ? clamped : verified).push(row.id);
       landed.push(row.variantGid);
+      if (outcome?.remoteUpdatedAt) stamps.set(outcome.remoteUpdatedAt, [...(stamps.get(outcome.remoteUpdatedAt) ?? []), row.id]);
       continue;
     }
     failed.push(
@@ -356,6 +359,9 @@ export async function settleSubmittedBulk(
   await prisma.$transaction([
     ...settle(verified, { status: "VERIFIED", appliedAt: now, verifiedAt: now }),
     ...settle(clamped, { status: "CLAMPED", appliedAt: now, verifiedAt: now }),
+    ...[...stamps]
+      .filter(([text]) => !Number.isNaN(new Date(text).getTime()))
+      .flatMap(([text, ids]) => settle(ids, { remoteUpdatedAt: new Date(text) })),
     ...settle(unverified, {
       status: "APPLIED",
       appliedAt: now,
