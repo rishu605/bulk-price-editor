@@ -28,6 +28,10 @@ import { isKnownCurrency } from "../lib/money/currency";
 import { formatMoneyForDisplay, money } from "../lib/money/money";
 import { holdForDrift, releaseHold } from "./campaigns/lifecycle.server";
 import { LANDED } from "../lib/execution/landed";
+import { endingAmong } from "./campaigns/model.server";
+
+/** Campaigns that keep their prices live, so a hand edit to one of them is drift (#878). */
+const DRIFT_CONTROLLING = ["ACTIVE", "PARTIAL", "HELD"] as const;
 
 /** How long a write intent stays valid. Generous: webhook delivery is not instant. */
 const INTENT_TTL_MS = 15 * 60 * 1000;
@@ -177,23 +181,34 @@ export async function checkForDrift(
   // The ledger answers it exactly: a VERIFIED base-surface row is us having written this
   // variant, and its run carries the campaign. Newest first, because a variant repriced by
   // a later campaign is controlled by that one.
+  //
+  // Any campaign keeping its prices live, not only an ACTIVE one (#878). A held campaign
+  // still controls its variants, and taking ACTIVE alone meant every edit after the first
+  // was dropped: a second edit left its event showing a price the storefront no longer
+  // had, and an edit to another of its variants recorded nothing, so the queue never asked
+  // about it and the next Apply wrote over it unrecorded. Partial is included for the same
+  // reason, and is what `holdForDrift` already holds. A campaign being ended is not: it is
+  // handing its variants back, not keeping them.
   const controlling = await prisma.variantChange.findFirst({
     where: {
       shopId,
       variantGid,
       surfaceKind: "BASE",
       status: { in: [...LANDED] },
-      run: { campaign: { status: "ACTIVE" } },
+      run: { campaign: { status: { in: [...DRIFT_CONTROLLING] } } },
     },
     orderBy: { createdAt: "desc" },
-    select: { run: { select: { campaignId: true, campaign: { select: { name: true } } } } },
+    select: { run: { select: { campaignId: true, campaign: { select: { name: true, status: true } } } } },
   });
   if (!controlling) return false;
+  if ((await endingAmong([controlling.run.campaignId])).size > 0) return false;
 
   const activeCampaign = {
     id: controlling.run.campaignId,
     name: controlling.run.campaign.name,
   };
+  // Already held: the merchant has been told, and holding it again would change nothing.
+  const alreadyHeld = controlling.run.campaign.status === "HELD";
 
   // Collapse repeats: one open event per variant, updated rather than duplicated.
   const existing = await prisma.driftEvent.findFirst({
@@ -224,7 +239,7 @@ export async function checkForDrift(
     },
   });
 
-  await notifyDrift(shopId, activeCampaign.id, activeCampaign.name);
+  if (!alreadyHeld) await notifyDrift(shopId, activeCampaign.id, activeCampaign.name);
 
   // Hold the campaign as well as recording the event. Recording alone would leave the
   // campaign looking healthy while it quietly stopped controlling one of its prices.
