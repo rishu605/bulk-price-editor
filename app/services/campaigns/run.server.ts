@@ -1000,7 +1000,10 @@ async function executeCampaignRun(
           { perProductOnly: true, onProgress: beat },
         )
       : options.revert
-        ? await revertMarketSurfaces(shopId, campaignId, client, beat)
+        ? await revertMarketSurfaces(shopId, campaignId, client, beat, {
+            runId: run.id,
+            campaigns: resolvable.filter((campaign) => campaign.id !== campaignId),
+          })
         : await applyMarketSurfaces(
             shopId,
             campaignId,

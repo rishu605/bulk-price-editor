@@ -163,10 +163,9 @@ async function main() {
     await runCampaign(shop.id, campaign.id, client, { revert: true }).catch((error) => console.log(`   revert: ${error}`));
     const base = await shopperPrices(client, variantGids, null);
     check("store prices back", variantGids.every((gid) => base.get(gid) === (baseline.get(gid)! / 100).toFixed(2)), true);
-    // Not yet: a revert deletes the campaign's market prices rather than recomputing them,
-    // so a hand-set price is lost (#930). Reported, not counted, until that ships.
+    // Recomputed and written back, not deleted: it was the merchant's own price (#930).
     const yen = await shopperPrices(client, variantGids, jpy.contextCountry);
-    console.log(`      ${jpy.name} after revert: ${variantGids.map((gid) => yen.get(gid)).join(", ")} (hand-set was 15000.0; see #930)`);
+    check(`${jpy.name} back to its hand-set price`, variantGids.every((gid) => yen.get(gid) === "15000.0"), true);
 
     await prisma.campaign.delete({ where: { id: campaign.id } });
     await prisma.baseline.deleteMany({ where: { shopId: shop.id, variantGid: { in: variantGids } } });

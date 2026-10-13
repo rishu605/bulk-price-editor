@@ -65,6 +65,16 @@ export type AnchorPriceListDerivedPricesQuery = { priceList?: AdminTypes.Maybe<(
     & { prices: { nodes: Array<{ variant: Pick<AdminTypes.ProductVariant, 'id'>, price: Pick<AdminTypes.MoneyV2, 'amount' | 'currencyCode'> }>, pageInfo: Pick<AdminTypes.PageInfo, 'hasNextPage' | 'endCursor'> } }
   )> };
 
+export type AnchorFixedPriceVariantsQueryVariables = AdminTypes.Exact<{
+  priceListId: AdminTypes.Scalars['ID']['input'];
+  query: AdminTypes.Scalars['String']['input'];
+  first: AdminTypes.Scalars['Int']['input'];
+  after?: AdminTypes.InputMaybe<AdminTypes.Scalars['String']['input']>;
+}>;
+
+
+export type AnchorFixedPriceVariantsQuery = { priceList?: AdminTypes.Maybe<{ prices: { nodes: Array<{ variant: Pick<AdminTypes.ProductVariant, 'id'> }>, pageInfo: Pick<AdminTypes.PageInfo, 'hasNextPage' | 'endCursor'> } }> };
+
 export type AnchorContextualPricesQueryVariables = AdminTypes.Exact<{
   ids: Array<AdminTypes.Scalars['ID']['input']> | AdminTypes.Scalars['ID']['input'];
   context: AdminTypes.ContextualPricingContext;
@@ -444,6 +454,7 @@ interface GeneratedQueryTypes {
   "#graphql\n  query AnchorCurrentBulkOperation {\n    currentBulkOperation(type: MUTATION) {\n      id status url partialDataUrl objectCount errorCode\n    }\n  }\n": {return: AnchorCurrentBulkOperationQuery, variables: AnchorCurrentBulkOperationQueryVariables},
   "#graphql\n  query AnchorBulkOperationById($id: ID!) {\n    node(id: $id) {\n      ... on BulkOperation { id status url partialDataUrl objectCount errorCode }\n    }\n  }\n": {return: AnchorBulkOperationByIdQuery, variables: AnchorBulkOperationByIdQueryVariables},
   "#graphql\n  query AnchorPriceListDerivedPrices($priceListId: ID!, $query: String!, $first: Int!, $after: String) {\n    priceList(id: $priceListId) {\n      currency\n      prices(originType: RELATIVE, query: $query, first: $first, after: $after) {\n        nodes {\n          variant { id }\n          price { amount currencyCode }\n        }\n        pageInfo { hasNextPage endCursor }\n      }\n    }\n  }\n": {return: AnchorPriceListDerivedPricesQuery, variables: AnchorPriceListDerivedPricesQueryVariables},
+  "#graphql\n  query AnchorFixedPriceVariants($priceListId: ID!, $query: String!, $first: Int!, $after: String) {\n    priceList(id: $priceListId) {\n      prices(originType: FIXED, query: $query, first: $first, after: $after) {\n        nodes { variant { id } }\n        pageInfo { hasNextPage endCursor }\n      }\n    }\n  }\n": {return: AnchorFixedPriceVariantsQuery, variables: AnchorFixedPriceVariantsQueryVariables},
   "#graphql\n  query AnchorContextualPrices($ids: [ID!]!, $context: ContextualPricingContext!) {\n    nodes(ids: $ids) {\n      ... on ProductVariant {\n        id\n        contextualPricing(context: $context) {\n          price { amount currencyCode }\n          compareAtPrice { amount currencyCode }\n        }\n      }\n    }\n  }\n": {return: AnchorContextualPricesQuery, variables: AnchorContextualPricesQueryVariables},
   "#graphql\n  query AnchorPriceListParent($id: ID!) {\n    priceList(id: $id) {\n      id\n      currency\n      parent {\n        adjustment { type value }\n        settings { compareAtMode }\n      }\n      fixed: prices(originType: FIXED, first: 1) {\n        nodes { variant { id } }\n      }\n    }\n  }\n": {return: AnchorPriceListParentQuery, variables: AnchorPriceListParentQueryVariables},
   "#graphql\n  query AnchorPriceListQuantityBreaks($id: ID!, $after: String) {\n    priceList(id: $id) {\n      prices(first: 100, after: $after) {\n        nodes {\n          variant { id }\n          quantityPriceBreaks(first: 20) {\n            nodes { minimumQuantity price { amount currencyCode } }\n          }\n        }\n        pageInfo { hasNextPage endCursor }\n      }\n    }\n  }\n": {return: AnchorPriceListQuantityBreaksQuery, variables: AnchorPriceListQuantityBreaksQueryVariables},

@@ -431,6 +431,62 @@ export async function readDerivedPrices(
   return out;
 }
 
+export const PRICE_LIST_FIXED_PRICES = `#graphql
+  query AnchorFixedPriceVariants($priceListId: ID!, $query: String!, $first: Int!, $after: String) {
+    priceList(id: $priceListId) {
+      prices(originType: FIXED, query: $query, first: $first, after: $after) {
+        nodes { variant { id } }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+`;
+
+interface FixedPricesResponse {
+  priceList?: {
+    prices?: {
+      nodes?: Array<{ variant?: { id?: string } }>;
+      pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
+    };
+  };
+}
+
+/**
+ * The variants a price list holds a hand-set (fixed) price for, among these (#930).
+ *
+ * Read when a market baseline is captured, so a revert knows whether the price before the
+ * campaign was the merchant's own -- to be written back -- or one the list derived from the
+ * store price, to be deleted so it follows again. Asked of Shopify rather than the mirror:
+ * a price set since the last markets sync is still the merchant's.
+ */
+export async function readFixedPriceVariants(
+  client: AdminClient,
+  priceListGid: string,
+  variantGids: readonly string[],
+): Promise<Set<string>> {
+  const out = new Set<string>();
+
+  for (let i = 0; i < variantGids.length; i += MAX_VARIANTS_PER_PRICE_QUERY) {
+    const batch = variantGids.slice(i, i + MAX_VARIANTS_PER_PRICE_QUERY);
+    const query = batch.map((gid) => `variant_id:${gid.split("/").pop()}`).join(" OR ");
+
+    let after: string | null = null;
+    do {
+      const response: { data?: FixedPricesResponse } = await client.request<FixedPricesResponse>(PRICE_LIST_FIXED_PRICES, {
+        priceListId: priceListGid,
+        query,
+        first: 250,
+        after,
+      });
+      const prices = response.data?.priceList?.prices;
+      for (const node of prices?.nodes ?? []) if (node.variant?.id) out.add(node.variant.id);
+      after = prices?.pageInfo?.hasNextPage ? (prices.pageInfo.endCursor ?? null) : null;
+    } while (after);
+  }
+
+  return out;
+}
+
 /**
  * What a shopper in a given country actually pays, as Shopify computes it.
  *
