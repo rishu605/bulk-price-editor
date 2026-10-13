@@ -137,6 +137,19 @@ describe("at most one action is black", () => {
     expect(primaries(html)).toBe(1);
   });
 
+  it("keeps Resume the only black button on a partial run that can also be applied (#904)", () => {
+    // The case above passed with Apply disabled. Live, a Partial campaign can be applied --
+    // PARTIAL -> APPLYING is legal -- and both buttons were black side by side.
+    const html = render(
+      <CampaignHeader {...props({ lifecycle: describeState("PARTIAL"), canApply: true })} />,
+    );
+    const row = html.split("<s-modal")[0];
+
+    expect(primaries(html)).toBe(1);
+    expect(row).toMatch(/variant="secondary"[^>]*>Apply to storefront/);
+    expect(row).toMatch(/variant="primary"[^>]*>[^<]*Resume/);
+  });
+
   it("hands the primary to the drift queue on a held campaign, and demotes Apply (#755)", () => {
     // Applying a held campaign writes over the edits that held it. Apply stays -- a
     // merchant may mean exactly that -- but the obvious next step is the decision.

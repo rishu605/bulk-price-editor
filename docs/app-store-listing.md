@@ -82,17 +82,26 @@ European price — which is what you meant, and not what a converted number give
 Rounding is per currency. `.99` where that reads as considered, whole amounts where a
 currency has no cents.
 
-### Built for catalogues that are actually large
+### Built for large catalogues
 
-500,000 variants. Bulk operations, resumable runs, and a rate-limit budget read from
-Shopify's own responses rather than assumed. A run that is interrupted picks up exactly
-where it stopped, because every row was recorded before it was written.
+Bulk operations, resumable runs, and a rate-limit budget read from Shopify's own responses
+rather than assumed. A run that is interrupted picks up exactly where it stopped, because
+every row was recorded before it was written.
 
-### Safety is never a paid feature
+### Undo is always included
 
-Preview, guardrails, unlimited history and one-click rollback are on every plan, including
-free. Charging for the ability to undo a mistake the app helped you make would be
-indefensible.
+Preview, guardrails, unlimited history and one-click rollback come with every campaign.
+
+<!-- App Store 4.3.3: no numbers we have not measured (the largest store run so far has
+102,132 variants, so "500,000" went). 4.2.3: nothing about plans or prices outside the
+Pricing details section, so "on every plan, including free" went too. -->
+
+### Requirements
+
+- **Market pricing** needs Shopify Markets, with at least one market that has its own prices.
+- **Wholesale pricing** needs Shopify B2B catalogues. Stores below Plus can have up to three.
+- Works with any theme. Anchor never edits theme code, so the Online Store channel isn't
+  required.
 
 ---
 
@@ -142,8 +151,8 @@ charged is a review nobody recovers from.
 are here. The app charges through the Billing API (D9, revisited), and Shopify refuses those
 charges if the listing is switched to managed pricing.
 
-**Say on the listing:** preview, guardrails, full history and rollback are on every plan
-including free. It is unusual in the category and it is the reason to trust the rest.
+**Say it here, in Pricing details, and nowhere else (App Store 4.2.3):** preview,
+guardrails, full history and rollback are on every plan, including Free.
 
 ---
 
@@ -157,7 +166,30 @@ person's involvement.
 data), that access tokens are encrypted at rest, and that telemetry carries no price
 values. All three are true and all three are unusual enough to be worth saying.
 
-**Still needed:** publishing it at a stable URL.
+**Published:** `https://bulk-price-editor-production-eb91.up.railway.app/privacy`.
+
+---
+
+## Languages
+
+English only (App Store 4.3.2). The app's interface is in English and nothing else.
+
+---
+
+## Testing instructions for App Review
+
+No credentials are needed: Anchor has no account of its own and runs entirely inside the
+Shopify admin (4.5.4).
+
+1. Install from the listing. You land on Home, and the catalogue sync starts. A small store
+   finishes in a minute or two.
+2. **Campaigns → Create campaign**: 20% off, all variants. **Create and preview**, then
+   **Apply to storefront**. Prices change, and the Ledger tab lists every row.
+3. **Revert**: every price goes back to its baseline.
+4. **Settings → Plan → Switch to Markets**: Shopify's approval screen opens. On a
+   development store it's a test charge and no money moves. After approval, the page reads
+   *You're on Markets*. **Switch to Free** cancels the subscription. Uninstalling and
+   reinstalling asks for approval again.
 
 ---
 

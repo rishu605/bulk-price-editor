@@ -105,7 +105,9 @@ export function CampaignHeader({
               type="button"
               // Not the obvious next step on a campaign held by edits made in Shopify:
               // applying writes over them. "Review the drift queue", beside it, is (#755).
-              variant={canApply && heldEdits === 0 ? "primary" : "secondary"}
+              // Nor on one whose run stopped part-way: Resume, beside it, finishes that run,
+              // and both were black at once (#904).
+              variant={canApply && heldEdits === 0 && lifecycle.nextAction?.intent !== "resume" ? "primary" : "secondary"}
               loading={busy || undefined}
               disabled={!canApply || undefined}
               commandFor={APPLY_MODAL_ID}
