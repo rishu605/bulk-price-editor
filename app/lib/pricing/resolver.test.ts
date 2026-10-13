@@ -3,7 +3,7 @@ import fc from "fast-check";
 
 import { money } from "../money/money";
 import { charm99, NO_ROUNDING, type RoundingProfile } from "../money/rounding";
-import { policyOf } from "../money/rounding-policy";
+import { policyOf, ROUNDING_PROFILES } from "../money/rounding-policy";
 import { compareCampaigns, resolve, resolveWithout, selectWinner } from "./resolver";
 import { selectRule } from "./rules";
 import type {
@@ -656,5 +656,74 @@ describe("a free item stays free (#792)", () => {
     });
     expect(result.price).toEqual(usd(1));
     expect(result.meta.reason).toBe("non-positive-price");
+  });
+});
+
+describe("a reduction stays a reduction after rounding (#825)", () => {
+  const reduce = (percent: number, profile: RoundingProfile, baselineMinor: number) =>
+    resolve({
+      baseline: { price: usd(baselineMinor) },
+      surface: USD,
+      campaigns: [
+        campaign({
+          ruleRows: [{ segmentIds: [], rule: { kind: "percent-change", percent: -percent } }],
+          compareAtPolicy: { kind: "set-to-baseline" },
+          roundingPolicy: policyOf(profile),
+        }),
+      ],
+    });
+
+  it.each([
+    // The ticket's table: each used to come out at or above the original.
+    ["charm99", 5, 595, 499],
+    ["whole", 5, 590, 500],
+    ["whole", 1, 1080, 1000],
+    ["charm99", 1, 1995, 1899],
+    ["charm95", 2, 2090, 1995],
+  ] as const)("%s, %i%% off %i: uses the next ending below, %i", (name, percent, baselineMinor, expected) => {
+    const out = reduce(percent, ROUNDING_PROFILES[name], baselineMinor);
+    expect(out.meta.outcome).toBe("priced");
+    expect(out.price?.amount).toBe(expected);
+  });
+
+  it("leaves nearest rounding alone when it stays below the original", () => {
+    expect(reduce(10, ROUNDING_PROFILES.charm99, 1000).price?.amount).toBe(899);
+  });
+
+  it("skips, with a reason, when no ending lies between zero and the original", () => {
+    // 1% off a .99 item: the only endings are 0.99 itself and below zero.
+    const out = reduce(1, ROUNDING_PROFILES.charm99, 99);
+    expect(out.meta).toMatchObject({ outcome: "skipped", reason: "discount-below-rounding-step" });
+    expect(out.price).toBeUndefined();
+  });
+
+  it("leaves an increase to nearest rounding, as before", () => {
+    // 5% up from 5.95 is 6.2475, nearest .99 is 5.99. That an increase can round below the
+    // original is the mirror of this bug, #923; this fix does not change it.
+    const out = resolve({
+      baseline: { price: usd(595) },
+      surface: USD,
+      campaigns: [campaign({ ruleRows: [{ segmentIds: [], rule: { kind: "percent-change", percent: 5 } }], roundingPolicy: policyOf(ROUNDING_PROFILES.charm99) })],
+    });
+    expect(out.price?.amount).toBe(599);
+  });
+
+  it("property: every baseline 0.01–1,000.00, every reduction 1–90%, every profile -- never above the original", () => {
+    // At or below, as the ticket states it: a would-be $0.00 is raised to the smallest price by
+    // the positivity rule (E10), which on a $0.01 item is the item's own price. Rounding alone
+    // never reaches it -- the cases above hold that strictly.
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 1, max: 100_000 }),
+        fc.integer({ min: 1, max: 90 }),
+        fc.constantFrom(...(Object.keys(ROUNDING_PROFILES) as Array<keyof typeof ROUNDING_PROFILES>)),
+        (baselineMinor, percent, name) => {
+          const out = reduce(percent, ROUNDING_PROFILES[name], baselineMinor);
+          if (out.meta.outcome !== "priced") return true;
+          return out.price!.amount <= baselineMinor && out.price!.amount > 0;
+        },
+      ),
+      { numRuns: 5_000 },
+    );
   });
 });

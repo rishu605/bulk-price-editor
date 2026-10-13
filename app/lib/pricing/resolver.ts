@@ -140,7 +140,22 @@ export function resolve(input: ResolveInput): Resolution {
   // Rounded in the currency actually being written, not the store's. The same campaign
   // rounds dollars to .99 and yen to the nearest ten, because that is what each looks
   // right in — which is the entire point of pricing per market.
-  const rounded = applyRounding(unrounded, profileFor(winner.roundingPolicy, currency));
+  const profile = profileFor(winner.roundingPolicy, currency);
+  let rounded = applyRounding(unrounded, profile);
+
+  // A reduction stays a reduction (#825). Every profile a merchant can pick rounds to the
+  // *nearest* ending, so a discount smaller than the distance to the next ending rounded
+  // up past the original: 5% off 5.95 at .99 endings became 5.99, with the strike-through
+  // then dropped -- an item that went up during a sale, on 6.9% of $1-$30 prices. When
+  // nearest reaches the baseline, the next ending below is used; when there is none above
+  // zero, the variant keeps its price and the row says why.
+  if (reduces(rule) && compare(rounded, baseline.price) >= 0) {
+    const below = applyRounding(unrounded, { ...profile, direction: "down" });
+    if (compare(below, baseline.price) >= 0 || !isPositive(below)) {
+      return skipped(winner, "discount-below-rounding-step", rule, undefined, unrounded);
+    }
+    rounded = below;
+  }
 
   let floor: Money | undefined;
   try {

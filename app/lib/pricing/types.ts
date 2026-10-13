@@ -247,7 +247,12 @@ export type ResolutionReason =
    * A hand edit holds this variant in another campaign, and the merchant has not yet said
    * whether to keep it (#821). No other campaign writes it until they do.
    */
-  | "held-edit";
+  | "held-edit"
+  /**
+   * The rule lowers the price, but by less than the rounding step: every rounded price is
+   * at or above the original, or at zero (#825). Kept at its price rather than raised.
+   */
+  | "discount-below-rounding-step";
 
 export interface Resolution {
   /** The price to write. Absent when nothing should be written. */
