@@ -26,30 +26,17 @@ import { withChaos, type ChaosContext } from "../harness/scenario";
 
 const EUR = "gid://shopify/PriceList/eu-guardrails";
 
-/**
- * A euro market the fixture campaign also prices.
- *
- * `fixed` gives every variant a hand-set euro price rather than a percentage. The
- * preview can only read a fixed list today: it plans markets without their country, so a
- * percentage list answers in the shop's currency and is refused (#840).
- */
-async function withEuroMarket(chaos: ChaosContext, fixed = false) {
-  const { shopId, campaignId, variantGids } = chaos.fixture;
+/** A euro market, priced 10% under the store by its list, that the fixture campaign also prices. */
+async function withEuroMarket(chaos: ChaosContext) {
+  const { shopId, campaignId } = chaos.fixture;
   chaos.fake.addPriceList({
     id: EUR,
     name: "Europe",
     currency: "EUR",
     country: "DE",
-    adjustment: fixed ? null : { type: "PERCENTAGE_DECREASE", value: 10 },
+    adjustment: { type: "PERCENTAGE_DECREASE", value: 10 },
     catalog: { id: "gid://shopify/MarketCatalog/eu-guardrails", title: "EU", __typename: "MarketCatalog" },
-    prices: fixed
-      ? variantGids.map((variantGid) => ({
-          variantGid,
-          amount: "50.00",
-          compareAt: null,
-          originType: "FIXED" as const,
-        }))
-      : [],
+    prices: [],
   });
 
   const { syncMarkets } = await import("../../app/services/markets-sync.server");
@@ -93,7 +80,7 @@ describe("chaos: store guardrails on markets", () => {
       { catalog: { products: 3, variantsPerProduct: 1 }, percent: -20 },
       async (chaos) => {
         const { shopId, campaignId, variantGids } = chaos.fixture;
-        await withEuroMarket(chaos, true);
+        await withEuroMarket(chaos);
 
         // Costs recorded in the store's currency, low enough that the base price passes.
         await prisma.variantIndex.updateMany({ where: { shopId }, data: { cost: 100n } });

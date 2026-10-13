@@ -438,7 +438,17 @@ async function costsFor(shopId: string, variantGids: readonly string[]) {
 async function namedLists(shopId: string, priceListGids: readonly string[]) {
   const lists = await prisma.priceListRecord.findMany({
     where: { shopId, priceListGid: { in: [...priceListGids] } },
-    select: { priceListGid: true, name: true, currency: true, adjustmentBps: true, catalogTitle: true, surfaceKind: true },
+    // Everything `planMarket` reads, the country included: without it a percentage market
+    // is read in the shop's currency and refused, though the run prices it (#840).
+    select: {
+      priceListGid: true,
+      name: true,
+      currency: true,
+      adjustmentBps: true,
+      contextCountry: true,
+      catalogTitle: true,
+      surfaceKind: true,
+    },
   });
   return lists.map(({ catalogTitle, surfaceKind, ...list }) => ({
     ...list,
