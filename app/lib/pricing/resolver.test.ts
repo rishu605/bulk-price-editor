@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import fc from "fast-check";
 
-import { money } from "../money/money";
-import { charm99, NO_ROUNDING, type RoundingProfile } from "../money/rounding";
-import { policyOf, ROUNDING_PROFILES } from "../money/rounding-policy";
+import { applyPercentChange, money } from "../money/money";
+import { applyRounding, charm99, NO_ROUNDING, type RoundingProfile } from "../money/rounding";
+import { policyOf, profileFor, ROUNDING_PROFILES } from "../money/rounding-policy";
 import { compareCampaigns, resolve, resolveWithout, selectWinner } from "./resolver";
 import { selectRule } from "./rules";
 import type {
@@ -697,17 +697,6 @@ describe("a reduction stays a reduction after rounding (#825)", () => {
     expect(out.price).toBeUndefined();
   });
 
-  it("leaves an increase to nearest rounding, as before", () => {
-    // 5% up from 5.95 is 6.2475, nearest .99 is 5.99. That an increase can round below the
-    // original is the mirror of this bug, #923; this fix does not change it.
-    const out = resolve({
-      baseline: { price: usd(595) },
-      surface: USD,
-      campaigns: [campaign({ ruleRows: [{ segmentIds: [], rule: { kind: "percent-change", percent: 5 } }], roundingPolicy: policyOf(ROUNDING_PROFILES.charm99) })],
-    });
-    expect(out.price?.amount).toBe(599);
-  });
-
   it("property: every baseline 0.01–1,000.00, every reduction 1–90%, every profile -- never above the original", () => {
     // At or below, as the ticket states it: a would-be $0.00 is raised to the smallest price by
     // the positivity rule (E10), which on a $0.01 item is the item's own price. Rounding alone
@@ -721,6 +710,137 @@ describe("a reduction stays a reduction after rounding (#825)", () => {
           const out = reduce(percent, ROUNDING_PROFILES[name], baselineMinor);
           if (out.meta.outcome !== "priced") return true;
           return out.price!.amount <= baselineMinor && out.price!.amount > 0;
+        },
+      ),
+      { numRuns: 5_000 },
+    );
+  });
+});
+
+describe("an increase stays an increase after rounding (#923)", () => {
+  const raise = (rule: AdjustmentRule, profile: RoundingProfile, baselineMinor: number, currency = "USD") =>
+    resolve({
+      baseline: { price: money(baselineMinor, currency) },
+      surface: { kind: "base", currency },
+      campaigns: [campaign({ ruleRows: [{ segmentIds: [], rule }], roundingPolicy: policyOf(profile) })],
+    });
+  const up = (percent: number): AdjustmentRule => ({ kind: "percent-change", percent });
+
+  const NAMES = Object.keys(ROUNDING_PROFILES) as Array<keyof typeof ROUNDING_PROFILES>;
+  // Two decimals, none and three, plus a euro store: precision is what decides where the
+  // endings fall, so each currency is a different set of prices an increase can drop between.
+  const CURRENCIES = ["USD", "EUR", "JPY", "KWD"] as const;
+
+  it.each([
+    // Each of these used to come out *below* the original under "Increase by".
+    ["charm99", "USD", 5, 610, 699], // 6.405, nearest 5.99
+    ["charm99", "USD", 1, 2005, 2099], // 20.2505, nearest 19.99
+    ["charm95", "USD", 1, 2000, 2095], // 20.20, nearest 19.95
+    ["whole", "USD", 5, 610, 700], // 6.405, nearest 6.00
+    ["nearest10", "USD", 1, 101, 110], // 1.0201, nearest 1.00
+    ["nearest100", "USD", 1, 1010, 1100], // 10.201, nearest 10.00
+    ["nearest100", "JPY", 1, 1010, 1100], // ¥1,020, nearest ¥1,000
+    ["charm99", "JPY", 1, 101, 110], // .99 is nearest ¥10 in yen: ¥102, nearest ¥100
+    ["whole", "KWD", 1, 10_100, 11_000], // 10.201 KWD, nearest 10.000
+  ] as const)("%s in %s, up %i percent on %i: uses the next ending above, %i", (name, currency, percent, baselineMinor, expected) => {
+    const out = raise(up(percent), ROUNDING_PROFILES[name], baselineMinor, currency);
+    expect(out.meta.outcome).toBe("priced");
+    expect(out.price).toEqual(money(expected, currency));
+    // The preview's explanation still starts from what the rule computed.
+    expect(out.meta.unroundedPrice!.amount).toBeGreaterThan(baselineMinor);
+  });
+
+  it("holds for an amount added, not only a percentage", () => {
+    // +0.10 on 6.10 is 6.20, whose nearest .99 ending is 5.99.
+    const out = raise({ kind: "fixed-change", amount: usd(10) }, ROUNDING_PROFILES.charm99, 610);
+    expect(out.price).toEqual(usd(699));
+  });
+
+  it("leaves nearest rounding alone when it lands above the original", () => {
+    // The ticket's own example: 5% up on 5.95 is 6.2475, nearest .99 is 5.99. That is a rise
+    // -- smaller than 5%, as rounding to an ending always may be -- so it stands.
+    expect(raise(up(5), ROUNDING_PROFILES.charm99, 595).price).toEqual(usd(599));
+    expect(raise(up(10), ROUNDING_PROFILES.charm99, 1_000).price).toEqual(usd(1_099));
+  });
+
+  it("leaves a rise that rounds back onto the original exactly there", () => {
+    // 1% up on 5.99 is 6.0499; nearest .99 is 5.99 itself. Not below, so nothing is lost --
+    // and the next ending, 6.99, would be a rise of nearly 17% under a "1%" campaign.
+    const out = raise(up(1), ROUNDING_PROFILES.charm99, 599);
+    expect(out.meta.outcome).toBe("priced");
+    expect(out.price).toEqual(usd(599));
+  });
+
+  it("holds against a profile that rounds down, too", () => {
+    // No named profile rounds down today, but the guarantee is the resolver's, not the
+    // picker's: 5% up on 10.00 is 10.50, and rounding down to .99 would give 9.99.
+    const out = raise(up(5), { mode: "charm", ending: 99, direction: "down" }, 1_000);
+    expect(out.price).toEqual(usd(1_099));
+  });
+
+  it("does not touch a reduction (#825 owns those) or a rule that sets the price", () => {
+    expect(raise(up(-10), ROUNDING_PROFILES.charm99, 1_000).price).toEqual(usd(899));
+    // A set price may legitimately land below the baseline, and nearest rounding with it.
+    const set = raise({ kind: "set-exact", amount: usd(640) }, ROUNDING_PROFILES.charm99, 610);
+    expect(set.price).toEqual(usd(599));
+  });
+
+  it("property: every baseline 0.01–1,000.00, every increase 1–100%, every profile and currency -- never below the original", () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 1, max: 100_000 }),
+        fc.integer({ min: 1, max: 100 }),
+        fc.constantFrom(...NAMES),
+        fc.constantFrom(...CURRENCIES),
+        (baselineMinor, percent, name, currency) => {
+          const out = raise(up(percent), ROUNDING_PROFILES[name], baselineMinor, currency);
+          expect(out.meta.outcome).toBe("priced");
+          expect(out.price!.amount).toBeGreaterThanOrEqual(baselineMinor);
+        },
+      ),
+      { numRuns: 5_000 },
+    );
+  });
+
+  it("property: an amount added never lands below the original either", () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 1, max: 100_000 }),
+        fc.integer({ min: 1, max: 10_000 }),
+        fc.constantFrom(...NAMES),
+        fc.constantFrom(...CURRENCIES),
+        (baselineMinor, addMinor, name, currency) => {
+          const rule: AdjustmentRule = { kind: "fixed-change", amount: money(addMinor, currency) };
+          const out = raise(rule, ROUNDING_PROFILES[name], baselineMinor, currency);
+          expect(out.meta.outcome).toBe("priced");
+          expect(out.price!.amount).toBeGreaterThanOrEqual(baselineMinor);
+        },
+      ),
+      { numRuns: 5_000 },
+    );
+  });
+
+  it("property: moves nothing nearest already had right, and goes no further than the next ending", () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 1, max: 100_000 }),
+        fc.integer({ min: 1, max: 100 }),
+        fc.constantFrom(...NAMES),
+        fc.constantFrom(...CURRENCIES),
+        (baselineMinor, percent, name, currency) => {
+          const profile = profileFor(policyOf(ROUNDING_PROFILES[name]), currency);
+          const nearest = applyRounding(applyPercentChange(money(baselineMinor, currency), percent), profile);
+          const price = raise(up(percent), ROUNDING_PROFILES[name], baselineMinor, currency).price!;
+
+          if (nearest.amount >= baselineMinor) {
+            expect(price).toEqual(nearest);
+            return;
+          }
+          // Below: the result is itself an ending, and the ending beneath it is below the
+          // original -- so it is the first one at or above the original, not a further one.
+          expect(applyRounding(price, profile)).toEqual(price);
+          const beneath = applyRounding(money(price.amount - 1, currency), { ...profile, direction: "down" });
+          expect(beneath.amount).toBeLessThan(baselineMinor);
         },
       ),
       { numRuns: 5_000 },
