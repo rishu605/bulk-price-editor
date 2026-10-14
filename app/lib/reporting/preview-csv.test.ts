@@ -113,3 +113,13 @@ describe("exporting the preview with surface columns", () => {
     expect(csv).toContain('"Monitor, 24"""');
   });
 });
+
+describe("a market the campaign refuses (#770)", () => {
+  it("gets no columns, rather than 'not sold here' on every row", () => {
+    const csv = previewCsv([row()], [markets[0], { ...markets[1], refused: true }]);
+    expect(csv.split("\n")[0]).toBe(
+      '"Variant","Title","Before","After","Compare at","State","Reason","Europe (EUR)","Europe compare at"',
+    );
+    expect(csv).not.toContain("Japan");
+  });
+});

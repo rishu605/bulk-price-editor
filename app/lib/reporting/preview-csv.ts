@@ -12,12 +12,15 @@
  */
 
 import type { MarketPreview, PreviewRow } from "../../services/campaigns/types";
+import { pricedMarkets } from "../markets/preview-columns";
 import { toCsv } from "./csv";
 
 export function previewCsv(
   rows: readonly PreviewRow[],
-  markets: readonly MarketPreview[],
+  allMarkets: readonly MarketPreview[],
 ): string {
+  // A refused market is not priced, so it has no column here either (#770).
+  const markets = pricedMarkets(allMarkets);
   const header = [
     "Variant",
     "Title",
