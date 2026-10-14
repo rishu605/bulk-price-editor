@@ -14,6 +14,7 @@ export function costErrorCsv(result: CostImportResult): string {
     ...result.invalid.map((problem) => ["invalid", problem] as const),
     ...result.unmatched.map((problem) => ["unmatched", problem] as const),
     ...result.ambiguous.map((problem) => ["ambiguous", problem] as const),
+    ...result.duplicates.map((problem) => ["listed twice", problem] as const),
   ];
 
   return toCsv(

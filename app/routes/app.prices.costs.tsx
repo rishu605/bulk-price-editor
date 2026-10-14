@@ -252,6 +252,7 @@ export default function Costs() {
         ...imported.invalid.map((problem) => ({ ...problem, kind: "Will not parse" })),
         ...imported.unmatched.map((problem) => ({ ...problem, kind: "No match" })),
         ...imported.ambiguous.map((problem) => ({ ...problem, kind: "Matches several" })),
+        ...imported.duplicates.map((problem) => ({ ...problem, kind: "Listed twice" })),
       ].sort((a, b) => a.line - b.line)
     : [];
 
@@ -430,13 +431,17 @@ export default function Costs() {
       {imported ? (
         <ImportReport
           heading={imported.dryRun ? "What would happen" : "What the file did"}
+          // Rows read = Ready + Unchanged + Need attention (#767). Unchanged rows were in
+          // none of the tiles, so a file of 10 with 4 already right read 10 / 6 / 6 / 0.
           counts={[
             { label: "Rows read", value: imported.total },
             { label: "Ready", value: imported.ready },
+            { label: "Unchanged", value: imported.unchanged },
             { label: "Written", value: imported.written },
-            { label: "Need attention", value: problems.length },
+            { label: "Need attention", value: imported.problems },
           ]}
           problems={problems}
+          problemCount={imported.problems}
           download={{
             filename: "cost-import-errors.csv",
             csv: () => costErrorCsv(imported),
