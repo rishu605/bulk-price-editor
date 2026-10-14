@@ -30,6 +30,7 @@ import { linesOf } from "../lib/reporting/lines";
 import { actorFor } from "../lib/audit/actor";
 import { withGuard } from "../lib/errors/guard.server";
 import { isCommit } from "../lib/imports/intent";
+import { importSegmentName } from "../lib/imports/segment-name";
 
 export const action = withGuard("/app/price-import", async ({ request }: ActionFunctionArgs) => {
   const { session, sessionToken } = await authenticate.admin(request);
@@ -60,32 +61,56 @@ export const action = withGuard("/app/price-import", async ({ request }: ActionF
     };
   }
 
-  // Frozen to exactly the variants the file named. A dynamic filter would let products
-  // added later fall into a campaign whose rule can say nothing about them.
-  const gids = await importedVariantGids(result.importId);
-  const segment = await prisma.segment.create({
-    data: {
-      shopId: shop.id,
-      name: `${name} (imported)`,
-      kind: "FROZEN",
-      filterAst: { groups: [] } as never,
-      frozenVariantGids: gids,
-    },
-  });
+  // The import, its segment and its campaign together or not at all (#719). The second
+  // import under the editor's default name used to collide with the first's segment after
+  // the import was committed: the merchant got the error screen, and every retry left
+  // another import with no campaign in the history.
+  const importId = result.importId;
+  let segmentId: string | null = null;
+  let campaign: Awaited<ReturnType<typeof createCampaign>>;
+  try {
+    const segmentName = importSegmentName(
+      name,
+      (
+        await prisma.segment.findMany({
+          where: { shopId: shop.id, name: { startsWith: `${name} (imported` } },
+          select: { name: true },
+        })
+      ).map((segment) => segment.name),
+    );
 
-  const campaign = await createCampaign(
-    shop.id,
-    {
-    name,
-    ast: { groups: [] },
-    segmentId: segment.id,
-    rule: { kind: "from-import", importId: result.importId },
-    compareAtPolicy: { kind: "leave" },
-    rounding: { default: "none", byCurrency: {} },
-    ...(practice ? { practice: true } : {}),
-    },
-    { actor },
-  );
+    // Frozen to exactly the variants the file named. A dynamic filter would let products
+    // added later fall into a campaign whose rule can say nothing about them.
+    const gids = await importedVariantGids(importId);
+    const segment = await prisma.segment.create({
+      data: {
+        shopId: shop.id,
+        name: segmentName,
+        kind: "FROZEN",
+        filterAst: { groups: [] } as never,
+        frozenVariantGids: gids,
+      },
+    });
+    segmentId = segment.id;
+
+    campaign = await createCampaign(
+      shop.id,
+      {
+      name,
+      ast: { groups: [] },
+      segmentId: segment.id,
+      rule: { kind: "from-import", importId },
+      compareAtPolicy: { kind: "leave" },
+      rounding: { default: "none", byCurrency: {} },
+      ...(practice ? { practice: true } : {}),
+      },
+      { actor },
+    );
+  } catch (error) {
+    if (segmentId) await prisma.segment.delete({ where: { id: segmentId } }).catch(() => undefined);
+    await prisma.priceImport.delete({ where: { id: importId } }).catch(() => undefined);
+    throw error;
+  }
 
   // Straight to the preview. The whole argument for routing an import through a campaign
   // is that the merchant sees what it will do before it does it.
