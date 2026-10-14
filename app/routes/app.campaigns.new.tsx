@@ -216,7 +216,7 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
     // Set when the merchant arrived by clicking a day on the calendar.
     presetStart: presetStartFor(url.searchParams.get("startAt")),
     // The rule a link opened the editor with, rendered by the fields themselves (#718,
-    // #771): the full preview's "Back to the campaign" carries the whole form, and Home's
+    // #771): the full preview's "Campaign" back link carries the whole form, and Home's
     // "Or set a scope…" carries the % typed there. The first preview already prices these
     // values, so a form showing the defaults beside it was a preview of a different rule.
     // Four old import URLs arrive with `ruleKind=from-file` and land on the file.
