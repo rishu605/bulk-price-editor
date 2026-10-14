@@ -8,30 +8,41 @@
  * and the alert either never fires or fires constantly, and a unit test with a
  * hand-written window would agree with either.
  *
- * So this runs against real Postgres and writes real rows.
+ * So this runs against real Postgres and writes real rows -- the deliveries through a real
+ * webhook route, as Shopify sends them. They used to be inserted by hand, which is how the
+ * alerts passed here while nothing in the app wrote the table at all (#712).
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import prisma from "../../app/db.server";
 import { gather } from "../../app/services/alerting.server";
 import { evaluate, SHOP_SAMPLE_MINIMUM } from "../../app/lib/observability/alerts";
 import { withChaos } from "../harness/scenario";
 
+let pending: { shop: string; topic: string; payload: unknown; session: null } = { shop: "", topic: "", payload: {}, session: null };
+
+vi.mock("../../app/shopify.server", () => ({
+  authenticate: { webhook: async () => pending },
+}));
+
+/** Deliveries through the app's own webhook route, which records each one. */
 async function deliveries(shopId: string, shopDomain: string, count: number, at: Date) {
+  const { action } = await import("../../app/routes/webhooks.app.scopes_update");
   for (let i = 0; i < count; i++) {
-    await prisma.webhookEvent.create({
-      data: {
-        webhookId: `spike-${shopId}-${i}-${at.getTime()}`,
-        shopId,
-        shopDomain,
-        topic: "products/update",
-        payload: {},
-        status: "PROCESSED",
-        receivedAt: at,
-        processedAt: at,
-      },
-    });
+    pending = { shop: shopDomain, topic: "APP_SCOPES_UPDATE", payload: { current: [] }, session: null };
+    await action({
+      request: new Request("https://example.invalid/webhooks/app/scopes_update", {
+        method: "POST",
+        headers: {
+          "X-Shopify-Webhook-Id": `spike-${shopId}-${i}-${at.getTime()}`,
+          "X-Shopify-Topic": "app/scopes_update",
+          "X-Shopify-Shop-Domain": shopDomain,
+        },
+      }),
+      params: {},
+      context: {},
+    } as never);
   }
 }
 

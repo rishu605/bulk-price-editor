@@ -25,6 +25,7 @@ import { noteCampaign } from "./campaigns/lifecycle.server";
 import { beat } from "./scheduler-heartbeat.server";
 import { checkAlerts } from "./alerting.server";
 import { sendDueDigests } from "./digest.server";
+import { pruneWebhookLog } from "./webhook-log.server";
 import { auditMirror } from "./mirror-audit.server";
 import { logger } from "../lib/logging/logger";
 import { metric } from "../lib/telemetry/metrics";
@@ -170,6 +171,14 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
     result.digests = await sendDueDigests(now);
   } catch {
     // sendDueDigests already logs per shop; a throw here would be the loop itself.
+  }
+
+  // Webhook deliveries past their keeping, so the table every delivery writes does not grow
+  // without end (#712). Last, and never able to hold up anything above it.
+  try {
+    await pruneWebhookLog(now);
+  } catch (error) {
+    logger.warn("could not prune the webhook log", { error: error instanceof Error ? error.message : String(error) });
   }
 
   // Emitted every tick, including the quiet ones. A scheduler panel that only has data

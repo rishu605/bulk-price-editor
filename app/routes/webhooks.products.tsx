@@ -32,6 +32,7 @@ import { enrollNewVariants } from "../services/auto-enroll.server";
 import { toAdminClient } from "../services/admin-client.server";
 import { giftCardFlagFor } from "../services/gift-card.server";
 import { variantsStillOnProduct } from "../lib/catalog/webhook-variants";
+import { recordedWebhook } from "../services/webhook-log.server";
 
 interface WebhookVariant {
   id: number | string;
@@ -59,7 +60,7 @@ interface WebhookProduct {
   variant_gids?: Array<{ admin_graphql_api_id?: string } | string> | null;
 }
 
-export const action = async ({ request }: ActionFunctionArgs) => {
+export const action = recordedWebhook(async ({ request }: ActionFunctionArgs) => {
   const { shop: shopDomain, topic, payload, admin } = await authenticate.webhook(request);
 
   const shop = await prisma.shop.findUnique({ where: { domain: shopDomain } });
@@ -268,7 +269,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   return new Response();
-};
+});
 
 /**
  * Parses a price to minor units, returning null rather than throwing.
