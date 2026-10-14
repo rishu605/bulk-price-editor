@@ -7,6 +7,7 @@
  * both views read, which means it cannot live inside either one.
  */
 
+import { neverStarts, parseSchedule } from "../../lib/scheduling/window";
 import prisma from "../../db.server";
 import { describeCampaign } from "../../lib/campaigns/describe";
 import { astOf, ruleOf } from "./model.server";
@@ -145,7 +146,11 @@ export async function listCampaigns(shopId: string, filters: CampaignFilters) {
       id: c.id,
       name: c.name,
       state,
-      lifecycle: describeState(state),
+      // A scheduled campaign whose window can never open reads as one (#824). The row
+      // shows the label, not the reason, so the zone the reason is written in does not matter.
+      lifecycle: describeState(state, {
+        neverStarts: state === "SCHEDULED" ? neverStarts(parseSchedule(c.schedule), new Date(), "UTC") : null,
+      }),
       attention: needsAttention(state),
       priority: c.priority,
       // What it does and what to, as sentences, through the one formatter every surface

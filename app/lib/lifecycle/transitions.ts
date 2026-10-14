@@ -137,6 +137,8 @@ export function describeState(
     resumes?: "APPLY" | "REVERT";
     /** When a held campaign's window ends, as the page writes it (#784). */
     heldUntil?: string;
+    /** Why a scheduled campaign will never start on its own (#824); see `neverStarts`. */
+    neverStarts?: string | null;
   } = {},
 ): StateDescription {
   switch (state) {
@@ -149,6 +151,15 @@ export function describeState(
         nextAction: { label: "Apply to storefront", intent: "apply" },
       };
     case "SCHEDULED":
+      // Not "waiting" when there is nothing to wait for (#824): a window that can never
+      // open is a decision for the merchant, so it says so and says what to do.
+      if (context.neverStarts) {
+        return {
+          label: "Scheduled — will never start",
+          tone: "warning",
+          explanation: `${context.neverStarts} Move its dates, or unschedule it, under Schedule.`,
+        };
+      }
       return {
         label: "Scheduled",
         tone: "info",
