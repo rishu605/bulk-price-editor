@@ -14,7 +14,17 @@
 
 import { describe, expect, it } from "vitest";
 
-import { astFrom, compareAtFrom, readerFor, ruleFrom, ruleInputProblem } from "./draft-form";
+import {
+  astFrom,
+  compareAtFrom,
+  readerFor,
+  ruleFrom,
+  ruleInputProblem,
+  DEFAULT_PRIORITY,
+  DEFAULT_REVERT_BUFFER_MINUTES,
+  priorityFrom,
+  revertBufferFrom,
+} from "./draft-form";
 
 const read = (fields: Record<string, string>) => readerFor(new URLSearchParams(fields));
 
@@ -163,5 +173,27 @@ describe("the same parser reads a form and a query string", () => {
     expect(ruleFrom(readerFor(form), "USD")).toEqual(
       ruleFrom(read({ ruleKind: "fixed-change", ruleValue: "-7.25" }), "USD"),
     );
+  });
+});
+
+describe("priority and revert buffer (#727)", () => {
+  const read = (fields: Record<string, string>) => readerFor(new URLSearchParams(fields));
+
+  it("keeps 0, which is a value and not a blank", () => {
+    expect(priorityFrom(read({ priority: "0" }))).toBe(0);
+    expect(revertBufferFrom(read({ revertBuffer: "0" }))).toBe(0);
+  });
+
+  it("takes the default only when the field is missing, blank or not a number", () => {
+    for (const fields of [{}, { priority: "" }, { priority: "  " }, { priority: "high" }]) {
+      expect(priorityFrom(read(fields))).toBe(DEFAULT_PRIORITY);
+    }
+    expect(revertBufferFrom(read({ revertBuffer: "soon" }))).toBe(DEFAULT_REVERT_BUFFER_MINUTES);
+  });
+
+  it("stores whole numbers, and no negative buffer", () => {
+    expect(priorityFrom(read({ priority: "40.7" }))).toBe(40);
+    expect(priorityFrom(read({ priority: "-5" }))).toBe(-5);
+    expect(revertBufferFrom(read({ revertBuffer: "-3" }))).toBe(0);
   });
 });

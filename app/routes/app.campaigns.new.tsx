@@ -40,7 +40,9 @@ import prisma from "../db.server";
 import {
   astFrom,
   compareAtFrom,
+  priorityFrom,
   readerFor,
+  revertBufferFrom,
   ruleFrom,
   ruleInputProblem,
   SCOPE_CONDITION_FIELDS,
@@ -324,7 +326,7 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
         kind: "window",
         startAt: startUtc,
         endAt: endUtc ?? undefined,
-        revertBufferMinutes: Number(form.get("revertBuffer") ?? 5) || 5,
+        revertBufferMinutes: revertBufferFrom(read),
         ...(clockNotes.length > 0 ? { clockNotes } : {}),
       }
     : undefined;
@@ -371,7 +373,7 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
     rule,
     compareAtPolicy,
     rounding: readRoundingPolicy(form.entries()),
-    priority: Number(form.get("priority") ?? 100) || 100,
+    priority: priorityFrom(read),
     // An unchecked checkbox is simply absent from the form, so presence is the value.
     autoEnroll: form.get("autoEnroll") !== null,
     tagKit: String(form.get("tagKit") ?? "")
