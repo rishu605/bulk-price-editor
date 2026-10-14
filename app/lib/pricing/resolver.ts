@@ -157,6 +157,21 @@ export function resolve(input: ResolveInput): Resolution {
     rounded = below;
   }
 
+  // And an increase stays an increase (#923), the mirror of the above. A rise smaller than
+  // the distance to the ending below rounded *down*, past the original: 5% up on 6.10 is
+  // 6.405, whose nearest .99 ending is 5.99 -- "Increase by 5%" lowering a price, which is
+  // revenue the merchant gave away without asking. When nearest lands below the baseline,
+  // the next ending above is used. Unlike the case above there is always one, and it never
+  // fails the bound: rounding up gives at least the unrounded price, and a rise never puts
+  // that below the baseline.
+  //
+  // Landing exactly on the baseline is left there, deliberately. The next ending charges
+  // more than the rule asked for, which below the original is the lesser wrong and at it is
+  // not: nothing is lost, and 1% up on 5.99 would otherwise become 6.99, a rise of nearly 17%.
+  if (raises(rule) && compare(rounded, baseline.price) < 0) {
+    rounded = applyRounding(unrounded, { ...profile, direction: "up" });
+  }
+
   let floor: Money | undefined;
   try {
     floor = computeFloor(baseline, guardrails);
@@ -399,5 +414,17 @@ export function isSameOutcome(a: Resolution, b: Resolution): boolean {
 function reduces(rule: AdjustmentRule): boolean {
   if (rule.kind === "percent-change") return rule.percent < 0;
   if (rule.kind === "fixed-change") return rule.amount.amount < 0;
+  return false;
+}
+
+/**
+ * Whether a rule adds to the normal price: "Increase by" a percentage or an amount.
+ *
+ * The mirror of `reduces`, with the same reasoning about the others: a rule that sets a
+ * price from something else promises nothing about where it lands against the baseline.
+ */
+function raises(rule: AdjustmentRule): boolean {
+  if (rule.kind === "percent-change") return rule.percent > 0;
+  if (rule.kind === "fixed-change") return rule.amount.amount > 0;
   return false;
 }
