@@ -33,6 +33,16 @@ export type Schedule =
        * typed time is not recoverable from the UTC instant afterwards.
        */
       clockNotes?: string[];
+      /**
+       * The zone the times were typed in, as Shopify had it then (#799).
+       *
+       * The instants above cannot say it, and the store's zone can change after they were
+       * set: the merchant moves it in Shopify, or, before #799, the first sync replaced the
+       * UTC the editor had been using. Kept so a campaign set for 09:00 can say it now
+       * starts at 04:00, and so "keep 09:00" has something to mean. Absent on campaigns
+       * saved before it was recorded; `recordShopTimezone` fills those in when it can.
+       */
+      zone?: string;
     };
 
 export const DEFAULT_REVERT_BUFFER_MINUTES = 5;
@@ -83,6 +93,7 @@ export function parseSchedule(raw: unknown): Schedule {
       ? buffer
       : DEFAULT_REVERT_BUFFER_MINUTES,
     ...(clockNotes.length > 0 ? { clockNotes } : {}),
+    ...(typeof value.zone === "string" && value.zone ? { zone: value.zone } : {}),
   };
 }
 

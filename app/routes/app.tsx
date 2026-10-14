@@ -3,12 +3,22 @@ import { Outlet } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
+import { actorFor } from "../lib/audit/actor";
+import { toAdminClient } from "../services/admin-client.server";
+import { refreshShopTimezone } from "../services/shop-timezone.server";
 import { AppBridgeNavigation } from "../components/AppBridgeNavigation";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { RouteProgress } from "../components/RouteProgress";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+  const { admin, session, sessionToken } = await authenticate.admin(request);
+
+  // The store's zone, read from Shopify on an authenticated visit (#799). It was read only
+  // by a catalogue sync, so a store was UTC until its first one, and a zone changed in
+  // Shopify reached Anchor only when somebody pressed Re-sync. Not awaited: it runs beside
+  // the page's own loader either way, and the pages read it from the next request. See
+  // `refreshShopTimezone`.
+  void refreshShopTimezone(session.shop, toAdminClient(admin), actorFor(sessionToken, session.shop));
 
   // The API key used to be returned here and handed to `AppProvider`, which rendered the
   // App Bridge script wherever it sat in the tree — inside `<body>`. `root.tsx` owns both

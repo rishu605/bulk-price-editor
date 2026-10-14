@@ -18,6 +18,7 @@ import { runResponse } from "../lib/campaigns/run-response";
 import { ResultBanner } from "../components/ResultBanner";
 import { describeSchedule, neverStarts, parseSchedule, scheduleWarnings, windowEndText } from "../lib/scheduling/window";
 import { scheduledWindow } from "../lib/scheduling/window-input";
+import { zoneShiftOf } from "../lib/scheduling/zone-shift";
 import { scheduleAction } from "../services/campaigns/schedule-control.server";
 import { RunHistoryTable } from "../components/RunHistoryTable";
 import { RunResultSection } from "../components/RunResultSection";
@@ -100,6 +101,7 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
   const scheduleText = describeSchedule(schedule, shop.timezone, state);
   const window = state === "SCHEDULED" ? scheduledWindow(schedule, shop.timezone) : null; // #760
   const warnings = scheduleWarnings(schedule);
+  const zoneShift = zoneShiftOf(schedule, state, shop.timezone, new Date()); // its times read differently now (#799)
 
   // Show the newest run's ledger inline. The first question after a run is always
   // "what exactly did it do to each variant", and making that a second click loses
@@ -134,6 +136,7 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     scheduleText,
     window,
     timeZone: shop.timezone,
+    zoneShift,
     warnings,
     // The same two sentences the index shows, through the same formatter, so a merchant
     // reading "20% off · In Outerwear" in the list meets those words again here.
@@ -172,7 +175,7 @@ export const action = withGuard("/app/campaigns/$id", async ({ request, params }
   }
 
   // Calling off or moving a campaign that has not started (#760). None of it writes a price.
-  const scheduling = await scheduleAction(shop.id, campaignId, intent, form, shop.timezone, actor);
+  const scheduling = await scheduleAction(shop.id, campaignId, intent, form, toAdminClient(admin), actor);
   if (scheduling) return scheduling;
   if (intent === "request-approval") {
     await requestApproval(shop.id, campaignId, actor);

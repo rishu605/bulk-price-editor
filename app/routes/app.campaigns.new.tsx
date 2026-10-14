@@ -13,11 +13,13 @@ import { scopeChosen } from "../lib/onboarding/guided-scope";
 import { AppError } from "../lib/errors/app-error";
 import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
+import { toAdminClient } from "../services/admin-client.server";
+import { confirmShopTimezone, windowInStoreZone } from "../services/shop-timezone.server";
 import { facetDetails } from "../lib/segments/facets";
 import { facets } from "../services/segments.server";
 import { createCampaign } from "../services/campaigns/index.server";
 import { formatScheduleInstant, type Schedule } from "../lib/scheduling/window";
-import { practiceWindowProblem, windowFromFields, windowInputProblem } from "../lib/scheduling/window-input";
+import { practiceWindowProblem, typedWindow, windowInputProblem } from "../lib/scheduling/window-input";
 import { presetStartFor } from "../lib/scheduling/calendar";
 import { formatClock, formatCount, formatDay, formatWhen } from "../lib/format/display";
 import { PriceImportHistory } from "../components/imports/PriceImportHistory";
@@ -68,7 +70,7 @@ import { Secondary } from "../components/Type";
 import { Card } from "../components/Card";
 
 export const loader = withGuard("/app/campaigns/new", async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { admin, session, sessionToken } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
 
   const url = new URL(request.url);
@@ -87,7 +89,7 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
       })
     : null;
 
-  const [available, segments, priceLists, settings, currency, shopRecord, priceImports] =
+  const [available, segments, priceLists, settings, currency, shopRecord, priceImports, timeZone] =
     await Promise.all([
     facets(shop.id),
     prisma.segment.findMany({
@@ -144,6 +146,11 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
         createdAt: true,
       },
     }),
+    // The store's zone, asked of Shopify on every visit rather than read off the shop row
+    // (#799). The row was UTC until a first sync, and this page said UTC was the zone "from
+    // your Shopify store settings". Null when Shopify does not answer, and the When card
+    // says so instead of naming a zone Anchor has not read.
+    confirmShopTimezone(shop.id, toAdminClient(admin), actorFor(sessionToken, session.shop)),
   ]);
 
   const billing = billingFrom(shopRecord);
@@ -176,12 +183,12 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
     // a rule. Built here rather than in the component: a name containing today's date
     // computed during render is two different strings on the server and in the browser,
     // which is the hydration mismatch `formatAgo` carries a paragraph about avoiding.
-    defaultName: `${practice ? "Practice" : "Sale"} · ${formatDay(new Date(), shop.timezone)}`,
-    timeZone: shop.timezone,
+    defaultName: `${practice ? "Practice" : "Sale"} · ${formatDay(new Date(), timeZone ?? shop.timezone)}`,
+    timeZone,
     // The clock in that zone, so a merchant can check it against the one on their wall
     // rather than trying to remember what "Asia/Calcutta" means for them. Computed here
     // rather than in the browser — see `formatClock`.
-    timeZoneNow: formatClock(new Date(), shop.timezone),
+    timeZoneNow: timeZone ? formatClock(new Date(), timeZone) : "",
     priceLists,
     currencies,
     // Gated surfaces are listed with an upgrade prompt rather than hidden. Hiding a
@@ -236,8 +243,10 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
       ...row,
       // `formatWhen`, not a second call to toLocaleString: the locale is centralised
       // there, and a page that picks its own drifts from every other page's dates.
-      createdAt: formatWhen(row.createdAt, shop.timezone),
+      createdAt: formatWhen(row.createdAt, timeZone ?? shop.timezone),
     })),
+    // Past imports only, so the stored zone will do when Shopify did not answer just now.
+    importsTimeZone: timeZone ?? shop.timezone,
     selected: {
       collection: url.searchParams.get("collection") ?? "",
       tag: url.searchParams.get("tag") ?? "",
@@ -273,7 +282,7 @@ export const SCOPE_FIELDS = [...SCOPE_CONDITION_FIELDS, "segment"] as const;
 /** Builds an AST from the simple scope form: all provided conditions ANDed. */
 
 export const action = withGuard("/app/campaigns/new", async ({ request }: ActionFunctionArgs) => {
-  const { session, sessionToken } = await authenticate.admin(request);
+  const { admin, session, sessionToken } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
 
   const form = await request.formData();
@@ -300,26 +309,33 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
   const rule = ruleFrom(read, currency);
   const compareAtPolicy = compareAtFrom(read);
 
-  // A typed time the clocks skip or repeat is scheduled by P3.9's rule and said out loud.
-  const { startUtc, endUtc, clockNotes } = windowFromFields(
-    {
-      startDate: String(form.get("startDate") ?? ""),
-      startTime: String(form.get("startTime") ?? ""),
-      endDate: String(form.get("endDate") ?? ""),
-      endTime: String(form.get("endTime") ?? ""),
-    },
-    shop.timezone,
-  );
+  const dates = {
+    startDate: String(form.get("startDate") ?? ""),
+    startTime: String(form.get("startTime") ?? ""),
+    endDate: String(form.get("endDate") ?? ""),
+    endTime: String(form.get("endTime") ?? ""),
+  };
 
   // A practice campaign is previewed and never applied, so it has no window to wait for
   // (#827). The editor does not show the dates in practice mode; this is the same rule for
   // a request that did not come through that page. Before the window's own checks, whose
   // advice for an end with no start -- add a start -- is the wrong advice here.
   const practice = String(form.get("practice") ?? "") === "1";
-  const practiceProblem = practice ? practiceWindowProblem({ startUtc, endUtc }) : null;
+  const typed = typedWindow(dates);
+  const practiceProblem = practice ? practiceWindowProblem({ start: typed.startLocal || null, end: typed.endLocal || null }) : null;
   if (practiceProblem) {
     throw new AppError({ code: "VALIDATION", userMessage: `${practiceProblem} Nothing was created.` });
   }
+
+  // Read in the zone Shopify has for the store now, asked for here and not taken from the
+  // shop row: the row was UTC until a first sync, so a 9 AM sale typed before one opened at
+  // 4 AM in New York (#799). Refused if Shopify does not say. A typed time the clocks skip
+  // or repeat is scheduled by P3.9's rule and said out loud.
+  const actor = actorFor(sessionToken, session.shop);
+  const typedIn = await windowInStoreZone(shop.id, toAdminClient(admin), actor, dates, "Nothing was created.");
+  if (!typedIn.ok) throw new AppError({ code: "VALIDATION", userMessage: typedIn.message });
+  const { startUtc, endUtc, clockNotes } = typedIn;
+  const zone = typedIn.zone ?? shop.timezone;
 
   // Refused here, naming the field, rather than created and then warned about on a page
   // that cannot fix it: an end before the start, or one already past, is a campaign that
@@ -328,7 +344,7 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
     startUtc,
     endUtc,
     now: new Date(),
-    describe: (iso) => `${formatScheduleInstant(iso, shop.timezone)} (${shop.timezone})`,
+    describe: (iso) => `${formatScheduleInstant(iso, zone)} (${zone})`,
   });
   if (windowProblem) {
     throw new AppError({ code: "VALIDATION", userMessage: `${windowProblem} Nothing was created.` });
@@ -343,6 +359,8 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
         endAt: endUtc ?? undefined,
         revertBufferMinutes: revertBufferFrom(read),
         ...(clockNotes.length > 0 ? { clockNotes } : {}),
+        // The zone the times were typed in, so a later change of zone can say what moved.
+        zone,
       }
     : undefined;
 
@@ -399,7 +417,7 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
     priceLists,
     schedule,
     },
-    { actor: actorFor(sessionToken, session.shop) },
+    { actor },
   );
 
   return redirect(`/app/campaigns/${campaign.id}`);
@@ -417,6 +435,7 @@ export default function NewCampaign() {
     guidedNeedsScope,
     timeZone,
     timeZoneNow,
+    importsTimeZone,
     initialRuleKind,
     initialRule,
     formRounding,
@@ -953,12 +972,24 @@ export default function NewCampaign() {
             start blank" knows what leaving it blank does, which "(optional)" does
             not. */}
         <s-paragraph>
-        <s-text>
-          Times are in your store&rsquo;s zone, {timeZone}, where it is currently{" "}
-          {timeZoneNow}. That comes from your Shopify store settings, so it matches
-          your orders. Leave the start blank to run the campaign only when you apply
-          it by hand.
-        </s-text>
+        {/* Only a zone this page has just read from Shopify (#799). It used to print the
+            shop row's, which was UTC on any store that had not synced yet -- under the
+            words "from your Shopify store settings". */}
+        {timeZone ? (
+          <s-text>
+            Times are in your store&rsquo;s zone, {timeZone}, where it is currently{" "}
+            {timeZoneNow}. That comes from your Shopify store settings, so it matches
+            your orders. Leave the start blank to run the campaign only when you apply
+            it by hand.
+          </s-text>
+        ) : (
+          <s-text>
+            Anchor couldn&rsquo;t read your store&rsquo;s time zone from Shopify just now, so it
+            can&rsquo;t tell when a time typed here would be, and the dates are off until it
+            can. Reload the page to ask again, or leave them empty and apply the campaign by
+            hand.
+          </s-text>
+        )}
       </s-paragraph>
 
       {/* Date and time as two fields, because Polaris has no datetime component:
@@ -970,20 +1001,22 @@ export default function NewCampaign() {
           other: a stack sizes each child to its content, so End sat a few pixels
           left of Start and the four fields read as four rather than as two pairs. */}
       <FieldGrid>
-        <s-date-field name="startDate" label="Start" value={presetStart.slice(0, 10)} />
+        <s-date-field name="startDate" label="Start" value={presetStart.slice(0, 10)} disabled={!timeZone || undefined} />
         <s-text-field
           name="startTime"
           label="Start time"
           placeholder="09:00"
           value={presetStart.slice(11)}
           details="24-hour, in your store's zone."
+          disabled={!timeZone || undefined}
         />
-        <s-date-field name="endDate" label="End (optional)" />
+        <s-date-field name="endDate" label="End (optional)" disabled={!timeZone || undefined} />
         <s-text-field
           name="endTime"
           label="End time"
           placeholder="23:59"
           details="Defaults to the end of that day."
+          disabled={!timeZone || undefined}
         />
       </FieldGrid>
       </Card>
@@ -1189,7 +1222,7 @@ export default function NewCampaign() {
 
       {fromFile ? (
         <>
-          <PriceImportHistory imports={priceImports} timeZone={timeZone} />
+          <PriceImportHistory imports={priceImports} timeZone={importsTimeZone} />
 
           {/* Moved here with the table it qualifies. Said out loud rather than papered
               over: the gap is real, and a merchant who imports a baseline file and then

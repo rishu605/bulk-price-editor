@@ -14,13 +14,15 @@ import { describe, expect, it, vi } from "vitest";
 
 import prisma from "../../app/db.server";
 import { draftCampaignFrom } from "../../app/services/campaigns/draft-input.server";
+import { chaosAdminContext } from "../harness/http-client";
 import { withChaos } from "../harness/scenario";
 
-let pending = { shop: "" };
+let pending = { shop: "", endpoint: "" };
 
+// An `admin` the fake answers: a create with dates asks Shopify for the store's zone (#799).
 vi.mock("../../app/shopify.server", () => ({
   authenticate: {
-    admin: async () => ({ session: { shop: pending.shop }, sessionToken: undefined, admin: {} }),
+    admin: async () => ({ session: { shop: pending.shop }, sessionToken: undefined, admin: chaosAdminContext(pending.endpoint) }),
   },
 }));
 
@@ -34,7 +36,7 @@ describe("chaos: a priority and a revert buffer of 0", () => {
   it("are saved as 0 by the create action, and read as 0 by the preview", async () => {
     await withChaos("zero-priority", { catalog: { products: 2, variantsPerProduct: 1 }, percent: -10 }, async (chaos) => {
       const { shopId, domain } = chaos.fixture;
-      pending = { shop: domain };
+      pending = { shop: domain, endpoint: chaos.server.endpoint() };
       const { action } = await import("../../app/routes/app.campaigns.new");
 
       const fields = {

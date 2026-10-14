@@ -18,6 +18,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { openNotices, resolveNotice } from "../services/markets-topology.server";
+import { shiftedCampaigns } from "../services/campaigns/zone-shift.server";
 import { ensureShop } from "../services/shop.server";
 import { startSync, syncStateOf } from "../services/sync-job.server";
 import { useSyncPolling } from "../components/useSyncPolling";
@@ -119,7 +120,7 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
   // twelve seconds went: the first batch is 21ms and this one is 2ms. It is folded in
   // because two round trips where one would do is still one too many, not because it was
   // ever the problem.
-  const [notices, needsAttention, drafts, archivedRunning, cleanRuns, practiceCampaigns, onSale] = await Promise.all([
+  const [notices, needsAttention, drafts, archivedRunning, cleanRuns, practiceCampaigns, onSale, zoneShifts] = await Promise.all([
     openNotices(shop.id),
     prisma.campaign.count({ where: { shopId: shop.id, archivedAt: null, status: { in: ["PARTIAL", "HELD"] } } }),
     // Campaigns the merchant made and has not applied. Counted because Home used to
@@ -138,6 +139,8 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
     // (#751): active products, no gift cards. `health.variants` is the catalogue -- the
     // right number for the Catalogue card and the wrong one to promise a sale over.
     prisma.variantIndex.count({ where: astToWhere(shop.id, QUICK_CAMPAIGN_SCOPE) }),
+    // One indexed read of the campaigns with a time still ahead (#799).
+    shiftedCampaigns(shop.id, shop.timezone),
   ]);
 
   const sync = syncStateOf(
@@ -178,6 +181,8 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
     driftOpen,
     drafts,
     archivedRunning,
+    // Campaigns whose times read differently on the store's clock since its zone changed (#799).
+    zoneShifts,
     notices: notices.map((notice) => ({
       id: notice.id,
       kind: notice.kind,
@@ -307,6 +312,7 @@ export default function Dashboard() {
     drafts,
     archivedRunning,
     notices,
+    zoneShifts,
     needsAttention,
     lastRun,
     recent,
@@ -386,6 +392,37 @@ export default function Dashboard() {
           </s-paragraph>
           <ActionRow>
             <s-button href="/app/campaigns">Review campaigns</s-button>
+          </ActionRow>
+        </>
+      ),
+    });
+  }
+
+  // A sale that opens at 4 AM because the store's zone changed under it is a wrong time on
+  // the storefront, nearly as bad as a wrong price, and was silent (#799). Each campaign's
+  // page offers the choice; this says which ones.
+  if (zoneShifts.length > 0) {
+    attention.push({
+      id: "zone-shifts",
+      heading: "Some campaigns now run at a different time of day",
+      tone: "warning",
+      body: (
+        <>
+          <s-paragraph>
+            Your store&rsquo;s time zone is not the one {zoneShifts.length === 1 ? "this campaign was" : "these campaigns were"}{" "}
+            set in. Nothing moved by itself; on each campaign you choose the times you set or the new ones.
+          </s-paragraph>
+          {zoneShifts.map((campaign) => (
+            <s-paragraph key={campaign.id}>
+              <s-text type="strong">{campaign.name}</s-text>: {campaign.sentence}
+            </s-paragraph>
+          ))}
+          <ActionRow>
+            {zoneShifts.map((campaign) => (
+              <s-button key={campaign.id} href={`/app/campaigns/${campaign.id}`}>
+                Choose times for {campaign.name}
+              </s-button>
+            ))}
           </ActionRow>
         </>
       ),

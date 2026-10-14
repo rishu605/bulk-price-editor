@@ -7,6 +7,15 @@ Set a start, optionally an end, and the app runs it.
 Everything is shown and entered in your store's timezone, which the app displays on every
 scheduling field so it is never a guess.
 
+That is the time zone in your Shopify settings (**Settings > General**), read from Shopify
+when you open the app and again when you save a schedule. If Shopify can't be asked just
+then, the campaign editor says so and won't take a date until it can.
+
+If you change your store's time zone in Shopify, nothing you scheduled moves by itself, but
+a sale set for 9:00 may now fall at a different time on your new clock. Home lists each
+campaign that does, and its page lets you choose: keep the time you set, now on your new
+clock, or keep the new time.
+
 ## The revert buffer
 
 A sale ending at midnight starts reverting slightly *before* midnight — five minutes by

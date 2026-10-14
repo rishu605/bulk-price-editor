@@ -104,6 +104,12 @@ export class FakeShopify {
   shopCurrency = "USD";
 
   /**
+   * The store's zone, as Settings > General has it (#799). Null answers the field with
+   * null, which a real store never does, to model a read that tells Anchor nothing.
+   */
+  shopTimezone: string | null = "UTC";
+
+  /**
    * Stores a different price than the one requested, and reports the stored one.
    *
    * Models a shop that quietly adjusts what it is given — a rounding rule, a currency
@@ -279,6 +285,12 @@ export class FakeShopify {
     }
     if (query.includes("AnchorContextualPrices")) {
       return this.contextualPrices(variables) as { data?: T; extensions?: { cost?: QueryCost } };
+    }
+    if (query.includes("AnchorShopTimezone")) {
+      return {
+        data: { shop: { ianaTimezone: this.shopTimezone } },
+        extensions: this.cost(1),
+      } as { data?: T; extensions?: { cost?: QueryCost } };
     }
     if (query.includes("prices(originType: RELATIVE")) {
       return this.derivedPrices(variables) as { data?: T; extensions?: { cost?: QueryCost } };

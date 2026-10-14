@@ -25,6 +25,7 @@ const NOT_A_WHO: Array<[RegExp, string]> = [
   [/\bshop:\s*$/, "error-report context"],
   [/planReturnUrl\(\s*$/, "the billing return URL"],
   [/this\.open\(token,\s*$/, "the session store's decryption key"],
+  [/refreshShopTimezone\(\s*$/, "which store's zone to read from Shopify (#799)"],
 ];
 
 describe("who did it", () => {

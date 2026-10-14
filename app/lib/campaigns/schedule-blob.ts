@@ -10,7 +10,7 @@
  */
 
 /** The keys that say when a campaign runs. Everything else in the blob is what it prices. */
-export const WINDOW_KEYS = ["kind", "startAt", "endAt", "revertBufferMinutes", "clockNotes"] as const;
+export const WINDOW_KEYS = ["kind", "startAt", "endAt", "revertBufferMinutes", "clockNotes", "zone"] as const;
 
 /** The blob without its window: the campaign's definition, which a copy keeps. */
 export function definitionOf(schedule: unknown): Record<string, unknown> {

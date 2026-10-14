@@ -27,6 +27,19 @@ export interface WindowFields {
 }
 
 /**
+ * What the four fields say before any zone is involved: `YYYY-MM-DDTHH:MM` values, or ""
+ * where no date was given. Whether a time was typed at all needs no zone, so a refusal that
+ * only cares about that -- practice, or a zone Anchor could not read (#799) -- can be made
+ * before one is asked for.
+ */
+export function typedWindow(fields: WindowFields): { startLocal: string; endLocal: string } {
+  return {
+    startLocal: joinDateAndTime(fields.startDate ?? "", fields.startTime ?? "", "09:00"),
+    endLocal: joinDateAndTime(fields.endDate ?? "", fields.endTime ?? "", "23:59"),
+  };
+}
+
+/**
  * The window the four fields describe, in UTC, read in the store's zone.
  *
  * One reading for the create form and the edit-dates dialog, so the same typed values
@@ -37,8 +50,7 @@ export function windowFromFields(
   fields: WindowFields,
   timeZone: string,
 ): { startUtc: string | null; endUtc: string | null; clockNotes: string[] } {
-  const startLocal = joinDateAndTime(fields.startDate ?? "", fields.startTime ?? "", "09:00");
-  const endLocal = joinDateAndTime(fields.endDate ?? "", fields.endTime ?? "", "23:59");
+  const { startLocal, endLocal } = typedWindow(fields);
   const start = startLocal ? resolveLocalInput(startLocal, timeZone) : null;
   const end = endLocal ? resolveLocalInput(endLocal, timeZone) : null;
 
@@ -117,11 +129,14 @@ export function windowInputProblem(input: WindowInput): string | null {
  *
  * Either date, not only the start. An end on its own would otherwise be answered by
  * `windowInputProblem`'s "add a start date" -- advice that leads straight back here.
+ *
+ * Takes the typed values (`typedWindow`), not instants: only whether each was given
+ * matters, and that is answered before the store's zone is asked for (#799).
  */
-export function practiceWindowProblem(input: { startUtc: string | null; endUtc: string | null }): string | null {
-  if (!input.startUtc && !input.endUtc) return null;
+export function practiceWindowProblem(input: { start: string | null; end: string | null }): string | null {
+  if (!input.start && !input.end) return null;
   return (
-    `${input.startUtc ? "Start" : "End"}: a practice campaign is only ever previewed, so it cannot be ` +
+    `${input.start ? "Start" : "End"}: a practice campaign is only ever previewed, so it cannot be ` +
     "scheduled — nothing would happen when the date came. Clear Start and End to keep it as practice, " +
     "or create a real campaign to schedule the sale."
   );
