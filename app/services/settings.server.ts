@@ -138,6 +138,26 @@ export async function writeSettings(
     },
   });
 
+  // The approval threshold gets an entry of its own when it moves (#788). It is the
+  // setting whose change matters most to somebody other than the person making it: the
+  // author of a large campaign switching off the check meant for them. Inside the entry
+  // above it is one field of seven, under a generic "settings" line; here it can be picked
+  // out of the What filter and read at a glance -- who, from what, to what. A count of
+  // variants, never a price.
+  if (previous.approvalThreshold !== parsed.approvalThreshold) {
+    await prisma.auditLogEntry.create({
+      data: {
+        shopId,
+        actor: actor ?? null,
+        action: "settings.approval.update",
+        entity: "Shop",
+        entityId: shopId,
+        before: { approvalThreshold: previous.approvalThreshold } as never,
+        after: { approvalThreshold: parsed.approvalThreshold } as never,
+      },
+    });
+  }
+
   return parsed;
 }
 

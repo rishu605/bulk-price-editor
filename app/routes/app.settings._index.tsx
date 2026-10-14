@@ -7,7 +7,11 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { ensureShop } from "../services/shop.server";
 import { readSettings, shopCurrency, writeSettings } from "../services/settings.server";
-import { guardrailInputProblems } from "../lib/settings/guardrail-input";
+import {
+  APPROVAL_THRESHOLD_LABEL,
+  approvalThresholdFrom,
+  guardrailInputProblems,
+} from "../lib/settings/guardrail-input";
 import { readPreferences, writePreferences } from "../services/notifications.server";
 import { actorFor } from "../lib/audit/actor";
 import { RouteBoundary } from "../components/RouteBoundary";
@@ -99,11 +103,12 @@ export const action = withGuard("/app/settings", async ({ request }: ActionFunct
     {
       ...existing,
       neverBelowCost: form.get("neverBelowCost") === "on",
-      // No control on this page owns the approval threshold, so a field that is not in
-      // the form is not a field the merchant cleared. Reading it unconditionally set it to
-      // null on every save, which switched approvals off.
+      // Blank switches approvals off (#788). Missing is not blank: a post without the
+      // field -- a tab opened before it existed, a script -- is not the merchant clearing
+      // it. Reading it unconditionally once set it to null on every save, which switched
+      // approvals off.
       approvalThreshold: form.has("approvalThreshold")
-        ? emptyToNull(form.get("approvalThreshold"))
+        ? (approvalThresholdFrom(form.get("approvalThreshold")) ?? null)
         : existing.approvalThreshold,
       minMarginPercent: emptyToNull(form.get("minMarginPercent")),
       minPrice: emptyToNull(form.get("minPrice")),
@@ -256,6 +261,25 @@ export default function Settings() {
                 </s-option>
               </s-select>
             </FieldGrid>
+        </Card>
+
+        {/* Its own card rather than one more guardrail (#788). A guardrail bounds a price;
+            this decides whether a campaign may run at all, and the consequence in
+            `secondary` -- nobody can approve their own request -- is what a merchant on a
+            one-person store needs to read before typing a number here. */}
+        <Card
+          heading="Approvals"
+          lede="A campaign changing more variants than the number below cannot run, by hand or on its schedule, until somebody other than the person who asked approves it."
+          secondary="Nobody can approve their own request, so on a store with one staff account it stops those campaigns running at all."
+        >
+          <Field width="medium">
+            <s-number-field
+              name="approvalThreshold"
+              label={APPROVAL_THRESHOLD_LABEL}
+              value={settings.approvalThreshold?.toString() ?? ""}
+              details="A whole number: 500 means a campaign changing 501 variants or more waits for approval. Leave blank for off."
+            />
+          </Field>
         </Card>
 
         <Card heading="Rounding">      <s-paragraph>

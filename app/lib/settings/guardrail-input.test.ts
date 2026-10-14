@@ -1,10 +1,16 @@
 /**
- * Refusing a guardrail the merchant could not have meant (#739).
+ * Refusing a guardrail the merchant could not have meant (#739), and an approval
+ * threshold that is not a count (#788).
  */
 
 import { describe, expect, it } from "vitest";
 
-import { guardrailInputProblems, MAX_MARGIN_PERCENT } from "./guardrail-input";
+import {
+  APPROVAL_THRESHOLD_LABEL,
+  approvalThresholdFrom,
+  guardrailInputProblems,
+  MAX_MARGIN_PERCENT,
+} from "./guardrail-input";
 
 const form = (fields: Record<string, string>) => (name: string) => fields[name] ?? null;
 const problems = (fields: Record<string, string>) => guardrailInputProblems(form(fields), "USD");
@@ -45,5 +51,61 @@ describe("checking typed guardrails", () => {
   it("refuses just past the edge", () => {
     expect(problems({ minMarginPercent: "100" })).toHaveLength(1);
     expect(problems({ minMarginPercent: "-0.1" })).toHaveLength(1);
+  });
+});
+
+describe("checking a typed approval threshold (#788)", () => {
+  it.each(["0", "-3", "abc", "1.5"])("refuses %s, naming the field and what it accepts", (typed) => {
+    const [problem, ...rest] = problems({ approvalThreshold: typed });
+    expect(rest).toEqual([]);
+    expect(problem.field).toBe("approvalThreshold");
+    expect(problem.message).toBe(
+      `Require a second person's approval above (variants) must be a whole number of 1 or more, or blank for off. “${typed}” is not.`,
+    );
+  });
+
+  it("names the field by the label the page shows", () => {
+    expect(problems({ approvalThreshold: "0" })[0].message.startsWith(APPROVAL_THRESHOLD_LABEL)).toBe(true);
+  });
+
+  it("accepts blank as off, and any whole number of 1 or more", () => {
+    expect(problems({ approvalThreshold: "" })).toEqual([]);
+    expect(problems({ approvalThreshold: "  " })).toEqual([]);
+    expect(problems({ approvalThreshold: "1" })).toEqual([]);
+    expect(problems({ approvalThreshold: " 500 " })).toEqual([]);
+  });
+
+  it("refuses what Number would have let through", () => {
+    // `Number` reads every one of these as a whole number, and none of them is one typed.
+    for (const typed of ["1e3", "0x10", "+5", "99999999999999999999"]) {
+      expect(problems({ approvalThreshold: typed }).map((p) => p.field), typed).toEqual(["approvalThreshold"]);
+    }
+  });
+
+  it("reports it with the other bad fields, so one save fixes them all", () => {
+    expect(problems({ minMarginPercent: "150", approvalThreshold: "0" }).map((p) => p.field)).toEqual([
+      "minMarginPercent",
+      "approvalThreshold",
+    ]);
+  });
+});
+
+describe("reading a typed approval threshold", () => {
+  it("is null for blank or absent; the action tells those two apart", () => {
+    expect(approvalThresholdFrom("")).toBeNull();
+    expect(approvalThresholdFrom("   ")).toBeNull();
+    expect(approvalThresholdFrom(null)).toBeNull();
+  });
+
+  it("is the count for a whole number of 1 or more", () => {
+    expect(approvalThresholdFrom("1")).toBe(1);
+    expect(approvalThresholdFrom(" 500 ")).toBe(500);
+    expect(approvalThresholdFrom("007")).toBe(7);
+  });
+
+  it("is undefined for anything else, never a number the merchant did not type", () => {
+    for (const typed of ["0", "-3", "abc", "1.5", "1e3"]) {
+      expect(approvalThresholdFrom(typed), typed).toBeUndefined();
+    }
   });
 });
