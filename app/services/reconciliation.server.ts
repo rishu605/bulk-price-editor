@@ -30,6 +30,8 @@ import { PRICES_MAY_BE_LIVE } from "../lib/lifecycle/transitions";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { formatMinorUnits } from "../lib/money/format";
 import { LANDED } from "../lib/execution/landed";
+import { labelled, priceListLabel } from "../lib/markets/display-name";
+import { BASE_SURFACE } from "../lib/reporting/export-filters";
 
 const PAGE_SIZE = ROWS_PER_VIEW;
 
@@ -76,7 +78,8 @@ export interface ReconciliationRow {
 export interface ReconciliationPage {
   rows: ReconciliationRow[];
   total: number;
-  surfaces: Array<{ priceListGid: string; name: string; currency: string }>;
+  /** `value` is what the Surface filter submits: a price list gid, or `BASE_SURFACE`. */
+  surfaces: Array<{ value: string; name: string; currency: string }>;
   campaigns: Array<{ id: string; name: string }>;
   counts: { drifted: number; offBaseline: number; staleBaseline: number };
 }
@@ -92,9 +95,9 @@ export async function reconcile(
   const [lists, campaigns] = await Promise.all([
     prisma.priceListRecord.findMany({
       where: { shopId },
-      select: { priceListGid: true, name: true, currency: true },
+      select: { priceListGid: true, name: true, catalogTitle: true, surfaceKind: true, currency: true },
       orderBy: { name: "asc" },
-    }),
+    }).then((rows) => rows.map(labelled)),
     prisma.campaign.findMany({
       where: { shopId },
       select: { id: true, name: true },
@@ -103,9 +106,13 @@ export async function reconcile(
     }),
   ]);
 
+  // Named through `priceListLabel`, never Shopify's own name for a market's list, which is
+  // `pricing_by_market.19853246698_1786915628` (#722, as #642 did for the editor).
   const surfaces = [
-    { priceListGid: "", name: "Base price", currency: "" },
-    ...lists,
+    { value: BASE_SURFACE, name: "Base price", currency: "" },
+    ...lists
+      .map((list) => ({ value: list.priceListGid, name: priceListLabel(list), currency: list.currency }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
   ];
 
   // The surface rows themselves. `price_surface_entries` is the one uniform record of
@@ -234,7 +241,7 @@ export async function reconcile(
       sku: variant?.sku ?? null,
       priceListGid: entry.priceListGid,
       surface: entry.priceListGid
-        ? (listBy.get(entry.priceListGid)?.name ?? entry.priceListGid)
+        ? priceListLabel(listBy.get(entry.priceListGid) ?? { name: "", surfaceKind: entry.surfaceKind })
         : "Base price",
       currency,
       live: formatMinorUnits(entry.livePrice, currency),

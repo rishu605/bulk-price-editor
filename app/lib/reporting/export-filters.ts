@@ -10,11 +10,20 @@ import type { ActivityFilters } from "../../services/activity.server";
 import type { BaselineFilters } from "../../services/baseline-browser.server";
 import type { ReconciliationFilters } from "../../services/reconciliation.server";
 
+/**
+ * The Surface filter's value for base prices (#722). The base surface's gid is "", and the
+ * filter form drops an empty value from the URL -- so "Base price" submitted nothing, the
+ * page applied no filter, and the select snapped back to "Every surface".
+ */
+export const BASE_SURFACE = "base";
+
 export function reconciliationFiltersFrom(params: URLSearchParams): ReconciliationFilters {
   const state = params.get("state") ?? "";
   return {
     q: params.get("q") ?? undefined,
-    priceListGid: params.get("surface") ?? undefined,
+    // The base surface is submitted as a word, because its gid is "" and an empty value
+    // never reaches the URL (#722).
+    priceListGid: params.get("surface") === BASE_SURFACE ? "" : (params.get("surface") ?? undefined),
     campaignId: params.get("campaign") || undefined,
     driftedOnly: state === "drifted",
     offBaselineOnly: state === "off-baseline",

@@ -35,6 +35,7 @@ export async function currentTopology(shopId: string): Promise<MarketSnapshot[]>
     select: {
       priceListGid: true,
       name: true,
+      catalogTitle: true,
       currency: true,
       adjustmentBps: true,
       surfaceKind: true,
@@ -44,6 +45,7 @@ export async function currentTopology(shopId: string): Promise<MarketSnapshot[]>
   return lists.map((list) => ({
     priceListGid: list.priceListGid,
     name: list.name,
+    catalogTitle: list.catalogTitle,
     currency: list.currency,
     adjustmentBps: list.adjustmentBps,
     surfaceKind: list.surfaceKind === "B2B" ? "B2B" : "MARKET",

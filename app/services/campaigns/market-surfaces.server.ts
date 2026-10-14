@@ -23,7 +23,7 @@
  * market following the base price at all.
  */
 
-import { priceListLabel } from "../../lib/markets/display-name";
+import { labelled, priceListLabel } from "../../lib/markets/display-name";
 import prisma from "../../db.server";
 import type { MarketWritePath } from "../../lib/execution/price-list-parent";
 import {
@@ -180,9 +180,9 @@ export async function captureMarketBaselinesFirst(
     return { messages: [], refused: [] };
   }
 
-  const lists = await prisma.priceListRecord.findMany({
+  const lists = (await prisma.priceListRecord.findMany({
     where: { shopId, priceListGid: { in: surfaces.priceLists } },
-  });
+  })).map(labelled);
 
   const messages: string[] = [];
 
@@ -241,9 +241,9 @@ export async function applyMarketSurfaces(
   const surfaces = parseSurfaces(campaign?.surfaces);
   if (surfaces.priceLists.length === 0) return [];
 
-  const lists = await prisma.priceListRecord.findMany({
+  const lists = (await prisma.priceListRecord.findMany({
     where: { shopId, priceListGid: { in: surfaces.priceLists } },
-  });
+  })).map(labelled);
 
   const outcomes: MarketSurfaceOutcome[] = [];
 
@@ -606,7 +606,7 @@ export async function revertMarketSurfaces(
   const outcomes: MarketSurfaceOutcome[] = [];
 
   for (const [priceListGid, variantGids] of byList) {
-    const list = await prisma.priceListRecord.findFirst({ where: { shopId, priceListGid } });
+    const list = await prisma.priceListRecord.findFirst({ where: { shopId, priceListGid } }).then((found) => found && labelled(found));
 
     // Recompute, not delete, where the price before the campaign was the merchant's own
     // (#930). Deleting a fixed price returns a variant to the list's percentage, which is

@@ -23,6 +23,7 @@
  *   carry information the rule does not already have.
  */
 
+import { labelled } from "../lib/markets/display-name";
 import prisma from "../db.server";
 import { logger } from "../lib/logging/logger";
 import type { AdminClient } from "../lib/execution/sync-executor";
@@ -422,8 +423,10 @@ async function mirrorFixedPrices(
 
 /** The shop's mirrored surfaces, for the dashboard and the surfaces wizard step. */
 export async function surfaces(shopId: string) {
-  return prisma.priceListRecord.findMany({
-    where: { shopId },
-    orderBy: [{ surfaceKind: "asc" }, { name: "asc" }],
-  });
+  return prisma.priceListRecord
+    .findMany({
+      where: { shopId },
+      orderBy: [{ surfaceKind: "asc" }, { name: "asc" }],
+    })
+    .then((rows) => rows.map(labelled));
 }

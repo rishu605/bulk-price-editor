@@ -64,3 +64,15 @@ export function priceListLabel(list: NameableList): string {
   // identifier in a checkbox label tells a merchant nothing they can act on.
   return list.surfaceKind === "B2B" ? "A wholesale price list" : "A market price list";
 }
+
+/**
+ * The list with `name` replaced by its label (#722).
+ *
+ * For a list read from the mirror and passed on: whatever it reaches -- a page, a run's
+ * message, a refusal -- quotes `name`, and Shopify's own name for a market's list is an
+ * id. Labelling at the read means nothing downstream has to remember to. Idempotent: a
+ * label is its own label.
+ */
+export function labelled<T extends NameableList>(list: T): T {
+  return { ...list, name: priceListLabel(list) };
+}

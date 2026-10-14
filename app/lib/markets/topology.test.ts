@@ -151,3 +151,32 @@ describe("telling the merchant what happened", () => {
     expect(message).not.toContain("targeted by");
   });
 });
+
+describe("what a notice calls a market (#722)", () => {
+  const generated = (over: Partial<MarketSnapshot> = {}) =>
+    list({ name: "pricing_by_market.19853246698_1786915628", catalogTitle: "Europe", ...over });
+
+  it("names it by its market title, never by Shopify's generated name", () => {
+    const [removed] = diffTopology([generated()], []);
+    expect(removed.name).toBe("Europe");
+    expect(describeChange(removed, [])).toContain('"Europe"');
+    expect(describeChange(removed, [])).not.toContain("pricing_by_market");
+
+    const [added] = diffTopology([], [generated()]);
+    expect(describeChange(added, [])).not.toContain("pricing_by_market");
+
+    // Shopify's name is still kept in the record, for the audit log.
+    expect(removed.before?.name).toBe("pricing_by_market.19853246698_1786915628");
+  });
+
+  it("does not report a rename the merchant cannot see", () => {
+    const changes = diffTopology([generated()], [generated({ name: "pricing_by_market.19853246698_99" })]);
+    expect(changes).toEqual([]);
+  });
+
+  it("reports a market retitled in Shopify, by both titles", () => {
+    const [renamed] = diffTopology([generated()], [generated({ catalogTitle: "European Union" })]);
+    expect(renamed.kind).toBe("renamed");
+    expect(describeChange(renamed, [])).toBe('The market "Europe" is now called "European Union".');
+  });
+});
