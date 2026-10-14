@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   addDays,
+  isCalendarDay,
   layOut,
   localDate,
   monthRange,
@@ -51,6 +52,36 @@ describe("the store's own days", () => {
 
   it("adds days across a leap day", () => {
     expect(addDays("2028-02-28", 1)).toBe("2028-02-29");
+  });
+});
+
+describe("a day from a URL (#747)", () => {
+  // The calendar's `on` went straight into `addDays`: `garbage` threw a RangeError and the
+  // page became "something went wrong on our side", and `2026-02-31` rolled into March.
+
+  it.each(["2026-09-25", "2028-02-29", "2026-12-31", "2026-01-01"])("accepts %s", (day) => {
+    expect(isCalendarDay(day)).toBe(true);
+  });
+
+  it.each([
+    "garbage",
+    "",
+    "2026-02-31",
+    "2027-02-29",
+    "2026-13-01",
+    "2026-13-45",
+    "2026-00-10",
+    "2026-09-00",
+    "2026-9-25",
+    "2026-09-25T00:00",
+    " 2026-09-25",
+  ])("refuses %j", (value) => {
+    expect(isCalendarDay(value)).toBe(false);
+  });
+
+  it("refuses a parameter that is not there", () => {
+    expect(isCalendarDay(null)).toBe(false);
+    expect(isCalendarDay(undefined)).toBe(false);
   });
 });
 

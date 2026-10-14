@@ -159,6 +159,23 @@ function classify(error: unknown, message: string): ErrorCode {
     }
   }
 
+  // Prisma refusing the arguments it was handed: a value that is not in an enum, a field
+  // the model does not have. It carries no `code`, so it used to fall through to the text
+  // below, where Prisma's own "Invalid value for argument `status`" matched the Shopify
+  // branch -- and a campaigns link with `status=active` told the merchant that *Shopify*
+  // had rejected part of a change, pointing at a ledger that did not exist for a change
+  // nobody made (#747).
+  //
+  // It is our mistake every time: the app built a query the schema does not accept, and
+  // nothing reached the store. So it is UNKNOWN, "something went wrong on our side",
+  // which is the true sentence. Not VALIDATION -- that tells the merchant to fix a form,
+  // and there is no form they could change to make the app send a valid query.
+  //
+  // By class, through its name rather than `instanceof`. This module is bundled into the
+  // browser for the error boundary, and importing the Prisma runtime to recognise one
+  // class would ship it there; the name is set by the class itself, so it is the class.
+  if (error instanceof Error && error.name === "PrismaClientValidationError") return "UNKNOWN";
+
   const text = message.toLowerCase();
 
   if (text.includes("throttled") || (text.includes("exceeded") && text.includes("rate"))) {
@@ -178,7 +195,13 @@ function classify(error: unknown, message: string): ErrorCode {
   if (text.includes("access denied") || text.includes("unauthorized")) {
     return "UNAUTHENTICATED";
   }
-  if (text.includes("usererrors") || text.includes("invalid value")) {
+  // Shopify's own wording only. "provided invalid value" is how its GraphQL layer refuses
+  // a variable ("Variable $input of type … was provided invalid value for …"). The bare
+  // phrase "invalid value" also matched Prisma, and would match any other library that
+  // refuses an argument in the same two words, filing each as Shopify rejecting a price
+  // change (#747). The class check above is the fix for Prisma; this is what stops the
+  // next library from doing the same.
+  if (text.includes("usererrors") || text.includes("provided invalid value")) {
     return "SHOPIFY_REJECTED";
   }
 

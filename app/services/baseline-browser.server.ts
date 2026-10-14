@@ -16,13 +16,15 @@ import { Prisma } from "@prisma/client";
 import prisma from "../db.server";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { formatMinorUnits } from "../lib/money/format";
+import { BASELINE_SOURCES as SOURCES, type BaselineSourceName } from "../lib/baselines/sources";
 import { astToWhere, type FilterAst } from "./segments.server";
 
 export interface BaselineFilters {
   q?: string;
   vendor?: string;
   collection?: string;
-  source?: string;
+  /** One of the sources that exist -- see `baselineSourceFrom` for why a string is not enough. */
+  source?: BaselineSourceName;
   /** Only variants whose live price differs from their baseline. */
   divergedOnly?: boolean;
 }
@@ -160,14 +162,6 @@ export async function browseBaselines(
   };
 }
 
-export const SOURCES = [
-  "INSTALL_CAPTURE",
-  "RECAPTURE",
-  "CSV_IMPORT",
-  "DRIFT_ADOPTION",
-  "AUTO_ENROLL",
-] as const;
-
 /**
  * Variants matching the filters that live outside `variant_index`.
  *
@@ -205,7 +199,7 @@ async function matchingVariantGids(
       shopId,
       supersededAt: null,
       surfaceKind: "BASE",
-      source: filters.source as never,
+      source: filters.source,
     },
     select: { variantGid: true },
     take: limit,

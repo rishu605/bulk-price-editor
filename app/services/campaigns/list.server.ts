@@ -12,6 +12,7 @@ import { describeCampaign } from "../../lib/campaigns/describe";
 import { astOf, ruleOf } from "./model.server";
 import { ROWS_PER_VIEW } from "../../lib/ui/table-budget";
 import {
+  ALL_STATES,
   describeState,
   needsAttention,
   type CampaignState,
@@ -19,11 +20,14 @@ import {
 
 export const PAGE_SIZE = ROWS_PER_VIEW;
 
+/** What the status filter can be: everything, the ones needing a decision, or one state. */
+export type StatusFilter = "" | "attention" | CampaignState;
+
 export interface CampaignFilters {
   /** Matches the campaign name. */
   q: string;
   /** A single lifecycle state, or "" for all, or "attention" for the ones needing one. */
-  status: string;
+  status: StatusFilter;
   /**
    * Whether to show the campaigns that have been filed away.
    *
@@ -38,10 +42,31 @@ export interface CampaignFilters {
 export function filtersFrom(params: URLSearchParams): CampaignFilters {
   return {
     q: (params.get("q") ?? "").trim(),
-    status: (params.get("status") ?? "").trim(),
+    status: statusFrom(params.get("status")),
     archived: params.get("archived") === "1",
     page: Math.max(1, Number(params.get("page") ?? 1) || 1),
   };
+}
+
+/**
+ * The status filter, read against the states that exist rather than trusted (#747).
+ *
+ * It used to go into the where clause as typed. `status` is an enum column, so anything
+ * that was not exactly a member -- `active` from a hand-typed or old link, a typo, a
+ * pasted `<script>` -- threw inside Prisma, and the whole list was replaced by an error
+ * page for a filter the merchant could simply have not had.
+ *
+ * Case does not matter, because the states are words a merchant reads on the page and
+ * then types in lower case: `active` means ACTIVE, and refusing it would be pedantry about
+ * a value whose meaning is not in doubt. Anything that is still not a state is dropped,
+ * not refused. A filter link is a convenience, and the honest answer to one that names
+ * nothing is the unfiltered list -- with "All" selected, so the page says what it is
+ * showing -- rather than an error about a parameter the merchant never chose to send.
+ */
+export function statusFrom(raw: string | null): StatusFilter {
+  const value = (raw ?? "").trim().toUpperCase();
+  if (value === "ATTENTION") return "attention";
+  return (ALL_STATES as readonly string[]).includes(value) ? (value as CampaignState) : "";
 }
 
 /** Turns the filters into a Prisma where clause, minus the parts SQL cannot express. */
@@ -64,7 +89,7 @@ function whereFor(shopId: string, filters: CampaignFilters) {
     ...(filters.status === "attention"
       ? { status: { in: ATTENTION_STATES } }
       : filters.status
-        ? { status: filters.status as CampaignState }
+        ? { status: filters.status }
         : {}),
   };
 }

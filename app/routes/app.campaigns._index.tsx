@@ -15,7 +15,7 @@ import { HelpNote } from "../components/HelpNote";
 import { filtersFrom, listCampaigns } from "../services/campaigns/list.server";
 import { duplicateCampaign } from "../services/campaigns/housekeeping.server";
 import { calendarFor, todayIn } from "../services/calendar.server";
-import { addDays } from "../lib/scheduling/calendar";
+import { addDays, isCalendarDay } from "../lib/scheduling/calendar";
 
 export const loader = withGuard("/app/campaigns", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -35,7 +35,13 @@ export const loader = withGuard("/app/campaigns", async ({ request }: LoaderFunc
   // `period`, not `view` — the outer `view` now chooses list or calendar, and one
   // parameter cannot mean both.
   const period = params.get("period") === "week" ? "week" : "month";
-  const on = params.get("on") ?? todayIn(shop.timezone);
+  // A day that exists, or today (#747). `on` went straight into the date arithmetic: a
+  // malformed one threw a RangeError and the calendar became "something went wrong on our
+  // side", and an impossible one (`2026-02-31`) rolled silently into March under a heading
+  // that still printed the raw string. A link that names no real day is answered with the
+  // period the merchant would have got without it, not an error about a parameter.
+  const asked = params.get("on");
+  const on = isCalendarDay(asked) ? asked : todayIn(shop.timezone);
   const calendar = await calendarFor(shop.id, shop.timezone, { view: period, on });
 
   // Neighbouring periods, computed here rather than in the browser so the links work

@@ -44,7 +44,7 @@ describe("chaos: a bulk run whose process stops after Shopify accepted the opera
       const summary = (await campaignResult(shopId, run.id))!.summary;
       expect(summary, "the run said nothing had been written").not.toMatch(/Nothing has been written/);
       expect(summary).toMatch(/^4 sent to Shopify; their results arrive when the bulk operation finishes/);
-      const listed = (filters = { q: "", status: "", archived: false, page: 1 }) =>
+      const listed = (filters = { q: "", status: "" as const, archived: false, page: 1 }) =>
         listCampaigns(shopId, filters).then((list) => list.campaigns.find((row) => row.id === campaignId)!.lastRun);
       expect((await listed())?.atShopify, "the list read 0 verified while Shopify applied them").toEqual({ done: 0, of: 4, live: false });
 

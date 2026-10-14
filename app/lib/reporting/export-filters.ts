@@ -9,6 +9,7 @@
 import type { ActivityFilters } from "../../services/activity.server";
 import type { BaselineFilters } from "../../services/baseline-browser.server";
 import type { ReconciliationFilters } from "../../services/reconciliation.server";
+import { baselineSourceFrom } from "../baselines/sources";
 
 /**
  * The Surface filter's value for base prices (#722). The base surface's gid is "", and the
@@ -35,7 +36,9 @@ export function baselineFiltersFrom(params: URLSearchParams): BaselineFilters {
   return {
     q: params.get("q") ?? undefined,
     vendor: params.get("vendor") ?? undefined,
-    source: params.get("source") ?? undefined,
+    // Against the sources that exist, because the column is an enum and an unknown value
+    // threw inside the query (#747).
+    source: baselineSourceFrom(params.get("source")),
     divergedOnly: params.get("diverged") === "1",
   };
 }
