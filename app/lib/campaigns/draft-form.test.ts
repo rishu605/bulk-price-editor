@@ -185,7 +185,8 @@ describe("priority and revert buffer (#727)", () => {
   });
 
   it("takes the default only when the field is missing, blank or not a number", () => {
-    for (const fields of [{}, { priority: "" }, { priority: "  " }, { priority: "high" }]) {
+    const blanks: Array<Record<string, string>> = [{}, { priority: "" }, { priority: "  " }, { priority: "high" }];
+    for (const fields of blanks) {
       expect(priorityFrom(read(fields))).toBe(DEFAULT_PRIORITY);
     }
     expect(revertBufferFrom(read({ revertBuffer: "soon" }))).toBe(DEFAULT_REVERT_BUFFER_MINUTES);
