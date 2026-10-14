@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { roundingExample, roundingExampleLine } from "./rounding-example";
+import { roundingChoices, roundingExample, roundingExampleLine } from "./rounding-example";
 import { ROUNDING_PROFILES, type RoundingProfileName } from "./rounding-policy";
 
 const NAMES = Object.keys(ROUNDING_PROFILES) as RoundingProfileName[];
@@ -76,5 +76,13 @@ describe("a currency with no sub-unit", () => {
     for (const name of NAMES) {
       expect(roundingExampleLine(name, "JPY")).not.toMatch(/\d\.\d/);
     }
+  });
+});
+
+describe("the picker in a three-decimal currency (#695)", () => {
+  it("shows .99 as .990 of a dinar, which is what the label says", () => {
+    const choices = roundingChoices("KWD");
+    expect(choices.find((c) => c.value === "charm99")?.example).toMatch(/^KWD\s\d+\.990$/);
+    expect(choices.find((c) => c.value === "charm95")?.example).toMatch(/^KWD\s\d+\.950$/);
   });
 });

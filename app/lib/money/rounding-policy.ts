@@ -146,6 +146,11 @@ export function resolvePolicy(stored: StoredRoundingPolicy): RoundingPolicy {
  * the merchant would see "prices ending .99" on the campaign and yen prices that do not.
  * Falling back to the currency's own sensible default instead means what is shown and
  * what happens are the same thing.
+ *
+ * A three-decimal currency (KWD, BHD, OMR, JOD, TND, LYD, IQD) keeps the charm, on purpose
+ * (#695): the ending is in hundredths of a major unit and scaled to the currency's
+ * decimals (`endingInMinorUnits`), so ".99" is 12.990 there, as it is 12.99 in dollars.
+ * It used to be 12.099 -- a 3.2% cut under a label that promised a cosmetic ending.
  */
 export function profileFor(policy: RoundingPolicy, currency: string): RoundingProfile {
   const profile = policy.byCurrency[currency.toUpperCase()] ?? policy.default;

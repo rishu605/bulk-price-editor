@@ -201,12 +201,13 @@ describe("zero-decimal degradation (edge case E9)", () => {
 
 describe("profile validation", () => {
   it("rejects a charm ending that cannot fit below one major unit", () => {
+    // Hundredths of a major unit in every currency (#695), so 100 is a whole unit too many
+    // in KWD as much as in USD.
     expect(() => validateProfile({ mode: "charm", ending: 100, direction: "nearest" }, "USD"))
       .toThrow(InvalidRoundingProfileError);
-    expect(() => validateProfile({ mode: "charm", ending: 1000, direction: "nearest" }, "KWD"))
+    expect(() => validateProfile({ mode: "charm", ending: 100, direction: "nearest" }, "KWD"))
       .toThrow(InvalidRoundingProfileError);
-    // 999 is legal for a 3-decimal currency
-    expect(() => validateProfile({ mode: "charm", ending: 999, direction: "nearest" }, "KWD"))
+    expect(() => validateProfile({ mode: "charm", ending: 99, direction: "nearest" }, "KWD"))
       .not.toThrow();
   });
 
@@ -215,5 +216,32 @@ describe("profile validation", () => {
       expect(() => validateProfile({ mode: "step", step, direction: "nearest" }, "USD"))
         .toThrow(InvalidRoundingProfileError);
     }
+  });
+});
+
+describe("a charm ending means the same in every currency (#695)", () => {
+  const kwd = (amount: number) => money(amount, "KWD");
+
+  it("prices KWD 12.500 at 12.990 under .99, not 12.099", () => {
+    expect(formatMoney(applyRounding(kwd(12_500), charm99))).toBe("12.990");
+    expect(formatMoney(applyRounding(kwd(12_500), charm95))).toBe("12.950");
+    expect(formatMoney(applyRounding(kwd(12_500), wholeUnits))).toBe("13.000");
+  });
+
+  it("ends every rounded price at .99 of a major unit, whatever the decimals", () => {
+    const decimal = knownCurrencies().filter((currency) => !isZeroDecimal(currency));
+    fc.assert(
+      fc.property(fc.constantFrom(...decimal), fc.integer({ min: 0, max: 10_000_000 }), (currency, amount) => {
+        const perMajor = 10 ** exponentOf(currency);
+        const rounded = applyRounding(money(amount, currency), charm99).amount;
+        // Zero is the one price below the smallest charm price (see `roundCharm`).
+        return rounded === 0 || rounded % perMajor === (99 * perMajor) / 100;
+      }),
+    );
+  });
+
+  it("leaves two-decimal currencies exactly as they were", () => {
+    expect(applyRounding(money(1250, "USD"), charm99).amount).toBe(1299);
+    expect(applyRounding(money(1250, "EUR"), charm95).amount).toBe(1295);
   });
 });
