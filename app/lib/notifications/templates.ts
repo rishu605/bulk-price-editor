@@ -45,6 +45,12 @@ export interface RunNotification {
   campaignId: string;
   campaignName: string;
   counts: RunCounts;
+  /**
+   * The run was a revert (#710). A revert that left prices on sale is a partial run, sent
+   * as one and gated by "Partial or failed" -- not "has been reverted", which is what a
+   * merchant who hears only about problems used to get, or nothing at all.
+   */
+  revert?: boolean;
   /** Merchant-facing reasons, already through the error taxonomy. Never raw errors. */
   reasons?: string[];
   /** Deep link back into the app, filled in by `notify` — see `campaign-link.ts`. */
@@ -110,18 +116,28 @@ function runCompleted(n: RunNotification): Email {
 }
 
 function runPartial(n: RunNotification): Email {
+  // Failed and written-but-not-read-back alike: a row Anchor cannot vouch for needs the
+  // merchant either way. Counting failed alone said "0 rows need attention" over twelve
+  // unverified ones (#710).
+  const attention = n.counts.failed + n.counts.unverified;
   return {
-    subject: `"${n.campaignName}" finished partially — ${n.counts.failed} rows need attention`,
+    subject: n.revert
+      ? `"${n.campaignName}" finished reverting partially — ${attention} rows need attention`
+      : `"${n.campaignName}" finished partially — ${attention} rows need attention`,
     text: [
-      `"${n.campaignName}" has finished, but not every row landed.`,
+      n.revert
+        ? `"${n.campaignName}" has been reverted part of the way: not every price went back, so parts of the sale may still be live.`
+        : `"${n.campaignName}" has finished, but not every row landed.`,
       "",
       ...countLines(n.counts),
       "",
       // Named plainly, because the alternative reading of a partial run is that the
       // app does not know what it did. It does, per row.
-      "Nothing is hidden: every row that did not complete has a reason recorded against",
-      "it, and the prices that did apply are live. Resuming retries only the rows that",
-      "are outstanding.",
+      n.revert
+        ? "Nothing is hidden: every price that did not go back has a reason recorded against it. Resuming the revert retries only those."
+        : "Nothing is hidden: every row that did not complete has a reason recorded against",
+      n.revert ? "" : "it, and the prices that did apply are live. Resuming retries only the rows that",
+      n.revert ? "" : "are outstanding.",
       ...reasonLines(n.reasons),
       link(n.campaignUrl, "Open the campaign to review and resume"),
     ]
@@ -132,9 +148,11 @@ function runPartial(n: RunNotification): Email {
 
 function runFailed(n: RunNotification): Email {
   return {
-    subject: `"${n.campaignName}" could not run`,
+    subject: n.revert ? `"${n.campaignName}" could not finish reverting` : `"${n.campaignName}" could not run`,
     text: [
-      `"${n.campaignName}" stopped before it could finish.`,
+      n.revert
+        ? `Reverting "${n.campaignName}" stopped before it could finish, so parts of the sale may still be live.`
+        : `"${n.campaignName}" stopped before it could finish.`,
       "",
       ...countLines(n.counts),
       ...reasonLines(n.reasons),

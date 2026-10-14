@@ -208,6 +208,7 @@ export async function runCampaign(
     // throws straight past the terminal update, but the gap was never specific to that
     // path — every `await` after the row is created had it.
     const failed = await failRun(started.runId, error, started.writing === true);
+    if (failed?.ended) await notifyRunFailed(shopId, campaignId, options, failed, error, started.writing === true);
 
     // It wrote, then threw (#802). Handing the campaign back to where it started -- Draft,
     // for a manual apply -- told the merchant "nothing has been written to your storefront"
@@ -306,6 +307,8 @@ interface FailedRun {
   applied: number;
   /** Rows inside a bulk operation Shopify accepted, outcome not yet read (#832). */
   sent: number;
+  /** Rows Shopify refused or the read-back disagreed with. */
+  failed: number;
   planned: number;
 }
 
@@ -359,7 +362,7 @@ async function failRun(runId: string | undefined, error: unknown, writing = fals
       }
       await settleMirror(runId);
     }
-    return { ended: ended.count > 0, verified, applied, sent, planned: run?.plannedRows ?? 0 };
+    return { ended: ended.count > 0, verified, applied, sent, failed, planned: run?.plannedRows ?? 0 };
   } catch (failure) {
     // Imported here rather than at the top, matching the one other use in this file.
     const { logger } = await import("../../lib/logging/logger");
@@ -369,6 +372,42 @@ async function failRun(runId: string | undefined, error: unknown, writing = fals
       original: error instanceof Error ? error.message : String(error),
     });
     return null;
+  }
+}
+
+/**
+ * A run that stopped by throwing, emailed to a merchant who asked to hear about failures
+ * (#710). `run-failed` had a template and a preference and no sender: `notify` was only
+ * reached on a normal return, so a guardrail block, a lost session or a crash part-way
+ * through reached nobody who had closed the tab. Best-effort, as every notification is:
+ * telling the merchant must never change what happened.
+ */
+async function notifyRunFailed(
+  shopId: string,
+  campaignId: string,
+  options: RunOptions,
+  failed: FailedRun,
+  error: unknown,
+  writing: boolean,
+): Promise<void> {
+  try {
+    const campaign = await prisma.campaign.findUnique({ where: { id: campaignId }, select: { name: true } });
+    void notify(shopId, {
+      campaignId,
+      kind: "run-failed",
+      revert: options.revert === true,
+      campaignName: campaign?.name ?? "Your campaign",
+      counts: {
+        verified: failed.verified,
+        failed: failed.failed,
+        unverified: failed.applied + failed.sent,
+        skipped: 0,
+        clamped: 0,
+      },
+      reasons: [writing ? stoppedPartWay(error, failed, options).userMessage : toAppError(error).userMessage],
+    });
+  } catch {
+    // Never let telling the merchant about a failure become a second one.
   }
 }
 
@@ -1109,11 +1148,9 @@ async function executeCampaignRun(
   // and never blocks the outcome being returned.
   void notify(shopId, {
     campaignId,
-    kind: options.revert
-      ? "revert-completed"
-      : result.clean
-        ? "run-completed"
-        : "run-partial",
+    // A revert that left prices on sale is a partial run, not "has been reverted" (#710).
+    kind: result.clean ? (options.revert ? "revert-completed" : "run-completed") : "run-partial",
+    revert: options.revert === true,
     campaignName: campaignName ?? "Your campaign",
     counts: {
       verified: result.verified,

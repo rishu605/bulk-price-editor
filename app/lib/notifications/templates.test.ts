@@ -33,6 +33,36 @@ describe("compose", () => {
     expect(email.subject).toContain("12 variants updated");
   });
 
+  it("counts unverified rows as needing attention, not only failed ones (#710)", () => {
+    const email = compose({
+      kind: "run-partial",
+      campaignId: "c1",
+      campaignName: "Summer",
+      counts: counts({ failed: 0, unverified: 12 }),
+    });
+    expect(email.subject).toBe('"Summer" finished partially — 12 rows need attention');
+  });
+
+  it("says a revert that left prices on sale is a partial revert, with its reasons (#710)", () => {
+    const email = compose({
+      kind: "run-partial",
+      revert: true,
+      campaignId: "c1",
+      campaignName: "Summer",
+      counts: counts({ failed: 300 }),
+      reasons: ["Shopify refused 300 prices."],
+    });
+    expect(email.subject).toBe('"Summer" finished reverting partially — 300 rows need attention');
+    expect(email.text).toContain("parts of the sale may still be live");
+    expect(email.text).toContain("Shopify refused 300 prices.");
+    expect(email.text).not.toContain("has been reverted.");
+  });
+
+  it("says a revert that stopped could not finish reverting (#710)", () => {
+    const email = compose({ kind: "run-failed", revert: true, campaignId: "c1", campaignName: "Summer", counts: counts() });
+    expect(email.subject).toBe('"Summer" could not finish reverting');
+  });
+
   it("says a partial run is partial, and how to finish it", () => {
     const email = compose({
       kind: "run-partial",
