@@ -97,7 +97,7 @@ describe("chaos: draft and archived products (#751)", () => {
       expect(preview.leftOutByStatus).toBe(2);
       expect(await scopeSize(shopId, campaign.id), "the campaign's scope differs from its preview's").toBe(2);
 
-      const run = await runCampaign(shopId, campaign.id, client, { verifySampleRate: 1 });
+      const run = await runCampaign(shopId, campaign.id, client, { actor: "chaos", verifySampleRate: 1 });
       expect(run.verified).toBe(2);
       expect(chaos.fake.priceOf(active[0]!)).toBe(at(active[0]!, 0.8));
       expect(chaos.fake.priceOf(active[1]!)).toBe(at(active[1]!, 0.8));
@@ -124,7 +124,7 @@ describe("chaos: draft and archived products (#751)", () => {
       expect(preview.matched).toBe(4);
       expect(preview.leftOutByStatus).toBe(0);
 
-      const run = await runCampaign(shopId, campaign.id, client, { verifySampleRate: 1 });
+      const run = await runCampaign(shopId, campaign.id, client, { actor: "chaos", verifySampleRate: 1 });
       expect(run.verified).toBe(4);
       expect(chaos.fake.priceOf(draft)).toBe(at(draft, 0.8));
       expect(chaos.fake.priceOf(archived)).toBe(at(archived, 0.8));
@@ -144,7 +144,7 @@ describe("chaos: draft and archived products (#751)", () => {
       // campaign made before #751 is now, having had no statuses recorded -- and what any
       // sale is when a product is archived half-way through it.
       const { campaign } = await allVariantsSale(chaos, { includeDraft: "1", includeArchived: "1" });
-      await runCampaign(shopId, campaign.id, client, { verifySampleRate: 1 });
+      await runCampaign(shopId, campaign.id, client, { actor: "chaos", verifySampleRate: 1 });
       expect(variantGids.map((gid) => chaos.fake.priceOf(gid))).toEqual(variantGids.map((gid) => at(gid, 0.8)));
 
       const record = await prisma.campaign.findUniqueOrThrow({ where: { id: campaign.id }, select: { schedule: true } });
@@ -165,7 +165,7 @@ describe("chaos: draft and archived products (#751)", () => {
       expect(after.get(draft), "the revert confirmation leaves out a price the revert takes back").toBe(usd(draft));
       expect(after.get(archived), "the revert confirmation leaves out a price the revert takes back").toBe(usd(archived));
 
-      const revert = await runCampaign(shopId, campaign.id, client, { revert: true, verifySampleRate: 1 });
+      const revert = await runCampaign(shopId, campaign.id, client, { actor: "chaos", revert: true, verifySampleRate: 1 });
       expect(revert.clean).toBe(true);
       expect(variantGids.map((gid) => chaos.fake.priceOf(gid)), "a price stayed on sale after the sale ended").toEqual(
         variantGids.map((gid) => at(gid, 1)),
@@ -205,7 +205,7 @@ describe("chaos: draft and archived products (#751)", () => {
       });
       expect(await scopeSize(shopId, quick.id)).toBe(home.onSale);
 
-      const run = await runCampaign(shopId, quick.id, client, { verifySampleRate: 1 });
+      const run = await runCampaign(shopId, quick.id, client, { actor: "chaos", verifySampleRate: 1 });
       expect(run.verified).toBe(2);
       const untouched = [draft, archived].map((gid) => chaos.fake.priceOf(gid));
       expect(untouched).toEqual([draft, archived].map((gid) => (baseline.get(gid)! / 100).toFixed(2)));
