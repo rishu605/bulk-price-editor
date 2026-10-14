@@ -191,3 +191,24 @@ describe("a Partial campaign's explanation follows what its run got done (#927)"
     }
   });
 });
+
+describe("an active campaign that a higher-priority one outranks everywhere (#837)", () => {
+  it("does not claim the storefront shows its price, and names who does", () => {
+    const described = describeState("ACTIVE", { outrankedBy: ["QA 687 high"] });
+    expect(described.explanation).not.toContain("Your storefront shows the campaign price");
+    expect(described.explanation).toContain("QA 687 high outranks it on every variant it covers");
+    expect(described.explanation).toContain("takes over when it ends");
+    expect(described.label, "still Active: it is running, and will price them").toBe("Active");
+  });
+
+  it("names several in one sentence", () => {
+    expect(describeState("ACTIVE", { outrankedBy: ["Autumn", "Clearance", "VIP"] }).explanation).toContain(
+      "Autumn, Clearance and VIP outrank it",
+    );
+  });
+
+  it("says the storefront shows its price when nothing outranks it everywhere", () => {
+    expect(describeState("ACTIVE", { outrankedBy: [] }).explanation).toContain("Your storefront shows the campaign price");
+    expect(describeState("ACTIVE").explanation).toContain("Your storefront shows the campaign price");
+  });
+});

@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { overlapSentences, overlapsFrom } from "./overlaps";
+import { alreadyCorrectBy, alreadyCorrectFacts, outrankedBy, overlapSentences, overlapsFrom } from "./overlaps";
 import type { PlanCoverage } from "./types";
 
 const OTHERS = [
@@ -68,5 +68,81 @@ describe("the sentences the Apply dialog shows", () => {
       "Autumn sale keeps 1,240 variants; it outranks this campaign.",
       "This campaign takes 1 variant from Clearance (held for a hand edit); reverting it hands them back.",
     ]);
+  });
+});
+
+describe("who prices the variants already at their price (#837)", () => {
+  /**
+   * The live repro: "QA 687 high" (priority 200) priced the probe, then "QA 687 low" was
+   * applied under it. Its Apply dialog said "Already correct 1 — no write needed, still owned
+   * by this campaign", about a variant the high sale was pricing.
+   */
+  let n = 0;
+  const at = (campaignId?: string) => ({
+    ref: { variantGid: `gid/${n++}`, surfaceKind: "base" as const, priceListGid: "", currency: "USD" },
+    campaignId,
+  });
+
+  it("splits them by the resolver's winner: this campaign, another by name, or nobody", () => {
+    const already = alreadyCorrectBy(
+      [at("draft"), at("draft"), at("c_autumn"), at("c_clear"), at("c_autumn"), at(undefined)],
+      "draft",
+      OTHERS,
+    );
+
+    expect(already).toEqual({
+      own: 2,
+      unpriced: 1,
+      others: [
+        { campaignId: "c_autumn", name: "Autumn sale", status: "ACTIVE", variants: 2 },
+        { campaignId: "c_clear", name: "Clearance", status: "HELD", variants: 1 },
+      ],
+    });
+  });
+
+  it("never calls another campaign's variant this campaign's", () => {
+    const facts = alreadyCorrectFacts(1, alreadyCorrectBy([at("c_autumn")], "draft", OTHERS));
+    const said = facts.map((fact) => `${fact.label}: ${fact.text}`).join(" | ");
+
+    expect(said).not.toContain("this campaign's price");
+    expect(said).not.toContain("owned by this campaign");
+    expect(said).toContain("1 variant priced by Autumn sale until it ends");
+  });
+
+  it("says the ones at this campaign's price are, under their own label", () => {
+    const facts = alreadyCorrectFacts(3, alreadyCorrectBy([at("draft"), at("draft"), at("c_clear")], "draft", OTHERS));
+
+    expect(facts).toEqual([
+      { label: "Already correct", text: "2 variants already at this campaign's price — no write needed" },
+      {
+        label: "Priced by another campaign",
+        text: "1 variant priced by Clearance (held for a hand edit) until it ends, so nothing is written for it.",
+      },
+    ]);
+  });
+
+  it("claims no owner at all for a preview made without the split", () => {
+    expect(alreadyCorrectFacts(4, undefined)).toEqual([{ label: "Already correct", text: "4 — no write needed" }]);
+    expect(alreadyCorrectFacts(0, undefined)).toEqual([]);
+  });
+});
+
+describe("a campaign that prices none of what it covers (#837)", () => {
+  it("names the campaigns pricing every variant it covers", () => {
+    expect(outrankedBy([cover("low", 3, 0, { c_autumn: 2, c_clear: 1 })], "low", OTHERS)).toEqual(["Autumn sale", "Clearance"]);
+  });
+
+  it("names nobody once it prices even one", () => {
+    expect(outrankedBy([cover("low", 3, 1, { c_autumn: 2 })], "low", OTHERS)).toEqual([]);
+  });
+
+  it("names nobody when some of what it covers is priced by no campaign at all", () => {
+    // A rule row that matches none of them: the storefront shows no campaign's price there.
+    expect(outrankedBy([cover("low", 3, 0, { c_autumn: 2 })], "low", OTHERS)).toEqual([]);
+  });
+
+  it("names nobody for a campaign with nothing in scope", () => {
+    expect(outrankedBy([], "low", OTHERS)).toEqual([]);
+    expect(outrankedBy([cover("low", 0, 0)], "low", OTHERS)).toEqual([]);
   });
 });

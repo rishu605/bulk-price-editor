@@ -14,7 +14,7 @@
  */
 
 import { formatCount } from "../format/display";
-import type { PlanCoverage } from "./types";
+import type { PlanCoverage, PlanUnchanged } from "./types";
 
 export interface Overlap {
   campaignId: string;
@@ -56,6 +56,107 @@ export function overlapsFrom(
     })
     .filter((overlap) => overlap.keeps + overlap.yields > 0)
     .sort((a, b) => b.keeps + b.yields - (a.keeps + a.yields) || a.name.localeCompare(b.name));
+}
+
+/**
+ * The variants a plan found already at their price (`counts.noop`), by who prices them (#837).
+ *
+ * "Already correct" only means the live price equals the resolved one, and the resolved one
+ * can be another campaign's. The Apply dialog called every one of them "still owned by this
+ * campaign", so a sale applied under a higher-priority one was told it owned the variants the
+ * other one was pricing. Split by the resolver's own winner, never by comparing prices here.
+ */
+export interface AlreadyCorrect {
+  /** At this campaign's own price: the resolver gives it the variant. */
+  own: number;
+  /** At their normal price: no campaign prices them -- excluded, or no rule row matches. */
+  unpriced: number;
+  /** At another campaign's price, which outranks this one: by campaign, biggest first. */
+  others: Array<{ campaignId: string; name: string; status: string; variants: number }>;
+}
+
+export function alreadyCorrectBy(
+  unchanged: readonly PlanUnchanged[],
+  plannedId: string,
+  others: ReadonlyArray<{ id: string; name: string; status: string }>,
+): AlreadyCorrect {
+  const byId = new Map(others.map((other) => [other.id, other]));
+  const kept = new Map<string, number>();
+  let own = 0;
+  let unpriced = 0;
+  for (const { campaignId } of unchanged) {
+    if (campaignId === plannedId) own++;
+    else if (!campaignId) unpriced++;
+    else kept.set(campaignId, (kept.get(campaignId) ?? 0) + 1);
+  }
+  return {
+    own,
+    unpriced,
+    others: [...kept]
+      .map(([campaignId, variants]) => ({
+        campaignId,
+        name: byId.get(campaignId)?.name ?? "Another campaign",
+        status: byId.get(campaignId)?.status ?? "ACTIVE",
+        variants,
+      }))
+      .sort((a, b) => b.variants - a.variants || a.name.localeCompare(b.name)),
+  };
+}
+
+/**
+ * The Apply dialog's lines for the variants already at their price: each kind under its own
+ * label, and another campaign's by name (#837). Without the split -- a preview made before it
+ * existed -- a count, claiming no owner.
+ */
+export function alreadyCorrectFacts(
+  noop: number,
+  already: AlreadyCorrect | undefined,
+): Array<{ label: string; text: string }> {
+  const count = (n: number) => `${formatCount(n)} ${n === 1 ? "variant" : "variants"}`;
+  if (!already) return noop > 0 ? [{ label: "Already correct", text: `${formatCount(noop)} — no write needed` }] : [];
+  return [
+    ...(already.own > 0
+      ? [{ label: "Already correct", text: `${count(already.own)} already at this campaign's price — no write needed` }]
+      : []),
+    ...(already.others.length > 0
+      ? [
+          {
+            label: "Priced by another campaign",
+            text: already.others
+              .map(
+                (other) =>
+                  `${count(other.variants)} priced by ${other.name}${stateNote(other.status)} until it ends, so nothing is written for ${other.variants === 1 ? "it" : "them"}.`,
+              )
+              .join(" "),
+          },
+        ]
+      : []),
+    ...(already.unpriced > 0
+      ? [{ label: "At normal price", text: `${count(already.unpriced)} this campaign does not price — no write needed` }]
+      : []),
+  ];
+}
+
+/**
+ * The campaigns pricing every variant this one covers, when it prices none of them itself
+ * (#837) -- the case where "your storefront shows the campaign price" is false. Empty when
+ * it prices any, covers none, or any of what it covers is priced by nobody: no sentence
+ * about who outranks it would then be true of all of them.
+ */
+export function outrankedBy(
+  coverage: readonly PlanCoverage[],
+  plannedId: string,
+  others: ReadonlyArray<{ id: string; name: string }>,
+): string[] {
+  const own = coverage.find((entry) => entry.campaignId === plannedId);
+  if (!own || own.covers === 0 || own.wins > 0) return [];
+  const yielded = Object.values(own.yieldsTo).reduce((sum, n) => sum + n, 0);
+  if (yielded < own.covers) return [];
+  const byId = new Map(others.map((other) => [other.id, other.name]));
+  return Object.entries(own.yieldsTo)
+    .filter(([, n]) => n > 0)
+    .sort(([, a], [, b]) => b - a)
+    .map(([campaignId]) => byId.get(campaignId) ?? "Another campaign");
 }
 
 /** A campaign's state, said where it changes the reading: a held one still keeps its prices. */

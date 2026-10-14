@@ -27,6 +27,11 @@ The revert notices. A product whose live price is not what we wrote is reported 
 silently overwrite a price a person set — but we never silently ignore it either, because
 that would leave a product that no longer matches what the app believes.
 
+A product whose live price is already what reverting would write is not drifted, and the
+revert asks nothing about it. That is usually a higher-priority campaign that took the
+product over: its price is live, and it stays when this campaign ends. The report lists such
+a product as **Already there**.
+
 ## Related
 
 - [What a baseline is](./baselines.md)

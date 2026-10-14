@@ -22,7 +22,13 @@ const STATE: Record<RollbackRow["kind"], { label: string; tone: "info" | "warnin
   drifted: { label: "Changed since", tone: "warning" },
   deleted: { label: "Deleted", tone: "neutral" },
   clean: { label: "Unchanged", tone: "info" },
+  // Live is already what the revert writes -- usually a higher-priority campaign's price
+  // (#836). Not a decision, so no checkbox, and capped with the clean rows.
+  unaffected: { label: "Already there", tone: "neutral" },
 };
+
+/** Rows that need no decision: reassurance, so the view may cap them. */
+const ORDINARY: ReadonlySet<RollbackRow["kind"]> = new Set(["clean", "unaffected"]);
 
 /**
  * Which rows this table may leave out, and which it may not.
@@ -41,8 +47,8 @@ const STATE: Record<RollbackRow["kind"], { label: string; tone: "info" | "warnin
  * thousand identical rows do, in one line instead of eighty screens.
  */
 export function rowsToShow(rows: RollbackRow[]): RollbackRow[] {
-  const decisions = rows.filter((row) => row.kind !== "clean");
-  const clean = rows.filter((row) => row.kind === "clean");
+  const decisions = rows.filter((row) => !ORDINARY.has(row.kind));
+  const clean = rows.filter((row) => ORDINARY.has(row.kind));
 
   return [...decisions, ...clean.slice(0, Math.max(0, ROWS_PER_VIEW - decisions.length))];
 }
@@ -57,7 +63,7 @@ export function RollbackReportTable({ rows }: { rows: RollbackRow[] }) {
       shown={shown.length}
       total={rows.length}
       noun="rows"
-      suffix="The rest are unchanged and revert without argument; the export lists every one."
+      suffix="The rest need no decision; the export lists every one."
     />}
     >
 <s-table>
@@ -82,7 +88,7 @@ export function RollbackReportTable({ rows }: { rows: RollbackRow[] }) {
               <RowState
                 label={STATE[row.kind].label}
                 tone={STATE[row.kind].tone}
-                ordinary={row.kind === "clean"}
+                ordinary={ORDINARY.has(row.kind)}
               />
             </s-table-cell>
             <s-table-cell>{row.applied ?? <Blank />}</s-table-cell>

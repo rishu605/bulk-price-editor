@@ -13,6 +13,9 @@
  * lists that conversation needs: rows that will revert cleanly, and rows where
  * somebody else got there first.
  *
+ * A variant a higher-priority campaign took over is neither. Its live price is already
+ * what the revert leaves there, so there is no edit to ask about (#836).
+ *
  * Deleted variants are their own category rather than an error. A merchant removing a
  * product mid-sale is ordinary; reporting it as a problem to resolve trains people to
  * click past the list, which is how the rows that do matter get missed (E4).
@@ -59,13 +62,6 @@ export async function rollbackReport(
   // to" its sale price here while the revert put its baseline back.
   const candidates = await withWritten(shopId, scoped, written, importIdsOf(resolvable));
 
-  // The report is a list of what this campaign wrote, so the ledger defines the rows
-  // -- not the campaign's current filter. Those are different sets, and the
-  // difference is exactly where the interesting rows live: `loadCandidates` drops
-  // tombstoned variants by design, so a product deleted mid-sale would vanish from a
-  // filter-driven report rather than being reported as deleted (E4).
-  const appliedGids = [...applied.keys()];
-
   // The same planner the revert itself will use, so the "reverts to" column cannot
   // disagree with what happens when the merchant clicks the button.
   const outcome = planRun({
@@ -75,6 +71,28 @@ export async function rollbackReport(
     excludeCampaignId: campaignId,
     heldEdits,
   });
+
+  // The report is a list of what this campaign wrote, so the ledger defines the rows
+  // -- not the campaign's current filter. Those are different sets, and the
+  // difference is exactly where the interesting rows live: `loadCandidates` drops
+  // tombstoned variants by design, so a product deleted mid-sale would vanish from a
+  // filter-driven report rather than being reported as deleted (E4).
+  //
+  // Plus what it prices without having written it (#837). A higher-priority sale's revert
+  // hands its variants to this one, and that write is ledgered under the revert that made
+  // it -- so this campaign's ledger never learns it prices them, and its Revert dialog said
+  // "0 variants are priced by this campaign" before rewriting every one. Who prices them is
+  // the planner's answer, as an apply sees it: already at this campaign's price, with this
+  // campaign the resolver's winner.
+  const inScope = new Map(candidates.map((c) => [c.ref.variantGid, c]));
+  const owned = new Map(applied);
+  const current = planRun({ campaigns: resolvable, candidates, storeGuardrails, heldEdits });
+  for (const { ref, campaignId: winner } of current.kind === "ok" ? current.unchanged : []) {
+    const price = inScope.get(ref.variantGid)?.livePrice;
+    if (winner !== campaignId || ref.priceListGid !== "" || owned.has(ref.variantGid) || !price) continue;
+    owned.set(ref.variantGid, BigInt(price.amount));
+  }
+  const appliedGids = [...owned.keys()];
 
   const [titles, mirror] = await Promise.all([
     titleMapFor(shopId, appliedGids),
@@ -90,13 +108,18 @@ export async function rollbackReport(
       : [],
   );
 
-  // Where the planner found no row, the variant is already where the revert would put
-  // it -- so it reverts to what it currently shows, not to nothing.
-  const inScope = new Map(candidates.map((c) => [c.ref.variantGid, c]));
+  // What the revert writes, in minor units, for the classification (#836): the price of
+  // each row it plans, and for a variant already at its answer, that answer -- the live
+  // price. A row it skips has no answer, and is compared with what was applied alone.
+  const writes = new Map<string, number>();
+  if (outcome.kind === "ok") {
+    for (const row of outcome.rows) if (row.intendedPrice) writes.set(row.ref.variantGid, row.intendedPrice.amount);
+  }
+  const alreadyThere = new Set(outcome.kind === "ok" ? outcome.unchanged.map((row) => row.ref.variantGid) : []);
 
   const rows: RollbackRow[] = [];
 
-  for (const [gid, wrote] of applied) {
+  for (const [gid, wrote] of owned) {
     const state = mirror.get(gid);
     const currency = state?.currency ?? inScope.get(gid)?.ref.currency ?? "USD";
     const live = state?.livePrice ?? null;
@@ -107,6 +130,7 @@ export async function rollbackReport(
       deleted: state === undefined || state.deleted,
       applied: wrote === null ? null : Number(wrote),
       live: live === null ? null : Number(live),
+      revertsTo: writes.get(gid) ?? (alreadyThere.has(gid) && live !== null ? Number(live) : null),
     });
 
     rows.push({
@@ -116,7 +140,8 @@ export async function rollbackReport(
       applied: wrote === null ? null : format(money(Number(wrote), currency)),
       live: live === null ? null : format(money(Number(live), currency)),
       // A deleted variant has nowhere to revert to, and claiming otherwise implies a
-      // write that cannot happen.
+      // write that cannot happen. Where the planner found no row, the variant is already
+      // where the revert would put it -- so it reverts to what it currently shows.
       revertsTo:
         kind === "deleted"
           ? null
@@ -127,7 +152,7 @@ export async function rollbackReport(
 
   // Rows needing a decision first: this is a list people skim, and the ones that
   // matter must not be below the fold.
-  const order: Record<RollbackRowKind, number> = { drifted: 0, deleted: 1, clean: 2 };
+  const order: Record<RollbackRowKind, number> = { drifted: 0, deleted: 1, clean: 2, unaffected: 3 };
   rows.sort((a, b) => order[a.kind] - order[b.kind] || a.title.localeCompare(b.title));
 
   const counts = {
@@ -135,6 +160,7 @@ export async function rollbackReport(
     clean: rows.filter((r) => r.kind === "clean").length,
     drifted: rows.filter((r) => r.kind === "drifted").length,
     deleted: rows.filter((r) => r.kind === "deleted").length,
+    unaffected: rows.filter((r) => r.kind === "unaffected").length,
   };
 
   return {

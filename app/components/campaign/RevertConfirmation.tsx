@@ -1,4 +1,5 @@
 import { formatCount } from "../../lib/format/display";
+import { unaffectedSentence } from "../../lib/reporting/rollback";
 import { SPACE } from "../../lib/ui/spacing";
 import type { KeepersAfterRevert } from "../../services/campaigns/keepers.server";
 import { Secondary } from "../Type";
@@ -37,7 +38,7 @@ export function RevertConfirmation({
 }: {
   campaignName: string;
   /** From the rollback report the page already has. */
-  counts: { total: number; drifted: number; deleted: number };
+  counts: { total: number; drifted: number; deleted: number; unaffected: number };
   /** Asked for when the modal opens, because answering means planning the scope again. */
   keepers: KeepersAfterRevert | null;
   pending: boolean;
@@ -46,6 +47,7 @@ export function RevertConfirmation({
   /** Commit. A callback rather than a passed-in control — see the button below. */
   onConfirm: () => void;
 }) {
+  const priced = counts.total - counts.unaffected;
   return (
     <s-modal id={REVERT_MODAL_ID} heading={`Revert ${campaignName}?`}>
       <s-stack gap={SPACE.section}>
@@ -59,12 +61,19 @@ export function RevertConfirmation({
         </s-paragraph>
 
         <s-stack gap={SPACE.item}>
+          {/* What this campaign prices: the variants its revert rewrites, those another
+              campaign's revert handed it included (#837). Not the ones a higher-priority
+              campaign has taken over, whose price reverting leaves where it is (#836). */}
           <s-paragraph>
-            <s-text type="strong">{formatCount(counts.total)}</s-text>{" "}
+            <s-text type="strong">{formatCount(priced)}</s-text>{" "}
             <s-text>
-              {counts.total === 1 ? "variant is" : "variants are"} priced by this campaign.
+              {priced === 1 ? "variant is" : "variants are"} priced by this campaign.
             </s-text>
           </s-paragraph>
+
+          {unaffectedSentence(counts.unaffected) ? (
+            <Secondary>{unaffectedSentence(counts.unaffected)}</Secondary>
+          ) : null}
 
           {counts.drifted > 0 ? (
             <s-paragraph>

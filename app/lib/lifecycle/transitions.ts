@@ -146,6 +146,11 @@ export function describeState(
      * written and verified" over a bulk run that had verified none.
      */
     progress?: { confirmed: number; unconfirmed: number };
+    /**
+     * The campaigns pricing every variant an active campaign covers, when it prices none
+     * itself (#837): the preview's `outrankedBy`. Empty or absent otherwise.
+     */
+    outrankedBy?: readonly string[];
   } = {},
 ): StateDescription {
   switch (state) {
@@ -183,8 +188,11 @@ export function describeState(
       return {
         label: "Active",
         tone: "success",
-        explanation:
-          "Running, and every row was read back and verified. Your storefront shows the campaign price.",
+        // Not while a higher-priority campaign prices every variant this one covers (#837):
+        // the storefront shows that campaign's price, and this one's takes over when it ends.
+        explanation: context.outrankedBy?.length
+          ? outranked(context.outrankedBy)
+          : "Running, and every row was read back and verified. Your storefront shows the campaign price.",
         nextAction: { label: "Revert", intent: "revert" },
       };
     case "HELD":
@@ -258,6 +266,20 @@ function partialExplanation(reverting: boolean, progress?: { confirmed: number; 
   return reverting
     ? "Some prices were put back and verified; others were not, so parts of the sale may still be live. The ledger names every row and why it stopped. Resuming finishes the revert."
     : "Some prices were written and verified; others were not. The ledger names every row and why it stopped. Resuming retries only what is outstanding — rows already correct are left alone.";
+}
+
+/**
+ * An active campaign's status line when other campaigns price every variant it covers (#837),
+ * naming them: "A", "A and B", "A, B and C".
+ */
+function outranked(names: readonly string[]): string {
+  const one = names.length === 1;
+  const who = one ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  return (
+    `Running, but ${who} ${one ? "outranks" : "outrank"} it on every variant it covers, so your ` +
+    `storefront shows ${one ? "that campaign's" : "their"} price. This campaign's price takes over ` +
+    `when ${one ? "it ends" : "they end"}.`
+  );
 }
 
 /** Every state, for exhaustive iteration in tests and pickers. */

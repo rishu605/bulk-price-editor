@@ -1,4 +1,4 @@
-import { overlapSentences } from "../../lib/planning/overlaps";
+import { alreadyCorrectFacts, overlapSentences } from "../../lib/planning/overlaps";
 import { useRef, type ElementRef } from "react";
 
 import { describeRunDuration } from "../../lib/planning/duration";
@@ -113,11 +113,15 @@ export function ApplyConfirmation({
             {formatCount(counts.planned + counts.noop + counts.skipped)} variants in scope
           </Fact>
 
-          {counts.noop > 0 ? (
-            <Fact label="Already correct">
-              {formatCount(counts.noop)} — no write needed, still owned by this campaign
+          {/* Already at the price the plan resolves, said by who prices it (#837). It read
+              "still owned by this campaign" for every one, including the variants a
+              higher-priority sale was pricing -- the ownership backwards, on the screen
+              where the merchant decides. */}
+          {alreadyCorrectFacts(counts.noop, preview.alreadyCorrect).map((fact) => (
+            <Fact key={fact.label} label={fact.label}>
+              {fact.text}
             </Fact>
-          ) : null}
+          ))}
 
           {counts.skipped > 0 ? (
             <Fact label="Left alone">{formatCount(counts.skipped)}, with reasons on the Preview tab</Fact>
