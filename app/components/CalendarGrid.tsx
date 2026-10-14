@@ -77,12 +77,24 @@ export function CalendarGrid({ days, today }: { days: CalendarDay[]; today: stri
                   <s-clickable
                     key={`${day.date}-${entry.campaignId}`}
                     href={`/app/campaigns/${entry.campaignId}`}
+                    // The name on every day for a screen reader, which cannot see that a
+                    // dot sits in the same place as the name at the start of its row.
+                    accessibilityLabel={entry.name}
                   >
                     <s-badge tone={toneFor(CAMPAIGN_TONE, entry.status)}>
-                      {/* Only the starting day carries the name. Repeating it on every
-                          day of a two-week sale turns the grid into a wall of the same
-                          words and hides the days something actually happens. */}
-                      {entry.starts ? entry.name : entry.continues ? "→" : "·"}
+                      {/* The name where it starts and at the start of every week row it
+                          runs on into (#768), so no row is a line of dots with nothing to
+                          say whose they are. Not on every day: repeating it across a
+                          two-week sale turns the grid into a wall of the same words and
+                          hides the days something actually happens. The leading "…" says
+                          the row is a continuation, so a Sunday is not read as its start. */}
+                      {entry.starts
+                        ? entry.name
+                        : entry.named
+                          ? `… ${entry.name}`
+                          : entry.continues
+                            ? "→"
+                            : "·"}
                     </s-badge>
                   </s-clickable>
                 ))}
@@ -90,12 +102,17 @@ export function CalendarGrid({ days, today }: { days: CalendarDay[]; today: stri
                 {/* What actually happened that day, as distinct from what was
                     scheduled. A campaign set for the 3rd that ended up partial on the
                     4th is a merchant's whole question, and a calendar showing only the
-                    intention cannot answer it. */}
+                    intention cannot answer it.
+
+                    Each names its campaign (#768). A busy day was a column of eleven
+                    "applied" and "reverted" with no way to tell whose was whose short of
+                    clicking each. The state is in brackets rather than after a "·",
+                    because campaign names use that dot themselves. */}
                 {day.runs.map((run) => (
                   <s-clickable key={run.runId} href={`/app/campaigns/${run.campaignId}`}>
                     <s-text tone={run.status === "COMPLETED" ? "success" : "critical"}>
-                      {run.kind === "REVERT" ? "reverted" : "applied"}
-                      {run.status === "COMPLETED" ? "" : ` · ${run.status.toLowerCase()}`}
+                      {run.kind === "REVERT" ? "Reverted" : "Applied"} {run.name}
+                      {run.status === "COMPLETED" ? "" : ` (${run.status.toLowerCase()})`}
                     </s-text>
                   </s-clickable>
                 ))}

@@ -217,6 +217,18 @@ export function describeSchedule(schedule: Schedule, timeZone: string, status?: 
     return `Was to start ${format(schedule.startAt)} (${timeZone}). Cancelled, so it will not run.`;
   }
 
+  // Nor beside a Completed one (#768). "QA · end before start" was applied and reverted
+  // by hand days before the start it was set for, and its page went on promising "Starts
+  // 30 Sep … Runs until you revert it" -- a run the scheduler, which picks up only
+  // scheduled and live campaigns, was never going to make.
+  if (status === "COMPLETED") {
+    const until = schedule.endAt ? ` to ${format(schedule.endAt)}` : "";
+    return (
+      `Was scheduled for ${format(schedule.startAt)}${until} (${timeZone}). ` +
+      `It has finished, so the schedule will not start it again.`
+    );
+  }
+
   const start = `Starts ${format(schedule.startAt)}`;
   if (!schedule.endAt) return `${start} (${timeZone}). Runs until you revert it.`;
 
