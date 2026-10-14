@@ -42,6 +42,7 @@ import {
   compareAtFrom,
   readerFor,
   ruleFrom,
+  ruleInputProblem,
   SCOPE_CONDITION_FIELDS,
 } from "../lib/campaigns/draft-form";
 import { PageSections, PageShell } from "../components/PageShell";
@@ -283,6 +284,12 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
   // literal 100, so a JPY amount came out a hundred times too large as well (#343).
   const read = readerFor(form);
   const currency = await shopCurrency(shop.id);
+  // Refused here, naming the field (#696). A blank amount read as 0, so an exact price left
+  // empty saved a campaign that priced the whole scope at 0.01; a decimal comma crashed.
+  const ruleProblem = ruleInputProblem(read);
+  if (ruleProblem) {
+    throw new AppError({ code: "VALIDATION", userMessage: `${ruleProblem} Nothing was created.` });
+  }
   const rule = ruleFrom(read, currency);
   const compareAtPolicy = compareAtFrom(read);
 

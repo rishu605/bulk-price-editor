@@ -49,6 +49,8 @@ export interface DraftCampaign {
   compareAtPolicy: CompareAtPolicy;
   rounding: StoredRoundingPolicy;
   priority: number;
+  /** Why the rule's amount cannot be used, if it cannot (#696). Nothing is priced then. */
+  ruleProblem?: string;
 }
 
 export interface DraftPreviewRow {
@@ -126,6 +128,11 @@ export interface DraftPreview {
    * instead of telling the merchant to loosen conditions they may not have set.
    */
   catalogue?: Exclude<CatalogueState, "ready">;
+  /**
+   * Why the rule's amount cannot be used (#696): empty, not a number, or a price of zero or
+   * less. The panel says so instead of previewing the whole scope at 0.01.
+   */
+  ruleProblem?: string;
 }
 
 const EMPTY: DraftPreview = {
@@ -178,6 +185,8 @@ export async function previewDraft(
   draft: DraftCampaign,
   limit = 25,
 ): Promise<DraftPreview> {
+  if (draft.ruleProblem) return { ...EMPTY, ruleProblem: draft.ruleProblem };
+
   const [others, settings] = await Promise.all([
     // Every campaign meant to be pricing its variants, as in a run (#821).
     competingCampaigns(shopId),

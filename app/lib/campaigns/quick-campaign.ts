@@ -40,10 +40,12 @@ export function readQuickPercent(raw: string): QuickPercent {
       message: "Enter a positive number — 20 means 20% off. Use the full editor to raise prices.",
     };
   }
+  // The typed figure, and no way round it: the full editor refuses it too (#696), and used
+  // to be recommended here as the way to price everything at 0.01.
   if (value >= 100) {
     return {
       ok: false,
-      message: "100% off would make everything free. Use the full editor if you mean that.",
+      message: `${value}% off would make every price free or negative. Enter less than 100.`,
     };
   }
 

@@ -58,6 +58,12 @@ describe("what it refuses, and why", () => {
       expect(readQuickPercent(raw), raw).toMatchObject({ ok: false });
     }
   });
+
+  it("names the figure typed, and does not send the merchant to the editor to do it anyway (#696)", () => {
+    const refused = readQuickPercent("150");
+    expect(refused).toMatchObject({ ok: false, message: "150% off would make every price free or negative. Enter less than 100." });
+    expect(refused.ok ? "" : refused.message).not.toMatch(/editor/);
+  });
 });
 
 describe("the name it gives the campaign", () => {
