@@ -37,6 +37,13 @@ export interface PriceImportResult {
   ambiguous: PriceImportProblem[];
   /** A variant the file named twice. Refused rather than letting the last row win. */
   duplicates: PriceImportProblem[];
+  /**
+   * Every row that needs attention, counted rather than listed (#766). The four lists stop
+   * at MAX_PROBLEMS each, and the report has to account for the whole file anyway: rows
+   * read = ready + this. The editor showed the length of the lists, so a file with 800
+   * bad rows said 500 and the counts did not add up.
+   */
+  problems: number;
   dryRun: boolean;
 }
 
@@ -58,7 +65,12 @@ export async function importPrices(
     unmatched: [],
     ambiguous: [],
     duplicates: [],
+    problems: 0,
     dryRun: options.dryRun === true,
+  };
+  const problem = (list: PriceImportProblem[], entry: PriceImportProblem) => {
+    result.problems++;
+    push(list, entry);
   };
 
   const variants = await prisma.variantIndex.findMany({
@@ -92,7 +104,7 @@ export async function importPrices(
 
     const validated = validateRow(raw, shopCurrency);
     if (!isValid(validated)) {
-      push(result.invalid, { line: raw.line, identifier: raw.identifier, reason: validated.reason });
+      problem(result.invalid, { line: raw.line, identifier: raw.identifier, reason: validated.reason });
       continue;
     }
 
@@ -100,7 +112,7 @@ export async function importPrices(
     // reported as "no match" (#735).
     const refusal = identifierRefusal(raw);
     if (refusal) {
-      push(result.unmatched, { line: raw.line, identifier: raw.identifier, reason: refusal });
+      problem(result.unmatched, { line: raw.line, identifier: raw.identifier, reason: refusal });
       continue;
     }
 
@@ -112,7 +124,7 @@ export async function importPrices(
     const outcome = matchIdentifiers([csvRow], index);
 
     if (outcome.ambiguous.length > 0) {
-      push(result.ambiguous, {
+      problem(result.ambiguous, {
         line: raw.line,
         identifier: raw.identifier,
         reason:
@@ -125,7 +137,7 @@ export async function importPrices(
     // A product id matches every variant of the product, and one row is one variant's
     // price: refused, as the baseline import refuses it, not applied to the first (#735).
     if (outcome.matched.length > 1) {
-      push(result.ambiguous, {
+      problem(result.ambiguous, {
         line: raw.line,
         identifier: raw.identifier,
         reason: productRefusal(outcome.matched.length, "price"),
@@ -135,7 +147,7 @@ export async function importPrices(
 
     const variantGid = outcome.matched[0];
     if (!variantGid) {
-      push(result.unmatched, {
+      problem(result.unmatched, {
         line: raw.line,
         identifier: raw.identifier,
         reason: "No variant in this shop has that SKU, barcode or ID.",
@@ -146,7 +158,7 @@ export async function importPrices(
     // A file naming a variant twice is a question, not two instructions. Letting the
     // last row win would set a price the merchant may not have meant, silently.
     if (seen.has(variantGid)) {
-      push(result.duplicates, {
+      problem(result.duplicates, {
         line: raw.line,
         identifier: raw.identifier,
         reason: "This variant already has a price earlier in the file. Remove one of the rows.",
@@ -182,11 +194,7 @@ export async function importPrices(
     importId: result.importId,
     total: result.total,
     ready: result.ready,
-    problems:
-      result.invalid.length +
-      result.unmatched.length +
-      result.ambiguous.length +
-      result.duplicates.length,
+    problems: result.problems,
     dryRun: result.dryRun,
   });
 

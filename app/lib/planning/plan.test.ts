@@ -138,6 +138,32 @@ describe("resolve-diff", () => {
     if (out.kind !== "ok") throw new Error("expected ok");
     expect(out.counts).toMatchObject({ planned: 0, noop: 1 });
   });
+
+  it("writes a file's compare-at, carried in from the candidate (#766)", () => {
+    // The loader hands each candidate its rows from every import in play; the planner
+    // must pass the compare-ats on to the resolver as it does the prices, or a file's
+    // compare-at column is checked, stored and never written.
+    const out = planRun({
+      campaigns: [
+        campaign({
+          ruleRows: [{ segmentIds: [], rule: { kind: "from-import", importId: "imp-1" } }],
+          compareAtPolicy: { kind: "from-import", importId: "imp-1" },
+        }),
+      ],
+      candidates: [
+        candidate({
+          importedPrices: { "imp-1": usd(8_000) },
+          importedCompareAts: { "imp-1": usd(9_500) },
+        }),
+      ],
+    });
+    if (out.kind !== "ok") throw new Error("expected ok");
+    expect(out.rows[0]).toMatchObject({
+      intendedPrice: usd(8_000),
+      intendedCompareAtSet: true,
+      intendedCompareAt: usd(9_500),
+    });
+  });
 });
 
 describe("guardrail policy at plan time", () => {

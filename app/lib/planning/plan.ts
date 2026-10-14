@@ -144,6 +144,7 @@ export function planRun(input: PlanInput): PlanOutcome {
       storeGuardrails,
       variantSegmentIds: candidate.segmentIds,
       importedPrices: candidate.importedPrices,
+      importedCompareAts: candidate.importedCompareAts,
     });
 
     if (onBase && resolution.meta.controlledBy) won(resolution.meta.controlledBy, applicable);

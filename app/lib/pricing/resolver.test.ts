@@ -539,6 +539,68 @@ describe("compare-at policy", () => {
     expect(result.price).toEqual(usd(1_000));
     expect(result.compareAtPrice).toEqual(usd(1_000));
   });
+
+  describe("from an imported file (#766)", () => {
+    // A spreadsheet campaign: the file names the price, and may name the compare-at.
+    const fromFile = (over: Partial<ResolvableCampaign> = {}) =>
+      campaign({
+        ruleRows: [{ segmentIds: [], rule: { kind: "from-import", importId: "imp-1" } }],
+        compareAtPolicy: { kind: "from-import", importId: "imp-1" },
+        ...over,
+      });
+    const fileSays = (compareAt: number | null, over: Partial<ResolveInput> = {}) =>
+      resolve({
+        baseline,
+        surface: USD,
+        campaigns: [fromFile()],
+        importedPrices: { "imp-1": usd(8_000) },
+        ...(compareAt === null ? {} : { importedCompareAts: { "imp-1": usd(compareAt) } }),
+        ...over,
+      });
+
+    it("writes the compare-at the file gave, rather than dropping it", () => {
+      // It was validated against the price, stored, and then never written: the campaign
+      // was "leave", so a row could be refused over a column nothing read.
+      const result = fileSays(9_500);
+      expect(result.price).toEqual(usd(8_000));
+      expect(result.compareAtPrice).toEqual(usd(9_500));
+    });
+
+    it("leaves the variant's own compare-at alone when the row gave none", () => {
+      // An empty cell is not an instruction to wipe a merchant's strike-through. Leave is
+      // `undefined`, not `null` -- the distinction the policy tests above pin.
+      expect(fileSays(null).compareAtPrice).toBeUndefined();
+    });
+
+    it("reads its own import, not another file's", () => {
+      expect(fileSays(null, { importedCompareAts: { "imp-2": usd(9_500) } }).compareAtPrice).toBeUndefined();
+    });
+
+    it("still never writes one at or below the final price (E11)", () => {
+      // The file's 90.00 was above its 80.00, and the import accepted it. A $95 floor then
+      // raised the price past it: the strike-through would show a price increase.
+      const result = resolve({
+        baseline,
+        surface: USD,
+        campaigns: [fromFile({ guardrails: { minPrice: usd(9_500) } })],
+        importedPrices: { "imp-1": usd(8_000) },
+        importedCompareAts: { "imp-1": usd(9_000) },
+      });
+      expect(result.price).toEqual(usd(9_500));
+      expect(result.compareAtPrice).toBeNull();
+    });
+
+    it("comes back off on revert, which recomputes without the campaign", () => {
+      const input: ResolveInput = {
+        baseline,
+        surface: USD,
+        campaigns: [fromFile()],
+        importedPrices: { "imp-1": usd(8_000) },
+        importedCompareAts: { "imp-1": usd(9_500) },
+      };
+      expect(resolveWithout(input, "c1").compareAtPrice).toEqual(baseline.compareAtPrice);
+    });
+  });
 });
 
 // -------------------------------------------------------------- rounding

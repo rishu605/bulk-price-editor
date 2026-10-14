@@ -212,7 +212,7 @@ export function resolve(input: ResolveInput): Resolution {
     }
   }
 
-  const compareAt = resolveCompareAt(winner, baseline, price);
+  const compareAt = resolveCompareAt(winner, baseline, price, input.importedCompareAts);
 
   if (compareAt.blocked) {
     return blocked(winner, "invalid-compare-at", rule, effectiveFloor, unrounded);
@@ -255,6 +255,7 @@ function resolveCompareAt(
   campaign: ResolvableCampaign,
   baseline: { price: Money; compareAtPrice?: Money; cost?: Money },
   finalPrice: Money,
+  importedCompareAts: ResolveInput["importedCompareAts"],
 ): CompareAtOutcome {
   const policy: CompareAtPolicy = campaign.compareAtPolicy;
 
@@ -263,6 +264,15 @@ function resolveCompareAt(
   switch (policy.kind) {
     case "leave":
       return { value: undefined };
+
+    // The file's value, through the same check as a computed one below: a guardrail can
+    // raise the price past it, and the strike-through must still show a saving (#766).
+    case "from-import": {
+      const imported = importedCompareAts?.[policy.importId];
+      if (!imported) return { value: undefined };
+      candidate = imported;
+      break;
+    }
 
     case "clear":
       return { value: null };

@@ -130,6 +130,14 @@ describe("every capability the Imports section had still exists", () => {
     expect(RECAPTURE).toContain("recapture(");
   });
 
+  it("writes the compare-at a price file gave, rather than checking it and dropping it (#766)", () => {
+    // The column was validated against the price -- refusing rows over it -- stored on
+    // every row, and then never read, because the campaign said "leave".
+    expect(PRICE_IMPORT).toContain('compareAtPolicy: { kind: "from-import", importId },');
+    expect(PRICE_IMPORT).not.toContain('compareAtPolicy: { kind: "leave" }');
+    expect(EDITOR).toContain("A compare-at column is optional");
+  });
+
   it("still offers the error CSV for both imports that had one", () => {
     expect(BASELINES).toContain("importErrorCsv");
     expect(COSTS).toContain("costErrorCsv");
@@ -264,6 +272,25 @@ describe("dropping a file", () => {
 describe("the three imports are one import", () => {
   it("blocks the commit until a dry run has found rows", () => {
     expect(IMPORT_FORM).toMatch(/disabled=\{!ready \|\| undefined\}/);
+  });
+
+  it("blocks it again when the rows change after the check (#766)", () => {
+    // The button kept the checked file's count while the box stayed editable, and the
+    // commit posts the box: a campaign from rows nobody checked. `ready` is now the check's
+    // count only while the rows are the ones it read (`commitReady`, tested on its own).
+    expect(IMPORT_FORM).toContain("const ready = commitReady(lastCheck, rows, checkedRows);");
+    expect(IMPORT_FORM).toContain("ready: lastCheck,");
+    // Heard natively: React 18 never delivers `onChange` from a Polaris field (#863), and
+    // the drop zone fills the box with dispatched events.
+    expect(IMPORT_FORM).toContain('element.addEventListener("input", read);');
+    expect(IMPORT_FORM).toContain('element.addEventListener("change", read);');
+    expect(IMPORT_FORM).not.toMatch(/<fetcher\.Form[^>]*\bon(Change|Input)=/);
+    // The rows a check sent become "the checked rows" only when an answer arrives, so the
+    // count is never paired with rows from a check that has not answered.
+    expect(IMPORT_FORM).toContain('element.addEventListener("submit", submitted);');
+    expect(IMPORT_FORM).toMatch(/useEffect\(\(\) => \{\s*setCheckedRows\(sent\.current\);\s*\}, \[fetcher\.data\]\);/);
+    // And the merchant is told why the button went grey.
+    expect(IMPORT_FORM).toContain("The rows have changed since they were checked.");
   });
 
   it("marks the commit as the consequential one on every source", () => {

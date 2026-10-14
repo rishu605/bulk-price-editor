@@ -1153,9 +1153,10 @@ export default function NewCampaign() {
             <s-paragraph>
               <s-text>
                 One row per variant: a SKU, barcode or variant ID, then the price. Prices
-                are read in {baseCurrency} and must be plain numbers. A Matrixify export
-                works as it is. Checking the file changes nothing — you see what would
-                happen first.
+                are read in {baseCurrency} and must be plain numbers; a row in another
+                currency is refused rather than converted. A compare-at column is optional
+                and becomes the price shown struck through. A Matrixify export works as it
+                is. Checking the file changes nothing — you see what would happen first.
               </s-text>
             </s-paragraph>
           }
@@ -1191,12 +1192,15 @@ export default function NewCampaign() {
       {importResult ? (
         <ImportReport
           heading={importResult.dryRun ? "What would happen" : "What happened"}
+          // Rows read = Ready + Need attention, counted by the importer (#766). The lists
+          // it sends stop at 500 each, and their length is what this tile used to show.
           counts={[
             { label: "Rows read", value: importResult.total },
             { label: "Ready", value: importResult.ready },
-            { label: "Need attention", value: importProblems.length },
+            { label: "Need attention", value: importResult.problems },
           ]}
           problems={importProblems}
+          problemCount={importResult.problems}
         />
       ) : null}
 

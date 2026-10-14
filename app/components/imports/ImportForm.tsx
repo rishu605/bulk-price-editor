@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Blank } from "../Blank";
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FetcherWithComponents } from "react-router";
 
 import { ActionRow } from "../ActionRow";
@@ -9,6 +9,7 @@ import { EmptyState } from "../AsyncState";
 import { CsvDropZone } from "./CsvDropZone";
 import { UnsavedChanges } from "../UnsavedChanges";
 import { downloadCsv } from "../../lib/reporting/csv";
+import { commitReady, rowsOf } from "../../lib/imports/checked-rows";
 import { SPACE } from "../../lib/ui/spacing";
 import { Secondary } from "../Type";
 import { Card } from "../Card";
@@ -55,7 +56,7 @@ export function ImportForm({
   busy,
   checkLabel = "Check the file",
   commitLabel,
-  ready,
+  ready: lastCheck,
   intent = INTENT,
   action,
   template,
@@ -79,6 +80,9 @@ export function ImportForm({
    * unrecognised intent — but because "import 0 rows" is a button that reports success
    * for having done nothing, and a merchant who has not looked at the report is exactly
    * the merchant who should not be writing to their catalogue.
+   *
+   * Nor while the rows have changed since that check (#766). The count is the checked
+   * file's, and the commit posts the box as it is now.
    */
   ready: number | null;
   /**
@@ -116,6 +120,47 @@ export function ImportForm({
     if (field.current) field.current.value = value;
     form.current?.requestSubmit();
   };
+
+  // The rows in the box now, and the rows the answer on screen is about (#766). Editing
+  // the rows after a check left the button offering the old count, and committing posted
+  // the new rows: a campaign from rows nobody had checked.
+  //
+  // Heard natively: React 18 never delivers `onChange` from a Polaris field (#863), and the
+  // drop zone fills the box with dispatched events rather than through React. The rows a
+  // check sends are held until its answer arrives, so the count on the button is only
+  // ever paired with the rows that produced it -- not with rows sent by a check that has
+  // not answered, or never will.
+  const [rows, setRows] = useState<string | null>(null);
+  const [checkedRows, setCheckedRows] = useState<string | null>(null);
+  const sent = useRef<string | null>(null);
+
+  useEffect(() => {
+    const element = form.current;
+    if (!element) return;
+    const read = () => setRows(rowsOf(new FormData(element)));
+    const submitted = () => {
+      const fields = new FormData(element);
+      if (fields.get("intent") === intent.check) sent.current = rowsOf(fields);
+    };
+    read();
+    element.addEventListener("input", read);
+    element.addEventListener("change", read);
+    element.addEventListener("submit", submitted);
+    return () => {
+      element.removeEventListener("input", read);
+      element.removeEventListener("change", read);
+      element.removeEventListener("submit", submitted);
+    };
+  }, [intent.check]);
+
+  // An answer arrived: it is about the rows the last check sent. A commit's answer leaves
+  // that alone, since a commit sends nothing to `sent`.
+  useEffect(() => {
+    setCheckedRows(sent.current);
+  }, [fetcher.data]);
+
+  const ready = commitReady(lastCheck, rows, checkedRows);
+  const stale = lastCheck !== null && ready === null && !busy;
 
   return (
     <Card heading={heading}>  {/* A pasted CSV can be fifty thousand rows, and none of it exists anywhere until
@@ -175,6 +220,13 @@ export function ImportForm({
               {commitLabel(ready ?? 0)}
             </s-button>
           </ActionRow>
+
+          {stale ? (
+            <Secondary>
+              The rows have changed since they were checked. {checkLabel} again to see what
+              these rows would do.
+            </Secondary>
+          ) : null}
         </s-stack>
       </fetcher.Form>
     </Card>
@@ -209,6 +261,7 @@ export function ImportReport({
   problems,
   download,
   limit = 25,
+  problemCount,
 }: {
   heading: string;
   counts: Array<{ label: string; value: number }>;
@@ -221,11 +274,17 @@ export function ImportReport({
    */
   download?: { filename: string; csv: () => string };
   limit?: number;
+  /**
+   * Every row that needs attention, when the importer listed only the first of them
+   * (#767). Without it a file with 800 bad rows showed 500 and the counts did not add up.
+   */
+  problemCount?: number;
 }) {
+  const unlisted = (problemCount ?? problems.length) - problems.length;
   return (
     <Card heading={heading}>  <CountsRow items={counts} />
 
-      {problems.length === 0 ? (
+      {problems.length === 0 && unlisted <= 0 ? (
         <EmptyState
           title="Every row matched a variant and validated"
           description="Nothing was left out, so the counts above account for the whole file."
@@ -236,6 +295,7 @@ export function ImportReport({
             <s-text>
               These rows were left out. Everything else is unaffected — one bad row never
               fails the file.
+              {unlisted > 0 ? ` Showing the first ${problems.length} of ${problemCount} rows that need attention.` : ""}
             </s-text>
           </s-paragraph>
 
