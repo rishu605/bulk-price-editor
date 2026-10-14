@@ -8,6 +8,7 @@
  */
 
 import { neverStarts, parseSchedule } from "../../lib/scheduling/window";
+import { startRefusal } from "../../lib/scheduling/start-refusal";
 import prisma from "../../db.server";
 import { describeCampaign } from "../../lib/campaigns/describe";
 import { astOf, ruleOf, segmentNameOf } from "./model.server";
@@ -150,6 +151,7 @@ export async function listCampaigns(shopId: string, filters: CampaignFilters) {
       // shows the label, not the reason, so the zone the reason is written in does not matter.
       lifecycle: describeState(state, {
         neverStarts: state === "SCHEDULED" ? neverStarts(parseSchedule(c.schedule), new Date(), "UTC") : null,
+        startRefused: state === "SCHEDULED" ? startRefusal(c.schedule) : null, // #975
       }),
       attention: needsAttention(state),
       priority: c.priority,

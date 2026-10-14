@@ -151,6 +151,8 @@ export function describeState(
      * itself (#837): the preview's `outrankedBy`. Empty or absent otherwise.
      */
     outrankedBy?: readonly string[];
+    /** Why its start was refused for good, so the schedule left it (#975); see `startRefusal`. */
+    startRefused?: string | null;
   } = {},
 ): StateDescription {
   switch (state) {
@@ -163,6 +165,19 @@ export function describeState(
         nextAction: { label: "Apply to storefront", intent: "apply" },
       };
     case "SCHEDULED":
+      // Refused when it came due, for a reason asking again cannot change (#975). Said here
+      // rather than once per tick in its history, with what to do: the schedule does not
+      // try this start again, so waiting changes nothing.
+      if (context.startRefused) {
+        return {
+          label: "Scheduled — couldn't start",
+          tone: "warning",
+          explanation:
+            `Its start came, and it could not be run: ${context.startRefused} Nothing was written to your ` +
+            "storefront, and the schedule will not try this start again. Once that is fixed, apply it by " +
+            "hand, or move its dates under Schedule.",
+        };
+      }
       // Not "waiting" when there is nothing to wait for (#824): a window that can never
       // open is a decision for the merchant, so it says so and says what to do.
       if (context.neverStarts) {

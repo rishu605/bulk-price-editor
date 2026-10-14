@@ -19,6 +19,7 @@ import { ResultBanner } from "../components/ResultBanner";
 import { describeSchedule, neverStarts, parseSchedule, scheduleWarnings, windowEndText } from "../lib/scheduling/window";
 import { scheduledWindow } from "../lib/scheduling/window-input";
 import { zoneShiftOf } from "../lib/scheduling/zone-shift";
+import { startRefusal } from "../lib/scheduling/start-refusal";
 import { scheduleAction } from "../services/campaigns/schedule-control.server";
 import { RunHistoryTable } from "../components/RunHistoryTable";
 import { RunResultSection } from "../components/RunResultSection";
@@ -95,6 +96,7 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     heldUntil: state === "HELD" ? windowEndText(record.schedule, shop.timezone) : undefined, // #784
     neverStarts: state === "SCHEDULED" ? neverStarts(parseSchedule(record.schedule), new Date(), shop.timezone) : null, // #824
     outrankedBy: preview.outrankedBy, // a higher campaign prices every variant (#837)
+    startRefused: state === "SCHEDULED" ? startRefusal(record.schedule) : null, // #975
   });
   const history = await transitionHistory(shop.id, campaignId, 8);
 

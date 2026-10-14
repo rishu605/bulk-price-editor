@@ -212,3 +212,27 @@ describe("an active campaign that a higher-priority one outranks everywhere (#83
     expect(describeState("ACTIVE").explanation).toContain("Your storefront shows the campaign price");
   });
 });
+
+describe("a scheduled campaign whose start was refused for good (#975)", () => {
+  const reason = "This campaign's segment was deleted, so it has no products to price.";
+
+  it("says it couldn't start, why, that nothing was written, and what to do", () => {
+    const described = describeState("SCHEDULED", { startRefused: reason });
+    expect(described.label).toBe("Scheduled — couldn't start");
+    expect(described.tone).toBe("warning");
+    expect(described.explanation).toContain(reason);
+    expect(described.explanation).toMatch(/Nothing was written/);
+    expect(described.explanation).toMatch(/will not try this start again/);
+    expect(described.explanation).toMatch(/apply it by hand, or move its dates under Schedule/);
+    expect(described.explanation).not.toMatch(/Waiting for its start time/);
+  });
+
+  it("is said ahead of a window that has since closed, which is the less specific reason", () => {
+    const described = describeState("SCHEDULED", { startRefused: reason, neverStarts: "Its window ended." });
+    expect(described.label).toBe("Scheduled — couldn't start");
+  });
+
+  it("is still waiting when nothing was refused", () => {
+    expect(describeState("SCHEDULED", { startRefused: null }).explanation).toMatch(/Waiting for its start time/);
+  });
+});
