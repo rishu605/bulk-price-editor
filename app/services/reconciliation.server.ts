@@ -298,7 +298,12 @@ export async function reconcile(
       ),
       // Only a claim when we actually made one. A variant no campaign has written is
       // not "drifted" — nothing was promised about it.
-      drifted: intended !== null && live !== null && intended !== live,
+      // Not once its writer has excluded the variant (#1003), the same rule as `driftedFrom`.
+      drifted:
+        intended !== null &&
+        live !== null &&
+        intended !== live &&
+        !campaignBy.get(controller!.run.campaignId)?.excludedVariantGids.includes(entry.variantGid),
       offBaseline: base !== null && live !== null && base !== live,
       adminUrl: variant
         ? `https://${shopDomain}/admin/products/${variant.productGid.split("/").pop()}`
@@ -327,12 +332,17 @@ export async function reconcile(
  * page ends up saying "3 drifted" above a table showing four.
  */
 export function driftedFrom(shopId: string): Prisma.Sql {
+  // Not a cell whose writer has excluded the variant since (#1003): "leave the merchant's
+  // edit" let that price go, so a kept edit is the merchant's price, not one behind our back.
   return Prisma.sql`
     FROM "price_surface_entries" e
     JOIN (
       SELECT DISTINCT ON (c."variantGid", c."priceListGid")
-             c."variantGid", c."priceListGid", c."intendedPrice"
+             c."variantGid", c."priceListGid", c."intendedPrice",
+             c."variantGid" = ANY(k."excludedVariantGids") AS "excluded"
       FROM "variant_changes" c
+      JOIN "campaign_runs" r ON r."id" = c."runId"
+      JOIN "campaigns" k ON k."id" = r."campaignId"
       WHERE c."shopId" = ${shopId} AND c."status" IN ('VERIFIED', 'CLAMPED')
       ORDER BY c."variantGid", c."priceListGid", c."verifiedAt" DESC
     ) w ON w."variantGid" = e."variantGid" AND w."priceListGid" = e."priceListGid"
@@ -340,6 +350,7 @@ export function driftedFrom(shopId: string): Prisma.Sql {
       AND e."livePrice" IS NOT NULL
       AND w."intendedPrice" IS NOT NULL
       AND e."livePrice" <> w."intendedPrice"
+      AND NOT w."excluded"
   `;
 }
 
@@ -389,6 +400,8 @@ export function staleBaselineFrom(
           AND c."priceListGid" = e."priceListGid"
           AND c."status" IN ('VERIFIED', 'CLAMPED')
           AND k."status" IN (${live})
+          -- A live campaign that has let this variant go did not put its price there (#1003).
+          AND NOT (c."variantGid" = ANY(k."excludedVariantGids"))
       )
   `;
 }
