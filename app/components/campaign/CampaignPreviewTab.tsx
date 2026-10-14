@@ -23,6 +23,7 @@
  */
 
 import { OverlapPanel } from "../OverlapPanel";
+import { confirmationReasons } from "../../lib/campaigns/blast-radius";
 import { CountsRow } from "../../components/CountsRow";
 import { PreviewTable } from "../../components/PreviewTable";
 import { filenameSlug } from "../../lib/reporting/csv";
@@ -122,12 +123,13 @@ export function CampaignPreviewTab({ preview, approval, fetcher, busy }: Campaig
           </s-banner>
         ) : null}
 
+        {/* The Apply dialog's reasons, so the tab and the dialog say the same thing (#818). */}
         {preview.blastRadius ? (
           <s-banner tone="warning">
-            <s-paragraph>
-              This campaign changes more than 1,000 variants. Re-read the preview
-              before applying.
-            </s-paragraph>
+            {(preview.confirm ? confirmationReasons(preview.confirm) : []).map((reason) => (
+              <s-paragraph key={reason}>{reason}</s-paragraph>
+            ))}
+            <s-paragraph>Re-read the preview before applying: Apply will ask for the word typed.</s-paragraph>
           </s-banner>
         ) : null}
 

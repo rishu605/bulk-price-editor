@@ -10,6 +10,10 @@ import { readSettings, shopCurrency, writeSettings } from "../services/settings.
 import {
   APPROVAL_THRESHOLD_LABEL,
   approvalThresholdFrom,
+  CONFIRM_CHANGE_LABEL,
+  CONFIRM_VARIANTS_LABEL,
+  confirmPercentFrom,
+  confirmVariantsFrom,
   guardrailInputProblems,
 } from "../lib/settings/guardrail-input";
 import { readPreferences, writePreferences } from "../services/notifications.server";
@@ -27,6 +31,11 @@ import { SettingsSaveBar } from "../components/SettingsSaveBar";
 import { Field, FieldGrid, FullRow } from "../components/FieldGrid";
 import { HelpNote } from "../components/HelpNote";
 import { formatCount } from "../lib/format/display";
+import {
+  DEFAULT_CONFIRM_ABOVE_CHANGE_PERCENT,
+  DEFAULT_CONFIRM_ABOVE_VARIANTS,
+  MINIMUM_PRICE_HANDFUL,
+} from "../lib/campaigns/blast-radius";
 import { SPACE } from "../lib/ui/spacing";
 import { Secondary } from "../components/Type";
 import { Card } from "../components/Card";
@@ -110,6 +119,11 @@ export const action = withGuard("/app/settings", async ({ request }: ActionFunct
       approvalThreshold: form.has("approvalThreshold")
         ? (approvalThresholdFrom(form.get("approvalThreshold")) ?? null)
         : existing.approvalThreshold,
+      // The typed confirmation's thresholds (#818), kept the same way when the post does
+      // not carry them. A blank one never gets here: it was refused above.
+      confirmAboveVariants: confirmVariantsFrom(form.get("confirmAboveVariants")) ?? existing.confirmAboveVariants,
+      confirmAboveChangePercent:
+        confirmPercentFrom(form.get("confirmAboveChangePercent")) ?? existing.confirmAboveChangePercent,
       minMarginPercent: emptyToNull(form.get("minMarginPercent")),
       minPrice: emptyToNull(form.get("minPrice")),
       violationPolicy: asPolicy(form.get("violationPolicy")),
@@ -261,6 +275,31 @@ export default function Settings() {
                 </s-option>
               </s-select>
             </FieldGrid>
+        </Card>
+
+        {/* The typed confirmation's two thresholds (A-3.11, #818). Beside the guardrails
+            because they answer the same worry -- a campaign that is wrong -- and their own
+            card because they bound a campaign, not a price. Neither has an "off": the
+            `secondary` says what still asks whatever these are set to. */}
+        <Card
+          heading="Typed confirmation"
+          lede="A campaign over either number below cannot be applied until “apply” is typed in its confirmation. Reverting never asks."
+          secondary={`A campaign that would take more than ${MINIMUM_PRICE_HANDFUL} prices to zero asks too, whatever these are set to.`}
+        >
+          <FieldGrid>
+            <s-number-field
+              name="confirmAboveVariants"
+              label={CONFIRM_VARIANTS_LABEL}
+              value={settings.confirmAboveVariants.toString()}
+              details={`A whole number. ${formatCount(DEFAULT_CONFIRM_ABOVE_VARIANTS)} means a campaign writing ${formatCount(DEFAULT_CONFIRM_ABOVE_VARIANTS + 1)} prices or more asks.`}
+            />
+            <s-number-field
+              name="confirmAboveChangePercent"
+              label={CONFIRM_CHANGE_LABEL}
+              value={settings.confirmAboveChangePercent.toString()}
+              details={`1 to 100, from each price's baseline, or that far below its cost. ${DEFAULT_CONFIRM_ABOVE_CHANGE_PERCENT} means 60% off asks and 40% off does not.`}
+            />
+          </FieldGrid>
         </Card>
 
         {/* Its own card rather than one more guardrail (#788). A guardrail bounds a price;

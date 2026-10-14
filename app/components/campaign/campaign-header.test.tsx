@@ -615,6 +615,33 @@ describe("the typed confirmation appears only when it is earned", () => {
     expect(html).toContain('name="confirmation"');
   });
 
+  it("asks for 95% off three variants, naming how many move too far and the largest (#818)", () => {
+    const html = render(
+      <CampaignHeader
+        {...props({
+          preview: preview({
+            blastRadius: true,
+            staleBaselines: 0,
+            counts: { planned: 3, noop: 0, skipped: 0, clamped: 0, clampedToMinimum: 0 },
+            confirm: {
+              thresholds: { variants: 1_000, changePercent: 50 },
+              planned: 3,
+              largeChanges: 3,
+              largest: { title: "Wool coat", before: "$249.99", after: "$12.50", basisPoints: 9_499, direction: "down" },
+              atMinimum: 0,
+            },
+          }),
+        })}
+      />,
+    );
+
+    expect(html).toContain('name="confirmation"');
+    expect(html).toContain("3 prices move more than 50% from their baseline");
+    expect(html).toContain("Wool coat");
+    expect(html).toContain("$249.99 to $12.50");
+    expect(html, "the count sentence for a campaign under the count").not.toContain("prices, more than the");
+  });
+
   it("does not ask on an ordinary campaign", () => {
     // A-3.11 asks for this over a thousand variants. Asking every time is how a
     // confirmation becomes a reflex.

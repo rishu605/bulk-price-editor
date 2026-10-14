@@ -8,6 +8,10 @@ import { describe, expect, it } from "vitest";
 import {
   APPROVAL_THRESHOLD_LABEL,
   approvalThresholdFrom,
+  CONFIRM_CHANGE_LABEL,
+  CONFIRM_VARIANTS_LABEL,
+  confirmPercentFrom,
+  confirmVariantsFrom,
   guardrailInputProblems,
   MAX_MARGIN_PERCENT,
 } from "./guardrail-input";
@@ -107,5 +111,62 @@ describe("reading a typed approval threshold", () => {
     for (const typed of ["0", "-3", "abc", "1.5", "1e3"]) {
       expect(approvalThresholdFrom(typed), typed).toBeUndefined();
     }
+  });
+});
+
+describe("checking the typed-confirmation thresholds (#818)", () => {
+  it.each(["0", "-3", "abc", "1.5", "1e3", "+5"])("refuses %s variants, naming the field and the default", (typed) => {
+    const [problem, ...rest] = problems({ confirmAboveVariants: typed });
+    expect(rest).toEqual([]);
+    expect(problem.field).toBe("confirmAboveVariants");
+    expect(problem.message).toBe(
+      `${CONFIRM_VARIANTS_LABEL} must be a whole number of 1 or more, such as the default 1,000. “${typed}” is not.`,
+    );
+  });
+
+  it.each(["0", "101", "150", "-50", "12.5", "abc"])("refuses a change of %s", (typed) => {
+    const [problem, ...rest] = problems({ confirmAboveChangePercent: typed });
+    expect(rest).toEqual([]);
+    expect(problem.field).toBe("confirmAboveChangePercent");
+    expect(problem.message).toBe(
+      `${CONFIRM_CHANGE_LABEL} must be a whole number from 1 to 100, such as the default 50. “${typed}” is not.`,
+    );
+  });
+
+  it("refuses a blank one, since neither can be switched off, and says it is empty", () => {
+    expect(problems({ confirmAboveVariants: "  " })[0].message).toMatch(/It is empty\.$/);
+    expect(problems({ confirmAboveChangePercent: "" })[0].message).toMatch(/It is empty\.$/);
+  });
+
+  it("asks nothing of a form that does not carry them: missing keeps the stored value", () => {
+    expect(problems({})).toEqual([]);
+  });
+
+  it("accepts the edges", () => {
+    expect(problems({ confirmAboveVariants: "1", confirmAboveChangePercent: "1" })).toEqual([]);
+    expect(problems({ confirmAboveVariants: " 250000 ", confirmAboveChangePercent: "100" })).toEqual([]);
+  });
+
+  it("reports them with the other bad fields", () => {
+    expect(
+      problems({ approvalThreshold: "0", confirmAboveVariants: "0", confirmAboveChangePercent: "0" }).map((p) => p.field),
+    ).toEqual(["approvalThreshold", "confirmAboveVariants", "confirmAboveChangePercent"]);
+  });
+});
+
+describe("reading the typed-confirmation thresholds", () => {
+  it("is the number for one that can be saved", () => {
+    expect(confirmVariantsFrom(" 250 ")).toBe(250);
+    expect(confirmVariantsFrom("1")).toBe(1);
+    expect(confirmPercentFrom("1")).toBe(1);
+    expect(confirmPercentFrom("100")).toBe(100);
+  });
+
+  it("is undefined for blank, absent or anything else, never a default nobody typed", () => {
+    for (const typed of [null, "", "0", "abc", "1.5"]) {
+      expect(confirmVariantsFrom(typed), String(typed)).toBeUndefined();
+      expect(confirmPercentFrom(typed), String(typed)).toBeUndefined();
+    }
+    expect(confirmPercentFrom("101")).toBeUndefined();
   });
 });

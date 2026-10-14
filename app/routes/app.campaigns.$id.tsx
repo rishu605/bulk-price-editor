@@ -294,7 +294,9 @@ export default function CampaignDetail() {
   // the run path refuses it outright, and the button is not merely disabled: offering a
   // control that exists only to be refused undermines the promise the merchant was given
   // when they chose practice.
-  const canApply = !practice && !preview.blocked && canTransition(state, "APPLYING") && !IN_FLIGHT.has(state);
+  // Nor a stored rule the run refuses (#818): the preview says why.
+  const unappliable = Boolean(preview.blocked || preview.refused);
+  const canApply = !practice && !unappliable && canTransition(state, "APPLYING") && !IN_FLIGHT.has(state);
 
   const tabs = tabsFor({ runs, rollback, ledger });
   const { keepers, pending: keepersPending } = useKeepers(rollback);
@@ -342,6 +344,8 @@ export default function CampaignDetail() {
           </s-paragraph>
         </s-banner>
       ) : null}
+      {/* A stored rule the run refuses, in the run's own words (#818). */}
+      {preview.refused ? <s-banner tone="critical"><s-paragraph>{preview.refused}</s-paragraph></s-banner> : null}
 
       {/* Up here with the other banners rather than inside the actions, which is where
           it was. It qualifies the whole page — nothing on it will ever write a price —

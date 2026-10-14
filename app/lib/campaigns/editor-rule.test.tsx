@@ -7,7 +7,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { RuleValueField } from "../../components/RuleValueField";
-import { compareAtFrom, readerFor, ruleFrom } from "./draft-form";
+import { compareAtFrom, readerFor, ruleFrom, ruleInputProblem } from "./draft-form";
 import { editorRuleFrom } from "./editor-rule";
 import { firstPreviewParams } from "./first-preview";
 import { moreOptionsHref } from "./quick-campaign";
@@ -93,5 +93,29 @@ describe("Home's 'Or set a scope, a schedule and more' (#771)", () => {
     const home = sourceOf("app/routes/app._index.tsx");
     expect(home).toContain("moreOptionsHref(");
     expect(home).not.toMatch(/href="\/app\/campaigns\/new">\s*Or set a scope/);
+  });
+});
+
+describe("Reduce by is capped below 100% in the form (#818)", () => {
+  const field = (direction: "down" | "up", kind = "percent-change") =>
+    renderToStaticMarkup(
+      <RuleValueField currency="USD" kind={kind} onKindChange={() => {}} initial={{ direction, magnitude: "20" }} />,
+    );
+
+  it("gives the percentage a max just under 100 while it reduces", () => {
+    expect(field("down")).toMatch(/<s-number-field[^>]*max="99.99"/);
+    expect(field("down")).toContain("Less than 100.");
+  });
+
+  it("leaves an increase uncapped: a 150% rise is a real rule", () => {
+    expect(field("up")).not.toMatch(/<s-number-field[^>]*max=/);
+  });
+
+  it("refuses at the boundary what the cap stops, for anything typed past it", () => {
+    const read = (ruleValue: string) =>
+      readerFor(new URLSearchParams({ ruleKind: "percent-change", ruleValue, ruleDirection: "down" }));
+    expect(ruleInputProblem(read("99.99"))).toBeNull();
+    expect(ruleInputProblem(read("100"))).toMatch(/^A 100% reduction would make every price free or negative/);
+    expect(ruleInputProblem(read("150"))).toMatch(/^A 150% reduction/);
   });
 });

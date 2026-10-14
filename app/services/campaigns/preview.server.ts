@@ -6,10 +6,20 @@
  */
 
 import { alreadyCorrectBy, outrankedBy, overlapsFrom } from "../../lib/planning/overlaps";
-import { format } from "../../lib/money/format";
+import { format, formatPrice } from "../../lib/money/format";
 import { marketScope } from "../../lib/planning/market-scope";
 import { money, type Money } from "../../lib/money/money";
-import { planRun } from "../../lib/planning/plan";
+import { planRun, refKey } from "../../lib/planning/plan";
+import type { PlanCandidate, PlannedRow } from "../../lib/planning/types";
+import {
+  asksForConfirmation,
+  confirmThresholdsOf,
+  largeChanges,
+  type BlastRadius,
+  type ConfirmThresholds,
+  type WrittenPrice,
+} from "../../lib/campaigns/blast-radius";
+import { unappliableRule } from "../../lib/campaigns/rule-limits";
 import { selectWritePath } from "../../lib/planning/write-path";
 import { loadCandidates, pricesWrittenBy, titleMapFor, withWritten } from "./candidates.server";
 import { loadCampaignContext, importIdsOf} from "./model.server";
@@ -29,7 +39,6 @@ import { labelled } from "../../lib/markets/display-name";
 import type { AdminClient } from "../../lib/execution/sync-executor";
 import prisma from "../../db.server";
 import {
-  BLAST_RADIUS_THRESHOLD,
   type CampaignPreview,
   type MarketPreview,
   type SurfaceCell,
@@ -185,6 +194,17 @@ export async function previewCampaign(
       candidates,
     ),
   );
+  // Whether applying this needs the word typed, and why (#818): the dialog says these
+  // reasons and `blastRadiusRefusal` re-checks them from a fresh preview.
+  const confirm = await blastRadiusOf(
+    shopId,
+    outcome.rows,
+    outcome.counts,
+    candidates,
+    confirmThresholdsOf(storeSettings),
+    titles,
+  );
+
   const margin = marginImpact(
     outcome.rows
       .filter((row) => row.status !== "skipped" && row.intendedPrice && row.beforePrice)
@@ -227,7 +247,11 @@ export async function previewCampaign(
     })),
     writePath: decision.path,
     writePathReason: decision.reason,
-    blastRadius: outcome.counts.planned > BLAST_RADIUS_THRESHOLD,
+    blastRadius: asksForConfirmation(confirm),
+    confirm,
+    // A stored rule the run refuses (#818), said here so the page offers no Apply the run
+    // would turn down. Not on a revert: taking such a campaign back is always allowed.
+    ...(options.revert ? {} : refusedRule(campaign.ruleRows)),
     staleBaselines,
     // From the planner's coverage, every candidate included: a variant another campaign
     // keeps is usually already at its price, and the rows leave those out (#821).
@@ -240,6 +264,58 @@ export async function previewCampaign(
   };
 }
 
+
+/**
+ * What the typed confirmation reads from a plan (#818): how many prices it writes, which
+ * of them move further than the change threshold, and how many were taken to zero.
+ *
+ * Over the base prices the plan writes, against each one's baseline and cost -- the values
+ * the resolver priced from, so the depth a merchant is warned about is the depth written.
+ */
+async function blastRadiusOf(
+  shopId: string,
+  rows: readonly PlannedRow[],
+  counts: { planned: number; clampedToMinimum: number },
+  candidates: readonly PlanCandidate[],
+  thresholds: ConfirmThresholds,
+  titles: Map<string, string>,
+): Promise<BlastRadius> {
+  const baselines = new Map(candidates.map((candidate) => [refKey(candidate.ref), candidate.baseline]));
+  const written: WrittenPrice[] = [];
+  for (const row of rows) {
+    if (row.status === "skipped" || !row.intendedPrice || row.ref.priceListGid !== "") continue;
+    const baseline = baselines.get(refKey(row.ref));
+    if (!baseline) continue;
+    written.push({ variantGid: row.ref.variantGid, baseline: baseline.price, after: row.intendedPrice, cost: baseline.cost });
+  }
+
+  const large = largeChanges(written, thresholds.changePercent);
+  const top = large.largest;
+  // Titled from the page of rows when it is on it, and looked up alone when it is not.
+  const title = top ? (titles.get(top.variantGid) ?? (await titleMapFor(shopId, [top.variantGid])).get(top.variantGid)) : null;
+
+  return {
+    thresholds,
+    planned: counts.planned,
+    largeChanges: large.count,
+    largest: top
+      ? {
+          title: title ?? top.variantGid,
+          before: formatPrice(top.baseline.amount, top.baseline.currency),
+          after: formatPrice(top.after.amount, top.after.currency),
+          basisPoints: top.basisPoints,
+          direction: top.after.amount < top.baseline.amount ? "down" : "up",
+        }
+      : null,
+    atMinimum: counts.clampedToMinimum,
+  };
+}
+
+/** `refused` for a campaign whose stored rule cannot be applied, or nothing. */
+function refusedRule(ruleRows: unknown): { refused?: string } {
+  const refused = unappliableRule(ruleRows);
+  return refused ? { refused } : {};
+}
 
 /**
  * How each targeted market will be written, in the merchant's own terms.

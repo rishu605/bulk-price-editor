@@ -18,6 +18,7 @@ import {
 import { decimalsFor } from "../lib/money/format";
 import { money } from "../lib/money/money";
 import type { Guardrails } from "../lib/pricing/types";
+import { DEFAULT_CONFIRM_ABOVE_CHANGE_PERCENT, DEFAULT_CONFIRM_ABOVE_VARIANTS } from "../lib/campaigns/blast-radius";
 
 export interface StoreSettings {
   /** Never price at or below cost. Requires cost data on the variant. */
@@ -46,6 +47,19 @@ export interface StoreSettings {
    * than no rule, because the same reflex is what makes real warnings ineffective.
    */
   approvalThreshold: number | null;
+  /**
+   * Campaigns writing more prices than this ask for "apply" to be typed (A-3.11, #818).
+   *
+   * Never off. A small shop lowers it and a large one raises it, but a campaign that can
+   * reprice the whole store from a one-click dialog is the thing the confirmation exists
+   * to stop.
+   */
+  confirmAboveVariants: number;
+  /**
+   * A written price moving more than this whole percentage of its baseline, or landing
+   * that far below cost, asks for the word too (#818). 1 to 100.
+   */
+  confirmAboveChangePercent: number;
 }
 
 export const DEFAULT_SETTINGS: StoreSettings = {
@@ -61,6 +75,8 @@ export const DEFAULT_SETTINGS: StoreSettings = {
   // setting should get exactly the prices the campaign calculated.
   rounding: { default: "none", byCurrency: {} },
   approvalThreshold: null,
+  confirmAboveVariants: DEFAULT_CONFIRM_ABOVE_VARIANTS,
+  confirmAboveChangePercent: DEFAULT_CONFIRM_ABOVE_CHANGE_PERCENT,
 };
 
 /** Reads settings, filling anything absent or malformed with a default. */
@@ -87,6 +103,13 @@ export function parseSettings(raw: unknown): StoreSettings {
     missingCostPolicy: value.missingCostPolicy === "error" ? "error" : "skip",
     rounding: parseRoundingPolicy(value.rounding),
     approvalThreshold: finiteOrNull(value.approvalThreshold, 1, Number.MAX_SAFE_INTEGER),
+    // Settings saved before #818 have neither key, and read as the PRD's defaults.
+    confirmAboveVariants: Math.trunc(
+      finiteOrNull(value.confirmAboveVariants, 1, Number.MAX_SAFE_INTEGER) ?? DEFAULT_CONFIRM_ABOVE_VARIANTS,
+    ),
+    confirmAboveChangePercent: Math.trunc(
+      finiteOrNull(value.confirmAboveChangePercent, 1, 100) ?? DEFAULT_CONFIRM_ABOVE_CHANGE_PERCENT,
+    ),
   };
 }
 
@@ -154,6 +177,27 @@ export async function writeSettings(
         entityId: shopId,
         before: { approvalThreshold: previous.approvalThreshold } as never,
         after: { approvalThreshold: parsed.approvalThreshold } as never,
+      },
+    });
+  }
+
+  // The typed-confirmation thresholds likewise (#818): raising either one is somebody
+  // deciding that fewer campaigns get a second look, and that should be findable by itself.
+  // Only the ones that moved, so the entry says what changed. Counts and percentages,
+  // never a price.
+  const moved = (["confirmAboveVariants", "confirmAboveChangePercent"] as const).filter(
+    (key) => previous[key] !== parsed[key],
+  );
+  if (moved.length > 0) {
+    await prisma.auditLogEntry.create({
+      data: {
+        shopId,
+        actor: actor ?? null,
+        action: "settings.confirmation.update",
+        entity: "Shop",
+        entityId: shopId,
+        before: Object.fromEntries(moved.map((key) => [key, previous[key]])) as never,
+        after: Object.fromEntries(moved.map((key) => [key, parsed[key]])) as never,
       },
     });
   }
