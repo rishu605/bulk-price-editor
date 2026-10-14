@@ -102,12 +102,20 @@ export function OnboardingCard({
             step contributes exactly four cells, and the two things that span the row —
             the rule between steps and the opened explanation — say so.
 
+            Four at every width (#725). There was a two-column branch below 500px, and it
+            never took effect: the `span 4` rows created the two missing tracks, so the
+            grid was four content-sized columns there anyway. Measured against the real
+            Polaris at 343, 480 and 700px containers, the old template and this one give
+            identical tracks and identical cells. A span cannot follow a container query
+            (see `FullRow`), and one grid is what lines these columns up, so the branch
+            goes rather than the span.
+
             The card's interior is what these columns are measured against, and the
             wrapper is a child of the stack above, which has already decided the width.
             See `QueryContainer`. */}
         <QueryContainer>
           <s-grid
-          gridTemplateColumns="@container (inline-size <= 500px) auto 1fr, auto 1fr auto auto"
+          gridTemplateColumns="auto 1fr auto auto"
           gap={SPACE.item}
           alignItems="center"
         >

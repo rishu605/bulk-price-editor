@@ -22,11 +22,8 @@ const grid = sourceOf(process.cwd(), "app", "components", "FieldGrid.tsx");
 const settings = sourceOf(process.cwd(), "app", "routes", "app.settings._index.tsx");
 const editor = sourceOf(process.cwd(), "app", "routes", "app.campaigns.new.tsx");
 
-/** The two responsive values in the file, read from their backticked literals. */
-const responsiveValues = () => [
-  ["the grid template", /gridTemplateColumns=\{`([^`]+)`\}/.exec(grid)?.[1] ?? ""],
-  ["FullRow's span", /const FULL_ROW_SPAN\s*=\s*`([^`]+)`/.exec(grid)?.[1] ?? ""],
-] as const;
+/** The grid's one responsive value, read from its backticked literal. */
+const responsiveValues = () => [["the grid template", /template=\{`([^`]+)`\}/.exec(grid)?.[1] ?? ""]] as const;
 
 describe("the field grid", () => {
   it.each(responsiveValues())("%s carries exactly one comma, so the value parses", (_n, value) => {
@@ -47,33 +44,14 @@ describe("the field grid", () => {
     // A checkbox is a tick and a sentence, not a field. In a column sized for a select
     // its label wraps under the box.
     expect(grid).toContain("export function FullRow");
-    expect(grid).toContain("gridColumn={FULL_ROW_SPAN}");
   });
 
-  it("does not let that escape hatch span more columns than the grid has", () => {
-    // The bug this replaced. CSS does not clamp `span 2` to the tracks that exist — it
-    // creates the missing one, and an implicit track is `auto`, so a FullRow inside the
-    // one-column grid turned the whole thing into two content-sized columns. Measured
-    // against the real components at the campaign editor's page width, container 557px:
-    //
-    //     span 2      grid-template-columns: 409.742px 131.258px
-    //     responsive  grid-template-columns: 557px
-    //
-    // On screen: the rule select squeezed to ~86px and clipped to "Perc...".
-    expect(
-      /gridColumn=\{?["'`]span 2["'`]\}?/.test(grid),
-      "FullRow spans two columns unconditionally — below the breakpoint the grid has one",
-    ).toBe(false);
-
-    const span = /const FULL_ROW_SPAN\s*=\s*`([^`]+)`/.exec(grid)?.[1] ?? "";
-    expect(span).toContain("span 1");
-    expect(span).toContain("span 2");
-  });
-
-  it("takes both breakpoints from one constant, so they cannot drift apart", () => {
-    // The grid's columns and FullRow's span are a contract about the same number. Two
-    // literals that must match are two literals that eventually will not.
-    expect((grid.match(/ONE_COLUMN_AT_OR_BELOW/g) ?? []).length).toBeGreaterThanOrEqual(3);
+  it("does not span anything, in either branch (#725)", () => {
+    // `span 2` creates a phantom column below the breakpoint (#678: the rule select at
+    // ~86px, clipped to "Perc..."). A responsive span -- what #681 shipped -- is read by
+    // the runtime as `auto` at every width, so a full row was one column wide above it.
+    // Full rows sit between the grids instead; see `FullRow`.
+    expect(grid, "a grid item in FieldGrid spans columns again").not.toMatch(/gridColumn=/);
   });
 });
 

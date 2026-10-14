@@ -19,8 +19,11 @@ const search = sourceOf(process.cwd(), "app", "components", "prices", "VariantSe
 
 describe("the filter block", () => {
   it("lays its controls out in a grid, not a stretching stack", () => {
-    expect(search).toContain("<s-grid");
-    expect(search).toContain("<s-grid-item");
+    expect(search).toContain("<SplitGrid");
+    // The search field takes a row of its own rather than spanning two of three columns,
+    // which below 700px made a phantom column (#725).
+    expect(search).toContain("<FullRow>");
+    expect(search).not.toMatch(/gridColumn=/);
   });
 
   it("re-flows to one column on a narrow container", () => {
@@ -36,7 +39,7 @@ describe("the filter block", () => {
     // Every value in the file, not just the first: the inline branch grew a plain
     // `1fr auto` and a check that only read the first match started asserting about that
     // one instead, which is a test quietly changing what it tests.
-    const values = [...search.matchAll(/gridTemplateColumns="([^"]+)"/g)].map((m) => m[1]);
+    const values = [...search.matchAll(/(?:gridTemplateColumns|template)="([^"]+)"/g)].map((m) => m[1]);
     expect(values.length, "both branches lay out in a grid").toBe(2);
 
     for (const value of values) {
@@ -53,7 +56,7 @@ describe("the filter block", () => {
   it("keeps the submit button at its natural width", () => {
     // A block stack stretches its children, which rendered the button as a full-width
     // bar across the card.
-    const afterGrid = search.slice(search.lastIndexOf("</s-grid>"));
+    const afterGrid = search.slice(search.lastIndexOf("</SplitGrid>"));
     expect(afterGrid).toContain('direction="inline"');
     expect(afterGrid).toContain("Search");
   });
