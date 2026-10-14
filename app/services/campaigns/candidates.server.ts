@@ -10,6 +10,7 @@ import prisma from "../../db.server";
 import { inChunks } from "../../lib/db/chunk";
 import { money, type Money } from "../../lib/money/money";
 import type { Baseline } from "../../lib/pricing/types";
+import { inVariantOrder } from "../../lib/planning/candidate-order";
 import type { PlanCandidate } from "../../lib/planning/types";
 import { astToWhere, type FilterAst } from "../segments.server";
 
@@ -106,17 +107,19 @@ export async function loadCandidates(
   if (onlyVariantGids?.length === 0) return [];
 
   const scope = astToWhere(shopId, ast);
-  const variants = onlyVariantGids
-    ? await inChunks(onlyVariantGids, (batch) =>
-        prisma.variantIndex.findMany({
-          where: { ...scope, variantGid: { in: batch } },
-          select: { variantGid: true, currency: true, cost: true },
-        }),
-      )
-    : await prisma.variantIndex.findMany({
-        where: scope,
-        select: { variantGid: true, currency: true, cost: true },
-      });
+  const select = { variantGid: true, currency: true, cost: true, title: true } as const;
+  // In one fixed order (#769), because the planner keeps the order it is given and every
+  // preview lists its rows in it. The full preview re-plans for each page and shows that
+  // page's slice, so an order that changed between two loads -- as Postgres's did whenever
+  // a sync rewrote a row -- showed some variants twice and others never. Sorted here, once,
+  // so the editor's panel, the full preview, the campaign page and the run all agree.
+  const variants = inVariantOrder(
+    onlyVariantGids
+      ? await inChunks(onlyVariantGids, (batch) =>
+          prisma.variantIndex.findMany({ where: { ...scope, variantGid: { in: batch } }, select }),
+        )
+      : await prisma.variantIndex.findMany({ where: scope, select }),
+  );
   if (variants.length === 0) return [];
 
   const gids = variants.map((v) => v.variantGid);

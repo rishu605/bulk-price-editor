@@ -248,6 +248,9 @@ export async function previewDraft(
   const alreadyCorrect = ours.filter((row) => row.status !== "skipped" && isNoop(row));
   const skipped = ours.filter((row) => row.status === "skipped");
 
+  // Each group keeps the candidates' order, title then variant id (#769), so the first
+  // `limit` rows are the same rows on every call -- which is what lets the full preview
+  // page through this list a slice at a time.
   const shown = [...changing, ...alreadyCorrect, ...skipped].slice(0, limit);
   const [display, staleBaselines] = await Promise.all([
     variantDisplayFor(shopId, shown.map((row) => row.ref.variantGid)),

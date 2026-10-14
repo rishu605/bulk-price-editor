@@ -56,7 +56,9 @@ export const loader = withGuard("/app/campaigns/preview", async ({ request }: Lo
   // Ask for everything up to the end of this page and show the tail. `previewDraft` takes
   // a limit rather than an offset because the resolver plans the whole scope either way —
   // the limit only decides how many rows get a product title looked up, which is the part
-  // that costs a query.
+  // that costs a query. Slicing a fresh plan per page is only sound because the plan's
+  // order is fixed -- title, then variant id (`candidate-order.ts`). Before #769 it was
+  // whatever order Postgres returned, and a sync between two pages moved rows across them.
   const preview = await previewDraft(shop.id, draft, page * ROWS_PER_VIEW);
   const rows = preview.rows.slice((page - 1) * ROWS_PER_VIEW);
 
@@ -93,7 +95,11 @@ export default function FullPreview() {
   return (
     <PageShell
       heading="Full preview"
-      backTo={{ href: `/app/campaigns/new?${params}`, label: "Back to the campaign" }}
+      // One noun, like every other back label (#769). The admin's breadcrumb truncates, and
+      // "Back to the campaign" read "Back to t…". "Campaign" rather than "New campaign",
+      // because the editor this returns to is headed "Practice campaign" or "Your first
+      // campaign" as often as "New campaign", and is the campaign in all three.
+      backTo={{ href: `/app/campaigns/new?${params}`, label: "Campaign" }}
     >
       <s-section>
         <s-stack gap={SPACE.section}>
