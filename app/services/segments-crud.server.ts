@@ -126,6 +126,8 @@ export async function createSegment(shopId: string, input: CreateSegmentInput) {
     throw new AppError({
       code: "VALIDATION",
       userMessage: "Give the segment a name so you can find it when building a campaign.",
+      // The form shows it on the field, beside the control the merchant has to fix (#741).
+      context: { field: "name" },
     });
   }
 
@@ -268,6 +270,7 @@ function nameCollision(error: unknown, name: string): unknown {
     return new AppError({
       code: "VALIDATION",
       userMessage: `You already have a segment called "${name}". Pick a different name.`,
+      context: { field: "name" },
     });
   }
   return error;

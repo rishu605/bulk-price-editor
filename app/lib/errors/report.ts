@@ -21,7 +21,11 @@ import { logger } from "../logging/logger";
 export const ANCHOR_ERROR = "__anchorError";
 
 export interface ReportedError {
-  errorId: string;
+  /**
+   * The reference a merchant quotes to support -- null for a VALIDATION error, which is the
+   * merchant's to fix rather than ours to look up (#741), so it is never given one.
+   */
+  errorId: string | null;
   code: string;
   userMessage: string;
   retryable: boolean;
