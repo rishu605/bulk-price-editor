@@ -19,15 +19,23 @@ import {
   addDays,
   layOut,
   monthRange,
+  placeCampaign,
   timeOverlaps,
   weekRange,
   type CalendarCampaign,
   type CalendarDay,
+  type CampaignRunFact,
 } from "../lib/scheduling/calendar";
 import { astOf, scopeOf } from "./campaigns/model.server";
 import { astToWhere } from "./segments.server";
 
-/** Statuses worth a place on a calendar. */
+/**
+ * Statuses worth a place on a calendar.
+ *
+ * Completed among them, as history: drawn on the days it ran and no others (#768). It
+ * used to be drawn from its schedule, so one reverted by hand with no end ran on into
+ * every future month.
+ */
 const SHOWN = [
   "SCHEDULED",
   "APPLYING",
@@ -84,16 +92,60 @@ export async function calendarFor(
   const records = await prisma.campaign.findMany({
     where: { shopId, status: { in: [...SHOWN] } },
     select: { id: true, name: true, status: true, startAt: true, endAt: true },
-    orderBy: { startAt: "asc" },
   });
 
-  const campaigns: CalendarCampaign[] = records.map((record) => ({
-    id: record.id,
-    name: record.name,
-    status: record.status,
-    startAt: record.startAt?.toISOString() ?? null,
-    endAt: record.endAt?.toISOString() ?? null,
-  }));
+  // What each campaign that has gone live actually did, so it is drawn where it ran rather
+  // than where its schedule -- if it has one -- said it would (#768). A scheduled campaign
+  // is drawn from its schedule alone, so its runs are not read.
+  //
+  // Whole-campaign runs only, as `endingAmong` reads them: one variant's revert out of a
+  // running sale does not end the sale.
+  const history = await prisma.campaignRun.findMany({
+    where: {
+      shopId,
+      campaignId: {
+        in: records.filter((record) => record.status !== "SCHEDULED").map((record) => record.id),
+      },
+      kind: { in: ["APPLY", "REVERT"] },
+      startedAt: { not: null },
+      NOT: { occurrenceKey: { startsWith: "VARIANT-" } },
+    },
+    select: { campaignId: true, kind: true, status: true, startedAt: true, finishedAt: true },
+    orderBy: { createdAt: "asc" },
+  });
+
+  const historyOf = new Map<string, CampaignRunFact[]>();
+  for (const run of history) {
+    const facts = historyOf.get(run.campaignId) ?? [];
+    facts.push({
+      kind: run.kind,
+      status: run.status,
+      startedAt: run.startedAt!.toISOString(),
+      finishedAt: run.finishedAt?.toISOString() ?? null,
+    });
+    historyOf.set(run.campaignId, facts);
+  }
+
+  const now = new Date().toISOString();
+  const campaigns: CalendarCampaign[] = records
+    .map((record) =>
+      placeCampaign(
+        {
+          id: record.id,
+          name: record.name,
+          status: record.status,
+          startAt: record.startAt?.toISOString() ?? null,
+          endAt: record.endAt?.toISOString() ?? null,
+        },
+        historyOf.get(record.id) ?? [],
+        now,
+      ),
+    )
+    // By where each is drawn, so a day's chips stack in the order their campaigns began
+    // and keep that order from one day to the next: the dots after a row's first name
+    // only read as "the same campaign" if they stay in the same place. Sorted here rather
+    // than by the query, because a sale applied by hand has no `startAt` to order by.
+    .sort((a, b) => (a.startAt ?? "").localeCompare(b.startAt ?? "") || a.id.localeCompare(b.id));
 
   // Runs that started inside the visible range. Bounded generously in UTC and bucketed
   // by the store's day afterwards, because a day in the store's zone is not a day in

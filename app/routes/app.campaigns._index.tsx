@@ -15,7 +15,7 @@ import { HelpNote } from "../components/HelpNote";
 import { filtersFrom, listCampaigns } from "../services/campaigns/list.server";
 import { duplicateCampaign } from "../services/campaigns/housekeeping.server";
 import { calendarFor, todayIn } from "../services/calendar.server";
-import { addDays, isCalendarDay } from "../lib/scheduling/calendar";
+import { addDays, isCalendarDay, weekHeading } from "../lib/scheduling/calendar";
 
 export const loader = withGuard("/app/campaigns", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -60,7 +60,8 @@ export const loader = withGuard("/app/campaigns", async ({ request }: LoaderFunc
       previous,
       next,
       today: todayIn(shop.timezone),
-      heading: period === "week" ? `Week of ${on}` : monthName(on),
+      // The week's first day, not the anchor, which is whatever day Next landed on (#768).
+      heading: period === "week" ? weekHeading(on) : monthName(on),
     },
   } as const;
 });

@@ -204,6 +204,18 @@ describe("describeSchedule", () => {
     expect(text).toMatch(/^Was to start .*Cancelled, so it will not run\.$/);
     expect(text).not.toMatch(/^Starts/);
   });
+
+  it("does not promise a run to a completed campaign (#768)", () => {
+    // "QA · end before start": Completed, and its page still read "Starts 30 Sep …
+    // Runs until you revert it." The scheduler does not start a completed campaign.
+    const open = describeSchedule(window({ endAt: undefined }), "America/New_York", "COMPLETED");
+    expect(open).toMatch(/^Was scheduled for .*\(America\/New_York\)\. It has finished/);
+    expect(open).not.toMatch(/Starts|until you revert it/);
+
+    const closed = describeSchedule(window(), "UTC", "COMPLETED");
+    expect(closed).toMatch(/^Was scheduled for .* to .* \(UTC\)\./);
+    expect(closed).not.toMatch(/Starts|reverts|Reverting begins/);
+  });
 });
 
 describe("revert buffer capping", () => {
