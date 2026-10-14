@@ -16,6 +16,7 @@ import {
   type Transition,
 } from "../lib/scheduling/window";
 import { isPractice } from "./campaigns/model.server";
+import { unschedule } from "./campaigns/schedule-control.server";
 import { runCampaign } from "./campaigns/run.server";
 import type { RunOutcome } from "./campaigns/types";
 import { nextAttemptKey } from "../lib/scheduling/attempts";
@@ -113,7 +114,14 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
     // before the claim, so a tick neither touches it nor says anything about it. In code
     // rather than in the query: the flag lives in the schedule JSON, and a JSON-path `NOT`
     // drops every row that has no `practice` key at all, which is nearly all of them.
-    if (isPractice(campaign)) continue;
+    //
+    // And one still in SCHEDULED is made a draft again, once (#976): its page hides the
+    // schedule controls, as it should for practice, so the merchant could not unschedule
+    // it, and it went on saying its prices would change automatically.
+    if (isPractice(campaign)) {
+      if (campaign.status === "SCHEDULED") await unschedulePractice(campaign.shop.id, campaign.id);
+      continue;
+    }
 
     result.examined++;
 
@@ -434,4 +442,17 @@ export async function upcomingTransitions(shopId: string, limit = 10) {
       schedule: parseSchedule(campaign.schedule),
     }))
     .filter((entry) => entry.schedule.kind === "window");
+}
+
+/**
+ * A practice campaign left in SCHEDULED from before #827, returned to a draft with no
+ * dates (#976), the way Unschedule does, with the history and audit entries that leaves.
+ * A campaign that moved on since this tick read it is left alone.
+ */
+async function unschedulePractice(shopId: string, campaignId: string): Promise<void> {
+  try {
+    await unschedule(shopId, campaignId, SCHEDULER_ACTOR, "practice campaigns never run on a schedule");
+  } catch (error) {
+    logger.warn("practice campaign not unscheduled", { campaignId, error: error instanceof Error ? error.message : String(error) });
+  }
 }

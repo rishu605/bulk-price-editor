@@ -115,34 +115,51 @@ describe("chaos: a practice campaign is never scheduled", () => {
     });
   });
 
-  it("is left alone by the scheduler when it already has one: not claimed, not logged, every tick", async () => {
+  it("is made a draft again by the scheduler when it already has one, once, and never run (#976)", async () => {
     await withChaos("practice-schedule-tick", CATALOG, async (chaos) => {
       await practiceScheduledAndDue(chaos);
       const { shopId, campaignId, variantGids, baseline } = chaos.fixture;
-      const entries = () => prisma.auditLogEntry.count({ where: { shopId, entityId: campaignId } });
-      const before = await entries();
+      const entries = () => prisma.auditLogEntry.findMany({ where: { shopId, entityId: campaignId } });
+      const before = (await entries()).length;
 
       // Three ticks, ninety seconds of the worker. Each used to claim, be refused, release
-      // and write "claim released without running: This is a practice campaign…".
+      // and write "claim released without running: This is a practice campaign…"; then #827
+      // left it in SCHEDULED, where its page -- schedule controls hidden, as for any practice
+      // campaign -- still said its prices would change automatically, with no way to stop it.
       for (let i = 0; i < 3; i++) {
         const result = await tick(new Date());
         expect(
           result.failures.filter((failure) => failure.campaignId === campaignId),
           `tick ${i + 1} reported the practice campaign as a failure`,
         ).toEqual([]);
-        expect(await statusOf(campaignId), `tick ${i + 1} moved it`).toBe("SCHEDULED");
+        expect(await statusOf(campaignId), `tick ${i + 1} left it scheduled`).toBe("DRAFT");
+        if (i === 0) {
+          const unscheduled = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
+          expect((unscheduled.schedule as { kind?: string; practice?: boolean }).kind).toBe("manual");
+          expect((unscheduled.schedule as { practice?: boolean }).practice, "it stopped being practice").toBe(true);
+          expect(unscheduled.startAt).toBeNull();
+        }
       }
 
-      expect(await entries(), "a tick wrote to the practice campaign's activity").toBe(before);
+      // Once, by the scheduler, saying why -- not once per tick.
+      const written = (await entries()).slice(before);
+      expect(written.map((entry) => entry.action)).toContain("campaign.unschedule");
+      expect(new Set(written.map((entry) => entry.actor))).toEqual(new Set(["scheduler"]));
+      expect(JSON.stringify(written)).toContain("practice campaigns never run on a schedule");
+      const afterFirst = written.length;
+      await tick(new Date());
+      expect((await entries()).length - before, "a later tick wrote to it again").toBe(afterFirst);
+
       expect(await prisma.campaignRun.count({ where: { campaignId } })).toBe(0);
       expect(chaos.fake.writeLog).toHaveLength(0);
       for (const gid of variantGids) {
         expect(chaos.fake.priceOf(gid)).toBe((baseline.get(gid)! / 100).toFixed(2));
       }
 
-      // The same campaign without the flag is applied by the very next tick, so the window
-      // above was genuinely due and the ticks left it alone because it was practice -- not
-      // because of anything incidental to how the fixture was set up.
+      // The same campaign, scheduled again and without the flag, is applied by the very next
+      // tick, so the window above was genuinely due and the ticks unscheduled it because it
+      // was practice -- not because of anything incidental to how the fixture was set up.
+      await practiceScheduledAndDue(chaos);
       const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
       const real = { ...(campaign.schedule as Record<string, unknown>) };
       delete real.practice;
