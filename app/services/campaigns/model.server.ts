@@ -10,6 +10,7 @@
 import type { Campaign } from "@prisma/client";
 
 import prisma from "../../db.server";
+import { AppError } from "../../lib/errors/app-error";
 import {
   parseRoundingPolicy,
   resolvePolicy,
@@ -65,6 +66,20 @@ export async function createCampaign(
   // may hand them over either way -- the editor as a field, Home inside its constant scope
   // -- and the stored filter keeps only the conditions, so `astOf` has one answer to read.
   const { productStatuses: inAst, ...filter } = input.ast;
+
+  // A practice campaign is always a draft (#827). The editor refuses the dates and names
+  // the field; this is the same rule for any caller that does not go through it, because a
+  // practice campaign with a window comes out Scheduled -- a state whose page promises the
+  // prices will change, and which the scheduler would otherwise be asked about every tick.
+  if (input.practice && input.schedule?.kind === "window") {
+    throw new AppError({
+      code: "VALIDATION",
+      userMessage:
+        "A practice campaign is only ever previewed, so it cannot be scheduled. Leave out the dates " +
+        "to keep it as practice, or create a real campaign to schedule the sale. Nothing was created.",
+      context: { practice: true },
+    });
+  }
 
   const campaign = await prisma.campaign.create({
     data: {
