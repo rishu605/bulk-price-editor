@@ -18,6 +18,13 @@
  * campaign *should* control the price, and this page exists to say which one *did*. When
  * those disagree, the ledger is the evidence and the resolver is the hypothesis.
  *
+ * The ledger names who *wrote* a price, which is not always who it is because of. A revert
+ * writes the price without its campaign -- the baseline, or another campaign's price -- and
+ * is ledgered under the campaign being taken out; and a campaign that has let a variant go
+ * or ended no longer puts a price anywhere. So the campaign shown is the newest write by a
+ * campaign still pricing the cell; a revert's write is nobody's, and neither are the writes
+ * it undid (#779).
+ *
  * **Everything narrows in SQL.** Filtering fetched rows would mean page 1 of 25 reporting
  * "nothing matches" while the matches sit on page 9, and on a 500K-variant catalogue that
  * is the difference between a feature and a timeout.
@@ -58,10 +65,14 @@ export interface ReconciliationRow {
   currency: string;
   live: string | null;
   baseline: string | null;
-  /** The campaign whose write is the most recent verified one for this cell. */
+  /**
+   * The campaign this price is because of: the newest verified write to the cell by a
+   * campaign that may still have prices live, has not excluded the variant, and has not
+   * reverted the cell since (#779). Null when no such campaign wrote it.
+   */
   campaignId: string | null;
   campaignName: string | null;
-  /** What that campaign's ledger says it wrote. */
+  /** What the newest verified write to this cell put there, whichever run made it. */
   intended: string | null;
   /**
    * Live disagrees with the ledger.
@@ -196,8 +207,8 @@ export async function reconcile(
       where: { shopId, variantGid: { in: gids }, supersededAt: null },
       select: { variantGid: true, priceListGid: true, basePrice: true, currency: true },
     }),
-    // The most recent verified write per cell. Ordered so the first row seen for a cell
-    // is the newest, which is the one that explains the price now.
+    // The verified writes per cell, newest first: the first row seen for a cell is what we
+    // last put there, and the first one by a campaign still pricing it is why.
     prisma.variantChange.findMany({
       where: { shopId, variantGid: { in: gids }, status: { in: [...LANDED] } },
       orderBy: { verifiedAt: "desc" },
@@ -206,7 +217,7 @@ export async function reconcile(
         priceListGid: true,
         intendedPrice: true,
         currency: true,
-        run: { select: { campaignId: true, campaign: { select: { name: true } } } },
+        run: { select: { kind: true, campaignId: true } },
       },
     }),
   ]);
@@ -214,10 +225,42 @@ export async function reconcile(
   const variantBy = new Map(variants.map((row) => [row.variantGid, row]));
   const baselineBy = new Map(baselines.map((row) => [key(row.variantGid, row.priceListGid), row]));
 
-  const controllerBy = new Map<string, (typeof ledger)[number]>();
+  const writers = await prisma.campaign.findMany({
+    where: { shopId, id: { in: [...new Set(ledger.map((row) => row.run.campaignId))] } },
+    select: { id: true, name: true, status: true, excludedVariantGids: true },
+  });
+  const campaignBy = new Map(writers.map((campaign) => [campaign.id, campaign]));
+
+  // A write is the reason for a price only while its campaign still prices that variant
+  // (#779). Not a revert's: it wrote the price without its campaign -- "Revert this variant"
+  // left a variant at its baseline "because of" the sale that had just let it go. Nor that
+  // campaign's own earlier writes to the cell, which the revert undid. Not a campaign that
+  // has excluded the variant since, which its write still names. And not one whose prices
+  // cannot be live any more: an ended sale explains nothing on the storefront.
+  const stillPricing = (row: (typeof ledger)[number]) => {
+    const campaign = campaignBy.get(row.run.campaignId);
+    return (
+      campaign !== undefined &&
+      PRICES_MAY_BE_LIVE.has(campaign.status) &&
+      !campaign.excludedVariantGids.includes(row.variantGid)
+    );
+  };
+
+  const writerBy = new Map<string, (typeof ledger)[number]>();
+  const causeBy = new Map<string, { campaignId: string; name: string }>();
+  // Per cell, the campaigns a newer revert has taken out of it.
+  const undoneBy = new Map<string, Set<string>>();
   for (const row of ledger) {
     const cell = key(row.variantGid, row.priceListGid);
-    if (!controllerBy.has(cell)) controllerBy.set(cell, row);
+    if (!writerBy.has(cell)) writerBy.set(cell, row);
+    if (causeBy.has(cell)) continue;
+
+    const undone = undoneBy.get(cell) ?? new Set<string>();
+    if (row.run.kind === "REVERT") {
+      undoneBy.set(cell, undone.add(row.run.campaignId));
+    } else if (!undone.has(row.run.campaignId) && stillPricing(row)) {
+      causeBy.set(cell, { campaignId: row.run.campaignId, name: campaignBy.get(row.run.campaignId)!.name });
+    }
   }
 
   const listBy = new Map(lists.map((list) => [list.priceListGid, list]));
@@ -226,7 +269,8 @@ export async function reconcile(
     const cell = key(entry.variantGid, entry.priceListGid);
     const variant = variantBy.get(entry.variantGid);
     const baseline = baselineBy.get(cell);
-    const controller = controllerBy.get(cell);
+    const controller = writerBy.get(cell);
+    const cause = causeBy.get(cell);
     const currency = entry.currency || baseline?.currency || "USD";
 
     const live = entry.livePrice === null ? null : Number(entry.livePrice);
@@ -246,8 +290,8 @@ export async function reconcile(
       currency,
       live: formatMinorUnits(entry.livePrice, currency),
       baseline: formatMinorUnits(baseline?.basePrice ?? null, currency),
-      campaignId: controller?.run.campaignId ?? null,
-      campaignName: controller?.run.campaign.name ?? null,
+      campaignId: cause?.campaignId ?? null,
+      campaignName: cause?.name ?? null,
       intended: formatMinorUnits(
         controller?.intendedPrice ?? null,
         controller?.currency || currency,

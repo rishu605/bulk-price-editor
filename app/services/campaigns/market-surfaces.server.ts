@@ -49,6 +49,7 @@ import { logger } from "../../lib/logging/logger";
 import { metric } from "../../lib/telemetry/metrics";
 import { LANDED } from "../../lib/execution/landed";
 import { inChunks } from "../../lib/db/chunk";
+import { mirrorMarketDelete, mirrorMarketWrite } from "./mirror.server";
 
 /** Which surfaces a campaign writes to. Stored on the campaign as JSON. */
 export interface CampaignSurfaces {
@@ -535,6 +536,9 @@ export async function applyMarketSurfaces(
       },
     );
 
+    // The mirror first, then the ledger: a run that dies in between leaves rows the ledger
+    // calls unsettled, which the mirror then calls unknown, never verified over an old price.
+    await mirrorMarketWrite(shopId, list, remaining, result);
     await recordResults(runId, shopId, list.priceListGid, result);
 
     const summary = summarise(list, result);
@@ -631,6 +635,8 @@ export async function revertMarketSurfaces(
 
     const deleted = followed.length > 0 ? await deleteMarketPrices(client, priceListGid, followed, onProgress) : null;
     if (deleted) {
+      // A deleted fixed price leaves no row behind, as the sync would mirror it (#779).
+      await mirrorMarketDelete(shopId, { priceListGid, currency: list?.currency ?? "" }, deleted);
       await prisma.variantChange.updateMany({
         where: { shopId, priceListGid, variantGid: { in: followed }, run: { campaignId } },
         data: { status: deleted.clean ? "REVERTED" : "FAILED" },
@@ -682,6 +688,7 @@ async function rewriteHandSet(
     await ledgerChunk(recompute.runId, shopId, list, chunk, index);
     await onProgress?.();
   });
+  await mirrorMarketWrite(shopId, list, rows, result);
   await recordResults(recompute.runId, shopId, list.priceListGid, result);
   return result;
 }
