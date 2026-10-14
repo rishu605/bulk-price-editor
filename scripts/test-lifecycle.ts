@@ -78,8 +78,8 @@ async function main() {
 
   // ------------------------------------------------- 1. apply → ACTIVE
   console.log("1. apply");
-  await transitionCampaign(shop.id, campaign.id, "APPLYING", { reason: "test: apply" });
-  await runCampaign(shop.id, campaign.id, client, {});
+  await transitionCampaign(shop.id, campaign.id, "APPLYING", { actor: "script", reason: "test: apply" });
+  await runCampaign(shop.id, campaign.id, client, { actor: "script" });
   check("state after a clean run", await stateOf(campaign.id), "ACTIVE");
   check("the run actually wrote a row", await verifiedRows(campaign.id) > 0, true);
 
@@ -93,10 +93,10 @@ async function main() {
 
   // ------------------------------------------------ 3. illegal transition
   console.log("3. illegal transition is refused");
-  await transitionCampaign(shop.id, campaign.id, "CANCELLED", { reason: "test" });
+  await transitionCampaign(shop.id, campaign.id, "CANCELLED", { actor: "script", reason: "test" });
   let refused = false;
   try {
-    await transitionCampaign(shop.id, campaign.id, "ACTIVE", { reason: "test: illegal" });
+    await transitionCampaign(shop.id, campaign.id, "ACTIVE", { actor: "script", reason: "test: illegal" });
   } catch {
     refused = true;
   }
@@ -106,13 +106,13 @@ async function main() {
   // ---------------------------------------------------- 4. resume a partial
   console.log("4. resume from partial");
   await prisma.campaign.update({ where: { id: campaign.id }, data: { status: "PARTIAL" } });
-  await transitionCampaign(shop.id, campaign.id, "APPLYING", { reason: "test: resume" });
-  await runCampaign(shop.id, campaign.id, client, {});
+  await transitionCampaign(shop.id, campaign.id, "APPLYING", { actor: "script", reason: "test: resume" });
+  await runCampaign(shop.id, campaign.id, client, { actor: "script" });
   check("resume reaches a clean state", await stateOf(campaign.id), "ACTIVE");
 
   // -------------------------------------------------------- 5. idempotence
   console.log("5. duplicate transition is a no-op, not an error");
-  const again = await transitionCampaign(shop.id, campaign.id, "ACTIVE", {
+  const again = await transitionCampaign(shop.id, campaign.id, "ACTIVE", { actor: "script",
     reason: "test: duplicate tick",
   });
   check("second identical transition changed nothing", again.changed, false);
@@ -126,7 +126,7 @@ async function main() {
   check("transitions were recorded", history.length > 0, true);
 
   // ------------------------------------------------------------- cleanup
-  await runCampaign(shop.id, campaign.id, client, { revert: true }).catch(() => {});
+  await runCampaign(shop.id, campaign.id, client, { actor: "script", revert: true }).catch(() => {});
   await prisma.driftEvent.deleteMany({ where: { variantGid: product.variantGid } });
   await prisma.campaign.delete({ where: { id: campaign.id } });
   await client.request(

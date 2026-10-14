@@ -110,7 +110,7 @@ describe("chaos: auto-enrol and a campaign being ended", () => {
         }
         return updateMany(args as never);
       }) as never);
-      await expect(runCampaign(shopId, campaignId, client, { revert: true, verifySampleRate: 1 })).rejects.toThrow();
+      await expect(runCampaign(shopId, campaignId, client, { actor: "chaos", revert: true, verifySampleRate: 1 })).rejects.toThrow();
       vi.restoreAllMocks();
       chaos.heal();
       expect((await campaignOf(campaignId)).status).toBe("PARTIAL");

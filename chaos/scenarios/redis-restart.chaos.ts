@@ -81,8 +81,8 @@ describe("chaos: Redis restarts mid-run", () => {
           // running".
           const shared = `APPLY-${chaos.seed}-split-brain`;
           const contended = await Promise.all([
-            chaos.apply({ occurrenceKey: shared }),
-            chaos.apply({ occurrenceKey: shared }),
+            chaos.apply({ actor: "chaos", occurrenceKey: shared }),
+            chaos.apply({ actor: "chaos", occurrenceKey: shared }),
           ]);
 
           const deferred = contended.filter((run) => run.deferredTo);
@@ -108,8 +108,8 @@ describe("chaos: Redis restarts mid-run", () => {
           const writesBefore = chaos.fake.writeLog.length;
 
           const both = await Promise.all([
-            chaos.apply({ occurrenceKey: `${shared}-a` }),
-            chaos.apply({ occurrenceKey: `${shared}-b` }),
+            chaos.apply({ actor: "chaos", occurrenceKey: `${shared}-a` }),
+            chaos.apply({ actor: "chaos", occurrenceKey: `${shared}-b` }),
           ]);
           const ran = both.filter((run) => !run.deferredTo);
           expect(ran, "two whole-campaign runs wrote at once").toHaveLength(1);

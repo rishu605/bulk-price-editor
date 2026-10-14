@@ -156,7 +156,7 @@ async function main() {
   );
 
   // ------------------------------------------------------------ 8. clean up
-  await runCampaign(shop.id, campaign.id, client, { revert: true });
+  await runCampaign(shop.id, campaign.id, client, { actor: "script", revert: true });
   await client.request(
     `mutation Del($input: ProductDeleteInput!) { productDelete(input: $input) { deletedProductId userErrors { message } } }`,
     { input: { id: product.id } },

@@ -41,7 +41,7 @@ describe("chaos: two active campaigns with different scopes", () => {
         schedule: { kind: "manual" },
       });
 
-      const narrowRun = await runCampaign(shopId, narrow.id, client, {});
+      const narrowRun = await runCampaign(shopId, narrow.id, client, { actor: "chaos" });
       expect(narrowRun.verified).toBe(1);
       expect(prices()).toEqual([at(baseline.get(one)!, 0.5), at(baseline.get(two)!, 1), at(baseline.get(three)!, 1)]);
 
@@ -56,11 +56,11 @@ describe("chaos: two active campaigns with different scopes", () => {
       expect(broadRun.verified).toBe(2);
 
       // Ending the narrow sale hands product 1 to the broad one, and touches nothing else.
-      await runCampaign(shopId, narrow.id, client, { revert: true });
+      await runCampaign(shopId, narrow.id, client, { actor: "chaos", revert: true });
       expect(prices()).toEqual([at(baseline.get(one)!, 0.8), at(baseline.get(two)!, 0.8), at(baseline.get(three)!, 0.8)]);
 
       // Ending the broad one returns everything to baseline: nothing else covers them now.
-      await runCampaign(shopId, broadId, client, { revert: true });
+      await runCampaign(shopId, broadId, client, { actor: "chaos", revert: true });
       expect(prices()).toEqual([at(baseline.get(one)!, 1), at(baseline.get(two)!, 1), at(baseline.get(three)!, 1)]);
     });
   });
@@ -83,11 +83,11 @@ describe("chaos: two active campaigns with different scopes", () => {
         segmentId: onlyOne.id,
         schedule: { kind: "manual" },
       });
-      await runCampaign(shopId, narrow.id, client, {});
+      await runCampaign(shopId, narrow.id, client, { actor: "chaos" });
 
       // The broad one ends. Product 1 falls to the narrow sale that covers it; 2 and 3
       // return to full price rather than taking the narrow sale's 50%.
-      await runCampaign(shopId, broadId, client, { revert: true });
+      await runCampaign(shopId, broadId, client, { actor: "chaos", revert: true });
       expect(variantGids.map((gid) => chaos.fake.priceOf(gid)), "ending one sale put products on another").toEqual([
         at(baseline.get(one)!, 0.5),
         at(baseline.get(two)!, 1),

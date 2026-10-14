@@ -33,7 +33,7 @@ describe("chaos: tags after a run that did not finish them", () => {
       expect(untagged.length, "the fault did not take").toBeGreaterThan(0);
       expect(untagged.length).toBeLessThan(productGids.length);
 
-      const resumed = await chaos.apply({ resume: true });
+      const resumed = await chaos.apply({ actor: "chaos", resume: true });
       for (const gid of productGids) expect(has(chaos.fake.tagsOf(gid), "SALE"), `${gid} is on sale without its badge`).toBe(true);
       const claims = await prisma.tagChange.findMany({ where: { runId: resumed.runId } });
       for (const claim of claims) {
@@ -62,7 +62,7 @@ describe("chaos: tags after a run that did not finish them", () => {
         schedule: { kind: "manual" },
         tagKit: ["CLEARANCE"],
       });
-      await runCampaign(shopId, lower.id, client, { verifySampleRate: 1 });
+      await runCampaign(shopId, lower.id, client, { actor: "chaos", verifySampleRate: 1 });
 
       // A's revert stops part-way: two prices back on B's sale, two still on A's.
       chaos.arm([{ fault: "server-error", match: (query) => query.includes("productVariantsBulkUpdate"), after: 2 }]);
@@ -77,7 +77,7 @@ describe("chaos: tags after a run that did not finish them", () => {
       }
       await prisma.tagChange.deleteMany({ where: { campaignId: lower.id } });
 
-      await chaos.revert({ resume: true });
+      await chaos.revert({ actor: "chaos", resume: true });
       for (const gid of productGids) {
         expect(has(chaos.fake.tagsOf(gid), "CLEARANCE"), `${gid} is on B's price without B's badge`).toBe(true);
       }

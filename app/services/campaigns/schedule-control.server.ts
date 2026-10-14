@@ -44,7 +44,7 @@ function notScheduled(name: string, status: CampaignState): AppError {
  * Called off for good. A cancelled campaign never runs; it can be duplicated into a new
  * draft, which is how "the same sale, another month" is meant to be made.
  */
-export async function cancelScheduled(shopId: string, campaignId: string, actor?: string): Promise<string> {
+export async function cancelScheduled(shopId: string, campaignId: string, actor: string): Promise<string> {
   const campaign = await scheduled(shopId, campaignId);
 
   const result = await transitionCampaign(shopId, campaignId, "CANCELLED", {
@@ -62,7 +62,7 @@ export async function cancelScheduled(shopId: string, campaignId: string, actor?
  * The dates go with it: a draft that kept its window would revert on the old end date the
  * first time it was applied by hand.
  */
-export async function unschedule(shopId: string, campaignId: string, actor?: string): Promise<string> {
+export async function unschedule(shopId: string, campaignId: string, actor: string): Promise<string> {
   const campaign = await scheduled(shopId, campaignId);
 
   const result = await transitionCampaign(shopId, campaignId, "DRAFT", {
@@ -97,7 +97,7 @@ export async function reschedule(
   shopId: string,
   campaignId: string,
   window: { startUtc: string; endUtc: string | null; clockNotes: string[] },
-  actor?: string,
+  actor: string,
 ): Promise<string> {
   const campaign = await scheduled(shopId, campaignId);
   const previous = (campaign.schedule ?? {}) as Record<string, unknown>;
@@ -152,7 +152,7 @@ export async function scheduleAction(
   intent: string,
   form: FormData,
   timeZone: string,
-  actor?: string,
+  actor: string,
 ): Promise<{ ok: boolean; message: string } | null> {
   if (intent !== "cancel-schedule" && intent !== "unschedule" && intent !== "reschedule") return null;
 

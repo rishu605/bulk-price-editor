@@ -7,6 +7,7 @@
  * code, ledger and verification.
  */
 
+import { SCHEDULER_ACTOR } from "../lib/audit/actor";
 import prisma from "../db.server";
 import {
   dueTransition,
@@ -321,6 +322,7 @@ async function drainEnrollments(
       // finds it and asks the merchant to try again in a minute, and this run, finding the
       // campaign claimed first, writes nothing (#763).
       await runCampaign(entry.shopId, entry.id, client, {
+        actor: SCHEDULER_ACTOR,
         variantGids,
         occurrenceKey: `VARIANT-ENROLL-${Date.now()}`,
       });
@@ -390,6 +392,7 @@ async function runTransition(
       : [];
 
   return runCampaign(shopId, campaignId, client, {
+    actor: SCHEDULER_ACTOR,
     revert: transition === "revert",
     occurrenceKey,
     claimedFrom: before?.status as CampaignState | undefined,

@@ -72,38 +72,38 @@ async function main() {
     const second = await make("Tag overlap B", 960, -15);
 
     console.log("1. apply A, then B over the same products");
-    const a = await runCampaign(shop.id, first, client, { verifySampleRate: 1 });
+    const a = await runCampaign(shop.id, first, client, { actor: "script", verifySampleRate: 1 });
     check("A applied clean", a.clean, true);
     check("A tagged the plain product", await hasTag(client, plain.productGid), true);
-    const b = await runCampaign(shop.id, second, client, { verifySampleRate: 1 });
+    const b = await runCampaign(shop.id, second, client, { actor: "script", verifySampleRate: 1 });
     check("B applied clean", b.clean, true);
 
     console.log("2. revert A first: B is still discounting both products");
-    await runCampaign(shop.id, first, client, { revert: true, verifySampleRate: 1 });
+    await runCampaign(shop.id, first, client, { actor: "script", revert: true, verifySampleRate: 1 });
     check("plain product keeps QA686 while B runs", await hasTag(client, plain.productGid), true);
     check("merchant's QA686 kept", await hasTag(client, merchants.productGid), true);
     check("B still live", await stateOf(second), "ACTIVE");
 
     console.log("3. revert B last: nobody owes the tag now");
-    await runCampaign(shop.id, second, client, { revert: true, verifySampleRate: 1 });
+    await runCampaign(shop.id, second, client, { actor: "script", revert: true, verifySampleRate: 1 });
     check("plain product loses QA686", await hasTag(client, plain.productGid), false);
     check("merchant's QA686 still kept", await hasTag(client, merchants.productGid), true);
 
     console.log("4. a higher sale over a lower one, then the higher one ends");
     const high = await make("Tag takeover high", 970, -30, HIGH_KIT);
     const low = await make("Tag takeover low", 940, -10, LOW_KIT);
-    await runCampaign(shop.id, high, client, { verifySampleRate: 1 });
-    await runCampaign(shop.id, low, client, { verifySampleRate: 1 });
+    await runCampaign(shop.id, high, client, { actor: "script", verifySampleRate: 1 });
+    await runCampaign(shop.id, low, client, { actor: "script", verifySampleRate: 1 });
     check("high sale's badge on", await hasTag(client, plain.productGid, HIGH_KIT), true);
     check("low sale wins nothing yet", await hasTag(client, plain.productGid, LOW_KIT), false);
     check("price is the high sale's", await priceOf(client, plain.variantGid), "140.00");
 
-    await runCampaign(shop.id, high, client, { revert: true, verifySampleRate: 1 });
+    await runCampaign(shop.id, high, client, { actor: "script", revert: true, verifySampleRate: 1 });
     check("price handed to the low sale", await priceOf(client, plain.variantGid), "180.00");
     check("high sale's badge off", await hasTag(client, plain.productGid, HIGH_KIT), false);
     check("low sale's badge on", await hasTag(client, plain.productGid, LOW_KIT), true);
 
-    await runCampaign(shop.id, low, client, { revert: true, verifySampleRate: 1 });
+    await runCampaign(shop.id, low, client, { actor: "script", revert: true, verifySampleRate: 1 });
     // Not "back to 200.00": another live campaign on the store can still leak onto the
     // probe (#752). What this step owns is that the low sale's own price is gone.
     check("low sale's price gone", (await priceOf(client, plain.variantGid)) !== "180.00", true);

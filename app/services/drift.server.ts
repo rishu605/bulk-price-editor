@@ -379,7 +379,7 @@ export async function resolveDrift(
   shopId: string,
   eventId: string,
   resolution: Exclude<DriftResolution, "reassert">,
-  actor?: string,
+  actor: string,
 ): Promise<{ released: boolean }> {
   const event = await prisma.driftEvent.findFirstOrThrow({
     where: { id: eventId, shopId },

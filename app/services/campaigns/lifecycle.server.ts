@@ -16,6 +16,7 @@
  * wins, and the loser sees `changed: false` rather than corrupting the sequence.
  */
 
+import { SCHEDULER_ACTOR } from "../../lib/audit/actor";
 import prisma from "../../db.server";
 import {
   canTransition,
@@ -34,7 +35,13 @@ export interface TransitionResult {
 export interface TransitionOptions {
   /** Why, for the audit trail. "scheduler: window opened", "merchant clicked resume". */
   reason: string;
-  actor?: string;
+  /**
+   * Who moved it: `actorFor(...)` for a person, `SCHEDULER_ACTOR` for the scheduler,
+   * `FLOW_ACTOR` for Flow (#746). Required: a missing actor used to default to "system",
+   * which Activity shows as the Scheduler, so every Apply pressed by hand read as the
+   * Scheduler's doing.
+   */
+  actor: string;
   runId?: string;
   /** Skip the audit entry when the last one gave this same reason (`releaseClaim` only). */
   quietIfRepeated?: boolean;
@@ -186,7 +193,8 @@ export async function noteCampaign(shopId: string, campaignId: string, reason: s
   });
   if (!campaign) return;
   const status = campaign.status as CampaignState;
-  await recordTransition(shopId, campaignId, status, status, { reason });
+  // Only the scheduler notes a campaign it could not move (#707).
+  await recordTransition(shopId, campaignId, status, status, { reason, actor: SCHEDULER_ACTOR });
 }
 
 /** The reason on this campaign's most recent recorded transition. */
@@ -225,7 +233,7 @@ async function recordTransition(
     await prisma.auditLogEntry.create({
       data: {
         shopId,
-        actor: options.actor ?? "system",
+        actor: options.actor,
         action: "campaign.transition",
         entity: "Campaign",
         entityId: campaignId,
@@ -344,7 +352,7 @@ async function announceHold(shopId: string, campaignId: string): Promise<void> {
 export async function releaseHold(
   shopId: string,
   campaignId: string,
-  actor?: string,
+  actor: string,
 ): Promise<TransitionResult | null> {
   const campaign = await prisma.campaign.findFirst({
     where: { id: campaignId, shopId },

@@ -122,7 +122,7 @@ describe("chaos: Apply prices a market once the store price is already right", (
       expect((await marketRows(first.runId, GBP)).some((row) => row.status === "VERIFIED"), "the fault did not take").toBe(false);
       expect(chaos.fake.priceOf(variantGids[0], GBP)).toBe("45.00");
 
-      const resumed = await chaos.apply({ resume: true });
+      const resumed = await chaos.apply({ actor: "chaos", resume: true });
       expect((await marketRows(resumed.runId, GBP)).map((row) => row.status), "the failed market was never retried").toEqual(
         variantGids.map(() => "VERIFIED"),
       );
@@ -157,11 +157,11 @@ describe("chaos: Apply prices a market once the store price is already right", (
       });
       await prisma.campaign.update({ where: { id: lower.id }, data: { surfaces: { base: true, priceLists: [EUR] } as never } });
       const client = chaosAdminClient(chaos.server.endpoint());
-      const applied = await runCampaign(shopId, lower.id, client, { verifySampleRate: 1 });
+      const applied = await runCampaign(shopId, lower.id, client, { actor: "chaos", verifySampleRate: 1 });
       expect(await marketRows(applied.runId, EUR), "the lower sale ledgered market prices it does not win").toHaveLength(0);
 
       // Ending the lower sale must leave the higher one's market prices where they are.
-      await runCampaign(shopId, lower.id, client, { revert: true, verifySampleRate: 1 });
+      await runCampaign(shopId, lower.id, client, { actor: "chaos", revert: true, verifySampleRate: 1 });
       for (const gid of variantGids) {
         expect(chaos.fake.priceOf(gid, EUR), "ending the lower sale took the higher sale off the market").toBe("40.00");
       }

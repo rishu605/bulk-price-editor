@@ -102,8 +102,8 @@ async function main() {
   try {
     // ------------------------------- 1. the run stops watching a real operation
     console.log("\n1. bulk apply that stops waiting as soon as Shopify accepts the operation");
-    await transitionCampaign(shop.id, campaign.id, "APPLYING", { reason: "test" });
-    const stopped = await runCampaign(shop.id, campaign.id, client, { forcePath: "bulk", bulkWaitMs: 1 }).then(
+    await transitionCampaign(shop.id, campaign.id, "APPLYING", { actor: "script", reason: "test" });
+    const stopped = await runCampaign(shop.id, campaign.id, client, { actor: "script", forcePath: "bulk", bulkWaitMs: 1 }).then(
       () => null,
       (error: unknown) => error as { userMessage?: string; message?: string },
     );
@@ -130,14 +130,14 @@ async function main() {
 
     // ------------------------------- 2. the next run asks Shopify first
     console.log("2. resume: refused while Shopify runs it, then settled from its result file");
-    await transitionCampaign(shop.id, campaign.id, "APPLYING", { reason: "test: resume" });
+    await transitionCampaign(shop.id, campaign.id, "APPLYING", { actor: "script", reason: "test: resume" });
     let refusals = 0;
-    let resumed = await runCampaign(shop.id, campaign.id, client, { resume: true });
+    let resumed = await runCampaign(shop.id, campaign.id, client, { actor: "script", resume: true });
     while (resumed.refused && refusals < 30) {
       refusals++;
       if (refusals === 1) console.log(`      refused: ${resumed.refused}`);
       await new Promise((r) => setTimeout(r, 2_000));
-      resumed = await runCampaign(shop.id, campaign.id, client, { resume: true });
+      resumed = await runCampaign(shop.id, campaign.id, client, { actor: "script", resume: true });
     }
     console.log(`      refused ${refusals} time(s) while Shopify was still running it`);
     check("the resume went ahead once Shopify had finished", resumed.refused, undefined);
@@ -156,7 +156,7 @@ async function main() {
     check("campaign is ACTIVE", (await prisma.campaign.findUniqueOrThrow({ where: { id: campaign.id } })).status, "ACTIVE");
   } finally {
     // ------------------------------------------------------------ cleanup
-    await runCampaign(shop.id, campaign.id, client, { revert: true }).catch((error) => console.log(`   revert: ${error}`));
+    await runCampaign(shop.id, campaign.id, client, { actor: "script", revert: true }).catch((error) => console.log(`   revert: ${error}`));
     const reverted = await livePrices(client, variantGids);
     check("revert put every price back", variantGids.every((gid) => reverted.get(gid) === (baseline.get(gid)! / 100).toFixed(2)), true);
     await prisma.campaign.delete({ where: { id: campaign.id } });

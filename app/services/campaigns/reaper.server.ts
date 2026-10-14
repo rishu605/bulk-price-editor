@@ -21,6 +21,7 @@
  * resume knows how to continue from.
  */
 
+import { SCHEDULER_ACTOR } from "../../lib/audit/actor";
 import prisma from "../../db.server";
 import { logger } from "../../lib/logging/logger";
 import { transitionCampaign } from "./lifecycle.server";
@@ -209,6 +210,7 @@ export async function reclaimStaleRuns(
       // campaign would stop the scheduler from doing anything for every shop.
       try {
         await transitionCampaign(run.shopId, run.campaignId, "PARTIAL", {
+          actor: SCHEDULER_ACTOR,
           reason: operation && sent > 0
             ? `Run ${run.id} stopped responding and was reclaimed ` +
               (operation.status === "CREATED" || operation.status === "RUNNING"

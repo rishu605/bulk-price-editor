@@ -72,7 +72,7 @@ describe("chaos: a sale under a campaign that is held, not merely Active", () =>
       ]);
       expect(preview.counts.planned, "the preview planned writes over the held campaign").toBe(0);
 
-      const applied = await runCampaign(shopId, lower.id, client, { verifySampleRate: 1 });
+      const applied = await runCampaign(shopId, lower.id, client, { actor: "chaos", verifySampleRate: 1 });
       expect(applied.planned, "the lower sale wrote over the held one").toBe(0);
       for (const gid of variantGids.slice(1)) expect(chaos.fake.priceOf(gid)).toBe(sale(gid));
       expect(chaos.fake.priceOf(edited), "the merchant's hand edit was overwritten").toBe(dollars(handPrice));
@@ -80,7 +80,7 @@ describe("chaos: a sale under a campaign that is held, not merely Active", () =>
       // The revert dialog names who keeps them, and the revert writes nothing under it.
       const revertPreview = await previewCampaign(shopId, lower.id, { client, revert: true });
       expect(revertPreview.overlaps).toEqual([expect.objectContaining({ campaignId: held, keeps: variantGids.length })]);
-      await runCampaign(shopId, lower.id, client, { revert: true, verifySampleRate: 1 });
+      await runCampaign(shopId, lower.id, client, { actor: "chaos", revert: true, verifySampleRate: 1 });
       for (const gid of variantGids.slice(1)) expect(chaos.fake.priceOf(gid), "the revert wrote a baseline under the held campaign").toBe(sale(gid));
       expect(chaos.fake.priceOf(edited)).toBe(dollars(handPrice));
     });
@@ -105,9 +105,9 @@ describe("chaos: a sale under a campaign that is held, not merely Active", () =>
 
       // The sale under it prices the variants, and its own revert returns them to baseline --
       // not to the ending campaign's sale.
-      await runCampaign(shopId, lower.id, client, { verifySampleRate: 1 });
+      await runCampaign(shopId, lower.id, client, { actor: "chaos", verifySampleRate: 1 });
       for (const gid of variantGids) expect(chaos.fake.priceOf(gid)).toBe(dollars(Math.round(baseline.get(gid)! * 0.7)));
-      await runCampaign(shopId, lower.id, client, { revert: true, verifySampleRate: 1 });
+      await runCampaign(shopId, lower.id, client, { actor: "chaos", revert: true, verifySampleRate: 1 });
       for (const gid of variantGids) expect(chaos.fake.priceOf(gid), "a revert put back a sale being ended").toBe(dollars(baseline.get(gid)!));
     });
   });

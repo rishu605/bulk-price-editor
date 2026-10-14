@@ -111,7 +111,7 @@ describe("chaos: Resume after a partial revert", () => {
 
         // Any caller asking to resume an apply now. The last whole run was the revert, so
         // the old apply's VERIFIED rows say nothing about what is live: they were undone.
-        const resumed = await chaos.apply({ resume: true });
+        const resumed = await chaos.apply({ actor: "chaos", resume: true });
 
         // Every row written and read back: none dropped as "already verified" on the
         // word of a ledger the revert had undone.

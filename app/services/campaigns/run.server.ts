@@ -50,8 +50,12 @@ import { addLogContext, withLogContext } from "../../lib/logging/context.server"
 
 export interface RunOptions {
   revert?: boolean;
-  /** Who asked for this run, recorded on anything it resolves on their behalf (#755). */
-  actor?: string;
+  /**
+   * Who asked for this run, recorded on every transition it makes and anything it resolves
+   * on their behalf (#755, #746): `actorFor(...)` for a person, `SCHEDULER_ACTOR` for the
+   * scheduler, `FLOW_ACTOR` for Flow. Required, so no caller can leave it to a default.
+   */
+  actor: string;
   /**
    * The state the caller moved this campaign out of when it claimed it.
    *
@@ -138,7 +142,7 @@ export async function runCampaign(
   shopId: string,
   campaignId: string,
   client: AdminClient,
-  options: RunOptions = {},
+  options: RunOptions,
 ): Promise<RunOutcome> {
   // The campaign is moved to APPLYING before anything is planned, so that an illegal
   // action is refused before a price moves. Planning can then fail -- a guardrail
@@ -446,7 +450,7 @@ async function executeCampaignRun(
   shopId: string,
   campaignId: string,
   client: AdminClient,
-  options: RunOptions = {},
+  options: RunOptions,
   /**
    * Filled in the moment the run row exists, so the caller's catch can finish it.
    *

@@ -24,7 +24,8 @@ import type { RunOutcome } from "./types";
 export interface QueuedRunOptions {
   revert: boolean;
   resume?: boolean;
-  actor?: string;
+  /** Who asked for it; carried to the worker's run (#746). */
+  actor: string;
   /** The rollback report's "leave as it is" (#790): carried to the worker, never dropped. */
   skipVariantGids?: string[];
   skipReason?: string;

@@ -21,9 +21,9 @@ async function main() {
   const campaignId = required("CHAOS_CAMPAIGN_ID");
   const resume = process.env.CHAOS_RESUME === "1";
 
-  await transitionCampaign(shopId, campaignId, "APPLYING", { reason: "chaos: child apply" });
+  await transitionCampaign(shopId, campaignId, "APPLYING", { actor: "chaos", reason: "chaos: child apply" });
 
-  const outcome = await runCampaign(shopId, campaignId, chaosAdminClient(endpoint), {
+  const outcome = await runCampaign(shopId, campaignId, chaosAdminClient(endpoint), { actor: "chaos",
     verifySampleRate: 1,
     resume,
   });

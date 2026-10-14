@@ -62,7 +62,7 @@ describe("chaos: duplicating a campaign", () => {
       await addVariantOutsideScope(chaos);
 
       const copy = await duplicateCampaign(shopId, campaignId, "staff@example.com");
-      const outcome = await runCampaign(shopId, copy.id, chaosAdminClient(chaos.server.endpoint()), {
+      const outcome = await runCampaign(shopId, copy.id, chaosAdminClient(chaos.server.endpoint()), { actor: "chaos",
         verifySampleRate: 1,
       });
 
@@ -87,7 +87,7 @@ describe("chaos: duplicating a campaign", () => {
 
       const copy = await duplicateCampaign(shopId, campaignId, "staff@example.com");
       await expect(
-        runCampaign(shopId, copy.id, chaosAdminClient(chaos.server.endpoint()), {}),
+        runCampaign(shopId, copy.id, chaosAdminClient(chaos.server.endpoint()), { actor: "chaos" }),
         "a practice campaign's copy was applied to the storefront",
       ).rejects.toThrow(/practice campaign/);
       expect(await prisma.campaignRun.count({ where: { campaignId: copy.id } })).toBe(0);

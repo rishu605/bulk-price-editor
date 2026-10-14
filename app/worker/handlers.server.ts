@@ -11,6 +11,7 @@
  * while its job was queued must not run.
  */
 
+import { SCHEDULER_ACTOR } from "../lib/audit/actor";
 import type { CampaignState } from "../lib/lifecycle/transitions";
 import prisma from "../db.server";
 import { adminClientForShop } from "../services/admin-client.server";
@@ -64,7 +65,9 @@ async function runCampaignJob(ref: JobRef): Promise<void> {
   await runCampaign(ref.shopId, ref.campaignId, client, {
     revert: ref.revert === true,
     resume: ref.resume === true,
-    actor: ref.actor,
+    // The actor `queueRun` carries -- the merchant, Flow or the scheduler (#746). A job
+    // queued before jobs carried one has none, and was queued by the scheduler.
+    actor: ref.actor ?? SCHEDULER_ACTOR,
     skipVariantGids: ref.skipVariantGids,
     skipReason: ref.skipReason,
     ...(ref.claimedFrom ? { claimedFrom: ref.claimedFrom as CampaignState } : {}),

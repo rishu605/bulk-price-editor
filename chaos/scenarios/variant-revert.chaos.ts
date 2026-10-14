@@ -44,7 +44,7 @@ describe("chaos: one variant reverted out of a running campaign", () => {
         expect(chaos.fake.priceOf(victim)).toBe(((base * 0.75) / 100).toFixed(2));
 
         // ---------------------------------------------------- the single revert
-        const result = await revertVariant(shopId, campaignId, victim, client);
+        const result = await revertVariant(shopId, campaignId, victim, client, { actor: "chaos" });
         expect(result.changed).toBe(true);
         expect(result.outcome?.clean).toBe(true);
 
@@ -91,7 +91,7 @@ describe("chaos: one variant reverted out of a running campaign", () => {
         expect(rerunRows.some((row) => row.variantGid === victim)).toBe(false);
 
         // ------------------------------------------------------- and back in
-        const back = await reinstateVariant(shopId, campaignId, victim, client);
+        const back = await reinstateVariant(shopId, campaignId, victim, client, { actor: "chaos" });
         expect(back.changed).toBe(true);
         expect(chaos.fake.priceOf(victim)).toBe(((base * 0.75) / 100).toFixed(2));
       },
@@ -153,7 +153,7 @@ describe("chaos: a revert that respects a merchant's edit", () => {
         expect(csv).toContain(edited);
 
         // -------------------------------------------- revert, keeping the edit
-        const reverted = await chaos.revert({ skipVariantGids: [edited] });
+        const reverted = await chaos.revert({ actor: "chaos", skipVariantGids: [edited] });
         await chaos.expectHonest(reverted.runId);
 
         // The merchant's price survived.

@@ -77,7 +77,7 @@ describe("chaos: a revert too large for one request", () => {
       ]);
 
       // A second press finds it claimed, and queues nothing more.
-      const again = await chaos.revert({ inlineBudgetMs: 10_000 });
+      const again = await chaos.revert({ actor: "chaos", inlineBudgetMs: 10_000 });
       expect(again.deferredTo).toBeTruthy();
       expect(again.messages[0]).toMatch(/already being reverted/);
       expect(enqueued).toHaveLength(1);
@@ -98,7 +98,7 @@ describe("chaos: a revert too large for one request", () => {
       const sale = await onSale(chaos);
       queueMode = "down";
 
-      const outcome = await chaos.revert({ inlineBudgetMs: 10_000 });
+      const outcome = await chaos.revert({ actor: "chaos", inlineBudgetMs: 10_000 });
 
       expect(outcome.refused).toMatch(/could not be reached, so nothing was written/);
       expect(await statusOf(campaignId), "the claim was kept with no job behind it").toBe("ACTIVE");
@@ -113,7 +113,7 @@ describe("chaos: a revert too large for one request", () => {
 
       // No queue to hand it to: a revert is never refused, so it runs here.
       queueMode = "none";
-      const inline = await chaos.revert({ inlineBudgetMs: 10_000 });
+      const inline = await chaos.revert({ actor: "chaos", inlineBudgetMs: 10_000 });
       expect(inline.queued).toBeUndefined();
       expect(inline.verified).toBe(20);
       expect(await statusOf(campaignId)).toBe("COMPLETED");
@@ -124,7 +124,7 @@ describe("chaos: a revert too large for one request", () => {
   it("does not queue a revert that fits in the request", async () => {
     await withChaos("queued-revert-small", CATALOG, async (chaos) => {
       await onSale(chaos);
-      const outcome = await chaos.revert({ inlineBudgetMs: 60_000 });
+      const outcome = await chaos.revert({ actor: "chaos", inlineBudgetMs: 60_000 });
       expect(outcome.queued).toBeUndefined();
       expect(outcome.verified).toBe(20);
       expect(enqueued).toHaveLength(0);

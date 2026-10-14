@@ -65,7 +65,7 @@ describe("chaos: a run writing its tags, with the reaper sweeping", () => {
       const { shopId, campaignId, productOf, variantGids } = chaos.fixture;
       const started = Date.now();
 
-      const reclaimed = await sweptWhileRunning(runCampaign(shopId, campaignId, slowTags(chaos)));
+      const reclaimed = await sweptWhileRunning(runCampaign(shopId, campaignId, slowTags(chaos), { actor: "chaos" }));
 
       expect(Date.now() - started, "the tag phase did not outlast the threshold, so this proved nothing").toBeGreaterThan(STALE_AFTER_MS);
       expect(reclaimed, "the reaper took a live run for a dead one").toEqual([]);
@@ -81,7 +81,7 @@ describe("chaos: a run writing its tags, with the reaper sweeping", () => {
 
       // A revert's tag removal settles the apply run's tag rows, not its own: its ledger
       // is quiet throughout, and only the heartbeat says it is alive.
-      const reclaimed = await sweptWhileRunning(runCampaign(shopId, campaignId, slowTags(chaos), { revert: true }));
+      const reclaimed = await sweptWhileRunning(runCampaign(shopId, campaignId, slowTags(chaos), { actor: "chaos", revert: true }));
 
       expect(reclaimed, "the reaper took a live revert for a dead one").toEqual([]);
       expect(await statusOf(campaignId)).toBe("COMPLETED");
@@ -128,11 +128,11 @@ describe("chaos: one writer per campaign", () => {
 
       // The same action defers to the run doing it (#793); a revert waits for it to finish.
       for (const options of [{ resume: true }, {}]) {
-        const outcome = await runCampaign(shopId, campaignId, client, options);
+        const outcome = await runCampaign(shopId, campaignId, client, { actor: "chaos", ...options });
         expect(outcome.deferredTo, `${JSON.stringify(options)} started a second writer`).toBe(live.id);
         expect(outcome.messages[0]).toMatch(/is still being applied by a run that started just now/);
       }
-      const revert = await runCampaign(shopId, campaignId, client, { revert: true });
+      const revert = await runCampaign(shopId, campaignId, client, { actor: "chaos", revert: true });
       expect(revert.refused, "a revert started beside a live apply").toMatch(/still being applied/);
       expect(revert.transient).toBe(true);
       expect(await prisma.campaignRun.count({ where: { campaignId } }), "a second run row was created").toBe(1);
@@ -140,7 +140,7 @@ describe("chaos: one writer per campaign", () => {
 
       // Once it finishes, Resume goes ahead.
       await prisma.campaignRun.update({ where: { id: live.id }, data: { status: "PARTIAL", finishedAt: new Date() } });
-      const resumed = await runCampaign(shopId, campaignId, client, { resume: true });
+      const resumed = await runCampaign(shopId, campaignId, client, { actor: "chaos", resume: true });
       expect(resumed.refused).toBeFalsy();
       expect(await statusOf(campaignId)).toBe("ACTIVE");
     });

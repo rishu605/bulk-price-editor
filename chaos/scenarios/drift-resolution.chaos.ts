@@ -146,7 +146,7 @@ describe("chaos: resolving price drift from the queue", () => {
       expect(transition.after).toMatchObject({ status: "ACTIVE", reason: "price drift resolved" });
 
       // A second answer to an answered question changes nothing.
-      await expect(resolveDrift(shopId, firstEdit.id, "ignore")).rejects.toThrow(/already resolved/);
+      await expect(resolveDrift(shopId, firstEdit.id, "ignore", "chaos")).rejects.toThrow(/already resolved/);
       expect((await prisma.driftEvent.findUniqueOrThrow({ where: { id: firstEdit.id } })).resolution).toBe(
         "REASSERTED",
       );
@@ -199,7 +199,7 @@ describe("chaos: resolving price drift from the queue", () => {
     await withChaos("drift-held-from-partial", CATALOG, async (chaos) => {
       const { shopId, campaignId, variantGids } = chaos.fixture;
       await applied(chaos);
-      await transitionCampaign(shopId, campaignId, "PARTIAL", { reason: "chaos: a row failed" });
+      await transitionCampaign(shopId, campaignId, "PARTIAL", { actor: "chaos", reason: "chaos: a row failed" });
       const event = await prisma.driftEvent.create({
         data: {
           shopId,
@@ -214,7 +214,7 @@ describe("chaos: resolving price drift from the queue", () => {
       await holdForDrift(shopId, campaignId, variantGids[0]);
       expect(await statusOf(campaignId)).toBe("HELD");
 
-      await resolveDrift(shopId, event.id, "ignore");
+      await resolveDrift(shopId, event.id, "ignore", "chaos");
       expect(await statusOf(campaignId), "a partial run's unfinished rows were hidden behind ACTIVE").toBe("PARTIAL");
     });
   });

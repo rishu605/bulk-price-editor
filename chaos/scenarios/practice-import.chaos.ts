@@ -58,7 +58,7 @@ describe("chaos: a spreadsheet campaign made in practice mode", () => {
       expect(isPractice(practice), "a practice import came out a real campaign").toBe(true);
 
       await expect(
-        runCampaign(shopId, practiceId, chaosAdminClient(chaos.server.endpoint()), {}),
+        runCampaign(shopId, practiceId, chaosAdminClient(chaos.server.endpoint()), { actor: "chaos" }),
         "a practice import was applied to the storefront",
       ).rejects.toThrow(/practice campaign/);
       for (const gid of variantGids) {

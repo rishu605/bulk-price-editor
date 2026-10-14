@@ -61,7 +61,7 @@ describe("chaos: the database gives out after prices are written", () => {
         return updateMany(args as never);
       }) as never);
 
-      const thrown = await runCampaign(shopId, campaignId, client).catch((error: unknown) => error);
+      const thrown = await runCampaign(shopId, campaignId, client, { actor: "chaos" }).catch((error: unknown) => error);
       vi.restoreAllMocks();
       chaos.heal();
 
@@ -84,7 +84,7 @@ describe("chaos: the database gives out after prices are written", () => {
       expect(JSON.stringify(transition.after)).not.toMatch(/without running/);
 
       // The way back works: revert from Partial ends every price at its baseline.
-      const reverted = await runCampaign(shopId, campaignId, client, { revert: true });
+      const reverted = await runCampaign(shopId, campaignId, client, { actor: "chaos", revert: true });
       expect(reverted.clean).toBe(true);
       expect(await statusOf(campaignId)).toBe("COMPLETED");
       for (const gid of variantGids) expect(chaos.fake.priceOf(gid)).toBe((baseline.get(gid)! / 100).toFixed(2));
@@ -97,7 +97,7 @@ describe("chaos: the database gives out after prices are written", () => {
       const before = new Map(variantGids.map((gid) => [gid, chaos.fake.priceOf(gid)]));
       throwBeforeWriting = true;
 
-      const thrown = await runCampaign(shopId, campaignId, chaosAdminClient(chaos.server.endpoint())).catch((error: unknown) => error);
+      const thrown = await runCampaign(shopId, campaignId, chaosAdminClient(chaos.server.endpoint()), { actor: "chaos" }).catch((error: unknown) => error);
 
       expect((thrown as Error).message).toMatch(/connection pool/);
       expect(await statusOf(campaignId), "nothing was written, so it goes back where it was").toBe("DRAFT");

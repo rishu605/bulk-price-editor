@@ -54,7 +54,7 @@ describe("chaos: a bulk operation that fails part-way, then Resume", () => {
         ).toBe(true);
 
         // ------------------------------------------------------------ resume
-        const resumed = await chaos.apply({ resume: true });
+        const resumed = await chaos.apply({ actor: "chaos", resume: true });
         await chaos.expectHonest(resumed.runId);
 
         expect(resumed.planned, "Resume called unwritten rows already correct").toBe(30 * 3);
