@@ -9,6 +9,7 @@
 import prisma from "../../db.server";
 import { readSettings } from "../settings.server";
 import { formatClock } from "../../lib/format/display";
+import { runToResume } from "./run.server";
 import {
   describeRun,
   isClean,
@@ -185,4 +186,27 @@ async function marginRows(shopId: string, runId: string): Promise<ResultRow[]> {
     costMinor: row.cost,
     currency: row.currency,
   }));
+}
+
+/**
+ * Which run a Partial campaign would resume, and what that run got done, for its banner
+ * (#927). Tallied by `tallyStatuses`, the buckets the run summary uses, so the banner and
+ * the Runs tab beneath it can't disagree about whether anything was verified.
+ */
+export async function partialProgress(
+  shopId: string,
+  campaignId: string,
+): Promise<{ resumes?: "APPLY" | "REVERT"; progress?: { confirmed: number; unconfirmed: number } }> {
+  const run = await runToResume(campaignId);
+  if (!run) return {};
+  const byStatus = await prisma.variantChange.groupBy({
+    by: ["status"],
+    where: { shopId, runId: run.id },
+    _count: { _all: true },
+  });
+  const counts = tallyStatuses(byStatus.map((entry) => ({ status: entry.status, count: entry._count._all })));
+  return {
+    resumes: run.kind,
+    progress: { confirmed: counts.verified + counts.clamped, unconfirmed: counts.unverified + counts.sent },
+  };
 }

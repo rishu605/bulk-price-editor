@@ -165,3 +165,29 @@ describe("a scheduled campaign that will never start (#824)", () => {
     expect(describeState("SCHEDULED", { neverStarts: null }).explanation).toMatch(/Waiting for its start time/);
   });
 });
+
+describe("a Partial campaign's explanation follows what its run got done (#927)", () => {
+  it("says prices were sent and not read back when none was verified", () => {
+    const apply = describeState("PARTIAL", { resumes: "APPLY", progress: { confirmed: 0, unconfirmed: 4 } }).explanation;
+    expect(apply).toMatch(/^Prices were sent to Shopify, but none has been read back yet, so none is verified/);
+    expect(apply).not.toMatch(/were written and verified/);
+    const revert = describeState("PARTIAL", { resumes: "REVERT", progress: { confirmed: 0, unconfirmed: 2 } }).explanation;
+    expect(revert).toMatch(/^Prices were sent to Shopify to put back, but none has been read back yet/);
+  });
+
+  it("claims no price changed when nothing was written or sent", () => {
+    const apply = describeState("PARTIAL", { resumes: "APPLY", progress: { confirmed: 0, unconfirmed: 0 } }).explanation;
+    expect(apply).toMatch(/^It stopped before any price was written and verified/);
+    expect(apply).not.toMatch(/Some prices|sent to Shopify/);
+    const revert = describeState("PARTIAL", { resumes: "REVERT", progress: { confirmed: 0, unconfirmed: 0 } }).explanation;
+    expect(revert).toMatch(/still be live/);
+  });
+
+  it("keeps the some-verified wording when some were, and when the counts are unknown", () => {
+    for (const context of [{ progress: { confirmed: 3, unconfirmed: 1 } }, {}]) {
+      expect(describeState("PARTIAL", { resumes: "APPLY", ...context }).explanation).toMatch(
+        /^Some prices were written and verified; others were not/,
+      );
+    }
+  });
+});

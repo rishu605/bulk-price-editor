@@ -139,6 +139,13 @@ export function describeState(
     heldUntil?: string;
     /** Why a scheduled campaign will never start on its own (#824); see `neverStarts`. */
     neverStarts?: string | null;
+    /**
+     * What the run that left it Partial got done (#927): rows written and read back
+     * (`confirmed`, clamped ones included), and rows written or sent to Shopify that no
+     * read-back has confirmed (`unconfirmed`). Without it the banner said "some prices were
+     * written and verified" over a bulk run that had verified none.
+     */
+    progress?: { confirmed: number; unconfirmed: number };
   } = {},
 ): StateDescription {
   switch (state) {
@@ -204,10 +211,7 @@ export function describeState(
       return {
         label: "Partial — some rows did not complete",
         tone: "critical",
-        explanation:
-          context.resumes === "REVERT"
-            ? "Some prices were put back and verified; others were not, so parts of the sale may still be live. The ledger names every row and why it stopped. Resuming finishes the revert."
-            : "Some prices were written and verified; others were not. The ledger names every row and why it stopped. Resuming retries only what is outstanding — rows already correct are left alone.",
+        explanation: partialExplanation(context.resumes === "REVERT", context.progress),
         nextAction: {
           label:
             context.resumes === "REVERT"
@@ -232,6 +236,28 @@ export function describeState(
         explanation: "Stopped and will not run again.",
       };
   }
+}
+
+/**
+ * What a Partial campaign's banner says happened, from what its last run actually got
+ * done (#927). "Some were verified" only when some were: a bulk run stopped after Shopify
+ * accepted it has verified nothing yet, and one stopped before its first write changed
+ * nothing anyone has confirmed.
+ */
+function partialExplanation(reverting: boolean, progress?: { confirmed: number; unconfirmed: number }): string {
+  if (progress && progress.confirmed === 0 && progress.unconfirmed > 0) {
+    return reverting
+      ? "Prices were sent to Shopify to put back, but none has been read back yet, so none is verified and parts of the sale may still be live. The ledger names every row. Resuming checks what landed and finishes the revert."
+      : "Prices were sent to Shopify, but none has been read back yet, so none is verified and some may already be live. The ledger names every row. Resuming checks what landed and retries only what is outstanding.";
+  }
+  if (progress && progress.confirmed === 0) {
+    return reverting
+      ? "It stopped before any price was put back and verified, so expect the sale's prices to still be live. The ledger names every row and why it stopped. Resuming finishes the revert."
+      : "It stopped before any price was written and verified. The ledger names every row and why it stopped. Resuming retries them.";
+  }
+  return reverting
+    ? "Some prices were put back and verified; others were not, so parts of the sale may still be live. The ledger names every row and why it stopped. Resuming finishes the revert."
+    : "Some prices were written and verified; others were not. The ledger names every row and why it stopped. Resuming retries only what is outstanding — rows already correct are left alone.";
 }
 
 /** Every state, for exhaustive iteration in tests and pickers. */

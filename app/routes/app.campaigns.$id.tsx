@@ -22,6 +22,7 @@ import { scheduleAction } from "../services/campaigns/schedule-control.server";
 import { RunHistoryTable } from "../components/RunHistoryTable";
 import { RunResultSection } from "../components/RunResultSection";
 import { runEvidence } from "../services/campaigns/run-evidence.server";
+import { partialProgress } from "../services/campaigns/result.server";
 import { variantAction } from "../services/campaigns/variant-action.server";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { reportError } from "../services/error-report.server";
@@ -89,7 +90,7 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
       ? await prisma.driftEvent.count({ where: { shopId: shop.id, campaignId, resolution: "PENDING" } })
       : 0;
   const lifecycle = describeState(state, {
-    resumes: state === "PARTIAL" ? (await runToResume(campaignId))?.kind : undefined,
+    ...(state === "PARTIAL" ? await partialProgress(shop.id, campaignId) : {}), // #702, #927
     heldUntil: state === "HELD" ? windowEndText(record.schedule, shop.timezone) : undefined, // #784
     neverStarts: state === "SCHEDULED" ? neverStarts(parseSchedule(record.schedule), new Date(), shop.timezone) : null, // #824
   });
