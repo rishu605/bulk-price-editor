@@ -18,6 +18,8 @@ import {
   validateRow,
   type InvalidRow,
   type RawRow,
+  HANDLE_REFUSAL,
+  identifierRefusal,
 } from "./csv-rows";
 
 const row = (over: Partial<RawRow> = {}): RawRow => ({
@@ -161,9 +163,28 @@ describe("mapColumns", () => {
     expect(mapColumns(["Handle", "Variant SKU", "Variant Price"])?.identifier).toBe(1);
   });
 
-  it("still accepts a handle when that is the only identifier there is", () => {
-    // Preferring a SKU must not mean refusing a file that has none.
-    expect(mapColumns(["Handle", "Variant Price"])?.identifier).toBe(0);
+  it("recognises a handle when that is the only identifier there is, and says it names a product (#735)", () => {
+    // Recognised, so the file is not read by position; marked, so each row is refused with
+    // the reason -- a handle names a product, and was looked up as a SKU that never matched.
+    expect(mapColumns(["Handle", "Variant Price"])).toMatchObject({ identifier: 0, identifierColumn: "handle" });
+    expect(mapColumns(["Product", "Price"])).toMatchObject({ identifier: 0, identifierColumn: "handle" });
+    expect(identifierRefusal({ identifierColumn: "handle" })).toBe(HANDLE_REFUSAL);
+    expect(identifierRefusal({ identifierColumn: "variant-id" })).toBeNull();
+    expect(identifierRefusal({})).toBeNull();
+  });
+
+  it("reads a Shopify product export's header row by its Variant SKU (#735)", () => {
+    // Verbatim from Shopify admin -> Products -> Export. No Variant ID column; Handle first.
+    const header = [
+      "Handle", "Title", "Body (HTML)", "Vendor", "Product Category", "Type", "Tags", "Published",
+      "Option1 Name", "Option1 Value", "Option2 Name", "Option2 Value", "Option3 Name", "Option3 Value",
+      "Variant SKU", "Variant Grams", "Variant Inventory Tracker", "Variant Inventory Qty",
+      "Variant Inventory Policy", "Variant Fulfillment Service", "Variant Price", "Variant Compare At Price",
+      "Variant Requires Shipping", "Variant Taxable", "Variant Barcode", "Image Src", "Image Position",
+      "Image Alt Text", "Gift Card", "SEO Title", "SEO Description", "Variant Image", "Variant Weight Unit",
+      "Variant Tax Code", "Cost per item", "Status",
+    ];
+    expect(mapColumns(header)).toEqual({ identifier: 14, price: 20, compareAt: 21, currency: null, cost: 34 });
   });
 
   it("returns null when it cannot tell which column is the price", () => {

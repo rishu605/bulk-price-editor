@@ -17,7 +17,7 @@
  */
 
 import prisma from "../db.server";
-import { readRows } from "../lib/baselines/csv-rows";
+import { identifierRefusal, productRefusal, readRows } from "../lib/baselines/csv-rows";
 import { isValid, validateRow } from "../lib/baselines/csv-rows";
 import { buildMatchIndex, matchIdentifiers, type CsvRow } from "../lib/segments/csv-import";
 import { logger } from "../lib/logging/logger";
@@ -96,7 +96,19 @@ export async function importPrices(
       continue;
     }
 
-    const csvRow: CsvRow = { line: raw.line, value: raw.identifier, column: raw.identifierColumn };
+    // A product handle cannot be matched to a variant, and is said so rather than
+    // reported as "no match" (#735).
+    const refusal = identifierRefusal(raw);
+    if (refusal) {
+      push(result.unmatched, { line: raw.line, identifier: raw.identifier, reason: refusal });
+      continue;
+    }
+
+    const csvRow: CsvRow = {
+      line: raw.line,
+      value: raw.identifier,
+      column: raw.identifierColumn === "variant-id" ? "variant-id" : undefined,
+    };
     const outcome = matchIdentifiers([csvRow], index);
 
     if (outcome.ambiguous.length > 0) {
@@ -106,6 +118,17 @@ export async function importPrices(
         reason:
           `Matches ${outcome.ambiguous[0].candidates.length} variants. ` +
           `Use a variant ID, or make the SKU unique.`,
+      });
+      continue;
+    }
+
+    // A product id matches every variant of the product, and one row is one variant's
+    // price: refused, as the baseline import refuses it, not applied to the first (#735).
+    if (outcome.matched.length > 1) {
+      push(result.ambiguous, {
+        line: raw.line,
+        identifier: raw.identifier,
+        reason: productRefusal(outcome.matched.length, "price"),
       });
       continue;
     }
