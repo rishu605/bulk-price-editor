@@ -108,6 +108,26 @@ export function windowInputProblem(input: WindowInput): string | null {
 }
 
 /**
+ * Why a practice campaign cannot be given these dates, naming the field (#827).
+ *
+ * A practice campaign is previewed and never applied, so a date has nothing to start. The
+ * create action saved one anyway: the campaign came out Scheduled, its page promised that
+ * "prices change automatically when the window opens", and from its start the scheduler
+ * claimed it, was refused and released it again every thirty seconds, for ever.
+ *
+ * Either date, not only the start. An end on its own would otherwise be answered by
+ * `windowInputProblem`'s "add a start date" -- advice that leads straight back here.
+ */
+export function practiceWindowProblem(input: { startUtc: string | null; endUtc: string | null }): string | null {
+  if (!input.startUtc && !input.endUtc) return null;
+  return (
+    `${input.startUtc ? "Start" : "End"}: a practice campaign is only ever previewed, so it cannot be ` +
+    "scheduled — nothing would happen when the date came. Clear Start and End to keep it as practice, " +
+    "or create a real campaign to schedule the sale."
+  );
+}
+
+/**
  * A window as the edit-dates dialog shows it: the dates as its fields take them, and the
  * start as the call-off dialog names it. Null for a campaign that runs by hand.
  */

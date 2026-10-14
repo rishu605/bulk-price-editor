@@ -15,6 +15,7 @@ import {
   parseSchedule,
   type Transition,
 } from "../lib/scheduling/window";
+import { isPractice } from "./campaigns/model.server";
 import { runCampaign } from "./campaigns/run.server";
 import type { RunOutcome } from "./campaigns/types";
 import { nextAttemptKey } from "../lib/scheduling/attempts";
@@ -103,6 +104,16 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
     // An uninstalled shop has no usable token, and writing to it is impossible
     // anyway. Skipping quietly is correct; the data is retained for reinstall.
     if (campaign.shop.uninstalledAt) continue;
+
+    // A practice campaign never runs, so it never owes a transition (#827). One created
+    // with dates before the editor refused them sits in SCHEDULED, and from its start every
+    // tick claimed it, had `runCampaign` refuse it -- a throw, whose release is recorded every
+    // time rather than once -- and put it back: an activity entry and a worker failure every
+    // thirty seconds, for ever, since nothing ever moves it out of SCHEDULED. Skipped here,
+    // before the claim, so a tick neither touches it nor says anything about it. In code
+    // rather than in the query: the flag lives in the schedule JSON, and a JSON-path `NOT`
+    // drops every row that has no `practice` key at all, which is nearly all of them.
+    if (isPractice(campaign)) continue;
 
     result.examined++;
 
