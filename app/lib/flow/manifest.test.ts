@@ -16,7 +16,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { sourceOf } from "../testing/source";
+import { sourceFiles, sourceOf } from "../testing/source";
 
 import { parseFlowManifest } from "./manifest";
 
@@ -166,5 +166,20 @@ describe("every trigger key exists on TriggerPayload", () => {
       // Spaced keys are quoted in the interface; a bare identifier like `outcome` is not.
       expect(payload).toMatch(new RegExp(`(^|\\s)"?${key}"?\\??:`, "m"));
     }
+  });
+});
+
+describe("every trigger the app publishes has something firing it (#711)", () => {
+  it("is fired from the app's own code, by its handle", () => {
+    // "Campaign held for drift" was deployed, declared and documented, and nothing fired
+    // it: a merchant's "when a campaign is held, message the team" never ran. The manifest
+    // test pinned its fields; nothing pinned that it had a producer.
+    const code = sourceFiles("app").map((path) => sourceOf(path)).join("\n");
+    const unfired = manifests()
+      .filter((manifest) => manifest.type === "flow_trigger")
+      .map((manifest) => manifest.handle)
+      .filter((handle) => !new RegExp(`fireTrigger(?:ForShop)?\\([^)]*["']${handle}["']`).test(code));
+
+    expect(unfired, "published Flow triggers that nothing fires").toEqual([]);
   });
 });
