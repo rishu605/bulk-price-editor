@@ -310,7 +310,10 @@ describe("making a segment is one decision", () => {
   });
 
   it("has one black button on the page", () => {
-    expect((segments.match(/variant="primary"/g) ?? []).length).toBe(1);
+    // Two forms carry one each -- making a segment and editing one (#742) -- and they are
+    // the two branches of one condition, so the page never renders both.
+    expect((segments.match(/variant="primary"/g) ?? []).length).toBe(2);
+    expect(segments).toMatch(/editing && !result\?\.saved \? \(\s*<EditSegment[\s\S]{0,200}\) : \(\s*<NewSegment/);
   });
 
   it("asks how the products are named, which is the only thing that differed", () => {
