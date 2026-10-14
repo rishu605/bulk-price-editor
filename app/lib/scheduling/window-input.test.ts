@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { scheduledWindow, windowFromFields, windowInputProblem } from "./window-input";
+import { practiceWindowProblem, scheduledWindow, windowFromFields, windowInputProblem } from "./window-input";
 
 const now = new Date("2026-11-01T12:00:00Z");
 const describeIso = (iso: string) => iso.slice(0, 16);
@@ -84,5 +84,21 @@ describe("reading the four fields", () => {
 
   it("has nothing to show for a campaign run by hand", () => {
     expect(scheduledWindow({ kind: "manual" }, "UTC")).toBeNull();
+  });
+});
+
+describe("a practice campaign's dates (#827)", () => {
+  it("refuses a start, naming Start and saying how to keep it as practice", () => {
+    const problem = practiceWindowProblem({ startUtc: "2026-11-27T05:00:00Z", endUtc: "2026-11-30T04:59:00Z" });
+    expect(problem).toMatch(/^Start: a practice campaign is only ever previewed, so it cannot be scheduled/);
+    expect(problem).toMatch(/Clear Start and End to keep it as practice, or create a real campaign/);
+  });
+
+  it("refuses an end on its own too, naming End rather than asking for a start", () => {
+    expect(practiceWindowProblem({ startUtc: null, endUtc: "2026-11-30T04:59:00Z" })).toMatch(/^End: a practice campaign/);
+  });
+
+  it("has nothing to say when no date was given", () => {
+    expect(practiceWindowProblem({ startUtc: null, endUtc: null })).toBeNull();
   });
 });

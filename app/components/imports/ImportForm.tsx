@@ -209,6 +209,7 @@ export function ImportReport({
   problems,
   download,
   limit = 25,
+  problemCount,
 }: {
   heading: string;
   counts: Array<{ label: string; value: number }>;
@@ -221,11 +222,17 @@ export function ImportReport({
    */
   download?: { filename: string; csv: () => string };
   limit?: number;
+  /**
+   * Every row that needs attention, when the importer listed only the first of them
+   * (#767). Without it a file with 800 bad rows showed 500 and the counts did not add up.
+   */
+  problemCount?: number;
 }) {
+  const unlisted = (problemCount ?? problems.length) - problems.length;
   return (
     <Card heading={heading}>  <CountsRow items={counts} />
 
-      {problems.length === 0 ? (
+      {problems.length === 0 && unlisted <= 0 ? (
         <EmptyState
           title="Every row matched a variant and validated"
           description="Nothing was left out, so the counts above account for the whole file."
@@ -236,6 +243,7 @@ export function ImportReport({
             <s-text>
               These rows were left out. Everything else is unaffected — one bad row never
               fails the file.
+              {unlisted > 0 ? ` Showing the first ${problems.length} of ${problemCount} rows that need attention.` : ""}
             </s-text>
           </s-paragraph>
 

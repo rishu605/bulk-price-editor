@@ -17,6 +17,7 @@
  */
 
 import prisma from "../db.server";
+import { AppError, toAppError } from "../lib/errors/app-error";
 import {
   buildMatchIndex,
   matchIdentifiers,
@@ -41,6 +42,14 @@ export interface CostImportResult {
   invalid: CostImportProblem[];
   unmatched: CostImportProblem[];
   ambiguous: CostImportProblem[];
+  /** Rows naming a variant another row also names (#767). None of them is written. */
+  duplicates: CostImportProblem[];
+  /**
+   * Every row that needs attention, counted rather than listed. The lists stop at
+   * MAX_PROBLEMS, and the report has to account for the whole file anyway: rows read =
+   * ready + unchanged + this.
+   */
+  problems: number;
   dryRun: boolean;
 }
 
@@ -61,7 +70,13 @@ export async function importCosts(
     invalid: [],
     unmatched: [],
     ambiguous: [],
+    duplicates: [],
+    problems: 0,
     dryRun: options.dryRun === true,
+  };
+  const problem = (list: CostImportProblem[], entry: CostImportProblem) => {
+    result.problems++;
+    push(list, entry);
   };
 
   const variants = await prisma.variantIndex.findMany({
@@ -82,26 +97,21 @@ export async function importCosts(
   );
   const currentCost = new Map(variants.map((row) => [row.variantGid, baselineCost.get(row.variantGid) ?? row.cost]));
 
-  let batch: Array<{ row: ValidCostRow; variantGid: string }> = [];
+  // Every matched row, by variant, before anything is written (#767). A variant named
+  // twice used to be written twice, the last row winning without a word; the price import
+  // refuses the same file. Which row is the merchant's real cost is a question, so
+  // neither is written -- and "neither" needs the whole file read first, since the first
+  // row may sit in a batch written long before the second turns up. A variant id and a
+  // cost a row is small enough to hold for a catalogue of any size.
+  const byVariant = new Map<string, Array<{ row: ValidCostRow; line: number; identifier: string }>>();
 
-  const flush = async () => {
-    if (batch.length === 0) return;
-    const pending = batch;
-    batch = [];
-    if (result.dryRun) return;
-
-    await writeCosts(shopId, pending);
-    result.written += pending.length;
-  };
-
-  // Streamed. The file is consumed a line at a time and never assembled, so a 500K-row
-  // import costs one batch of memory rather than the whole spreadsheet.
+  // Read a line at a time; nothing is written until the file has been read.
   for await (const raw of readRows(lines)) {
     result.total++;
 
     const validated = validateCostRow(raw, shopCurrency);
     if (!isValidCost(validated)) {
-      push(result.invalid, { line: raw.line, identifier: raw.identifier, reason: validated.reason });
+      problem(result.invalid, { line: raw.line, identifier: raw.identifier, reason: validated.reason });
       continue;
     }
 
@@ -109,7 +119,7 @@ export async function importCosts(
     // reported as "no match" (#735).
     const refusal = identifierRefusal(raw);
     if (refusal) {
-      push(result.unmatched, { line: raw.line, identifier: raw.identifier, reason: refusal });
+      problem(result.unmatched, { line: raw.line, identifier: raw.identifier, reason: refusal });
       continue;
     }
 
@@ -121,7 +131,7 @@ export async function importCosts(
     const outcome = matchIdentifiers([csvRow], index);
 
     if (outcome.ambiguous.length > 0) {
-      push(result.ambiguous, {
+      problem(result.ambiguous, {
         line: raw.line,
         identifier: raw.identifier,
         reason:
@@ -134,7 +144,7 @@ export async function importCosts(
     // A product id matches every variant of the product, and one row is one variant's
     // cost: refused, as the baseline import refuses it, not applied to the first (#735).
     if (outcome.matched.length > 1) {
-      push(result.ambiguous, {
+      problem(result.ambiguous, {
         line: raw.line,
         identifier: raw.identifier,
         reason: productRefusal(outcome.matched.length, "cost"),
@@ -144,7 +154,7 @@ export async function importCosts(
 
     const variantGid = outcome.matched[0];
     if (!variantGid) {
-      push(result.unmatched, {
+      problem(result.unmatched, {
         line: raw.line,
         identifier: raw.identifier,
         reason: "No variant in this shop has that SKU, barcode or ID.",
@@ -152,20 +162,70 @@ export async function importCosts(
       continue;
     }
 
+    const rows = byVariant.get(variantGid) ?? [];
+    rows.push({ row: validated, line: raw.line, identifier: raw.identifier });
+    byVariant.set(variantGid, rows);
+  }
+
+  const pending: Array<{ row: ValidCostRow; variantGid: string }> = [];
+  for (const [variantGid, rows] of byVariant) {
+    if (rows.length > 1) {
+      for (const { line, identifier } of rows) {
+        problem(result.duplicates, {
+          line,
+          identifier,
+          reason: `This variant is listed ${rows.length} times (lines ${rows.map((r) => r.line).join(", ")}). Keep one row and import again; neither was imported.`,
+        });
+      }
+      continue;
+    }
+    const [{ row }] = rows;
     // Unchanged is a real answer, not a write. Rewriting an identical cost would churn
     // the mirror's syncedAt and make the audit look like something moved.
     const existing = currentCost.get(variantGid);
-    if (existing !== null && existing !== undefined && Number(existing) === validated.parsedCost.amount) {
+    if (existing !== null && existing !== undefined && Number(existing) === row.parsedCost.amount) {
       result.unchanged++;
       continue;
     }
-
     result.ready++;
-    batch.push({ row: validated, variantGid });
-    if (batch.length >= BATCH) await flush();
+    pending.push({ row, variantGid });
   }
 
-  await flush();
+  if (!result.dryRun) {
+    for (let i = 0; i < pending.length; i += BATCH) {
+      const batch = pending.slice(i, i + BATCH);
+      try {
+        await writeCosts(shopId, batch);
+      } catch (error) {
+        // Batches before this one are written, each in its own transaction, and the
+        // merchant needs to know how far it got (#767): the same file, imported again,
+        // finds those unchanged and writes the rest.
+        const failed = toAppError(error);
+        throw new AppError({
+          code: failed.code,
+          retryable: failed.retryable,
+          userMessage:
+            `${failed.userMessage} ${result.written} of ${pending.length} costs were written before it stopped. ` +
+            "Import the same file again to finish: the costs already written will show as unchanged.",
+          cause: error,
+          context: { written: result.written, pending: pending.length },
+        });
+      }
+      result.written += batch.length;
+    }
+
+    // What the import did, for Activity: counts and who, never a cost (#767).
+    await prisma.auditLogEntry.create({
+      data: {
+        shopId,
+        actor: options.actor ?? null,
+        action: "costs.import",
+        entity: "Shop",
+        entityId: shopId,
+        after: { total: result.total, written: result.written, unchanged: result.unchanged, problems: result.problems },
+      },
+    });
+  }
 
   logger.info("costs imported", {
     shopId,
@@ -173,7 +233,7 @@ export async function importCosts(
     ready: result.ready,
     written: result.written,
     unchanged: result.unchanged,
-    problems: result.invalid.length + result.unmatched.length + result.ambiguous.length,
+    problems: result.problems,
     dryRun: result.dryRun,
   });
 

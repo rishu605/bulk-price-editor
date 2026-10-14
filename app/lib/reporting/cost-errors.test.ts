@@ -30,6 +30,8 @@ const result = (over: Partial<CostImportResult> = {}): CostImportResult => ({
   invalid: [],
   unmatched: [],
   ambiguous: [],
+  duplicates: [],
+  problems: 0,
   dryRun: true,
   ...over,
 });
