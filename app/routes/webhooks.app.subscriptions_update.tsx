@@ -14,8 +14,9 @@ import { applySubscriptionUpdate, subscriptionStillActive, syncSubscription } fr
 import { toAdminClient } from "../services/admin-client.server";
 import { parseSubscription } from "../lib/billing/subscription-payload";
 import { logger } from "../lib/logging/logger";
+import { recordedWebhook } from "../services/webhook-log.server";
 
-export const action = async ({ request }: ActionFunctionArgs) => {
+export const action = recordedWebhook(async ({ request }: ActionFunctionArgs) => {
   const { payload, topic, shop, admin } = await authenticate.webhook(request);
 
   const record = await prisma.shop.findUnique({ where: { domain: shop }, select: { id: true } });
@@ -40,4 +41,4 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (admin) await syncSubscription(record.id, toAdminClient(admin));
 
   return new Response();
-};
+});

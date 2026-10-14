@@ -2,8 +2,9 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
 import { logger } from "../lib/logging/logger";
+import { recordedWebhook } from "../services/webhook-log.server";
 
-export const action = async ({ request }: ActionFunctionArgs) => {
+export const action = recordedWebhook(async ({ request }: ActionFunctionArgs) => {
     const { payload, session, topic, shop } = await authenticate.webhook(request);
     logger.info("webhook received", { topic, shop });
 
@@ -19,4 +20,4 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         });
     }
     return new Response();
-};
+});

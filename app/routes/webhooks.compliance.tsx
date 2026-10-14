@@ -15,8 +15,9 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import { logger } from "../lib/logging/logger";
 import prisma from "../db.server";
+import { recordedWebhook } from "../services/webhook-log.server";
 
-export const action = async ({ request }: ActionFunctionArgs) => {
+export const action = recordedWebhook(async ({ request }: ActionFunctionArgs) => {
   // Shopify requires JSON; rejecting anything else before parsing keeps malformed
   // or probing requests away from the HMAC check entirely.
   const contentType = request.headers.get("content-type");
@@ -58,4 +59,4 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   return new Response();
-};
+});

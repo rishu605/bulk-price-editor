@@ -17,8 +17,9 @@ import db from "../db.server";
 import { PRICES_MAY_BE_LIVE } from "../lib/lifecycle/transitions";
 import { logger } from "../lib/logging/logger";
 import { markUninstalled } from "../services/shop.server";
+import { recordedWebhook } from "../services/webhook-log.server";
 
-export const action = async ({ request }: ActionFunctionArgs) => {
+export const action = recordedWebhook(async ({ request }: ActionFunctionArgs) => {
   const { shop, session, topic } = await authenticate.webhook(request);
 
   logger.info("webhook received", { topic, shop });
@@ -75,4 +76,4 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   return new Response();
-};
+});
