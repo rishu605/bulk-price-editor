@@ -12,6 +12,7 @@ appending a new one, and note the reasoning.
 | D3 | Pricing meters variants-under-management + surface gating, **not** change counts | Change metering taxes the core loop and makes recurring campaigns (a differentiator) expensive to run. Safety features are never paywalled. |
 | D10 | No storefront theme code, ever | Theme-facing code risks the Built-for-Shopify performance budget and drags us into theme-support burden. Campaign-scoped tags give themes the hook instead. |
 | D5 | **Railway**, web and worker as two services from one repo | Resolved from [`reference-patterns.md`](reference-patterns.md): the author already runs this exact stack (React Router + Postgres/Prisma + BullMQ worker) in production on Railway, so the deployment shape is proven rather than assumed. Worker gets its own service — it is the only price writer and must restart and scale independently of web traffic. Region/data-residency still to confirm at provisioning. |
+| D11 | **Shopify's cost wins where Shopify has one** (#737) | The guardrails read the current baseline's cost before the mirror's, and only the mirror followed Shopify, so a cost raised in Shopify left "never below cost" on the old one. Each catalogue sync now copies a non-null Shopify cost onto the current base baseline. A spreadsheet cost import fills the costs Shopify does not hold, and survives a sync because an empty Shopify cost is never copied. A cost is not a price: campaign maths still reads the baseline's price (rule 1). |
 
 ## Open
 
