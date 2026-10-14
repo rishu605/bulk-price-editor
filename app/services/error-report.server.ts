@@ -35,8 +35,25 @@ export async function reportError(
   context: ReportContext = {},
 ): Promise<ReportedError> {
   const appError = toAppError(error);
-  const errorId = newErrorId();
   const { shopId, shop, route, method, ...rest } = context;
+
+  // A form the merchant has to fix is not a failure of ours (#741). A missing segment name
+  // was logged at error level, sent to Sentry and written to ErrorEvent with a reference:
+  // Diagnostics' "Recent failures" filled with typos, the error-spike alert counted them,
+  // and the merchant was handed a support reference for an empty field. Their message, no
+  // reference, and an info line for anybody tracing the request.
+  if (appError.code === "VALIDATION") {
+    logger.info("refused by validation", { code: appError.code, shop: shop ?? undefined, route, message: appError.userMessage });
+    return {
+      errorId: null,
+      code: appError.code,
+      userMessage: appError.userMessage,
+      retryable: appError.retryable,
+      status: appError.status,
+    };
+  }
+
+  const errorId = newErrorId();
 
   const merged = { ...appError.context, ...rest };
 

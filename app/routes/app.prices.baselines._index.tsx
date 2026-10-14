@@ -119,7 +119,7 @@ export const action = withGuard(
         shop: session.shop,
         route: "/app/prices/baselines",
       });
-      return { ok: false, message: reported.userMessage, errorId: reported.errorId };
+      return { ok: false, message: reported.userMessage, errorId: reported.errorId ?? undefined };
     }
   },
 );

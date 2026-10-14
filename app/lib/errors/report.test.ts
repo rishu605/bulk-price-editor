@@ -19,7 +19,7 @@ import { reportErrorSync } from "./report";
 
 describe("the reference on the error screen", () => {
   it("is a well-formed error id", () => {
-    expect(isErrorId(reportErrorSync(new Error("boom")).errorId)).toBe(true);
+    expect(isErrorId(reportErrorSync(new Error("boom")).errorId ?? "")).toBe(true);
   });
 
   it("is different for every error", () => {
@@ -89,7 +89,7 @@ describe("what the boundary is given to render", () => {
 
     expect(reported.code).toBe("UNKNOWN");
     expect(reported.userMessage.length).toBeGreaterThan(0);
-    expect(isErrorId(reported.errorId)).toBe(true);
+    expect(isErrorId(reported.errorId ?? "")).toBe(true);
   });
 
   it("keeps an AppError's own code rather than reclassifying it", () => {

@@ -51,7 +51,10 @@ export async function gather(now: Date = new Date()): Promise<SignalWindow> {
     // for a scheduler that was fine. And a scheduler that died while a long run was still
     // stamping looked alive, which is the one case the alert exists for.
     secondsSinceBeat(now),
-    prisma.errorEvent.count({ where: { createdAt: { gte: since } } }),
+    // Not the merchant's own refusals (#741): a form filled in wrong is not the app failing,
+    // and once error-spike had a denominator, enough typos could page somebody. None are
+    // written any more; rows from before that still are, so they are left out here too.
+    prisma.errorEvent.count({ where: { createdAt: { gte: since }, code: { not: "VALIDATION" } } }),
     // Sampled, and only ever used for the worst lag. The cap is why the count below is a
     // separate query rather than this array's length.
     prisma.webhookEvent.findMany({
@@ -78,7 +81,7 @@ export async function gather(now: Date = new Date()): Promise<SignalWindow> {
     // only needs the worst lag; a rate needs the whole denominator or it is not a rate.
     prisma.errorEvent.groupBy({
       by: ["shopId"],
-      where: { createdAt: { gte: since }, shopId: { not: null } },
+      where: { createdAt: { gte: since }, shopId: { not: null }, code: { not: "VALIDATION" } },
       _count: { _all: true },
     }),
     prisma.webhookEvent.groupBy({

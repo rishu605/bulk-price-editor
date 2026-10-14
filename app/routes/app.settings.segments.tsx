@@ -27,6 +27,7 @@ import { facetDetails, type Facets } from "../lib/segments/facets";
 import { facets } from "../services/segments.server";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
+import { AppError } from "../lib/errors/app-error";
 import { reportError } from "../services/error-report.server";
 import { PageShell } from "../components/PageShell";
 import { EmptyState } from "../components/AsyncState";
@@ -59,7 +60,9 @@ type ActionData = {
     ambiguous: Array<{ line: number; value: string; candidates: number }>;
     repeated: number;
   };
-  errorId?: string;
+  errorId?: string | null;
+  /** The form field a refusal is about, shown beside it (#741). */
+  field?: string;
 };
 
 export const action = withGuard("/app/settings/segments", async ({ request }: ActionFunctionArgs) => {
@@ -158,7 +161,11 @@ export const action = withGuard("/app/settings/segments", async ({ request }: Ac
       route: "/app/settings/segments",
       context: { intent },
     });
-    return { ok: false, message: reported.userMessage, errorId: reported.errorId };
+    // The field a refusal is about, so the form can say it beside the control: the banner
+    // sits at the top of the page and the button at the foot of the card, below the fold,
+    // so a refusal shown only up there looked like a click that did nothing (#741).
+    const field = error instanceof AppError && typeof error.context?.field === "string" ? error.context.field : undefined;
+    return { ok: false, message: reported.userMessage, errorId: reported.errorId, ...(field ? { field } : {}) };
   }
 });
 
@@ -297,6 +304,7 @@ function NewSegment({
   busy: boolean;
 }) {
   const [how, setHow] = useState<"filter" | "list">("filter");
+  const result = fetcher.data;
 
   return (
     <Card heading="New segment">  <fetcher.Form method="post">
@@ -313,7 +321,13 @@ function NewSegment({
           <FieldGrid>
             <FullRow>
               <Field width="medium">
-                <s-text-field name="name" label="Name" placeholder="Summer collection" required />
+                <s-text-field
+                  name="name"
+                  label="Name"
+                  placeholder="Summer collection"
+                  required
+                  error={result && !result.ok && result.field === "name" ? result.message : undefined}
+                />
               </Field>
             </FullRow>
 

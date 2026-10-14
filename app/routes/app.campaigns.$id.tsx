@@ -257,7 +257,7 @@ export const action = withGuard("/app/campaigns/$id", async ({ request, params }
     return {
       ok: false,
       message: reported.userMessage,
-      details: [`Reference ${reported.errorId}`],
+      details: reported.errorId ? [`Reference ${reported.errorId}`] : [],
       errorId: reported.errorId,
     };
   }

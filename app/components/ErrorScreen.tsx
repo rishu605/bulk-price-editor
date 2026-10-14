@@ -17,7 +17,8 @@ import { helpLabelFor, helpPathFor } from "../lib/errors/help-links";
 import { SPACE } from "../lib/ui/spacing";
 
 export interface ErrorScreenProps {
-  errorId: string;
+  /** Null for a refusal the merchant can fix themselves: there is nothing for support to look up (#741). */
+  errorId: string | null;
   userMessage: string;
   code: string;
   retryable: boolean;
@@ -66,27 +67,31 @@ export function ErrorScreen({
             </s-button>
           </ActionRow>
 
-          <s-divider />
+          {errorId ? (
+            <>
+              <s-divider />
 
-          <s-paragraph>
-            <s-text>
-              This reference links straight to the full technical detail. Contacting
-              support from here carries it for you.
-            </s-text>
-          </s-paragraph>
-          <s-paragraph>
-            <s-text><strong>{errorId}</strong> · {code}</s-text>
-          </s-paragraph>
+              <s-paragraph>
+                <s-text>
+                  This reference links straight to the full technical detail. Contacting
+                  support from here carries it for you.
+                </s-text>
+              </s-paragraph>
+              <s-paragraph>
+                <s-text><strong>{errorId}</strong> · {code}</s-text>
+              </s-paragraph>
 
-          {/* The whole point of #457: support one click from the problem, not one
-              navigation away from it. Somebody on this screen has already spent their
-              patience, and asking them to find the help section and retype an id is how
-              a support request becomes an uninstall. */}
-          <ActionRow>
-            <s-button variant="tertiary" icon="chat" href={supportHref(errorId)}>
-              Contact support about this
-            </s-button>
-          </ActionRow>
+              {/* The whole point of #457: support one click from the problem, not one
+                  navigation away from it. Somebody on this screen has already spent their
+                  patience, and asking them to find the help section and retype an id is how
+                  a support request becomes an uninstall. */}
+              <ActionRow>
+                <s-button variant="tertiary" icon="chat" href={supportHref(errorId)}>
+                  Contact support about this
+                </s-button>
+              </ActionRow>
+            </>
+          ) : null}
         </s-stack>
 
         {stack ? (
