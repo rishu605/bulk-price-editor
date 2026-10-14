@@ -9,8 +9,6 @@ import { toAdminClient } from "../services/admin-client.server";
 import {
   campaignRuns,
   pagePreview,
-  reinstateVariant,
-  revertVariant,
   rollbackReport,
   runCampaign,
   runToResume,
@@ -24,6 +22,7 @@ import { scheduleAction } from "../services/campaigns/schedule-control.server";
 import { RunHistoryTable } from "../components/RunHistoryTable";
 import { RunResultSection } from "../components/RunResultSection";
 import { runEvidence } from "../services/campaigns/run-evidence.server";
+import { variantAction } from "../services/campaigns/variant-action.server";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { reportError } from "../services/error-report.server";
 import { withGuard } from "../lib/errors/guard.server";
@@ -75,6 +74,7 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
         ruleRows: true,
         note: true,
         archivedAt: true,
+        excludedVariantGids: true,
         segments: { select: { name: true }, take: 1 },
       },
     }),
@@ -101,11 +101,13 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
 
   // Show the newest run's ledger inline. The first question after a run is always
   // "what exactly did it do to each variant", and making that a second click loses
-  // the people who most need the answer.
-  const requested = new URL(request.url).searchParams.get("run");
-  const selectedRunId = requested ?? runs[0]?.id ?? null;
-  // What that run actually did, as opposed to what the preview said it would.
-  const { ledger, ledgerTotal, result } = await runEvidence(shop.id, selectedRunId);
+  // the people who most need the answer. `?run=` picks another of this campaign's runs;
+  // one that is not this campaign's is ignored (#764).
+  const { selectedRunId, ledgerRun, ledger, ledgerTotal, result } = await runEvidence(
+    shop.id,
+    campaignId,
+    new URL(request.url).searchParams.get("run"),
+  );
 
   // Only for a campaign that has actually written something and could still be
   // reverted. It costs a full plan, and on a draft it would be a report about
@@ -124,6 +126,9 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     ledgerTotal,
     result,
     selectedRunId,
+    ledgerRun,
+    // What "Revert this variant" has already let go of, so its confirmation can say so.
+    excludedVariantGids: record.excludedVariantGids,
     scheduleText,
     window,
     timeZone: shop.timezone,
@@ -205,25 +210,10 @@ export const action = withGuard("/app/campaigns/$id", async ({ request, params }
 
   try {
     // Reverting one variant out of a running campaign, rather than ending the whole
-    // thing. The exclusion is durable, so tonight's scheduled run leaves it alone too.
-    if (intent === "revert-variant" || intent === "reinstate-variant") {
-      const variantGid = String(form.get("variantGid"));
-      const result =
-        intent === "revert-variant"
-          ? await revertVariant(shop.id, String(params.id), variantGid, toAdminClient(admin), {
-              actor,
-              excludeOnly: form.get("excludeOnly") === "1",
-            })
-          : await reinstateVariant(shop.id, String(params.id), variantGid, toAdminClient(admin), {
-              actor,
-            });
-
-      return {
-        ok: result.outcome ? result.outcome.clean : true,
-        message: result.message,
-        details: result.outcome?.messages ?? [],
-      };
-    }
+    // thing. The exclusion is durable, so tonight's scheduled run leaves it alone too --
+    // which is why the press is checked against the campaign and its ledger first (#764).
+    const variant = await variantAction(shop.id, campaignId, intent, form, toAdminClient(admin), actor);
+    if (variant) return variant;
 
     // Resume is an ordinary apply. The resolver is idempotent, so rows already at the
     // campaign price are planned as "already correct" and cost nothing — only the ones

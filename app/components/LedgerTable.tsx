@@ -17,6 +17,7 @@ import { TableBlock } from "./TableBlock";
 export function LedgerTable({
   rows,
   total,
+  revert = false,
   /**
    * Optional per-row control, rendered in a trailing column.
    *
@@ -35,6 +36,11 @@ export function LedgerTable({
    * one screen in the app whose entire job is being the evidence.
    */
   total?: number;
+  /**
+   * A revert's rows, whose second price is the one put back rather than a campaign's
+   * (#764). Headed "Intended", a revert's 0.28 → 0.40 read as a price rise.
+   */
+  revert?: boolean;
   renderAction?: (row: LedgerRow) => ReactNode;
 }) {
   return (
@@ -54,7 +60,7 @@ export function LedgerTable({
       <s-table-header-row>
         <s-table-header listSlot="primary">Variant</s-table-header>
         <s-table-header listSlot="labeled" format="currency">Before</s-table-header>
-        <s-table-header listSlot="labeled" format="currency">Intended</s-table-header>
+        <s-table-header listSlot="labeled" format="currency">{revert ? "Reverts to" : "Intended"}</s-table-header>
         <s-table-header listSlot="inline">State</s-table-header>
         <s-table-header listSlot="labeled">Reason</s-table-header>
         {renderAction ? <s-table-header listSlot="inline">Action</s-table-header> : null}
