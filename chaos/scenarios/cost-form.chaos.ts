@@ -39,6 +39,7 @@ async function submit(shopDomain: string, fields: Record<string, string>) {
   return (response instanceof Response ? await response.json() : response) as {
     ok: boolean;
     message: string;
+    check?: { key: string; changed: number };
   };
 }
 
@@ -60,7 +61,15 @@ describe("chaos: the bulk cost form", () => {
         expect(dry.ok).toBe(true);
         expect(dry.message).toContain(`Set every matching cost to ${shown}:`);
 
-        await submit(domain, { ...fields, intent: "commit" });
+        // The commit carries the check it follows, as the page's confirmation sends it
+        // (#754); without one the action writes nothing.
+        const done = await submit(domain, {
+          ...fields,
+          intent: "commit",
+          checked: dry.check?.key ?? "",
+          expected: String(dry.check?.changed ?? ""),
+        });
+        expect(done.ok, done.message).toBe(true);
 
         for (const gid of variantGids) {
           const current = await prisma.baseline.findFirstOrThrow({
