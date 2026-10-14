@@ -31,12 +31,13 @@ export function baselineFiltersFrom(params: URLSearchParams): BaselineFilters {
   };
 }
 
-export function activityFiltersFrom(params: URLSearchParams): ActivityFilters {
+export function activityFiltersFrom(params: URLSearchParams, timeZone: string): ActivityFilters {
   return {
     actor: params.get("actor") ?? undefined,
     action: params.get("action") ?? undefined,
     from: params.get("from") ?? undefined,
     to: params.get("to") ?? undefined,
+    timeZone,
   };
 }
 
