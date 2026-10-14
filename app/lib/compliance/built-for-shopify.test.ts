@@ -343,10 +343,19 @@ describe("integration — API, auth and webhooks", () => {
       const source = sourceOf(file);
       if (!/export const (loader|action)/.test(source)) continue;
 
+      // `legacyRedirect` counts because it authenticates before it redirects. Every old
+      // URL's stub is one call to it, so none can be written the way that dropped the
+      // admin's query string (#744); the authentication they did in place lives there.
       expect(source, `${file} has a loader or action that does not authenticate`).toMatch(
-        /authenticate\.(admin|flow)\(/,
+        /authenticate\.(admin|flow)\(|legacyRedirect\(/,
       );
     }
+
+    // And held to it, so the allowance above cannot outlive the reason for it.
+    expect(
+      sourceOf("app/lib/routing/legacy-redirect.server.ts"),
+      "legacyRedirect no longer authenticates, so the stubs that call it do not either",
+    ).toMatch(/await authenticate\.admin\(request\)/);
   });
 
   it("registers all three mandatory GDPR topics", () => {

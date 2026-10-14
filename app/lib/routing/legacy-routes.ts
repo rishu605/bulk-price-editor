@@ -24,7 +24,7 @@
  */
 const FROM_A_FILE = "/app/campaigns/new?ruleKind=from-file";
 
-export const LEGACY_ROUTES: Readonly<Record<string, string>> = {
+const MOVED = {
   // Prices — five tables over the same variant rows.
   "/app/catalog": "/app/prices",
   "/app/baselines": "/app/prices/baselines",
@@ -76,7 +76,18 @@ export const LEGACY_ROUTES: Readonly<Record<string, string>> = {
   // exactly that, so both now land on the merged view directly.
   "/app/calendar": "/app/campaigns?view=calendar",
   "/app/campaigns/calendar": "/app/campaigns?view=calendar",
-};
+} as const satisfies Record<string, string>;
+
+/**
+ * An old URL this app still answers.
+ *
+ * Typed from the map rather than as `string` so a redirect stub naming a path the map
+ * does not hold fails the typecheck, instead of redirecting to `undefined` on the one
+ * request nobody tested.
+ */
+export type LegacyPath = keyof typeof MOVED;
+
+export const LEGACY_ROUTES: Readonly<Record<string, string>> = MOVED;
 
 /**
  * The route files that could serve a URL under `flatRoutes()`.
@@ -97,9 +108,17 @@ export function routeFilesFor(url: string): [string, string] {
 }
 
 /**
- * A legacy destination with a query carried onto it.
+ * A base to parse a relative path against, discarded before anything is returned.
  *
- * Only one redirect in the map needs this -- `/app/campaigns/calendar`, which keeps the
+ * Deliberately not a real host: nothing here should ever be resolved against one, and a
+ * redirect that leaked it would be an open redirect to a domain nobody owns.
+ */
+const NOWHERE = "https://legacy-routes.invalid";
+
+/**
+ * A legacy destination with the parameters a redirect decided carried onto it.
+ *
+ * Only one redirect in the map decides any -- `/app/campaigns/calendar`, which keeps the
  * week a link pointed at -- and its destination already carries `?view=calendar`. The
  * obvious `${destination}&${params}` therefore produced
  * `/app/campaigns?view=calendar&view=calendar`, because `params` sets `view` too.
@@ -113,9 +132,53 @@ export function routeFilesFor(url: string): [string, string] {
  * destination already defines is replaced, not repeated, whichever side supplies it.
  */
 export function withQuery(destination: string, params: URLSearchParams): string {
-  // A base is required to parse a relative URL, and is discarded below. It is
-  // deliberately not a real host: nothing here should ever be resolved against one.
-  const url = new URL(destination, "https://legacy-routes.invalid");
+  const url = new URL(destination, NOWHERE);
   for (const [key, value] of params) url.searchParams.set(key, value);
+  return `${url.pathname}${url.search}`;
+}
+
+/**
+ * Where an old URL sends this request, with the request's own query carried along.
+ *
+ * Every stub but one used to redirect to the bare destination, and inside the admin that
+ * is a dead page. The admin loads the app in an iframe as
+ * `/app/catalog?embedded=1&host=…&shop=…&id_token=…`, and those parameters are all the
+ * next page has to authenticate with: a document request carries no session header, so
+ * `authenticate.admin` reads the shop and the session token from the URL or not at all.
+ * The browser followed the redirect to `/app/prices` with none of them, the library could
+ * not tell which shop was asking, and it answered the way it answers any request it
+ * cannot place -- an App Bridge script tag, status 200, thrown out of the loader. What
+ * reached the screen was React Router's fallback for a thrown Response: its status code,
+ * alone (#744). The calendar's stub was the one that worked, and the only one that
+ * carried the query.
+ *
+ * Three layers, in the order they win:
+ *
+ *   1. What the stub decided (`decided`) -- the calendar's old `?view=week` becoming
+ *      `?period=week`. Only the stub knows what the old page's parameters meant.
+ *   2. The destination's own query -- `?view=calendar`, `?ruleKind=from-file`. That is
+ *      what makes it the page the map promised. An incoming key of the same name meant
+ *      something on the old page, not this one: `/app/calendar?view=week` has to land on
+ *      the calendar, not on whatever `view=week` means to the campaigns list.
+ *   3. Everything the request arrived with -- the admin's parameters, and any filter a
+ *      bookmark carried. A key the request repeats arrives repeated.
+ *
+ * It is the rule the `redirect` that `authenticate.admin` hands back applies as well: it
+ * copies a request parameter only when the destination does not already set one. Stating
+ * it here too keeps the precedence a pure function a test can hold, rather than a
+ * property of a library's internals that a version bump could change underneath us.
+ */
+export function legacyDestination(
+  from: LegacyPath,
+  incoming: URLSearchParams,
+  decided: URLSearchParams = new URLSearchParams(),
+): string {
+  const url = new URL(withQuery(MOVED[from], decided), NOWHERE);
+  // Taken before the loop, so a key the request repeats is kept whole. Checking as it
+  // goes would keep the first value and then treat the key as the destination's own.
+  const owned = new Set(url.searchParams.keys());
+  for (const [key, value] of incoming) {
+    if (!owned.has(key)) url.searchParams.append(key, value);
+  }
   return `${url.pathname}${url.search}`;
 }

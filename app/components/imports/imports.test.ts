@@ -148,7 +148,7 @@ describe("every one of them is reachable without typing a URL", () => {
 
   it("keeps the URL it used to have, pointing at the editor", () => {
     // Linked from runbooks and whatever a merchant bookmarked.
-    expect(IMPORT_REDIRECT).toContain("LEGACY_ROUTES");
+    expect(IMPORT_REDIRECT).toContain('legacyRedirect(request, "/app/campaigns/import")');
     expect(IMPORT_REDIRECT).not.toContain("<ImportForm");
   });
 
