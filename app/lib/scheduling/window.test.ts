@@ -301,7 +301,10 @@ describe("recombining a date field and a time field", () => {
   });
 });
 
-describe("local times near a clock change (#814, #703)", () => {
+// Each test walks a year of hours per zone through Intl: about a second on a quiet machine,
+// and past vitest's 5-second default while other suites load it, which failed a correct
+// tree's unit run. The bound is for a hang, not for speed.
+describe("local times near a clock change (#814, #703)", { timeout: 60_000 }, () => {
   const ZONES = [
     "America/New_York",
     "America/Los_Angeles",
