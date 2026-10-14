@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { decimalsFor, formatMinorUnits, formatOrDash } from "./format";
+import { decimalsFor, formatMinorUnits, formatOrDash, formatPrice } from "./format";
 
 describe("formatMinorUnits", () => {
   it("uses the real currency table, not a hardcoded JPY/KRW check", () => {
@@ -45,5 +45,19 @@ describe("formatMinorUnits", () => {
     expect(decimalsFor("JPY")).toBe(0);
     expect(decimalsFor("BHD")).toBe(3);
     expect(decimalsFor("ZZZ")).toBe(2);
+  });
+});
+
+describe("formatPrice", () => {
+  it("says which currency, with the currency's own precision", () => {
+    // The same 70100 minor units, three ways. A bare "701.00" or "70100" is ambiguous
+    // between them, which is how #757's Activity log read $701.00 as 70100.
+    expect(formatPrice(70100n, "USD")).toBe("$701.00");
+    expect(formatPrice(70100n, "JPY")).toBe("¥70,100");
+    expect(formatPrice(70100n, "KWD")).toBe("KWD\u00a070.100");
+  });
+
+  it("names an unknown currency rather than borrowing a symbol", () => {
+    expect(formatPrice(1999n, "ZZZ")).toBe("19.99 ZZZ");
   });
 });

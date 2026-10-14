@@ -12,7 +12,7 @@
  */
 
 import { exponentOf, isKnownCurrency } from "./currency";
-import { formatMoney, money, type Money } from "./money";
+import { formatMoney, formatMoneyForDisplay, money, type Money } from "./money";
 
 /**
  * Formats a minor-unit amount for display.
@@ -32,6 +32,20 @@ export function formatMinorUnits(
 
   if (!isKnownCurrency(currency)) return fallbackFormat(value, 2);
   return formatMoney(money(Math.trunc(value), currency));
+}
+
+/**
+ * A price as a merchant reads it in a sentence: "$701.00" and "¥701", not "701.00".
+ *
+ * The bare number is right in a column headed with its currency and wrong anywhere else:
+ * "701" means $701 in one store and ¥701 in another, and 70100 minor units is $701.00 in
+ * the first and ¥70,100 in the second. An unknown currency keeps its code beside the
+ * number rather than borrowing a symbol it may not have.
+ */
+export function formatPrice(amount: bigint | number, currency: string): string {
+  return isKnownCurrency(currency)
+    ? formatMoneyForDisplay(money(Number(amount), currency))
+    : `${formatMinorUnits(amount, currency)} ${currency}`;
 }
 
 /** Convenience for the common case of formatting a `Money` value. */

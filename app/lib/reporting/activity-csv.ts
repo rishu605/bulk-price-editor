@@ -18,12 +18,19 @@ export interface ActivityEntry {
   action: string;
   entity: string | null;
   entityId: string | null;
+  /**
+   * The one variant the entry is about, if it is about one. The summary names it by title
+   * (#757); the GID is for the export, where somebody may need to join it to something.
+   */
+  variantGid: string | null;
   summary: string;
 }
 
 export function activityCsv(entries: readonly ActivityEntry[]): string {
   return toCsv(
-    ["timestamp", "actor", "action", "entity", "entity_id", "change"],
+    // `variant_gid` last, so a spreadsheet that reads the columns before it by position
+    // still reads the same ones.
+    ["timestamp", "actor", "action", "entity", "entity_id", "change", "variant_gid"],
     entries.map((entry) => [
       entry.at,
       // "system" rather than blank: an empty cell in an exported audit log reads as
@@ -33,6 +40,7 @@ export function activityCsv(entries: readonly ActivityEntry[]): string {
       entry.entity ?? "",
       entry.entityId ?? "",
       entry.summary,
+      entry.variantGid ?? "",
     ]),
   );
 }
