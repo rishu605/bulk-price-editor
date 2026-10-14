@@ -362,8 +362,13 @@ function contextCountryOf(list: PriceListNode): string | null {
  * showed the market on sale, a recapture took the old sale price as the new baseline, and
  * the B2B plan read it as one. Every row this read touches is stamped with this read's
  * clock, created ones included, and once the read has reached its last page the list's
- * rows it did not touch are deleted. A read that stopped short deletes nothing. These rows
- * are this function's alone: every other writer of the mirror writes base prices.
+ * rows it did not touch are deleted. A read that stopped short deletes nothing.
+ *
+ * A run writes these rows too, as each market write is verified (#779), stamped with its
+ * own clock. So a page leaves alone a row stamped after that page was asked for: the run
+ * wrote it since, and the page holds the price from before -- writing the page's over it
+ * read the campaign's own price as drift until the next sync. The sweep spares the same
+ * rows, since their stamp is after the read began.
  */
 async function mirrorFixedPrices(
   client: AdminClient,
@@ -377,6 +382,9 @@ async function mirrorFixedPrices(
   let complete = false;
 
   for (;;) {
+    // Before the request, so anything stamped after it was written after this page's prices
+    // were read.
+    const pageReadAt = new Date();
     const response: { data?: { priceList?: { prices: { pageInfo: { hasNextPage: boolean; endCursor: string }; nodes: PricesNode[] } } } } =
       await withRetry(
         () => client.request(PRICE_LIST_PRICES_QUERY, { id: list.id, ...(cursor ? { cursor } : {}) }),
@@ -395,34 +403,26 @@ async function mirrorFixedPrices(
         ? parseMoney(node.compareAtPrice.amount, node.compareAtPrice.currencyCode ?? currency)
         : null;
 
-      await prisma.priceSurfaceEntry.upsert({
-        where: {
-          shopId_variantGid_surfaceKind_priceListGid: {
-            shopId,
-            variantGid: node.variant.id,
-            surfaceKind,
-            priceListGid: list.id,
-          },
-        },
-        create: {
-          shopId,
-          variantGid: node.variant.id,
-          surfaceKind,
-          priceListGid: list.id,
-          currency,
-          livePrice: BigInt(price.amount),
-          liveCompareAt: compareAt ? BigInt(compareAt.amount) : null,
-          // This process's clock, not the database default, so the sweep below compares
-          // like with like.
-          syncedAt: new Date(),
-        },
-        update: {
-          currency,
-          livePrice: BigInt(price.amount),
-          liveCompareAt: compareAt ? BigInt(compareAt.amount) : null,
-          syncedAt: new Date(),
-        },
+      // This process's clock, not the database default, so the sweep below compares like
+      // with like.
+      const values = {
+        currency,
+        livePrice: BigInt(price.amount),
+        liveCompareAt: compareAt ? BigInt(compareAt.amount) : null,
+        syncedAt: new Date(),
+      };
+      const updated = await prisma.priceSurfaceEntry.updateMany({
+        where: { shopId, variantGid: node.variant.id, surfaceKind, priceListGid: list.id, syncedAt: { lt: pageReadAt } },
+        data: values,
       });
+      // No older row: either none at all, which this creates, or one a run wrote after this
+      // page was read, which this leaves as it is.
+      if (updated.count === 0) {
+        await prisma.priceSurfaceEntry.createMany({
+          data: [{ shopId, variantGid: node.variant.id, surfaceKind, priceListGid: list.id, ...values }],
+          skipDuplicates: true,
+        });
+      }
 
       written++;
     }

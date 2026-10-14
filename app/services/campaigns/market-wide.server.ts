@@ -30,6 +30,7 @@ import type { AdminClient } from "../../lib/execution/sync-executor";
 import { composeBps, toAdjustmentInput } from "../../lib/markets/uniform";
 import { parseMoney } from "../../lib/money/money";
 import type { PlannedRow } from "../../lib/planning/types";
+import { mirrorMarketWrite } from "./mirror.server";
 
 export interface MarketWideResult {
   verified: number;
@@ -162,6 +163,8 @@ export async function applyMarketWide(
     // Already ledgered with these exact prices, so writing them now still satisfies
     // "ledger before write" without a second write-ahead.
     const fix = await writeMarketPrices(client, list.priceListGid, list.currency, drifted);
+    // These are fixed prices on the list now, mirrored as any other market write (#779).
+    await mirrorMarketWrite(shopId, list, drifted, fix);
 
     await settle(
       runId,
