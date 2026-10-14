@@ -4,6 +4,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
+import { actorFor } from "../lib/audit/actor";
 import { ActionRow } from "../components/ActionRow";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
@@ -69,7 +70,7 @@ export const loader = withGuard("/app/campaigns", async ({ request }: LoaderFunc
  * draft has written nothing to a storefront.
  */
 export const action = withGuard("/app/campaigns", async ({ request }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, sessionToken } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
   const form = await request.formData();
 
@@ -77,7 +78,7 @@ export const action = withGuard("/app/campaigns", async ({ request }: ActionFunc
     return { ok: false, message: "That action is not available from the campaigns list." };
   }
 
-  const copy = await duplicateCampaign(shop.id, String(form.get("campaignId")), session.shop);
+  const copy = await duplicateCampaign(shop.id, String(form.get("campaignId")), actorFor(sessionToken, session.shop));
 
   return redirect(`/app/campaigns/${copy.id}?duplicated=1`);
 });

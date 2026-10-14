@@ -16,6 +16,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
+import { actorFor } from "../lib/audit/actor";
 import {
   createSegment,
   deleteSegment,
@@ -62,8 +63,10 @@ type ActionData = {
 };
 
 export const action = withGuard("/app/settings/segments", async ({ request }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, sessionToken } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
+  // A person, not the store (#726), as on every other page that records who did something.
+  const actor = actorFor(sessionToken, session.shop);
   const form = await request.formData();
   const intent = String(form.get("intent"));
 
@@ -108,7 +111,7 @@ export const action = withGuard("/app/settings/segments", async ({ request }: Ac
         name,
         kind: "FROZEN",
         variantGids: outcome.matched,
-        createdBy: session.shop,
+        createdBy: actor,
       });
 
       return {
@@ -138,7 +141,7 @@ export const action = withGuard("/app/settings/segments", async ({ request }: Ac
       name,
       kind,
       filterAst: ast,
-      createdBy: session.shop,
+      createdBy: actor,
     });
 
     return {

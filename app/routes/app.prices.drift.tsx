@@ -12,6 +12,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
+import { actorFor } from "../lib/audit/actor";
 import { toAdminClient } from "../services/admin-client.server";
 import { reassertDrift } from "../services/campaigns/reassert.server";
 import {
@@ -46,8 +47,11 @@ export const loader = withGuard("/app/prices/drift", async ({ request }: LoaderF
 });
 
 export const action = withGuard("/app/prices/drift", async ({ request }: ActionFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
+  const { admin, session, sessionToken } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
+  // The staff member who decided, not the store (#726): "who kept this drifted price as
+  // the new baseline?" is the question the activity log exists to answer.
+  const actor = actorFor(sessionToken, session.shop);
 
   const form = await request.formData();
   const eventId = String(form.get("eventId"));
@@ -57,10 +61,10 @@ export const action = withGuard("/app/prices/drift", async ({ request }: ActionF
     // Putting the price back is a write, so it is a run, made now -- not a mark waiting
     // for a run that a manual or held campaign never gets (#756).
     if (resolution === "reassert") {
-      return await reassertDrift(shop.id, eventId, toAdminClient(admin), session.shop);
+      return await reassertDrift(shop.id, eventId, toAdminClient(admin), actor);
     }
 
-    const { released } = await resolveDrift(shop.id, eventId, resolution, session.shop);
+    const { released } = await resolveDrift(shop.id, eventId, resolution, actor);
     const wording: Record<typeof resolution, string> = {
       adopt: "Adopted as the new baseline. Future campaigns compute from this price.",
       ignore: "Ignored. The price stays as the merchant left it.",
