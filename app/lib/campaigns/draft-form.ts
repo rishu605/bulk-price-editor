@@ -82,6 +82,41 @@ function signedAmount(read: FieldReader): number {
   return (direction === "up" ? magnitude : -magnitude) || 0;
 }
 
+/**
+ * Why the rule's amount cannot be used, naming the field, or null when it can (#696).
+ *
+ * `Number("")` is 0, so an exact price left blank saved a campaign setting every price to
+ * 0.00, which the resolver then clamped to one minor unit: the whole scope previewed, and
+ * would have applied, at 0.01, reported as "below your floor". A reduction of 150% did the
+ * same. A decimal comma ("1,5", the usual spelling across most of Europe) reached `money()`
+ * as NaN and threw as an unclassified error. Each is refused here, before anything is
+ * priced or saved, in words the merchant can act on.
+ */
+export function ruleInputProblem(read: FieldReader): string | null {
+  const kind = read("ruleKind") ?? "percent-change";
+  const raw = (read("ruleValue") ?? "").trim();
+  const field =
+    kind === "set-exact" ? "The exact price" : kind === "fixed-change" ? "The amount to change by" : "The percentage";
+
+  if (raw === "") return `${field} is empty. Enter a number.`;
+  if (!Number.isFinite(Number(raw))) {
+    return raw.includes(",")
+      ? `${field} "${raw}" is not a number. Use a full stop for decimals, as in ${raw.replace(",", ".")}.`
+      : `${field} "${raw}" is not a number.`;
+  }
+
+  if (kind === "set-exact") {
+    return Number(raw) > 0 ? null : "An exact price has to be more than zero. Enter the price to set.";
+  }
+
+  const signed = signedAmount(read);
+  if (signed === 0) return `${field} is 0, which would leave every price where it is. Enter the change to make.`;
+  if (kind === "percent-change" && signed <= -100) {
+    return `A ${Math.abs(signed)}% reduction would make every price free or negative. Enter less than 100.`;
+  }
+  return null;
+}
+
 export function ruleFrom(read: FieldReader, currency: string): AdjustmentRule {
   const kind = read("ruleKind") ?? "percent-change";
   const perMajor = 10 ** decimalsFor(currency);

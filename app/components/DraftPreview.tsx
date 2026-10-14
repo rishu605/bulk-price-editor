@@ -62,6 +62,16 @@ export function DraftPreview({
     );
   }
 
+  // The rule's amount is empty, not a number, or no price at all (#696): nothing to show
+  // but why, where the merchant is typing it.
+  if (preview.ruleProblem) {
+    return (
+      <s-banner tone="critical">
+        <s-paragraph>{preview.ruleProblem}</s-paragraph>
+      </s-banner>
+    );
+  }
+
   if (preview.blocked) {
     return (
       <s-banner tone="critical">

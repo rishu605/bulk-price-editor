@@ -14,9 +14,54 @@
 
 import { describe, expect, it } from "vitest";
 
-import { astFrom, compareAtFrom, readerFor, ruleFrom } from "./draft-form";
+import { astFrom, compareAtFrom, readerFor, ruleFrom, ruleInputProblem } from "./draft-form";
 
 const read = (fields: Record<string, string>) => readerFor(new URLSearchParams(fields));
+
+describe("a rule amount the merchant has not given (#696)", () => {
+  it("refuses a blank amount, naming the field, for every kind of rule", () => {
+    expect(ruleInputProblem(read({ ruleKind: "set-exact", ruleValue: "" }))).toBe("The exact price is empty. Enter a number.");
+    expect(ruleInputProblem(read({ ruleKind: "fixed-change", ruleValue: "  " }))).toBe("The amount to change by is empty. Enter a number.");
+    expect(ruleInputProblem(read({ ruleKind: "percent-change" }))).toBe("The percentage is empty. Enter a number.");
+  });
+
+  it("refuses a decimal comma, and says how to write it", () => {
+    expect(ruleInputProblem(read({ ruleKind: "set-exact", ruleValue: "1,5" }))).toBe(
+      'The exact price "1,5" is not a number. Use a full stop for decimals, as in 1.5.',
+    );
+    expect(ruleInputProblem(read({ ruleKind: "percent-change", ruleValue: "abc" }))).toBe('The percentage "abc" is not a number.');
+  });
+
+  it("refuses an exact price of zero or less, rather than letting it be clamped to 0.01", () => {
+    for (const ruleValue of ["0", "-5"]) {
+      expect(ruleInputProblem(read({ ruleKind: "set-exact", ruleValue })), ruleValue).toMatch(/^An exact price has to be more than zero/);
+    }
+  });
+
+  it("refuses a reduction of 100% or more, in either spelling", () => {
+    expect(ruleInputProblem(read({ ruleKind: "percent-change", ruleValue: "150", ruleDirection: "down" }))).toBe(
+      "A 150% reduction would make every price free or negative. Enter less than 100.",
+    );
+    expect(ruleInputProblem(read({ ruleKind: "percent-change", ruleValue: "-100" }))).toMatch(/^A 100% reduction/);
+  });
+
+  it("refuses a change of zero, which would leave every price where it is", () => {
+    expect(ruleInputProblem(read({ ruleKind: "percent-change", ruleValue: "0", ruleDirection: "down" }))).toMatch(/is 0, which would leave/);
+  });
+
+  it("accepts what a merchant means", () => {
+    const meant: Array<Record<string, string>> = [
+      { ruleKind: "set-exact", ruleValue: "9.99" },
+      { ruleKind: "fixed-change", ruleValue: "5", ruleDirection: "down" },
+      { ruleKind: "percent-change", ruleValue: "20", ruleDirection: "down" },
+      { ruleKind: "percent-change", ruleValue: "150", ruleDirection: "up" },
+      { ruleKind: "percent-change", ruleValue: "-20" },
+    ];
+    for (const fields of meant) {
+      expect(ruleInputProblem(read(fields)), JSON.stringify(fields)).toBeNull();
+    }
+  });
+});
 
 describe("money in the rule", () => {
   it("uses the currency it is given, not a default", () => {

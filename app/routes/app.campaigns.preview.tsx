@@ -65,6 +65,8 @@ export const loader = withGuard("/app/campaigns/preview", async ({ request }: Lo
   return {
     // No catalogue to match against yet, rather than conditions matching nothing (#800).
     catalogue: preview.catalogue ? catalogueNotice(preview.catalogue) : null,
+    // The rule's amount cannot be used (#696); the page says why instead of pricing at 0.01.
+    ruleProblem: preview.ruleProblem ?? null,
     rows,
     total,
     page,
@@ -79,7 +81,7 @@ export const loader = withGuard("/app/campaigns/preview", async ({ request }: Lo
 });
 
 export default function FullPreview() {
-  const { rows, total, page, pages, counts, catalogue } = useLoaderData<typeof loader>();
+  const { rows, total, page, pages, counts, catalogue, ruleProblem } = useLoaderData<typeof loader>();
   const [params] = useSearchParams();
 
   const pageHref = (next: number) => {
@@ -95,15 +97,22 @@ export default function FullPreview() {
     >
       <s-section>
         <s-stack gap={SPACE.section}>
-          <s-paragraph>
-            <s-text>
-              {formatCount(counts.changing)} of {formatCount(counts.matched)} variants
-              would change. {formatCount(counts.alreadyCorrect)} are already at this price
-              and {formatCount(counts.skipped)} would be skipped.
-            </s-text>
-          </s-paragraph>
+          {/* Nothing was priced when the rule cannot be used, so there are no counts to give. */}
+          {ruleProblem ? null : (
+            <s-paragraph>
+              <s-text>
+                {formatCount(counts.changing)} of {formatCount(counts.matched)} variants
+                would change. {formatCount(counts.alreadyCorrect)} are already at this price
+                and {formatCount(counts.skipped)} would be skipped.
+              </s-text>
+            </s-paragraph>
+          )}
 
-          {catalogue ? (
+          {ruleProblem ? (
+            <s-banner tone="critical">
+              <s-paragraph>{ruleProblem}</s-paragraph>
+            </s-banner>
+          ) : catalogue ? (
             <EmptyState {...catalogue} />
           ) : rows.length === 0 ? (
             <EmptyState

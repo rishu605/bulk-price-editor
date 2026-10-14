@@ -10,7 +10,7 @@
  * sidebar and a different one in the run.
  */
 
-import { astFrom, compareAtFrom, readerFor, ruleFrom } from "../../lib/campaigns/draft-form";
+import { astFrom, compareAtFrom, readerFor, ruleFrom, ruleInputProblem } from "../../lib/campaigns/draft-form";
 import { readRoundingPolicy } from "../../lib/money/rounding-policy";
 import { segmentToAst } from "../segments.server";
 import type { DraftCampaign } from "./draft-preview.server";
@@ -38,6 +38,8 @@ export async function draftCampaignFrom(
       })
     : null;
 
+  const ruleProblem = ruleInputProblem(read);
+
   return {
     ast: segment
       ? segmentToAst({
@@ -46,7 +48,11 @@ export async function draftCampaignFrom(
           frozenVariantGids: segment.frozenVariantGids,
         })
       : astFrom(read),
-    rule: ruleFrom(read, currency),
+    // A rule the merchant has not finished typing is never priced (#696): the preview says
+    // why instead, and the placeholder below is never written anywhere.
+    ...(ruleProblem
+      ? { rule: { kind: "percent-change" as const, percent: 0 }, ruleProblem }
+      : { rule: ruleFrom(read, currency) }),
     compareAtPolicy: compareAtFrom(read),
     rounding: readRoundingPolicy(source.entries()),
     priority: Number(read("priority") ?? 100) || 100,
