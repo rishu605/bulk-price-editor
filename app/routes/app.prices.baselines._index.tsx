@@ -50,6 +50,7 @@ import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { SPACE } from "../lib/ui/spacing";
 import { Card } from "../components/Card";
 import { TableBlock } from "../components/TableBlock";
+import { FullRow } from "../components/FieldGrid";
 
 const FILTER_FIELDS = ["q", "vendor", "source", "diverged", "variant"] as const;
 
@@ -197,14 +198,14 @@ export default function Baselines() {
 
             {/* Its own full row. A checkbox is a tick and a sentence, not a field, so
                 a column sized for a select leaves it stranded in white space. */}
-            <s-grid-item gridColumn="span 3">
+            <FullRow>
               <s-checkbox
                 name="diverged"
                 value="1"
                 label="Only variants whose live price differs from their baseline"
                 checked={filters.divergedOnly || undefined}
               />
-            </s-grid-item>
+            </FullRow>
           </VariantSearch>
 
           {rows.length === 0 ? (

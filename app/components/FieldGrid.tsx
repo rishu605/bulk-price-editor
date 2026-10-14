@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Children, Fragment, cloneElement, isValidElement, type ReactNode } from "react";
 
 import { QueryContainer } from "./QueryContainer";
 import { SPACE } from "../lib/ui/spacing";
@@ -56,19 +56,9 @@ const GRID_GAP = 16;
 /**
  * The container width at or below which this grid is a single column.
  *
- * Named because **two** things depend on it and they must agree: the grid's own
- * `gridTemplateColumns` below, and `FullRow`'s span at the foot of this file. A
- * `FullRow` that spans two columns while the grid has one does not get a wide row --
- * it manufactures an implicit second column, and implicit tracks are `auto`, so the
- * whole grid re-sizes itself to its content and comes out lopsided.
- *
- * Measured against the real components, at the campaign editor's own page width:
- *
- *     with `span 2`   grid-template-columns: 409.742px 131.258px
- *     with this       grid-template-columns: 557px
- *
- * That is the bug, and the two numbers are why it has to be one constant rather than
- * `700px` written twice.
+ * Named rather than written into the template, because it is the one number the grid's
+ * two branches are about. A `span 2` inside this grid would be right above it and wrong
+ * below it -- see `FullRow` for why nothing here spans.
  */
 const ONE_COLUMN_AT_OR_BELOW = "700px";
 
@@ -152,8 +142,12 @@ export function Field({
 export function FieldGrid({ children }: { children: ReactNode }) {
   return (
     <QueryContainer>
-      <s-grid
-        gap={SPACE.section}
+      <SplitGrid
+        // One comma. Polaris splits a responsive value on it to separate "when the query
+        // matches" from "otherwise", so `repeat(2, 1fr)` is unparseable and falls back to
+        // `none` — which stacks everything full width again, i.e. looks exactly like the
+        // bug this component exists to fix.
+        template={`@container (inline-size <= ${ONE_COLUMN_AT_OR_BELOW}) 1fr, 1fr 1fr`}
         // Capped, for the reason `FIELD` exists. Two equal columns of a 970px card are
         // ~470px each, which is better than one 970px bar and still four times what a
         // percentage needs. Capping the grid rather than each field keeps the two columns
@@ -162,76 +156,109 @@ export function FieldGrid({ children }: { children: ReactNode }) {
         // The card's measure, shared with its prose so the two have one right edge. See
         // `MEASURE`: the flat number this replaces was arbitrary in both directions.
         maxInlineSize={MEASURE}
-        // One comma. Polaris splits a responsive value on it to separate "when the query
-        // matches" from "otherwise", so `repeat(2, 1fr)` is unparseable and falls back to
-        // `none` — which stacks everything full width again, i.e. looks exactly like the
-        // bug this component exists to fix.
-        gridTemplateColumns={`@container (inline-size <= ${ONE_COLUMN_AT_OR_BELOW}) 1fr, 1fr 1fr`}
       >
         {children}
-      </s-grid>
+      </SplitGrid>
     </QueryContainer>
   );
 }
 
 /**
- * A field that needs the whole row.
+ * A field that needs the whole row: checkboxes, and anything with a sentence attached. A
+ * checkbox is a tick and a label, not a field, so a column sized for a select leaves it
+ * stranded in white space with its text wrapping under the box.
  *
- * Checkboxes and anything with a sentence attached: a checkbox is a tick and a label,
- * not a field, so a column sized for a select leaves it stranded in white space with its
- * text wrapping under the box.
+ * ## Why it is not in the grid at all (#725)
  *
- * ## Why the span is responsive, and not simply `span 2`
+ * A grid item can only span as many columns as one of the grid's two branches has, and
+ * Polaris gives it no way to choose between them.
  *
- * It was `span 2`, and that is only true above the breakpoint. Below it the grid is one
- * column, and CSS does not clamp a span to the tracks that exist -- it **creates** the
- * missing one. An implicit track is `auto`, so the grid stops being two equal fractions
- * and becomes two content-sized columns instead. Measured on the campaign editor at its
- * real page width, with the container at 557px:
+ * - **`span 2`** is right above the breakpoint and wrong below it. CSS does not clamp a
+ *   span to the tracks that exist, it **creates** the missing one as `auto`, and the grid
+ *   comes out content-sized: the campaign editor's rule select squeezed to ~86px and
+ *   clipped to "Perc…" (#678, measured at a 557px container: `409.742px 131.258px`).
+ * - **A responsive span** -- `@container (inline-size <= 700px) span 1, span 2`, which
+ *   #681 shipped -- is not something the runtime reads. `s-grid-item`'s `gridColumn`
+ *   converter accepts `auto` or `span N` and nothing else; every other string, a container
+ *   query included, becomes `auto`. Measured against the real `polaris.js` on 14 Oct, the
+ *   item's own computed `grid-column` was `auto` at 480, 700 and 900px, so a "full row"
+ *   was one column wide on every container above the breakpoint. #681's measurements read
+ *   the grid's *tracks*, which are the same whether or not an item spans them.
  *
- *     span 2      grid-template-columns: 409.742px 131.258px
- *     responsive  grid-template-columns: 557px
- *
- * On the page that is the rule select squeezed to about 86px, clipped to "Perc...", with
- * "How should prices change?" wrapping over three lines above it -- the one control that
- * decides whether a campaign is a percentage, a fixed amount or an exact price, showing
- * none of its value.
- *
- * `#638` did not cause this and did not miss it: before `QueryContainer`, the query
- * matched nothing and the grid took its two-column branch at every width, where `span 2`
- * is correct. Making the query work made the one-column branch reachable for the first
- * time, and this was waiting in it. It is also the shape `#560` was reverted for --
- * "two columns of about 10px and 445px" is the same lopsided pair, measured before
- * anybody knew where it came from.
- *
- * Above the breakpoint the two forms are byte-identical in the computed style, at 742px
- * and at 756px containers. The responsive one only differs where the old one was wrong.
+ * So `FieldGrid` breaks its children into runs at each `FullRow` and renders the full row
+ * between two grids, as a block the width of the grid. A run of fields after a full row
+ * starts a new row, which is where it went when the span worked. A `FullRow` must be a
+ * child of the grid, or inside a fragment that is: one rendered from inside another
+ * component cannot be seen, and is an ordinary one-column cell.
  */
-/**
- * Cast past the React prop types, which declare `gridColumn` as `"auto" | \`span ${number}\``
- * and so refuse a responsive value.
- *
- * This is the same gap as `s-page`'s `subheading`: the pinned React wrapper picks a
- * narrower type than the element accepts. `Type.tsx` carried a cast of exactly this shape
- * for `type="small"` and it was **removed**, because the deployed page rendered
- * byte-for-byte identically -- the runtime did not implement the attribute either, so the
- * cast asserted something untrue.
- *
- * The difference here is that it was measured before it was written, against the real
- * components in a browser:
- *
- *     container 557px   span 2 -> 409.742px 131.258px    responsive -> 557px
- *     container 742px   span 2 -> 363px 363px            responsive -> 363px 363px
- *     container 756px   span 2 -> 370px 370px            responsive -> 370px 370px
- *
- * The runtime parses it, applies the conditional branch, and agrees with the old value
- * everywhere the old value was right. If a future Polaris stops honouring it, the symptom
- * is the lopsided pair in the first row returning -- so check the campaign editor, not
- * this file.
- */
-const FULL_ROW_SPAN =
-  `@container (inline-size <= ${ONE_COLUMN_AT_OR_BELOW}) span 1, span 2` as `span ${number}`;
-
 export function FullRow({ children }: { children: ReactNode }) {
-  return <s-grid-item gridColumn={FULL_ROW_SPAN}>{children}</s-grid-item>;
+  return <s-grid-item>{children}</s-grid-item>;
+}
+
+type Run = { full: true; node: ReactNode; key: string } | { full: false; nodes: ReactNode[]; key: string };
+
+/** Children broken into runs of cells and the full rows between them, fragments opened. */
+export function splitAtFullRows(children: ReactNode): Run[] {
+  const runs: Run[] = [];
+  for (const child of flatten(children)) {
+    const key = isValidElement(child) ? String(child.key) : String(runs.length);
+    if (isValidElement(child) && child.type === FullRow) {
+      runs.push({ full: true, node: (child.props as { children?: ReactNode }).children, key });
+      continue;
+    }
+    const last = runs[runs.length - 1];
+    if (last && !last.full) last.nodes.push(child);
+    else runs.push({ full: false, nodes: [child], key });
+  }
+  return runs;
+}
+
+/**
+ * The children with every fragment opened, re-keyed by the fragment they came from, so
+ * two fragments' first children do not arrive in one grid under the same key.
+ */
+function flatten(children: ReactNode, prefix = ""): ReactNode[] {
+  return Children.toArray(children).flatMap((child) => {
+    if (!isValidElement(child)) return [child];
+    const key = `${prefix}${String(child.key)}`;
+    if (child.type === Fragment) return flatten((child.props as { children?: ReactNode }).children, `${key}/`);
+    return [prefix ? cloneElement(child, { key }) : child];
+  });
+}
+
+/**
+ * A grid whose full rows sit between its runs of cells rather than spanning them. One
+ * grid when there is no full row, which is most of them.
+ */
+export function SplitGrid({
+  template,
+  gap = SPACE.section,
+  maxInlineSize,
+  children,
+}: {
+  template: string;
+  gap?: (typeof SPACE)[keyof typeof SPACE];
+  maxInlineSize?: string;
+  children: ReactNode;
+}) {
+  const runs = splitAtFullRows(children);
+  const grid = (cells: ReactNode[], key?: string) => (
+    <s-grid key={key} gap={gap} maxInlineSize={maxInlineSize as never} gridTemplateColumns={template}>
+      {cells}
+    </s-grid>
+  );
+  if (runs.length <= 1 && !runs[0]?.full) return grid(runs[0]?.full === false ? runs[0].nodes : []);
+  return (
+    <s-stack gap={gap}>
+      {runs.map((run) =>
+        run.full ? (
+          <s-box key={run.key} maxInlineSize={maxInlineSize as never}>
+            {run.node}
+          </s-box>
+        ) : (
+          grid(run.nodes, run.key)
+        ),
+      )}
+    </s-stack>
+  );
 }

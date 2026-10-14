@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { FilterForm } from "../FilterForm";
+import { FullRow, SplitGrid } from "../FieldGrid";
 import { QueryContainer } from "../QueryContainer";
 import { SPACE } from "../../lib/ui/spacing";
 
@@ -94,20 +95,21 @@ export function VariantSearch({
               Safe here because the parent is a block stack, which has already decided the
               width; in an inline stack this same wrapper collapses to 58px. */}
           <QueryContainer>
-            <s-grid
-              gap={SPACE.section}
-              gridTemplateColumns="@container (inline-size <= 700px) 1fr, 1fr 1fr 1fr"
-            >
-              <s-grid-item gridColumn="span 2">
+            {/* The search field on its own row, not spanning two of the three columns:
+                below 700px the grid has one, and `span 2` there manufactured a second,
+                content-sized track that squeezed every filter after it (#725). A full
+                row is the one shape that is right at every width; see `FullRow`. */}
+            <SplitGrid template="@container (inline-size <= 700px) 1fr, 1fr 1fr 1fr">
+              <FullRow>
                 <s-search-field
                   name="q"
                   label={label}
                   placeholder={placeholder}
                   value={query}
                 />
-              </s-grid-item>
+              </FullRow>
               {children}
-            </s-grid>
+            </SplitGrid>
           </QueryContainer>
 
           {/* Its own row, so the button keeps its natural width. A block stack stretches

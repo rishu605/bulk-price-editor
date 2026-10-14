@@ -57,8 +57,11 @@ import { sourceFiles, sourceOf } from "../lib/testing/source";
  */
 const OUTSTANDING: string[] = [];
 
-/** A responsive value, not a comment mentioning one. */
-const ASKS_FOR_A_CONTAINER = /gridTemplateColumns=[^\n]*@container/;
+/**
+ * A responsive value, not a comment mentioning one. `template` is `SplitGrid`'s name for
+ * the same thing (#725).
+ */
+const ASKS_FOR_A_CONTAINER = /(?:gridTemplateColumns|template)=[^\n]*@container/;
 
 const files = sourceFiles("app").filter((file) => ASKS_FOR_A_CONTAINER.test(sourceOf(file)));
 
