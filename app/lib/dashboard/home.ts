@@ -27,6 +27,12 @@ export interface HomeFacts {
   driftOpen: number;
   /** Campaigns a merchant made and has not applied. Nothing of theirs is live. */
   drafts: number;
+  /**
+   * Archived campaigns whose prices are still live (#723). The four tiles count what the
+   * campaigns list shows, which leaves archived campaigns out, and archiving files a
+   * campaign away without ending it: a shop whose only sale is archived still has a sale.
+   */
+  archivedRunning: number;
   /** Whether any run has ever happened. */
   hasRun: boolean;
   /** The getting-started checklist has retired itself. */
@@ -93,7 +99,7 @@ export function homeSections(facts: HomeFacts): HomeSections {
   // not a set of counters that all read zero. Adding them rather than testing each is
   // deliberate: the list here and the list the section renders are the same four.
   const counted =
-    facts.running + facts.scheduled + facts.needsAttention + facts.driftOpen;
+    facts.running + facts.scheduled + facts.needsAttention + facts.driftOpen + facts.archivedRunning;
   const live = counted > 0 || facts.hasRun;
 
   const drafts = !live && facts.drafts > 0;

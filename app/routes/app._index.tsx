@@ -51,8 +51,12 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
     await Promise.all([
     baselineHealth(shop.id),
     prisma.campaign.count({ where: { shopId: shop.id } }),
-    prisma.campaign.count({ where: { shopId: shop.id, status: { in: ["ACTIVE", "APPLYING"] } } }),
-    prisma.campaign.count({ where: { shopId: shop.id, status: "SCHEDULED" } }),
+    // Every count a tile links to the campaigns list with reads what that list shows,
+    // which leaves archived campaigns out (#723). An archived campaign that stopped part
+    // way was counted here and found nowhere there: "1 campaign stopped part way", and a
+    // link to "Nothing here matches".
+    prisma.campaign.count({ where: { shopId: shop.id, archivedAt: null, status: { in: ["ACTIVE", "APPLYING"] } } }),
+    prisma.campaign.count({ where: { shopId: shop.id, archivedAt: null, status: "SCHEDULED" } }),
     prisma.driftEvent.count({ where: { shopId: shop.id, resolution: "PENDING" } }),
     prisma.campaignRun.findFirst({
       where: { shopId: shop.id },
@@ -109,12 +113,15 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
   // twelve seconds went: the first batch is 21ms and this one is 2ms. It is folded in
   // because two round trips where one would do is still one too many, not because it was
   // ever the problem.
-  const [notices, needsAttention, drafts, cleanRuns, practiceCampaigns] = await Promise.all([
+  const [notices, needsAttention, drafts, archivedRunning, cleanRuns, practiceCampaigns] = await Promise.all([
     openNotices(shop.id),
-    prisma.campaign.count({ where: { shopId: shop.id, status: { in: ["PARTIAL", "HELD"] } } }),
+    prisma.campaign.count({ where: { shopId: shop.id, archivedAt: null, status: { in: ["PARTIAL", "HELD"] } } }),
     // Campaigns the merchant made and has not applied. Counted because Home used to
     // decide "is anything live" from every campaign row, drafts included — see #613.
-    prisma.campaign.count({ where: { shopId: shop.id, status: "DRAFT" } }),
+    prisma.campaign.count({ where: { shopId: shop.id, archivedAt: null, status: "DRAFT" } }),
+    // Archived and still live: archiving files a campaign away without ending it, so its
+    // prices are on the storefront though the list's default view leaves it out.
+    prisma.campaign.count({ where: { shopId: shop.id, archivedAt: { not: null }, status: { in: ["ACTIVE", "APPLYING"] } } }),
     // The onboarding goal, asked of the data rather than of a dismissed flag: a
     // merchant who clicked past a step has not run a campaign cleanly.
     prisma.campaignRun.count({
@@ -159,6 +166,7 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
     upcoming,
     driftOpen,
     drafts,
+    archivedRunning,
     notices: notices.map((notice) => ({
       id: notice.id,
       kind: notice.kind,
@@ -284,6 +292,7 @@ export default function Dashboard() {
     upcomingMoments,
     driftOpen,
     drafts,
+    archivedRunning,
     notices,
     needsAttention,
     lastRun,
@@ -326,6 +335,7 @@ export default function Dashboard() {
     needsAttention,
     driftOpen,
     drafts,
+    archivedRunning,
     hasRun: lastRun !== null,
     onboardingComplete: guide.complete,
   });
@@ -622,6 +632,20 @@ export default function Dashboard() {
                   { label: "Edits to review", value: driftOpen, href: "/app/prices/drift" },
                 ]}
               />
+
+              {/* The tiles count what the campaigns list shows, so an archived campaign is
+                  in none of them -- and archiving does not end one (#723). Its sale is
+                  still live, and "Campaigns running: 0" alone would say otherwise. */}
+              {archivedRunning > 0 ? (
+                <s-paragraph>
+                  {archivedRunning === 1
+                    ? "1 archived campaign is still running: archiving filed it away, and its prices are still live. "
+                    : `${formatCount(archivedRunning)} archived campaigns are still running: archiving filed them away, and their prices are still live. `}
+                  <s-link href="/app/campaigns?archived=1&status=ACTIVE">
+                    {archivedRunning === 1 ? "See it" : "See them"}
+                  </s-link>
+                </s-paragraph>
+              ) : null}
 
               {/* A rule, not a border. The card has three parts — the figures, the last run,
                   and where to go next — and they were separated by nothing but the stack's

@@ -25,6 +25,7 @@ const shop = (over: Partial<Parameters<typeof homeSections>[0]> = {}) =>
     needsAttention: 0,
     driftOpen: 0,
     drafts: 0,
+    archivedRunning: 0,
     hasRun: false,
     onboardingComplete: false,
     ...over,
@@ -169,5 +170,16 @@ describe("whatever the shop", () => {
 
   it("never shows the draft line and the empty state together", () => {
     expect(every.filter((sections) => sections.drafts && sections.emptyState)).toEqual([]);
+  });
+});
+
+describe("a shop whose only live campaign is archived (#723)", () => {
+  // Archiving files a campaign away without ending it. The tiles count what the campaigns
+  // list shows, which leaves it out, so they read zero -- and the sale is still live.
+  const sections = shop({ archivedRunning: 1, onboardingComplete: true });
+
+  it("still reports what is live, rather than saying nothing is running", () => {
+    expect(sections.live).toBe(true);
+    expect(sections.emptyState).toBe(false);
   });
 });
