@@ -34,7 +34,59 @@ export function formatCount(value: number): string {
 }
 
 /**
- * A timestamp in the shop's own timezone.
+ * Month abbreviations, spelled by us rather than by the runtime.
+ *
+ * `07/09/2026` is 7 September to a reader in London and 9 July to one in New York, and
+ * most of Shopify's merchants are in New York (#688). A month name can't be read either
+ * way. The names are fixed here, not asked of `Intl`, because `en-GB` abbreviates
+ * September "Sep" in one ICU release and "Sept" in the next, and the server's Node and
+ * the merchant's browser need not carry the same one.
+ */
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** One formatter per zone: a table formats a timestamp on every row. */
+const formatters = new Map<string, Intl.DateTimeFormat>();
+
+function formatterFor(timeZone: string): Intl.DateTimeFormat {
+  let formatter = formatters.get(timeZone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en-GB", {
+      timeZone,
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "numeric",
+      hourCycle: "h23",
+    });
+    formatters.set(timeZone, formatter);
+  }
+  return formatter;
+}
+
+/**
+ * The calendar fields of an instant in a zone, as numbers, which every ICU agrees on.
+ * Throws a `RangeError` on a zone it doesn't know; the callers decide what to show then.
+ */
+function fieldsIn(value: Date | string, timeZone: string) {
+  const parts = formatterFor(timeZone).formatToParts(new Date(value));
+  const field = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((part) => part.type === type)?.value);
+  return { year: field("year"), month: field("month"), day: field("day"), hour: field("hour"), minute: field("minute") };
+}
+
+/** "7 Sep 2026": a day no reader can take for another. */
+function dayText({ year, month, day }: { year: number; month: number; day: number }): string {
+  return `${day} ${MONTHS[month - 1]} ${year}`;
+}
+
+/**
+ * A timestamp in the shop's own timezone: "7 Sep 2026, 11:00".
+ *
+ * One style for every timestamp the merchant reads, the schedule's sentences included,
+ * so a campaign page doesn't say "Sep 7, 2026, 11:00 AM" above a run history that says
+ * "07/09/2026, 11:00". A 24-hour clock, because that is what the zone clock under the
+ * date pickers shows (`formatClock`), and a sale at "12:00" with no AM or PM has one
+ * reading.
  *
  * A bad zone string throws a `RangeError`, which would take a whole page down over a
  * display preference — so the raw value is returned instead. Showing an ISO string is
@@ -42,15 +94,12 @@ export function formatCount(value: number): string {
  */
 export function formatWhen(value: Date | string, timeZone: string): string {
   try {
-    // Explicit styles rather than the default, which spells the time out to the second.
-    // A column of "27/08/2026, 12:40:38" is asking the reader to skip two characters on
-    // every row to reach a distinction no merchant is making — nothing in this app
-    // happens on a schedule finer than a minute.
-    return new Date(value).toLocaleString(LOCALE, {
-      timeZone,
-      dateStyle: "short",
-      timeStyle: "short",
-    });
+    // To the minute, not the second. A column of "27/08/2026, 12:40:38" is asking the
+    // reader to skip two characters on every row to reach a distinction no merchant is
+    // making — nothing in this app happens on a schedule finer than a minute.
+    const fields = fieldsIn(value, timeZone);
+    if (Number.isNaN(fields.year)) return String(value);
+    return `${dayText(fields)}, ${String(fields.hour).padStart(2, "0")}:${String(fields.minute).padStart(2, "0")}`;
   } catch {
     return String(value);
   }
@@ -82,10 +131,12 @@ export function formatClock(value: Date | string, timeZone: string): string {
   }
 }
 
-/** A date without the time, same rules. */
+/** A date without the time, same rules: "7 Sep 2026". */
 export function formatDay(value: Date | string, timeZone: string): string {
   try {
-    return new Date(value).toLocaleDateString(LOCALE, { timeZone });
+    const fields = fieldsIn(value, timeZone);
+    if (Number.isNaN(fields.year)) return String(value);
+    return dayText(fields);
   } catch {
     return String(value);
   }

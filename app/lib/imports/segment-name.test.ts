@@ -4,7 +4,7 @@ import { importSegmentName } from "./segment-name";
 
 describe("the segment a spreadsheet campaign is built on (#719)", () => {
   it("is named after the campaign", () => {
-    expect(importSegmentName("Sale · 25/09/2026", [])).toBe("Sale · 25/09/2026 (imported)");
+    expect(importSegmentName("Sale · 25 Sep 2026", [])).toBe("Sale · 25 Sep 2026 (imported)");
   });
 
   it("takes the next free number when the day's name is already used", () => {

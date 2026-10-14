@@ -16,6 +16,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { formatScheduleInstant } from "../scheduling/window";
 import { sourceOf } from "../testing/source";
 
 import { formatAgo, formatCount, formatDay, formatWhen } from "./display";
@@ -48,13 +49,13 @@ describe("times are the shop's, not the server's", () => {
     expect(tokyo).not.toBe(newYork);
     // 02:30 UTC is the 27th in Tokyo and still the 26th in New York — the exact class of
     // mistake that makes a merchant think a sale reverts on the wrong day.
-    expect(tokyo).toContain("27/08/2026");
-    expect(newYork).toContain("26/08/2026");
+    expect(tokyo).toContain("27 Aug 2026");
+    expect(newYork).toContain("26 Aug 2026");
   });
 
   it("renders a date in the zone it is given", () => {
-    expect(formatDay(iso, "Asia/Tokyo")).toBe("27/08/2026");
-    expect(formatDay(iso, "America/New_York")).toBe("26/08/2026");
+    expect(formatDay(iso, "Asia/Tokyo")).toBe("27 Aug 2026");
+    expect(formatDay(iso, "America/New_York")).toBe("26 Aug 2026");
   });
 
   it("survives a timezone the shop has set to something unusable", () => {
@@ -159,7 +160,7 @@ describe("how long ago", () => {
   it("falls back to a date once relative stops helping", () => {
     // "47 days ago" is a subtraction the reader has to undo to place it against
     // anything else they know.
-    expect(ago("2026-06-02T09:00:00.000Z")).toBe("02/06/2026");
+    expect(ago("2026-06-02T09:00:00.000Z")).toBe("2 Jun 2026");
   });
 
   it("handles a timestamp in the future, which a scheduled run is", () => {
@@ -185,6 +186,41 @@ describe("a timestamp in a table", () => {
     // A column of "27/08/2026, 12:40:38" asks the reader to skip two characters on every
     // row to reach a distinction nobody is making — nothing here happens on a schedule
     // finer than a minute.
-    expect(formatWhen("2026-08-27T12:40:38.000Z", "Europe/London")).toBe("27/08/2026, 13:40");
+    expect(formatWhen("2026-08-27T12:40:38.000Z", "Europe/London")).toBe("27 Aug 2026, 13:40");
+  });
+});
+
+describe("a date no reader can take for another (#688)", () => {
+  // 7 September: a day of 12 or less, so a day-first/month-first swap reads as a real
+  // date (9 July) and only a month name tells them apart.
+  const seventhOfSeptember = "2026-09-07T15:00:00.000Z";
+
+  it("names the month, so 7 September is never printed as 07/09 or 09/07", () => {
+    expect(formatDay(seventhOfSeptember, "America/New_York")).toBe("7 Sep 2026");
+    expect(formatWhen(seventhOfSeptember, "America/New_York")).toBe("7 Sep 2026, 11:00");
+    expect(formatWhen(seventhOfSeptember, "America/New_York")).not.toMatch(/\d{1,2}\/\d{1,2}/);
+  });
+
+  it("writes the schedule's sentences in the same style and clock as the run history", () => {
+    expect(formatScheduleInstant(seventhOfSeptember, "America/New_York")).toBe(
+      formatWhen(seventhOfSeptember, "America/New_York"),
+    );
+  });
+
+  it("uses a 24-hour clock that never reads 24:00, and pads the minutes", () => {
+    expect(formatWhen("2026-01-05T00:05:00.000Z", "UTC")).toBe("5 Jan 2026, 00:05");
+    expect(formatWhen("2026-12-31T23:59:00.000Z", "UTC")).toBe("31 Dec 2026, 23:59");
+  });
+
+  it("spells every month the same in every runtime, not as this one's ICU does", () => {
+    const months = Array.from({ length: 12 }, (_, i) =>
+      formatDay(new Date(Date.UTC(2026, i, 1, 12)).toISOString(), "UTC").split(" ")[1],
+    );
+    expect(months).toEqual(["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]);
+  });
+
+  it("returns the raw value for a zone or a date it can't read", () => {
+    expect(formatDay(seventhOfSeptember, "Not/A_Zone")).toBe(seventhOfSeptember);
+    expect(formatWhen("not a date", "UTC")).toBe("not a date");
   });
 });
