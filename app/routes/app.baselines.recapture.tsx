@@ -1,7 +1,6 @@
-import { redirect, type LoaderFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 
-import { authenticate } from "../shopify.server";
-import { LEGACY_ROUTES } from "../lib/routing/legacy-routes";
+import { legacyRedirect } from "../lib/routing/legacy-redirect.server";
 
 /**
  * `/app/baselines/recapture` moved to `/app/imports/recapture`.
@@ -9,12 +8,8 @@ import { LEGACY_ROUTES } from "../lib/routing/legacy-routes";
  * Kept because this URL is linked from operator alerts, runbooks and whatever a
  * merchant bookmarked. See `app/lib/routing/legacy-routes.ts`.
  *
- * Authenticates before redirecting rather than leaving it to the destination: an
- * embedded route reached without a session has to be sent through OAuth, and doing
- * that from here means the merchant lands on the page they asked for instead of
- * bouncing off a second redirect afterwards.
+ * Through `legacyRedirect`, never a bare `redirect`: the admin's query string is what
+ * the destination signs in with, and dropping it left a page reading only "200" (#744).
  */
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
-  return redirect(LEGACY_ROUTES["/app/baselines/recapture"]);
-};
+export const loader = ({ request }: LoaderFunctionArgs) =>
+  legacyRedirect(request, "/app/baselines/recapture");

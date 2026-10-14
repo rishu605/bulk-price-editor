@@ -11,18 +11,14 @@
  * Kept because this URL is linked from runbooks and whatever a merchant bookmarked. The
  * POST it used to serve lives at `/app/price-import`, unchanged.
  *
- * Authenticates before redirecting rather than leaving it to the destination: an embedded
- * route reached without a session has to go through OAuth, and doing that here means the
- * merchant lands on the editor rather than bouncing off a second redirect.
+ * Through `legacyRedirect`, never a bare `redirect`: the admin's query string is what the
+ * editor signs in with, and dropping it is why this URL opened on a page reading only
+ * "200" (#744).
  */
 
 import type { LoaderFunctionArgs } from "react-router";
-import { redirect } from "react-router";
 
-import { authenticate } from "../shopify.server";
-import { LEGACY_ROUTES } from "../lib/routing/legacy-routes";
+import { legacyRedirect } from "../lib/routing/legacy-redirect.server";
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
-  return redirect(LEGACY_ROUTES["/app/campaigns/import"]);
-};
+export const loader = ({ request }: LoaderFunctionArgs) =>
+  legacyRedirect(request, "/app/campaigns/import");

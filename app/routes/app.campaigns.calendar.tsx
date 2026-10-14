@@ -1,7 +1,6 @@
-import { redirect, type LoaderFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 
-import { authenticate } from "../shopify.server";
-import { LEGACY_ROUTES, withQuery } from "../lib/routing/legacy-routes";
+import { legacyRedirect } from "../lib/routing/legacy-redirect.server";
 
 /**
  * `/app/campaigns/calendar` moved into `/app/campaigns?view=calendar`.
@@ -11,18 +10,15 @@ import { LEGACY_ROUTES, withQuery } from "../lib/routing/legacy-routes";
  * redirects like any other -- it existed long enough to be linked.
  *
  * The query is carried across so a link to a specific week still lands on that week.
+ * `legacyRedirect` carries all of it -- the admin's parameters included, which every other
+ * stub used to drop (#744) -- so this one only has to say what the old `view` meant.
  */
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
-
-  const from = new URL(request.url).searchParams;
-  const to = new URLSearchParams(from);
-  to.set("view", "calendar");
-  // `view` used to mean week-or-month here; it means list-or-calendar now.
-  const period = from.get("view");
+export const loader = ({ request }: LoaderFunctionArgs) => {
+  // `view` used to mean week-or-month here; it means list-or-calendar now. The incoming
+  // `view` itself is not carried: the destination's `view=calendar` wins over it.
+  const period = new URL(request.url).searchParams.get("view");
+  const to = new URLSearchParams();
   if (period === "week" || period === "month") to.set("period", period);
 
-  // Merged rather than appended: the destination already carries `view=calendar`, so
-  // concatenating produced `?view=calendar&view=calendar` on every one of these links.
-  return redirect(withQuery(LEGACY_ROUTES["/app/campaigns/calendar"], to));
+  return legacyRedirect(request, "/app/campaigns/calendar", to);
 };
