@@ -67,7 +67,7 @@ describe("chaos: a segment with no name", () => {
       }
       const after = await gather(now);
       expect(after.errors, "old VALIDATION rows counted towards error-spike").toBe(before.errors);
-      expect(after.shopRates.find((rate) => rate.shopId === shopId), "and towards this shop's").toBeUndefined();
+      expect((after.shopRates ?? []).find((rate) => rate.shopId === shopId), "and towards this shop's").toBeUndefined();
     });
   });
 });
