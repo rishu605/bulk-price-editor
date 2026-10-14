@@ -23,7 +23,9 @@ import {
   type CsvRow,
 } from "../lib/segments/csv-import";
 import {
+  identifierRefusal,
   isValid,
+  productRefusal,
   readRows,
   validateRow,
   type InvalidRow,
@@ -119,7 +121,19 @@ export async function importBaselines(
 
     // The same matcher segments use, so "SKU-1 matches two variants" means the same
     // thing in both places rather than being decided twice, differently.
-    const csvRow: CsvRow = { line: raw.line, value: raw.identifier, column: raw.identifierColumn };
+    // A product handle cannot be matched to a variant, and is said so rather than
+    // reported as "no match" (#735).
+    const refusal = identifierRefusal(raw);
+    if (refusal) {
+      record(result.unmatched, { line: raw.line, identifier: raw.identifier, reason: refusal });
+      continue;
+    }
+
+    const csvRow: CsvRow = {
+      line: raw.line,
+      value: raw.identifier,
+      column: raw.identifierColumn === "variant-id" ? "variant-id" : undefined,
+    };
     const outcome = matchIdentifiers([csvRow], index);
 
     if (outcome.ambiguous.length > 0) {
@@ -147,9 +161,7 @@ export async function importBaselines(
       record(result.ambiguous, {
         line: raw.line,
         identifier: raw.identifier,
-        reason:
-          `This is a product, not a variant — it covers ${outcome.matched.length} variants ` +
-          `which would all get the same baseline. List each variant's SKU instead.`,
+        reason: productRefusal(outcome.matched.length, "baseline"),
       });
       continue;
     }

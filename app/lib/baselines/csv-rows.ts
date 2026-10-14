@@ -20,12 +20,50 @@
 import { parseMoney, type Money } from "../money/money";
 import { VARIANT_ID_HEADERS } from "../segments/csv-import";
 
+export type IdentifierColumn = "variant-id" | "handle";
+
+/** Headers that name a product rather than a variant. */
+const PRODUCT_HEADERS: readonly string[] = ["handle", "product handle", "product"];
+
+/**
+ * Why a row identified by a product handle is refused (#735).
+ *
+ * Handles are not in the catalogue index -- a handle was looked up as a SKU and every row
+ * of a handle-only file came back "No match". And they could not be honoured if they
+ * were: a handle names a product, a price belongs to a variant, and one row would have to
+ * price every size and colour alike. The product-id case is refused the same way.
+ */
+export const HANDLE_REFUSAL =
+  "This row names a product by its handle, and a price belongs to a variant -- one row " +
+  "would price every size and colour alike. Add a Variant SKU or Variant ID column (an " +
+  "export from Shopify or Matrixify has both) and import the file again.";
+
+/**
+ * Why a row naming a whole product is refused: a product id matches every variant of the
+ * product, and a price, a cost or a baseline is one variant's. The price and cost imports
+ * used to take the first of them and drop the rest without a word (#735).
+ */
+export function productRefusal(variants: number, what: "price" | "cost" | "baseline"): string {
+  return (
+    `This is a product, not a variant -- it covers ${variants} variants, which would all get ` +
+    `the same ${what}. List each variant's SKU or Variant ID instead.`
+  );
+}
+
+/** The reason a row's identifier cannot be matched at all, or null when it can be tried. */
+export function identifierRefusal(row: Pick<RawRow, "identifierColumn">): string | null {
+  return row.identifierColumn === "handle" ? HANDLE_REFUSAL : null;
+}
+
 export interface RawRow {
   /** 1-based line in the file, so an error points at something findable. */
   line: number;
   identifier: string;
-  /** Set when the identifier came from a column headed Variant ID (#774). */
-  identifierColumn?: "variant-id";
+  /**
+   * What the identifier column is headed, where that decides what its values mean: a
+   * Variant ID's numbers are variant ids (#774), and a Handle names a product (#735).
+   */
+  identifierColumn?: IdentifierColumn;
   price: string;
   compareAt?: string;
   currency?: string;
@@ -172,8 +210,8 @@ const HEADERS: Record<"identifier" | "price" | "compareAt" | "currency" | "cost"
 
 export interface ColumnMap {
   identifier: number;
-  /** The identifier column is headed Variant ID, so its numbers are variant ids (#774). */
-  identifierColumn?: "variant-id";
+  /** Headed Variant ID, so its numbers are variant ids (#774); or Handle, a product (#735). */
+  identifierColumn?: IdentifierColumn;
   /**
    * Null when the file has no price column at all.
    *
@@ -222,7 +260,11 @@ export function mapColumns(header: readonly string[]): ColumnMap | null {
 
   return {
     identifier,
-    ...(VARIANT_ID_HEADERS.includes(identifierName) ? { identifierColumn: "variant-id" as const } : {}),
+    ...(VARIANT_ID_HEADERS.includes(identifierName)
+      ? { identifierColumn: "variant-id" as const }
+      : PRODUCT_HEADERS.includes(identifierName)
+        ? { identifierColumn: "handle" as const }
+        : {}),
     price: price === -1 ? null : price,
     compareAt: compareAt === -1 ? null : compareAt,
     currency: currency === -1 ? null : currency,
