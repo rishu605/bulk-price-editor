@@ -7,10 +7,14 @@
  * against a ~100-point variant update, large synchronous runs are not merely slow
  * but infeasible.
  *
- * Two details that are easy to get wrong:
+ * Three details that are easy to get wrong:
  *
  *   The mutation is PER PRODUCT. Iterating per variant multiplies the request count
  *   by the average variant count and burns the budget for nothing.
+ *
+ *   But never more than 250 variants in one call. A product can have 2,048, and
+ *   Shopify refuses any input array over 250 outright -- so a product with more in
+ *   scope is written in several calls, each its own unit of success or failure (#847).
  *
  *   `userErrors` is not an exception. Shopify returns HTTP 200 with a populated
  *   userErrors array when a write is rejected, so a naive implementation reports
@@ -18,6 +22,7 @@
  *   ledger exists to prevent.
  */
 
+import { chunk } from "../db/chunk";
 import { formatMoney, type Money } from "../money/money";
 import { readBackVerdict } from "./read-back";
 import type { PlannedRow } from "../planning/types";
@@ -101,6 +106,17 @@ export interface ExecuteOptions {
   sleep?: (ms: number) => Promise<void>;
   maxAttempts?: number;
 }
+
+/**
+ * Shopify's cap on any input array: "Input arguments that accept an array have a maximum
+ * size of 250, on every Shopify API" (shopify.dev/docs/api/usage/limits).
+ *
+ * A size limit on one request, not a rate limit: it is the same on every plan, and no
+ * `throttleStatus` reports it. Not a tuning knob either -- a request over it is refused
+ * whole, before anything is written. It bounds the variants in one write (#847) and the
+ * ids in one read-back (#698).
+ */
+export const INPUT_ARRAY_MAX = 250;
 
 export const PRODUCT_VARIANTS_BULK_UPDATE = `#graphql
   mutation AnchorProductVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
@@ -190,8 +206,18 @@ export async function executeSync(
     else byProduct.set(product, [row]);
   }
 
+  // Then split each product at Shopify's input cap. A product with 600 variants in scope
+  // went as one 600-element array, which Shopify refuses whole: every row of it failed,
+  // and a resume sent the same array and failed the same way (#847). Each request below
+  // is its own unit: a userError or a throw settles only the rows it carried, so one
+  // product can end partly written -- reported row by row by the ledger and the
+  // read-back, exactly as a run that wrote some products and not others is.
+  const requests = [...byProduct].flatMap(([productId, group]) =>
+    chunk(group, INPUT_ARRAY_MAX).map((part) => [productId, part] as const),
+  );
+
   let settled = 0;
-  for (const [productId, group] of byProduct) {
+  for (const [productId, group] of requests) {
     await budget.reserve(costPerVariant * group.length);
 
     try {
@@ -211,7 +237,8 @@ export async function executeSync(
       const userErrors = payload?.userErrors ?? [];
 
       // Map each userError back to the row it concerns. Shopify addresses fields
-      // positionally (["variants", "2", "price"]), so the index identifies the row.
+      // positionally (["variants", "2", "price"]), so the index identifies the row --
+      // its place in this request's array, which is `group`, not the whole product.
       const errorsByIndex = new Map<number, string>();
       let groupWideError: string | undefined;
 
@@ -347,13 +374,10 @@ async function verifyRows(
   // `nodes` call for a 300-row sync run was refused outright -- so every campaign of
   // 251 to 1,000 variants wrote its prices correctly and then ended PARTIAL with no row
   // verified (#698).
-  for (let i = 0; i < sample.length; i += READ_BACK_BATCH) {
-    await verifyBatch(sample.slice(i, i + READ_BACK_BATCH), options);
+  for (const batch of chunk(sample, INPUT_ARRAY_MAX)) {
+    await verifyBatch(batch, options);
   }
 }
-
-/** Shopify's cap on any input array: "a maximum size of 250, on every Shopify API". */
-export const READ_BACK_BATCH = 250;
 
 async function verifyBatch(
   sample: ExecutedRow[],

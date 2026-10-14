@@ -397,8 +397,31 @@ export class FakeShopify {
     return new Date(Math.floor((Date.now() + this.storeClockSkewMs) / 1000) * 1000).toISOString().replace(".000Z", "Z");
   }
 
+  /**
+   * How many variants each `productVariantsBulkUpdate` asked to write, in order, refused
+   * ones included -- so a scenario can say no request went over the cap, not merely that
+   * none was refused.
+   */
+  readonly variantWriteSizes: number[] = [];
+
   private bulkUpdate(variables: Record<string, unknown>) {
     const inputs = (variables.variants ?? []) as Array<Record<string, unknown>>;
+    this.variantWriteSizes.push(inputs.length);
+
+    // The same cap as `nodes`, on the same terms: refused at the top level, nothing
+    // written. Without it the fake took a 600-variant product in one call, and the suite
+    // could not see that Shopify would not (#847).
+    if (inputs.length > 250) {
+      return {
+        errors: [
+          {
+            message: `The input array size of ${inputs.length} is greater than the maximum allowed of 250.`,
+            extensions: { code: "MAX_INPUT_SIZE_EXCEEDED" },
+          },
+        ],
+      };
+    }
+
     const payload = this.applyVariantInputs(inputs);
     return {
       data: { productVariantsBulkUpdate: payload },

@@ -101,6 +101,27 @@ function fakeClient(options: FakeOptions = {}) {
   return { client, calls, written };
 }
 
+/**
+ * Refuses any input array over 250 at the top level, as Shopify does -- the variants of a
+ * write and the ids of a read-back alike.
+ */
+function capped(fake: ReturnType<typeof fakeClient>): ReturnType<typeof fakeClient> {
+  const client: AdminClient = {
+    request(query, variables) {
+      for (const key of ["variants", "ids"]) {
+        const input = variables[key];
+        if (Array.isArray(input) && input.length > 250) {
+          return Promise.reject(
+            new Error(`The input array size of ${input.length} is greater than the maximum allowed of 250.`),
+          );
+        }
+      }
+      return fake.client.request(query, variables);
+    },
+  };
+  return { ...fake, client };
+}
+
 function budget() {
   return new RateLimitBudget({ now: () => 0, sleep: noSleep });
 }
@@ -148,6 +169,91 @@ describe("grouping", () => {
       expect((mutations[0].variables.variants as unknown[]).length).toBe(2);
       expect((mutations[1].variables.variants as unknown[]).length).toBe(1);
     });
+  });
+
+  it("splits one product's variants at Shopify's 250 input cap, and writes and verifies all of them (#847)", async () => {
+    // One product, 600 variants in scope: under the bulk threshold, so all of it sync.
+    const rows = Array.from({ length: 600 }, (_, i) =>
+      row({ ref: ref(`gid://shopify/ProductVariant/${1_000 + i}`) }),
+    );
+    const { client, calls, written } = capped(fakeClient());
+
+    const result = await executeSync(rows, {
+      client,
+      budget: budget(),
+      productOf,
+      verifySampleRate: 1,
+      random: () => 0,
+      sleep: noSleep,
+    });
+
+    const writes = calls.filter((c) => c.query.includes("productVariantsBulkUpdate"));
+    expect(writes.map((c) => (c.variables.variants as unknown[]).length)).toEqual([250, 250, 100]);
+    expect(new Set(writes.map((c) => c.variables.productId))).toEqual(new Set(["gid://shopify/Product/A"]));
+    // Each variant in exactly one request, none twice and none left out.
+    const sent = writes.flatMap((c) => (c.variables.variants as Array<{ id: string }>).map((v) => v.id));
+    expect(new Set(sent).size).toBe(600);
+    expect(sent).toHaveLength(600);
+    expect(written.size).toBe(600);
+
+    expect(result.verified).toBe(600);
+    expect(result.failed).toBe(0);
+    expect(result.clean).toBe(true);
+  });
+
+  it("settles a failed request's rows alone, and reads its userErrors against its own array (#847)", async () => {
+    const rows = Array.from({ length: 600 }, (_, i) =>
+      row({ ref: ref(`gid://shopify/ProductVariant/${1_000 + i}`) }),
+    );
+    const { client: inner } = fakeClient();
+    let writesSeen = 0;
+    const client: AdminClient = {
+      async request<T>(query: string, variables: Record<string, unknown>) {
+        if (!query.includes("productVariantsBulkUpdate")) return inner.request<T>(query, variables);
+        writesSeen++;
+        // The second request is refused outright; the third carries one bad row, at
+        // index 3 of *its* array -- the product's 504th variant, not its 4th.
+        if (writesSeen === 2) throw new Error("Invalid product id");
+        const response = await inner.request<T>(query, variables);
+        if (writesSeen === 3) {
+          const payload = (response.data as { productVariantsBulkUpdate: { userErrors: unknown[] } })
+            .productVariantsBulkUpdate;
+          payload.userErrors = [{ field: ["variants", "3", "price"], message: "Price must be positive", code: "INVALID" }];
+        }
+        return response;
+      },
+    };
+
+    const result = await executeSync(rows, {
+      client,
+      budget: budget(),
+      productOf,
+      verifySampleRate: 1,
+      random: () => 0,
+      sleep: noSleep,
+      maxAttempts: 1,
+    });
+
+    expect(writesSeen, "a refused request does not hold back the product's next one").toBe(3);
+    const statusOf = (n: number) =>
+      result.rows.find((r) => r.row.ref.variantGid === `gid://shopify/ProductVariant/${n}`)!;
+
+    // The first request's rows landed and verified, untouched by what came after.
+    expect(statusOf(1_000).status).toBe("verified");
+    expect(statusOf(1_249).status).toBe("verified");
+    // The second request's rows failed with its reason, and only those.
+    expect(statusOf(1_250).status).toBe("failed");
+    expect(statusOf(1_499).status).toBe("failed");
+    expect(statusOf(1_499).failureReason).toContain("Invalid product id");
+    // The third request's userError is on its fourth row.
+    expect(statusOf(1_503).status).toBe("failed");
+    expect(statusOf(1_503).failureReason).toContain("Price must be positive");
+    expect(statusOf(1_003).status).toBe("verified");
+    expect(statusOf(1_500).status).toBe("verified");
+
+    expect(result.failed).toBe(251);
+    expect(result.verified).toBe(349);
+    expect(result.clean).toBe(false);
   });
 
   it("passes skipped rows through without writing them", async () => {
