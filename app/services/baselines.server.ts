@@ -213,3 +213,34 @@ export async function baselineHealth(shopId: string): Promise<BaselineHealth> {
     oldestCapturedAt: row?.oldest ?? null,
   };
 }
+
+/**
+ * Carries Shopify's cost onto each current base baseline (#737).
+ *
+ * The guardrails read `baseline.cost ?? variant.cost`, and a catalogue sync updated only
+ * the mirror's. A cost raised in Shopify from $5 to $8 left the baseline at $5, so "never
+ * below cost" floored a sale at $5 and allowed $7, while the cost import, comparing with the
+ * mirror, called a re-import of $8 "already matched" and wrote nothing.
+ *
+ * The decision, also in docs/decisions.md: **Shopify's cost wins where Shopify has one.**
+ * After a sync, a current baseline whose cost differs from a non-null mirror cost takes the
+ * mirror's. Where Shopify has no cost the baseline keeps what it has, which is how a cost
+ * imported from a spreadsheet survives the sync that empties the mirror's.
+ *
+ * A cost is not a price: rule 1 keeps campaign maths on the baseline's *price*, which this
+ * leaves alone. Returns the number of baselines changed.
+ */
+export async function carryShopifyCosts(shopId: string): Promise<number> {
+  return prisma.$executeRaw`
+    UPDATE "baselines" b
+    SET "cost" = v."cost"
+    FROM "variant_index" v
+    WHERE v."shopId" = ${shopId}
+      AND b."shopId" = v."shopId"
+      AND b."variantGid" = v."variantGid"
+      AND b."surfaceKind" = 'BASE'
+      AND b."priceListGid" = ''
+      AND b."supersededAt" IS NULL
+      AND v."cost" IS NOT NULL
+      AND b."cost" IS DISTINCT FROM v."cost"`;
+}

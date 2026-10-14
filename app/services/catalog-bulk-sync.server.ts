@@ -18,6 +18,7 @@
  * source of truth that could disagree with the database.
  */
 
+import { carryShopifyCosts } from "./baselines.server";
 import prisma from "../db.server";
 import { CATALOG_BULK_QUERY, parseCatalogJsonl, type CatalogRow, type ParseStats } from "../lib/catalog/bulk-jsonl";
 import { streamLines } from "../lib/execution/jsonl";
@@ -217,6 +218,8 @@ export async function syncCatalogViaBulk(
 
   const source = options.fetchResult ?? streamHttp;
   await ingest(source(finished.url), shopId, currency, result, options.onProgress);
+  // Shopify's costs onto the current baselines, which the guardrails read (#737).
+  await carryShopifyCosts(shopId);
 
   logger.info("catalogue imported", {
     shopId,

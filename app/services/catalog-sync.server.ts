@@ -11,6 +11,7 @@
  * same rows, so everything downstream is unaffected by which ran.
  */
 
+import { carryShopifyCosts } from "./baselines.server";
 import prisma from "../db.server";
 import { parseMoney } from "../lib/money/money";
 
@@ -208,6 +209,9 @@ export async function syncCatalog(
     // forever, which on a background worker is worse than stopping short.
     if (hasNext && !cursor) break;
   }
+
+  // Shopify's costs onto the current baselines, which the guardrails read (#737).
+  await carryShopifyCosts(shopId);
 
   return result;
 }

@@ -69,7 +69,18 @@ export async function importCosts(
     select: { variantGid: true, productGid: true, sku: true, barcode: true, cost: true },
   });
   const index = buildMatchIndex(variants);
-  const currentCost = new Map(variants.map((row) => [row.variantGid, row.cost]));
+  // The cost the guardrails read: the current baseline's, falling back to the mirror's
+  // (#737). Compared with the mirror's alone, a re-import of the cost Shopify now has was
+  // "already matched" while the baseline -- and so "never below cost" -- kept the old one.
+  const baselineCost = new Map(
+    (
+      await prisma.baseline.findMany({
+        where: { shopId, surfaceKind: "BASE", priceListGid: "", supersededAt: null, cost: { not: null } },
+        select: { variantGid: true, cost: true },
+      })
+    ).map((row) => [row.variantGid, row.cost]),
+  );
+  const currentCost = new Map(variants.map((row) => [row.variantGid, baselineCost.get(row.variantGid) ?? row.cost]));
 
   let batch: Array<{ row: ValidCostRow; variantGid: string }> = [];
 
