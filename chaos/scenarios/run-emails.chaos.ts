@@ -62,7 +62,7 @@ describe("chaos: what a run tells the merchant by email", () => {
       sent.length = 0;
       // Shopify refuses the bulk upload outright: the run has started, and throws.
       chaos.arm([{ fault: "auth-revoked", match: (query) => query.includes("stagedUploadsCreate") }]);
-      const thrown = await chaos.apply({ forcePath: "bulk" }).catch((error: unknown) => error);
+      const thrown = await chaos.apply({ actor: "chaos", forcePath: "bulk" }).catch((error: unknown) => error);
       chaos.heal();
       expect(thrown).toBeInstanceOf(Error);
 

@@ -50,7 +50,7 @@ describe("chaos: a run too large for its request is refused, not abandoned halfw
 
         // Four products against a budget of a millisecond. What is under test is the
         // comparison and everything it protects, not the constant.
-        const refused = await ctx.apply({ inlineBudgetMs: 1 });
+        const refused = await ctx.apply({ actor: "chaos", inlineBudgetMs: 1 });
 
         expect(refused.refused, "a refusal has to say so in the outcome").toBeTruthy();
         expect(refused.refused, "and tell the merchant where to go next").toMatch(
@@ -112,7 +112,7 @@ describe("chaos: a run too large for its request is refused, not abandoned halfw
         // A limit far below the scope. Refusing here would strand a store at 20% off
         // because it is large -- the guard causing the incident it exists to prevent. With
         // no worker queue to hand it to, it runs here, as it always did.
-        const reverted = await ctx.revert({ inlineBudgetMs: 1 });
+        const reverted = await ctx.revert({ actor: "chaos", inlineBudgetMs: 1 });
 
         expect(reverted.refused, "a revert is never gated, on anything").toBeFalsy();
         expect(reverted.clean).toBe(true);

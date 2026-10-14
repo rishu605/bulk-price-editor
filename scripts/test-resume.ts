@@ -69,8 +69,8 @@ async function main() {
 
   // --------------------------------------- 1. clean apply, for reference
   console.log("\n1. clean apply (the state a resumed run must converge on)");
-  await transitionCampaign(shop.id, campaign.id, "APPLYING", { reason: "test" });
-  const first = await runCampaign(shop.id, campaign.id, client, {});
+  await transitionCampaign(shop.id, campaign.id, "APPLYING", { actor: "script", reason: "test" });
+  const first = await runCampaign(shop.id, campaign.id, client, { actor: "script" });
   check("all rows verified", first.verified, PRODUCTS);
   check("run is clean", first.clean, true);
 
@@ -78,13 +78,13 @@ async function main() {
   console.log(`      reference prices: ${[...reference.values()].join(", ")}`);
 
   // Back to baseline so the next apply has real work to do.
-  await runCampaign(shop.id, campaign.id, client, { revert: true });
+  await runCampaign(shop.id, campaign.id, client, { actor: "script", revert: true });
 
   // ------------------------------- 2. an apply genuinely interrupted partway
   console.log("2. apply interrupted after 2 products");
-  await transitionCampaign(shop.id, campaign.id, "APPLYING", { reason: "test: partial" });
+  await transitionCampaign(shop.id, campaign.id, "APPLYING", { actor: "script", reason: "test: partial" });
 
-  const partial = await runCampaign(shop.id, campaign.id, failAfter(client, 2), {});
+  const partial = await runCampaign(shop.id, campaign.id, failAfter(client, 2), { actor: "script" });
   console.log(`      verified ${partial.verified}, failed ${partial.failed}`);
   check("the run is not reported clean", partial.clean, false);
   check("some rows landed", partial.verified > 0, true);
@@ -93,8 +93,8 @@ async function main() {
 
   // ------------------------------------------------- 3. resume the rest
   console.log("3. resume");
-  await transitionCampaign(shop.id, campaign.id, "APPLYING", { reason: "test: resume" });
-  const resumed = await runCampaign(shop.id, campaign.id, client, { resume: true });
+  await transitionCampaign(shop.id, campaign.id, "APPLYING", { actor: "script", reason: "test: resume" });
+  const resumed = await runCampaign(shop.id, campaign.id, client, { actor: "script", resume: true });
   console.log(`      ${resumed.messages[0] ?? "(no resume message)"}`);
   check(
     "resume wrote only what was outstanding",
@@ -113,15 +113,15 @@ async function main() {
 
   // ------------------------------- 4. a poison row does not block the rest
   console.log("4. delete a variant, then apply — the poison row must not block");
-  await runCampaign(shop.id, campaign.id, client, { revert: true });
+  await runCampaign(shop.id, campaign.id, client, { actor: "script", revert: true });
 
   const victim = products[0];
   // Deleted in Shopify but still in our mirror: exactly the mid-run deletion of E4,
   // since the products/delete webhook has not arrived yet.
   await deleteProduct(client, victim.productGid);
 
-  await transitionCampaign(shop.id, campaign.id, "APPLYING", { reason: "test: poison" });
-  const poisoned = await runCampaign(shop.id, campaign.id, client, {});
+  await transitionCampaign(shop.id, campaign.id, "APPLYING", { actor: "script", reason: "test: poison" });
+  const poisoned = await runCampaign(shop.id, campaign.id, client, { actor: "script" });
   console.log(`      verified ${poisoned.verified}, failed ${poisoned.failed}`);
   check("every surviving row still got written", poisoned.verified, PRODUCTS - 1);
 
@@ -133,7 +133,7 @@ async function main() {
   check("deleted variant recorded as SKIPPED, not FAILED", deletedRow?.status, "SKIPPED");
 
   // ------------------------------------------------------------ cleanup
-  await runCampaign(shop.id, campaign.id, client, { revert: true }).catch(() => {});
+  await runCampaign(shop.id, campaign.id, client, { actor: "script", revert: true }).catch(() => {});
   await prisma.campaign.delete({ where: { id: campaign.id } });
   for (const product of products.slice(1)) {
     await deleteProduct(client, product.productGid).catch(() => {});

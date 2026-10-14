@@ -77,7 +77,7 @@ describe("chaos: the rollback report right after a clean apply", () => {
       const [reverted, edited, ...rest] = variantGids;
       await chaos.expectHonest((await chaos.apply()).runId);
 
-      await revertVariant(shopId, campaignId, reverted, chaosAdminClient(chaos.server.endpoint()));
+      await revertVariant(shopId, campaignId, reverted, chaosAdminClient(chaos.server.endpoint()), { actor: "chaos" });
       const afterRevert = await rollbackReport(shopId, campaignId);
       expect(afterRevert.counts.drifted, "Anchor's own revert reported as somebody's edit").toBe(0);
       expect(afterRevert.rows.map((row) => row.variantGid)).not.toContain(reverted);

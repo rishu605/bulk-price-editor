@@ -22,6 +22,12 @@ import { FakeShopifyServer } from "./shopify-server";
 import { judge, type Verdict } from "./verdict";
 
 /** Overridable so a failing run replays exactly: `CHAOS_SEED=1234 npm run test:chaos`. */
+
+/** Who a scenario's runs are made by, unless it says otherwise (#746: there is no default). */
+export const CHAOS_ACTOR = "chaos";
+
+/** A scenario's run options: the run's own, with the actor optional. */
+export type HarnessRunOptions = Omit<RunOptions, "actor"> & { actor?: string };
 export const RUN_SEED = Number(process.env.CHAOS_SEED ?? 20260825);
 
 export interface ChaosContext {
@@ -36,9 +42,10 @@ export interface ChaosContext {
   heal(): void;
 
   /** Applies the campaign in-process, through the real run path. */
-  apply(options?: RunOptions): Promise<RunOutcome>;
+  /** A run as the campaign page makes one; `actor` defaults to "chaos" (#746). */
+  apply(options?: HarnessRunOptions): Promise<RunOutcome>;
   /** Reverts it, likewise -- `resolve(without C)`, not a restore. */
-  revert(options?: RunOptions): Promise<RunOutcome>;
+  revert(options?: HarnessRunOptions): Promise<RunOutcome>;
 
   /** What the store says right now, per variant. */
   livePrices(): Map<string, string | undefined>;
@@ -106,6 +113,7 @@ export async function withChaos(
     // report "nothing has been written to your storefront".
     apply: async (options = {}) =>
       runCampaign(fixture.shopId, fixture.campaignId, client, {
+        actor: CHAOS_ACTOR,
         // Full read-back. Sampling would let a scenario pass because the one bad row
         // happened not to be sampled -- the opposite of what this suite is for.
         verifySampleRate: 1,
@@ -114,6 +122,7 @@ export async function withChaos(
 
     revert: async (options = {}) =>
       runCampaign(fixture.shopId, fixture.campaignId, client, {
+        actor: CHAOS_ACTOR,
         revert: true,
         verifySampleRate: 1,
         ...options,

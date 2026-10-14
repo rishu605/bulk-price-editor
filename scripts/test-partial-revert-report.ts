@@ -87,11 +87,11 @@ async function main() {
 
   try {
     console.log("\n1. apply");
-    await transitionCampaign(shop.id, campaign.id, "APPLYING", { reason: "test" });
-    check("every price verified", (await runCampaign(shop.id, campaign.id, client, {})).verified, PRODUCTS);
+    await transitionCampaign(shop.id, campaign.id, "APPLYING", { actor: "script", reason: "test" });
+    check("every price verified", (await runCampaign(shop.id, campaign.id, client, { actor: "script" })).verified, PRODUCTS);
 
     console.log("2. revert, refused after two products");
-    const partial = await runCampaign(shop.id, campaign.id, refuseAfter(client, 2), { revert: true }).catch(
+    const partial = await runCampaign(shop.id, campaign.id, refuseAfter(client, 2), { actor: "script", revert: true }).catch(
       (error: unknown) => ({ clean: false, verified: -1, error }),
     );
     console.log(`      revert verified ${partial.verified}, clean ${partial.clean}`);
@@ -121,7 +121,7 @@ async function main() {
     const after = await rollbackReport(shop.id, campaign.id);
     check("the hand edit is drift", after.counts.drifted, 1);
   } finally {
-    await runCampaign(shop.id, campaign.id, client, { revert: true }).catch(() => {});
+    await runCampaign(shop.id, campaign.id, client, { actor: "script", revert: true }).catch(() => {});
     await prisma.campaign.delete({ where: { id: campaign.id } });
     await prisma.driftEvent.deleteMany({ where: { shopId: shop.id, variantGid: { in: variantGids } } });
     await prisma.baseline.deleteMany({ where: { shopId: shop.id, variantGid: { in: variantGids } } });

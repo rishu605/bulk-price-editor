@@ -109,8 +109,8 @@ async function main() {
 
   try {
     console.log("\n1. apply to the store price only");
-    await transitionCampaign(shop.id, campaign.id, "APPLYING", { reason: "test" });
-    const first = await runCampaign(shop.id, campaign.id, client, {});
+    await transitionCampaign(shop.id, campaign.id, "APPLYING", { actor: "script", reason: "test" });
+    const first = await runCampaign(shop.id, campaign.id, client, { actor: "script" });
     check("store prices verified", first.verified, 2);
     const eurFollowing = await shopperPrices(client, variantGids, eur.contextCountry);
     console.log(`      ${eur.name} follows the store price: ${[...eurFollowing.values()].join(", ")}`);
@@ -120,8 +120,8 @@ async function main() {
       where: { id: campaign.id },
       data: { surfaces: { base: true, priceLists: [jpy.priceListGid, eur.priceListGid] } as never },
     });
-    await transitionCampaign(shop.id, campaign.id, "APPLYING", { reason: "test: markets added" });
-    const second = await runCampaign(shop.id, campaign.id, client, {});
+    await transitionCampaign(shop.id, campaign.id, "APPLYING", { actor: "script", reason: "test: markets added" });
+    const second = await runCampaign(shop.id, campaign.id, client, { actor: "script" });
     for (const line of second.messages) console.log(`      ${line.slice(0, 200)}`);
     const yen = await shopperPrices(client, variantGids, jpy.contextCountry);
     for (const gid of variantGids) check(`${jpy.name} priced from its own hand-set price`, yen.get(gid), "12000.0");
@@ -145,14 +145,14 @@ async function main() {
     });
     try {
       await prisma.campaign.update({ where: { id: lower.id }, data: { surfaces: { base: true, priceLists: [jpy.priceListGid] } as never } });
-      await transitionCampaign(shop.id, lower.id, "APPLYING", { reason: "test: lower sale" });
-      const lowerRun = await runCampaign(shop.id, lower.id, client, {});
+      await transitionCampaign(shop.id, lower.id, "APPLYING", { actor: "script", reason: "test: lower sale" });
+      const lowerRun = await runCampaign(shop.id, lower.id, client, { actor: "script" });
       check(
         "the lower sale ledgers no market price it does not win",
         await prisma.variantChange.count({ where: { runId: lowerRun.runId, priceListGid: jpy.priceListGid } }),
         0,
       );
-      await runCampaign(shop.id, lower.id, client, { revert: true });
+      await runCampaign(shop.id, lower.id, client, { actor: "script", revert: true });
       const kept = await shopperPrices(client, variantGids, jpy.contextCountry);
       for (const gid of variantGids) check(`${jpy.name} still on the higher sale after the lower one ended`, kept.get(gid), "12000.0");
     } finally {
@@ -160,7 +160,7 @@ async function main() {
     }
   } finally {
     console.log("4. revert");
-    await runCampaign(shop.id, campaign.id, client, { revert: true }).catch((error) => console.log(`   revert: ${error}`));
+    await runCampaign(shop.id, campaign.id, client, { actor: "script", revert: true }).catch((error) => console.log(`   revert: ${error}`));
     const base = await shopperPrices(client, variantGids, null);
     check("store prices back", variantGids.every((gid) => base.get(gid) === (baseline.get(gid)! / 100).toFixed(2)), true);
     // Recomputed and written back, not deleted: it was the merchant's own price (#930).

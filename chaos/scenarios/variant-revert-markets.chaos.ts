@@ -103,7 +103,7 @@ describe("chaos: reverting one variant out of a sale with a market", () => {
         compareAt: "50.00",
       });
 
-      await revertVariant(shopId, campaignId, variantGids[0], chaosAdminClient(chaos.server.endpoint()));
+      await revertVariant(shopId, campaignId, variantGids[0], chaosAdminClient(chaos.server.endpoint()), { actor: "chaos" });
 
       expect(chaos.fake.fixedPricesOn(EUR).get(variantGids[0]), "the sale's strike-through stayed").toEqual({
         amount: "50.00",
@@ -120,7 +120,7 @@ describe("chaos: reverting one variant out of a sale with a market", () => {
       await chaos.expectHonest((await chaos.apply()).runId);
 
       chaos.arm([{ fault: "server-error", match: (query) => /priceListFixedPricesAdd|PriceListFixedPrices/i.test(query) }]);
-      const result = await revertVariant(shopId, campaignId, variantGids[0], chaosAdminClient(chaos.server.endpoint()));
+      const result = await revertVariant(shopId, campaignId, variantGids[0], chaosAdminClient(chaos.server.endpoint()), { actor: "chaos" });
       chaos.heal();
 
       expect(result.message).toMatch(/verified: the base price\. Not confirmed: Europe \(EUR\)\..*Revert this variant again/);
@@ -159,7 +159,7 @@ describe("chaos: reverting one variant out of a markets-only sale applied with o
       const sale = new Map(variantGids.map((gid) => [gid, chaos.fake.priceOf(gid, EU)]));
 
       const [victim, ...others] = variantGids;
-      await revertVariant(shopId, campaignId, victim, chaosAdminClient(chaos.server.endpoint()));
+      await revertVariant(shopId, campaignId, victim, chaosAdminClient(chaos.server.endpoint()), { actor: "chaos" });
 
       expect(chaos.fake.parentWrites, "a run over one variant moved the whole market").toHaveLength(parentWrites);
       expect(chaos.fake.priceOf(victim, EU), "the variant stayed on sale in Europe").toBe(before.get(victim));
@@ -203,7 +203,7 @@ describe("chaos: a variant revert and a full run of the same campaign", () => {
       // A full apply has claimed it and is writing.
       await prisma.campaign.update({ where: { id: campaignId }, data: { status: "APPLYING" } });
 
-      const result = await revertVariant(shopId, campaignId, variantGids[0], chaosAdminClient(chaos.server.endpoint()));
+      const result = await revertVariant(shopId, campaignId, variantGids[0], chaosAdminClient(chaos.server.endpoint()), { actor: "chaos" });
 
       expect(result.message).toMatch(/being applied right now, so nothing was written for this variant/);
       expect(base(chaos, variantGids[0]), "the variant revert wrote during a full apply").toBe(sale);

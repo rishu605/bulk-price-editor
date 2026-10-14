@@ -81,7 +81,7 @@ describe("chaos: the database connection drops mid-run", () => {
         const verdict = await chaos.expectHonest(runId);
         expect(verdict.outcome).toBe("partial");
 
-        const resumed = await chaos.apply({ resume: true });
+        const resumed = await chaos.apply({ actor: "chaos", resume: true });
         await chaos.expectHonest(resumed.runId);
         expect(resumed.clean).toBe(true);
 

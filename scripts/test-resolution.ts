@@ -122,18 +122,18 @@ async function main() {
 
   // ------------------------------------------- 1. the lower-priority campaign alone
   console.log("1. one campaign covering the variant");
-  await runCampaign(shop.id, quiet.id, client, {});
+  await runCampaign(shop.id, quiet.id, client, { actor: "script" });
   check("priced by the only campaign", await livePrice(client, probe.variantGid), "180.00");
 
   // ------------------------------------------- 2. the higher-priority one takes over
   console.log("2. a higher-priority campaign covers the same variant");
-  await runCampaign(shop.id, loud.id, client, {});
+  await runCampaign(shop.id, loud.id, client, { actor: "script" });
   // 108.00 would be the two stacked. It must not appear.
   check("exactly one winner, not both", await livePrice(client, probe.variantGid), "120.00");
 
   // --------------------------- 3. ending the winner recomputes, it does not restore
   console.log("3. ending the winner while the other still covers it");
-  await runCampaign(shop.id, loud.id, client, { revert: true });
+  await runCampaign(shop.id, loud.id, client, { actor: "script", revert: true });
   // The claim: not 200.00 (the baseline, which a restore would give) and not 120.00.
   check(
     "falls back to the remaining campaign, not to the baseline",
@@ -143,7 +143,7 @@ async function main() {
 
   // ------------------------------------------- 4. ending the last one reaches baseline
   console.log("4. ending the last campaign");
-  await runCampaign(shop.id, quiet.id, client, { revert: true });
+  await runCampaign(shop.id, quiet.id, client, { actor: "script", revert: true });
   check("back to the baseline", await livePrice(client, probe.variantGid), "200.00");
 
   // ------------------------------------------------------------------- clean up

@@ -87,8 +87,8 @@ async function main() {
 
   try {
     console.log("\n1. apply");
-    await transitionCampaign(shop.id, campaign.id, "APPLYING", { reason: "test" });
-    check("both prices verified", (await runCampaign(shop.id, campaign.id, client, {})).verified, 2);
+    await transitionCampaign(shop.id, campaign.id, "APPLYING", { actor: "script", reason: "test" });
+    check("both prices verified", (await runCampaign(shop.id, campaign.id, client, { actor: "script" })).verified, 2);
 
     console.log("2. edit the first price in Shopify: the campaign is held");
     // Straight after the run: the mirror is stamped on Shopify's clock, so an edit a second

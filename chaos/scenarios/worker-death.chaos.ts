@@ -85,7 +85,7 @@ describe("chaos: the worker is killed mid-chunk", () => {
         expect(verdict.outcome).toBe("partial");
 
         // ------------------------------------------------------- the resuming
-        const resumed = await chaos.apply({ resume: true });
+        const resumed = await chaos.apply({ actor: "chaos", resume: true });
         await chaos.expectHonest(resumed.runId);
         expect(resumed.clean).toBe(true);
 

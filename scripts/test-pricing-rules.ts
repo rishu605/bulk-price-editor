@@ -132,7 +132,7 @@ async function main() {
 
   let refused = false;
   try {
-    await runCampaign(shop.id, practice.id, client, {});
+    await runCampaign(shop.id, practice.id, client, { actor: "script" });
   } catch {
     // Refused in `runCampaign` itself rather than only in the UI, which is the point.
     refused = true;
@@ -159,9 +159,9 @@ async function main() {
   } as never);
   created.push(floored.id);
 
-  await runCampaign(shop.id, floored.id, client, {});
+  await runCampaign(shop.id, floored.id, client, { actor: "script" });
   check("Shopify holds the floor, not the computed price", await livePrice(client, probe.variantGid), "150.00");
-  await runCampaign(shop.id, floored.id, client, { revert: true });
+  await runCampaign(shop.id, floored.id, client, { actor: "script", revert: true });
   check("reverted to the baseline", await livePrice(client, probe.variantGid), "200.00");
 
   // ------------------------------------------------- 3. charm rounding
@@ -178,11 +178,11 @@ async function main() {
   } as never);
   created.push(charmed.id);
 
-  await runCampaign(shop.id, charmed.id, client, {});
+  await runCampaign(shop.id, charmed.id, client, { actor: "script" });
   const charmedPrice = await livePrice(client, probe.variantGid);
   check("the live price ends .99", charmedPrice.endsWith(".99"), true);
   console.log(`   live price: ${charmedPrice}`);
-  await runCampaign(shop.id, charmed.id, client, { revert: true });
+  await runCampaign(shop.id, charmed.id, client, { actor: "script", revert: true });
   check("reverted to the baseline", await livePrice(client, probe.variantGid), "200.00");
 
 
@@ -202,14 +202,14 @@ async function main() {
   } as never);
   created.push(struck.id);
 
-  await runCampaign(shop.id, struck.id, client, {});
+  await runCampaign(shop.id, struck.id, client, { actor: "script" });
   const onSale = await live(client, probe.variantGid);
   check("the sale price", onSale.price, "150.00");
   check("compare-at carries the baseline", onSale.compareAt, "200.00");
   check("compare-at is above the price, or it is not a strike-through",
     Number(onSale.compareAt) > Number(onSale.price), true);
 
-  await runCampaign(shop.id, struck.id, client, { revert: true });
+  await runCampaign(shop.id, struck.id, client, { actor: "script", revert: true });
   const ended = await live(client, probe.variantGid);
   check("price back to the baseline", ended.price, "200.00");
   // The sale is over, so the strike-through must go with it. A compare-at left behind
@@ -251,12 +251,12 @@ async function main() {
     } as never);
     created.push(campaign.id);
 
-    await runCampaign(shop.id, campaign.id, client, {});
+    await runCampaign(shop.id, campaign.id, client, { actor: "script" });
     const held = await live(client, priced.variantGid);
     check("Shopify never holds a price below cost", Number(held.price) >= floor, true);
     console.log(`   cost ${floor.toFixed(2)}, live ${held.price}`);
 
-    await runCampaign(shop.id, campaign.id, client, { revert: true });
+    await runCampaign(shop.id, campaign.id, client, { actor: "script", revert: true });
     check(
       "reverted to its baseline",
       (await livePrice(client, priced.variantGid)),

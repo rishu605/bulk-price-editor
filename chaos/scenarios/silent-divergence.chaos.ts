@@ -33,7 +33,7 @@ describe("chaos: Shopify stores a price we did not ask for", () => {
         async (chaos) => {
           chaos.fake.distortStoredPrice = roundsToWholeUnits;
 
-          const outcome = await chaos.apply({ forcePath: path });
+          const outcome = await chaos.apply({ actor: "chaos", forcePath: path });
 
           // The whole point: no row may be called verified when the store holds a
           // different number, however quietly it got there.

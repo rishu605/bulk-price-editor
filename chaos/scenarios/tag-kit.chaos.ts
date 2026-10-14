@@ -177,7 +177,7 @@ describe("chaos: the campaign tag kit", () => {
           schedule: { kind: "manual" },
           tagKit: ["SALE"],
         });
-        const b = await runCampaign(shopId, second.id, client, { verifySampleRate: 1 });
+        const b = await runCampaign(shopId, second.id, client, { actor: "chaos", verifySampleRate: 1 });
         expect(b.clean).toBe(true);
 
         // The second sale wrote no tag, and still owns one: SALE is there because the
@@ -205,7 +205,7 @@ describe("chaos: the campaign tag kit", () => {
         }
 
         // ------------------------------------------------ B off last: nobody owes it now
-        await runCampaign(shopId, second.id, client, { revert: true, verifySampleRate: 1 });
+        await runCampaign(shopId, second.id, client, { actor: "chaos", revert: true, verifySampleRate: 1 });
 
         for (const productGid of productGids.slice(1)) {
           expect(
@@ -241,7 +241,7 @@ describe("chaos: the campaign tag kit", () => {
           schedule: { kind: "manual" },
           tagKit: ["SALE"],
         });
-        await runCampaign(shopId, second.id, client, { verifySampleRate: 1 });
+        await runCampaign(shopId, second.id, client, { actor: "chaos", verifySampleRate: 1 });
 
         // Held for drift: a price was edited by hand, and the sale is still on.
         await prisma.campaign.update({ where: { id: second.id }, data: { status: "HELD" } });
@@ -280,7 +280,7 @@ describe("chaos: the campaign tag kit", () => {
           schedule: { kind: "manual" },
           tagKit: ["CLEARANCE"],
         });
-        await runCampaign(shopId, lower.id, client, { verifySampleRate: 1 });
+        await runCampaign(shopId, lower.id, client, { actor: "chaos", verifySampleRate: 1 });
 
         // B wins nothing while A is on, so it has nothing to badge yet.
         for (const productGid of productGids.slice(1)) {
@@ -312,7 +312,7 @@ describe("chaos: the campaign tag kit", () => {
         }
 
         // ------------------------------------------------ B off: its badges come off
-        await runCampaign(shopId, lower.id, client, { revert: true, verifySampleRate: 1 });
+        await runCampaign(shopId, lower.id, client, { actor: "chaos", revert: true, verifySampleRate: 1 });
 
         for (const productGid of productGids.slice(1)) {
           expect(has(chaos.fake.tagsOf(productGid), "CLEARANCE")).toBe(false);
@@ -344,7 +344,7 @@ describe("chaos: the campaign tag kit", () => {
           schedule: { kind: "manual" },
           tagKit: ["SALE"],
         });
-        await runCampaign(shopId, lower.id, client, { verifySampleRate: 1 });
+        await runCampaign(shopId, lower.id, client, { actor: "chaos", verifySampleRate: 1 });
 
         // Record every tag write, so a remove-then-add flicker is visible even though
         // the end state would look the same.
@@ -364,7 +364,7 @@ describe("chaos: the campaign tag kit", () => {
           expect(has(chaos.fake.tagsOf(productGid), "SALE")).toBe(true);
         }
 
-        await runCampaign(shopId, lower.id, client, { revert: true, verifySampleRate: 1 });
+        await runCampaign(shopId, lower.id, client, { actor: "chaos", revert: true, verifySampleRate: 1 });
         for (const productGid of productGids) {
           expect(has(chaos.fake.tagsOf(productGid), "SALE")).toBe(false);
         }
@@ -396,12 +396,12 @@ describe("chaos: the campaign tag kit", () => {
           schedule: { kind: "manual" },
           tagKit: ["FLASH"],
         });
-        await runCampaign(shopId, higher.id, client, { verifySampleRate: 1 });
+        await runCampaign(shopId, higher.id, client, { actor: "chaos", verifySampleRate: 1 });
         expect(has(chaos.fake.tagsOf(shared), "FLASH")).toBe(true);
 
         // The higher sale ends and hands its variant back to the lower one, which
         // already badged this product when it applied.
-        await runCampaign(shopId, higher.id, client, { revert: true, verifySampleRate: 1 });
+        await runCampaign(shopId, higher.id, client, { actor: "chaos", revert: true, verifySampleRate: 1 });
         expect(has(chaos.fake.tagsOf(shared), "FLASH")).toBe(false);
         expect(has(chaos.fake.tagsOf(shared), "CLEARANCE")).toBe(true);
 

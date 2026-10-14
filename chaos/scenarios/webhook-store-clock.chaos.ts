@@ -55,7 +55,7 @@ for (const path of ["sync", "bulk"] as const) {
         const [edited, untouched] = variantGids;
         chaos.fake.storeClockSkewMs = -3_000;
 
-        const applied = await chaos.apply({ forcePath: path });
+        const applied = await chaos.apply({ actor: "chaos", forcePath: path });
         await chaos.expectHonest(applied.runId);
         const stamped = await prisma.variantChange.findFirstOrThrow({ where: { runId: applied.runId, variantGid: edited } });
         expect(stamped.remoteUpdatedAt, "the write's own Shopify timestamp was not recorded").not.toBeNull();

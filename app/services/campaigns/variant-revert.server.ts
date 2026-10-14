@@ -33,7 +33,7 @@ import type { RunOutcome } from "./types";
 import { isLanded, LANDED } from "../../lib/execution/landed";
 
 export interface VariantRevertOptions {
-  actor?: string;
+  actor: string;
   /**
    * Record the exclusion but write nothing.
    *
@@ -57,7 +57,7 @@ export async function revertVariant(
   campaignId: string,
   variantGid: string,
   client: AdminClient,
-  options: VariantRevertOptions = {},
+  options: VariantRevertOptions,
 ): Promise<VariantRevertResult> {
   const campaign = await prisma.campaign.findFirst({
     where: { id: campaignId, shopId },
@@ -114,6 +114,7 @@ export async function revertVariant(
   // history that misleads whoever reads it later. The campaign's own state is
   // untouched, because a scoped run says nothing about the other 3,999 variants.
   const outcome = await runCampaign(shopId, campaignId, client, {
+    actor: options.actor,
     revert: true,
     variantGids: [variantGid],
     verifySampleRate: 1,
@@ -197,7 +198,7 @@ export async function reinstateVariant(
   campaignId: string,
   variantGid: string,
   client: AdminClient,
-  options: { actor?: string } = {},
+  options: { actor: string },
 ): Promise<VariantRevertResult> {
   const campaign = await prisma.campaign.findFirst({
     where: { id: campaignId, shopId },
@@ -243,6 +244,7 @@ export async function reinstateVariant(
   });
 
   const outcome = await runCampaign(shopId, campaignId, client, {
+    actor: options.actor,
     variantGids: [variantGid],
     verifySampleRate: 1,
     occurrenceKey: `VARIANT-REINSTATE-${variantGid}-${Date.now()}`,

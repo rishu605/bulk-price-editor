@@ -98,12 +98,30 @@ describe("chaos: who pressed Apply, Revert and Resume", () => {
     });
   });
 
-  it("still records a run nobody pressed -- the scheduler's -- as the system's", async () => {
+  it("records a run nobody pressed as the scheduler's, by name rather than by default (#746)", async () => {
     await withChaos("page-actor-scheduled", { catalog: { products: 2, variantsPerProduct: 1 }, percent: -20 }, async (chaos) => {
-      const { shopId, campaignId } = chaos.fixture;
+      const { shopId, domain, campaignId } = chaos.fixture;
+      pending = { shop: domain, endpoint: chaos.server.endpoint() };
+      // A window campaign whose start has just passed, for the real tick to apply.
+      const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
+      const startAt = new Date(Date.now() - 5 * 60_000);
+      const endAt = new Date(Date.now() + 24 * 60 * 60_000);
+      await prisma.campaign.update({
+        where: { id: campaignId },
+        data: {
+          status: "SCHEDULED",
+          startAt,
+          endAt,
+          schedule: { ...(campaign.schedule as object), kind: "window", startAt: startAt.toISOString(), endAt: endAt.toISOString() } as never,
+        },
+      });
+
       const start = new Date(Date.now() - 1000);
-      await chaos.apply();
-      expect(await moves(shopId, campaignId, start)).toEqual(["system: DRAFT → APPLYING", "system: APPLYING → ACTIVE"]);
+      const { tick } = await import("../../app/services/scheduler.server");
+      await tick(new Date());
+      const recorded = await moves(shopId, campaignId, start);
+      expect(recorded.length, "the tick moved nothing").toBeGreaterThan(0);
+      expect(recorded.every((move) => move.startsWith("scheduler: ")), recorded.join("; ")).toBe(true);
     });
   });
 });

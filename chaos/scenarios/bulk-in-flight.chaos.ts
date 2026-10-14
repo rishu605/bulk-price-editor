@@ -31,7 +31,7 @@ describe("chaos: a bulk run whose process stops after Shopify accepted the opera
 
       // Shopify accepts the operation; then the run loses its polling for good.
       chaos.arm([{ fault: "server-error", match: (query) => isBulkPoll(query), after: 1 }]);
-      const thrown = await chaos.apply({ forcePath: "bulk" }).catch((error: unknown) => error);
+      const thrown = await chaos.apply({ actor: "chaos", forcePath: "bulk" }).catch((error: unknown) => error);
       chaos.heal();
       expect(thrown).toBeInstanceOf(Error);
 
@@ -69,7 +69,7 @@ describe("chaos: a bulk run whose process stops after Shopify accepted the opera
       // the fake would never finish.
       const operationsBefore = await prisma.bulkOperationRecord.count({ where: { shopId } });
       chaos.arm([{ fault: "auth-revoked", match: (query) => query.includes("stagedUploadsCreate") }]);
-      const held = await chaos.apply({ resume: true, forcePath: "bulk" });
+      const held = await chaos.apply({ actor: "chaos", resume: true, forcePath: "bulk" });
       expect(held.refused).toMatch(/^Shopify is still applying this campaign's prices in bulk/);
       expect(held.transient).toBe(true);
       expect(await prisma.bulkOperationRecord.count({ where: { shopId } }), "a resume sent the rows again").toBe(operationsBefore);
@@ -78,7 +78,7 @@ describe("chaos: a bulk run whose process stops after Shopify accepted the opera
       // nothing left to send (so it is not forced down the bulk path, which refuses an
       // empty set).
       chaos.fake.finishBulkOnNextPoll();
-      const finished = await chaos.apply({ resume: true });
+      const finished = await chaos.apply({ actor: "chaos", resume: true });
       expect((await prisma.variantChange.findMany({ where: { runId: run.id } })).map((row) => row.status)).toEqual(
         variantGids.map(() => "VERIFIED"),
       );
@@ -102,7 +102,7 @@ describe("chaos: a bulk run whose process stops after Shopify accepted the opera
       const { campaignId, variantGids, baseline } = chaos.fixture;
 
       chaos.arm([{ fault: "server-error", match: (query) => isBulkPoll(query), after: 1 }]);
-      await chaos.apply({ forcePath: "bulk" }).catch(() => undefined);
+      await chaos.apply({ actor: "chaos", forcePath: "bulk" }).catch(() => undefined);
       chaos.heal();
 
       // A revert written now would be overwritten as Shopify works through the apply,
@@ -127,7 +127,7 @@ describe("chaos: a bulk run whose process stops after Shopify accepted the opera
       const { shopId, campaignId, variantGids, baseline } = chaos.fixture;
 
       chaos.server.resultFilesDown = true;
-      const thrown = await chaos.apply({ forcePath: "bulk" }).catch((error: unknown) => error);
+      const thrown = await chaos.apply({ actor: "chaos", forcePath: "bulk" }).catch((error: unknown) => error);
       chaos.server.resultFilesDown = false;
       expect(thrown).toBeInstanceOf(Error);
 
@@ -157,7 +157,7 @@ describe("chaos: a bulk run whose process stops after Shopify accepted the opera
 
       // The resume reads the finished operation's results instead of sending 4 prices again.
       chaos.arm([{ fault: "auth-revoked", match: (query) => query.includes("stagedUploadsCreate") }]);
-      await chaos.apply({ resume: true });
+      await chaos.apply({ actor: "chaos", resume: true });
       chaos.heal();
       expect((await prisma.variantChange.findMany({ where: { runId: run.id } })).map((row) => row.status)).toEqual(
         variantGids.map(() => "VERIFIED"),
@@ -172,7 +172,7 @@ describe("chaos: a bulk run whose process stops after Shopify accepted the opera
       const { campaignId, variantGids } = chaos.fixture;
 
       chaos.arm([{ fault: "server-error", match: (query) => isBulkPoll(query), after: 1 }]);
-      await chaos.apply({ forcePath: "bulk" }).catch(() => undefined);
+      await chaos.apply({ actor: "chaos", forcePath: "bulk" }).catch(() => undefined);
       chaos.heal();
 
       // As far as the database knows, the run that sent it is still polling: its rows are
@@ -181,7 +181,7 @@ describe("chaos: a bulk run whose process stops after Shopify accepted the opera
       await prisma.campaignRun.update({ where: { id: run.id }, data: { status: "EXECUTING" } });
       chaos.fake.finishBulkOnNextPoll();
 
-      const scoped = await chaos.revert({ variantGids: [variantGids[0]] });
+      const scoped = await chaos.revert({ actor: "chaos", variantGids: [variantGids[0]] });
       expect(scoped.refused, "a scoped run settled a live run's rows").toMatch(/^Shopify is still applying this campaign's prices in bulk/);
       expect(await prisma.variantChange.count({ where: { runId: run.id, status: "WRITING" } })).toBe(variantGids.length);
       expect((await prisma.bulkOperationRecord.findFirstOrThrow({ where: { runId: run.id } })).status).toBe("RUNNING");
@@ -194,7 +194,7 @@ describe("chaos: a bulk run whose process stops after Shopify accepted the opera
 
       // The poll gives up while Shopify is still working. This used to settle every row as
       // "Not present in the bulk result file", and a resume then sent them all again.
-      const thrown = await chaos.apply({ forcePath: "bulk", bulkWaitMs: 1 }).catch((error: unknown) => error);
+      const thrown = await chaos.apply({ actor: "chaos", forcePath: "bulk", bulkWaitMs: 1 }).catch((error: unknown) => error);
       expect((thrown as { userMessage?: string }).userMessage).toMatch(
         /^This apply stopped part-way\. 4 prices were sent to Shopify in bulk and may already be live\./,
       );
@@ -207,7 +207,7 @@ describe("chaos: a bulk run whose process stops after Shopify accepted the opera
 
       chaos.fake.finishBulkOnNextPoll();
       chaos.arm([{ fault: "auth-revoked", match: (query) => query.includes("stagedUploadsCreate") }]);
-      await chaos.apply({ resume: true });
+      await chaos.apply({ actor: "chaos", resume: true });
       chaos.heal();
       expect((await prisma.variantChange.findMany({ where: { runId: run.id } })).map((row) => row.status)).toEqual(
         variantGids.map(() => "VERIFIED"),
@@ -232,11 +232,11 @@ describe("chaos: a bulk run whose process stops after Shopify accepted the opera
       });
 
       chaos.arm([{ fault: "server-error", match: (query) => isBulkPoll(query), after: 1 }]);
-      await chaos.apply({ forcePath: "bulk" }).catch(() => undefined);
+      await chaos.apply({ actor: "chaos", forcePath: "bulk" }).catch(() => undefined);
       chaos.heal();
 
       chaos.fake.finishBulkOnNextPoll();
-      await chaos.apply({ resume: true });
+      await chaos.apply({ actor: "chaos", resume: true });
       const run = await prisma.campaignRun.findFirstOrThrow({ where: { campaignId, kind: "APPLY" }, orderBy: { createdAt: "asc" } });
       const ledger = new Map(
         (await prisma.variantChange.findMany({ where: { runId: run.id } })).map((row) => [row.variantGid, row]),

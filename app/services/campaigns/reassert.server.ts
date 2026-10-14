@@ -31,7 +31,7 @@ export async function reassertDrift(
   shopId: string,
   eventId: string,
   client: AdminClient,
-  actor?: string,
+  actor: string,
 ): Promise<ReassertResult> {
   const event = await prisma.driftEvent.findFirstOrThrow({ where: { id: eventId, shopId } });
   if (event.resolution !== "PENDING") {

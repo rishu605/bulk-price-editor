@@ -38,7 +38,7 @@ describe("chaos: two applies of one campaign at the same moment", () => {
 
       // Four presses at once, each with its own client, as four requests would have.
       const outcomes = await Promise.all(
-        [1, 2, 3, 4].map(() => runCampaign(shopId, campaignId, slowWrites(chaos, 20))),
+        [1, 2, 3, 4].map(() => runCampaign(shopId, campaignId, slowWrites(chaos, 20), { actor: "chaos" })),
       );
 
       const runs = await prisma.campaignRun.findMany({ where: { campaignId } });
@@ -79,11 +79,11 @@ describe("chaos: Revert pressed while the apply is still writing", () => {
     await withChaos("revert-mid-apply", { catalog: { products: 6, variantsPerProduct: 1 }, percent: -20 }, async (chaos) => {
       const { shopId, campaignId, variantGids, baseline } = chaos.fixture;
 
-      const applying = runCampaign(shopId, campaignId, slowWrites(chaos, 100));
+      const applying = runCampaign(shopId, campaignId, slowWrites(chaos, 100), { actor: "chaos" });
       // Until the apply's run row exists, so the revert arrives mid-write.
       while ((await prisma.campaignRun.count({ where: { campaignId } })) === 0) await new Promise((r) => setTimeout(r, 20));
 
-      const early = await runCampaign(shopId, campaignId, chaosAdminClient(chaos.server.endpoint()), { revert: true });
+      const early = await runCampaign(shopId, campaignId, chaosAdminClient(chaos.server.endpoint()), { actor: "chaos", revert: true });
       expect(early.refused, "a revert raced the apply").toMatch(new RegExp(`"chaos/revert-mid-apply" is still being applied by a run that started`));
       expect(early.refused).toMatch(/watch it on the Runs tab/);
       expect(early.transient).toBe(true);
@@ -93,7 +93,7 @@ describe("chaos: Revert pressed while the apply is still writing", () => {
       expect(await statusOf(campaignId)).toBe("ACTIVE");
 
       // Once it has finished, the same press goes through and ends the sale cleanly.
-      const revert = await runCampaign(shopId, campaignId, chaosAdminClient(chaos.server.endpoint()), { revert: true });
+      const revert = await runCampaign(shopId, campaignId, chaosAdminClient(chaos.server.endpoint()), { actor: "chaos", revert: true });
       expect(revert.refused).toBeFalsy();
       expect(await statusOf(campaignId)).toBe("COMPLETED");
       for (const gid of variantGids) expect(chaos.fake.priceOf(gid)).toBe((baseline.get(gid)! / 100).toFixed(2));
