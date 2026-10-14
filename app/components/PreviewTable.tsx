@@ -1,4 +1,5 @@
 import { humanise } from "../lib/format/label";
+import { pricedMarkets } from "../lib/markets/preview-columns";
 import { reasonForRow } from "../lib/planning/reasons";
 import { MoneyCell } from "./MoneyCell";
 import { RowState } from "./RowState";
@@ -17,7 +18,7 @@ import { TableBlock } from "./TableBlock";
  */
 export function PreviewTable({
   rows,
-  markets = [],
+  markets: allMarkets = [],
   total,
 }: {
   rows: PreviewRow[];
@@ -32,6 +33,8 @@ export function PreviewTable({
    */
   total?: number;
 }) {
+  const markets = pricedMarkets(allMarkets);
+
   if (rows.length === 0) {
     return (
       <EmptyState
