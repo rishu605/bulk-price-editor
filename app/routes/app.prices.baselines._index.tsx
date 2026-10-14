@@ -236,7 +236,7 @@ export default function Baselines() {
                 {/* Exports what the filters currently show, not the whole catalogue. A
                     merchant who narrowed to one vendor means that vendor, and handing them
                     500K rows instead is not being generous. */}
-                <ExportButton href={`/app/export/baselines${exportQuery(params)}`} filename="anchor-baselines.csv" rows={total} noun="baselines" />
+                <ExportButton href={`/app/export/baselines${exportQuery(params)}`} filename="anchor-baselines.csv" rows={total} noun={["baseline", "baselines"]} />
               </ActionRow>
 
               <TableBlock
