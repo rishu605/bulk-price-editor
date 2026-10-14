@@ -151,3 +151,17 @@ describe("what the merchant is told", () => {
     expect(pricesMayBeLive("CANCELLED")).toBe(false);
   });
 });
+
+describe("a scheduled campaign that will never start (#824)", () => {
+  it("is not described as waiting, and says what to do", () => {
+    const described = describeState("SCHEDULED", { neverStarts: "Its end is not after its start, so it will never be applied." });
+    expect(described.label).toBe("Scheduled — will never start");
+    expect(described.tone).toBe("warning");
+    expect(described.explanation).toMatch(/Move its dates, or unschedule it/);
+    expect(described.explanation).not.toMatch(/Waiting for its start time/);
+  });
+
+  it("is still waiting when it can start", () => {
+    expect(describeState("SCHEDULED", { neverStarts: null }).explanation).toMatch(/Waiting for its start time/);
+  });
+});

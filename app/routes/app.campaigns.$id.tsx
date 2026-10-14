@@ -18,7 +18,7 @@ import {
 import { PAGE_INLINE_BUDGET_MS } from "../lib/execution/inline-budget";
 import { runResponse } from "../lib/campaigns/run-response";
 import { ResultBanner } from "../components/ResultBanner";
-import { describeSchedule, parseSchedule, scheduleWarnings, windowEndText } from "../lib/scheduling/window";
+import { describeSchedule, neverStarts, parseSchedule, scheduleWarnings, windowEndText } from "../lib/scheduling/window";
 import { scheduledWindow } from "../lib/scheduling/window-input";
 import { scheduleAction } from "../services/campaigns/schedule-control.server";
 import { RunHistoryTable } from "../components/RunHistoryTable";
@@ -91,6 +91,7 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
   const lifecycle = describeState(state, {
     resumes: state === "PARTIAL" ? (await runToResume(campaignId))?.kind : undefined,
     heldUntil: state === "HELD" ? windowEndText(record.schedule, shop.timezone) : undefined, // #784
+    neverStarts: state === "SCHEDULED" ? neverStarts(parseSchedule(record.schedule), new Date(), shop.timezone) : null, // #824
   });
   const history = await transitionHistory(shop.id, campaignId, 8);
 

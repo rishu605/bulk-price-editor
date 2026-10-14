@@ -17,6 +17,7 @@ import {
   utcToLocalInput,
   windowClosed,
   windowEndText,
+  neverStarts,
 } from "./window";
 
 const at = (iso: string) => new Date(iso);
@@ -398,5 +399,36 @@ describe("local times near a clock change (#814, #703)", () => {
     });
     expect(scheduleWarnings(schedule)).toContain("The clocks go forward…");
     expect(schedule.kind === "window" && schedule.clockNotes).toEqual(["The clocks go forward…"]);
+  });
+});
+
+describe("a scheduled window that can never start (#824)", () => {
+  const window = (startAt: string, endAt?: string, revertBufferMinutes = 0) =>
+    parseSchedule({ kind: "window", startAt, ...(endAt ? { endAt } : {}), revertBufferMinutes });
+  const now = new Date("2026-10-01T12:00:00Z");
+
+  it("says why when the end is not after the start", () => {
+    expect(neverStarts(window("2026-10-02T17:00:00Z", "2026-10-02T16:00:00Z"), now, "UTC")).toMatch(/end is not after its start/);
+  });
+
+  it("says why when the window closed before it was applied", () => {
+    expect(neverStarts(window("2026-09-30T09:00:00Z", "2026-10-01T09:00:00Z"), now, "UTC")).toMatch(/ended .* before it was applied/);
+  });
+
+  it("agrees with the scheduler: what it calls never-starting, the scheduler never applies", () => {
+    for (const schedule of [
+      window("2026-10-02T17:00:00Z", "2026-10-02T16:00:00Z"),
+      window("2026-09-30T09:00:00Z", "2026-10-01T09:00:00Z"),
+    ]) {
+      for (const at of [now, new Date("2026-10-02T17:00:00Z"), new Date("2026-10-05T00:00:00Z")]) {
+        expect(dueTransition({ schedule, status: "SCHEDULED" }, at)).toBeNull();
+      }
+    }
+  });
+
+  it("is quiet for a window still to come, one with no end, and a manual campaign", () => {
+    expect(neverStarts(window("2026-10-02T09:00:00Z", "2026-10-03T09:00:00Z"), now, "UTC")).toBeNull();
+    expect(neverStarts(window("2026-09-30T09:00:00Z"), now, "UTC")).toBeNull();
+    expect(neverStarts(parseSchedule({ kind: "manual" }), now, "UTC")).toBeNull();
   });
 });

@@ -120,6 +120,26 @@ export function dueTransition(state: ScheduleState, now: Date): Transition | nul
 }
 
 /**
+ * Why a scheduled campaign will never start on its own, or null when it will (#824).
+ *
+ * `dueTransition` checks the revert moment first, and a SCHEDULED campaign has nothing to
+ * revert, so once that moment has come -- or when it comes before the start -- every tick
+ * answers "nothing owed", for ever. The campaign sat at Scheduled, "Waiting for its start
+ * time", and the sale never happened. #883 refuses such a window when one is saved; this is
+ * for the ones saved before it, and for a window that closed while the scheduler was down.
+ */
+export function neverStarts(schedule: Schedule, now: Date, timeZone: string): string | null {
+  if (schedule.kind !== "window" || !schedule.endAt) return null;
+  const start = Date.parse(schedule.startAt);
+  const end = Date.parse(schedule.endAt);
+  if (end <= start) return "Its end is not after its start, so it will never be applied.";
+  if (now.getTime() >= end - effectiveBufferMs(schedule)) {
+    return `Its window ended ${formatScheduleInstant(schedule.endAt, timeZone)} before it was applied, so it will never be applied on its own.`;
+  }
+  return null;
+}
+
+/**
  * The revert buffer actually used, capped at half the window.
  *
  * A buffer longer than the window would put the revert moment before the start,
