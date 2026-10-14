@@ -17,7 +17,7 @@ import { facetDetails } from "../lib/segments/facets";
 import { facets } from "../services/segments.server";
 import { createCampaign } from "../services/campaigns/index.server";
 import { formatScheduleInstant, type Schedule } from "../lib/scheduling/window";
-import { windowFromFields, windowInputProblem } from "../lib/scheduling/window-input";
+import { practiceWindowProblem, windowFromFields, windowInputProblem } from "../lib/scheduling/window-input";
 import { presetStartFor } from "../lib/scheduling/calendar";
 import { formatClock, formatCount, formatDay, formatWhen } from "../lib/format/display";
 import { PriceImportHistory } from "../components/imports/PriceImportHistory";
@@ -311,6 +311,16 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
     shop.timezone,
   );
 
+  // A practice campaign is previewed and never applied, so it has no window to wait for
+  // (#827). The editor does not show the dates in practice mode; this is the same rule for
+  // a request that did not come through that page. Before the window's own checks, whose
+  // advice for an end with no start -- add a start -- is the wrong advice here.
+  const practice = String(form.get("practice") ?? "") === "1";
+  const practiceProblem = practice ? practiceWindowProblem({ startUtc, endUtc }) : null;
+  if (practiceProblem) {
+    throw new AppError({ code: "VALIDATION", userMessage: `${practiceProblem} Nothing was created.` });
+  }
+
   // Refused here, naming the field, rather than created and then warned about on a page
   // that cannot fix it: an end before the start, or one already past, is a campaign that
   // sits in Scheduled forever (#760).
@@ -344,7 +354,6 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
     .filter(Boolean);
 
   const segmentId = String(form.get("segment") ?? "").trim();
-  const practice = String(form.get("practice") ?? "") === "1";
 
   // The page holds its button until a guided campaign is narrowed; this is the same rule
   // for a submit that did not come through that button -- no JavaScript, or a hand-built
@@ -575,7 +584,8 @@ export default function NewCampaign() {
   const headings = numberSections([
     { key: "rule", title: fromFile ? "The file" : "How prices change" },
     { key: "scope", title: "Which products", when: !fromFile },
-    { key: "when", title: "When", when: !fromFile },
+    // Not for practice: a campaign that never applies has nothing for a date to start (#827).
+    { key: "when", title: "When", when: !fromFile && !practice },
     { key: "markets", title: "Markets and catalogues", when: !fromFile && priceLists.length > 0 },
     { key: "advanced", title: "Advanced (optional)", when: !fromFile },
   ]);
@@ -930,8 +940,12 @@ export default function NewCampaign() {
           per currency, the schedule and four advanced controls; "2 · Scope" held the
           other one — and the submit was inside section 1, above the heading of section 2.
           A merchant who filled in the rule and pressed the obvious button never read the
-          section that says which products it applies to. */}
-      {fromFile ? null : (
+          section that says which products it applies to.
+
+          Left out in practice mode (#827). Its dates made a practice campaign Scheduled,
+          promised prices that would "change automatically when the window opens", and had
+          the scheduler claim it and be refused every thirty seconds from its start. */}
+      {fromFile || practice ? null : (
       <Card heading={headings.when}>    {/* The card's own heading says "When". A second one saying "Schedule (optional)"
             inside it was the heading this block needed while it lived in the middle of
             the rule's card, and it is a heading inside a heading now. The optionality is
