@@ -87,7 +87,7 @@ export const loader = withGuard("/app/export/$kind", async ({ request, params }:
       return paged(
         "anchor-activity.csv",
         async (page) => {
-          const result = await activity(shop.id, activityFiltersFrom(query), page, EXPORT_PAGE);
+          const result = await activity(shop.id, activityFiltersFrom(query, shop.timezone), page, EXPORT_PAGE);
           return { rows: result.entries, total: result.total };
         },
         activityCsv,

@@ -51,7 +51,7 @@ export const loader = withGuard("/app/activity", async ({ request }: LoaderFunct
 
   const url = new URL(request.url);
   // Shared with the export, so it reads exactly these rows (#819).
-  const filters = activityFiltersFrom(url.searchParams);
+  const filters = activityFiltersFrom(url.searchParams, shop.timezone);
   const page = Math.max(1, Number(url.searchParams.get("page") ?? 1) || 1);
 
   const result = await activity(shop.id, filters, page);

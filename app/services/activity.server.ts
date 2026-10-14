@@ -11,6 +11,7 @@
  */
 
 import prisma from "../db.server";
+import { dayRange } from "../lib/scheduling/day-range";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import type { ActivityEntry } from "../lib/reporting/activity-csv";
 
@@ -21,9 +22,14 @@ export { activityCsv, type ActivityEntry } from "../lib/reporting/activity-csv";
 export interface ActivityFilters {
   actor?: string;
   action?: string;
-  /** Inclusive ISO dates, as the filter form supplies them. */
+  /** Inclusive `YYYY-MM-DD` dates, as the filter form supplies them: days in `timeZone`. */
   from?: string;
   to?: string;
+  /**
+   * The store's zone, which the page shows every time in (#721). Required, so a caller
+   * cannot fall back to UTC days without saying so.
+   */
+  timeZone: string;
 }
 
 export interface ActivityPage {
@@ -39,7 +45,7 @@ const PAGE_SIZE = ROWS_PER_VIEW;
 
 export async function activity(
   shopId: string,
-  filters: ActivityFilters = {},
+  filters: ActivityFilters,
   page = 1,
   /** Rows a page. The screen's by default; an export reads all of them in larger pages (#819). */
   pageSize = PAGE_SIZE,
@@ -83,7 +89,7 @@ export async function activity(
 /** The whole filtered log, for export. Capped so one click cannot exhaust memory. */
 export async function activityForExport(
   shopId: string,
-  filters: ActivityFilters = {},
+  filters: ActivityFilters,
   limit = 10_000,
 ): Promise<ActivityEntry[]> {
   const rows = await prisma.auditLogEntry.findMany({
@@ -100,15 +106,11 @@ function buildWhere(shopId: string, filters: ActivityFilters) {
   if (filters.actor) where.actor = filters.actor;
   if (filters.action) where.action = filters.action;
 
-  if (filters.from || filters.to) {
-    const range: Record<string, Date> = {};
-    if (filters.from) range.gte = new Date(`${filters.from}T00:00:00.000Z`);
-    // The whole of the end day, not midnight at the start of it. A merchant filtering
-    // "to today" and seeing nothing from today would reasonably conclude the log is
-    // broken.
-    if (filters.to) range.lte = new Date(`${filters.to}T23:59:59.999Z`);
-    where.createdAt = range;
-  }
+  // Days in the store's zone, the one every time on the page is shown in (#721). The whole
+  // of the end day, not midnight at the start of it: a merchant filtering "to today" and
+  // seeing nothing from today would reasonably conclude the log is broken.
+  const range = dayRange(filters.from, filters.to, filters.timeZone);
+  if (range.gte || range.lt) where.createdAt = range;
 
   return where;
 }
