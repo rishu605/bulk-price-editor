@@ -77,6 +77,22 @@ export class AppError extends Error {
 }
 
 /**
+ * True for one of the codes above, and nothing else.
+ *
+ * For a code that arrives from outside the process: a browser crash report names its own
+ * (#783), and the endpoint stores only a code this list has, so a row's code is always one
+ * the alerts and Diagnostics know how to read.
+ */
+export function isErrorCode(value: unknown): value is ErrorCode {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(STATUS, value);
+}
+
+/** The sentence a code shows when nothing more specific was written for it. */
+export function userMessageFor(code: ErrorCode): string {
+  return USER_MESSAGE[code];
+}
+
+/**
  * Normalises anything thrown into an AppError.
  *
  * Matching on message text is unpleasant, but the alternative is worse: these errors
