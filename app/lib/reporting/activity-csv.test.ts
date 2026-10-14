@@ -22,6 +22,7 @@ const entry = (over: Partial<ActivityEntry> = {}): ActivityEntry => ({
   action: "campaign.applied",
   entity: "campaign",
   entityId: "c1",
+  variantGid: null,
   summary: "Applied Summer Sale to 412 variants",
   ...over,
 });
@@ -31,7 +32,7 @@ const lines = (csv: string) => csv.trimEnd().split("\n");
 describe("the exported audit log", () => {
   it("names every column in the header", () => {
     expect(lines(activityCsv([]))[0]).toBe(
-      '"timestamp","actor","action","entity","entity_id","change"',
+      '"timestamp","actor","action","entity","entity_id","change","variant_gid"',
     );
   });
 
@@ -82,7 +83,33 @@ describe("columns that legitimately have nothing in them", () => {
     );
   });
 
+  it("writes an empty variant cell for an entry about no one variant", () => {
+    expect(lines(activityCsv([entry()]))[1].endsWith(',""')).toBe(true);
+  });
+
   it("exports a header-only file when there is no activity", () => {
     expect(lines(activityCsv([]))).toHaveLength(1);
+  });
+});
+
+describe("an entry about a variant (#757)", () => {
+  const drift = entry({
+    action: "drift.ignore",
+    entity: "DriftEvent",
+    entityId: "d1",
+    variantGid: "gid://shopify/ProductVariant/45725717004522",
+    summary: "variant: The Minimal Snowboard, observedPrice: $701.00",
+  });
+
+  it("carries the GID in a column of its own", () => {
+    // The page names the variant by title and nothing else. The export is where somebody
+    // joins the log to another file, so the GID has to survive there -- and only there.
+    expect(lines(activityCsv([drift]))[1].split(",").at(-1)).toBe(
+      '"gid://shopify/ProductVariant/45725717004522"',
+    );
+  });
+
+  it("keeps the summary the merchant read on the page", () => {
+    expect(activityCsv([drift])).toContain('"variant: The Minimal Snowboard, observedPrice: $701.00"');
   });
 });

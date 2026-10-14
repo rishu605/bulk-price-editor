@@ -11,6 +11,7 @@
  */
 
 import prisma from "../db.server";
+import { asAuditMoney, auditMoney, describeAuditMoney } from "../lib/audit/money";
 import { dayRange } from "../lib/scheduling/day-range";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import type { ActivityEntry } from "../lib/reporting/activity-csv";
@@ -79,7 +80,7 @@ export async function activity(
   ]);
 
   return {
-    entries: rows.map(toEntry),
+    entries: await toEntries(shopId, rows),
     total,
     actors: actors.map((a) => a.actor!).filter(Boolean).sort(),
     actions: actions.map((a) => a.action).sort(),
@@ -97,7 +98,7 @@ export async function activityForExport(
     orderBy: { createdAt: "desc" },
     take: limit,
   });
-  return rows.map(toEntry);
+  return toEntries(shopId, rows);
 }
 
 function buildWhere(shopId: string, filters: ActivityFilters) {
@@ -117,17 +118,88 @@ function buildWhere(shopId: string, filters: ActivityFilters) {
 
 type Row = Awaited<ReturnType<typeof prisma.auditLogEntry.findMany>>[number];
 
-function toEntry(row: Row): ActivityEntry {
-  return {
-    id: row.id,
-    at: row.createdAt.toISOString(),
-    actor: row.actor,
-    action: row.action,
-    entity: row.entity,
-    entityId: row.entityId,
-    summary: summarise(row.action, row.before, row.after),
-  };
+/**
+ * Rows as the page and the export show them, with what the summary needs looked up once.
+ *
+ * Two lookups, each one query however many rows there are: the titles of the variants the
+ * entries are about (#757), and the currency of any drift entry written before prices
+ * carried theirs.
+ */
+async function toEntries(shopId: string, rows: readonly Row[]): Promise<ActivityEntry[]> {
+  const variantGids = [...new Set(rows.map(variantOf).filter((gid): gid is string => gid !== null))];
+  const legacyDrift = rows.filter((row) => legacyDriftPrice(row) !== null).map((row) => row.entityId!);
+
+  const [variants, events] = await Promise.all([
+    variantGids.length === 0
+      ? []
+      : prisma.variantIndex.findMany({
+          where: { shopId, variantGid: { in: variantGids } },
+          select: { variantGid: true, title: true },
+        }),
+    legacyDrift.length === 0
+      ? []
+      : prisma.driftEvent.findMany({
+          where: { shopId, id: { in: legacyDrift } },
+          select: { id: true, currency: true },
+        }),
+  ]);
+
+  const titles = new Map(
+    variants.flatMap((variant) => (variant.title ? [[variant.variantGid, variant.title] as const] : [])),
+  );
+  const currencyOf = new Map(events.map((event) => [event.id, event.currency]));
+
+  return rows.map((row) => {
+    const legacy = legacyDriftPrice(row);
+    const currency = row.entityId ? currencyOf.get(row.entityId) : undefined;
+    const after =
+      legacy !== null && currency
+        ? { ...asRecord(row.after), observedPrice: auditMoney(BigInt(legacy), currency) }
+        : row.after;
+
+    return {
+      id: row.id,
+      at: row.createdAt.toISOString(),
+      actor: row.actor,
+      action: row.action,
+      entity: row.entity,
+      entityId: row.entityId,
+      variantGid: variantOf(row),
+      summary: summarise(row.action, row.before, after, { titles }),
+    };
+  });
 }
+
+/** The variant an entry is about, when it is about exactly one. */
+function variantOf(row: Pick<Row, "before" | "after">): string | null {
+  const gid = asRecord(row.after)?.[VARIANT] ?? asRecord(row.before)?.[VARIANT];
+  return typeof gid === "string" && gid !== "" ? gid : null;
+}
+
+/**
+ * The bare minor units a drift entry recorded before #757, or null.
+ *
+ * Until then resolving a drift wrote `observedPrice: String(event.observedPrice)` -- the
+ * event's integer minor units with no currency. The number alone cannot be shown: 70100 is
+ * $701.00 or ¥70,100. But each such entry names its `DriftEvent`, the event carries the
+ * currency the price was observed in, and events are never deleted, so the currency is
+ * recovered from the record the price came from rather than guessed from the shop. Only
+ * these entries: no other writer stored a bare price, and widening this to any field that
+ * looks like one is the guess `lib/audit/money` rejects.
+ */
+function legacyDriftPrice(row: Pick<Row, "action" | "entity" | "entityId" | "after">): string | null {
+  if (row.entity !== "DriftEvent" || !row.entityId || !row.action.startsWith("drift.")) return null;
+  const observed = asRecord(row.after)?.observedPrice;
+  return typeof observed === "string" && /^-?\d+$/.test(observed) ? observed : null;
+}
+
+export interface SummaryContext {
+  /** Variant titles by GID, from the catalogue mirror. A GID missing here is shown as itself. */
+  titles?: ReadonlyMap<string, string>;
+}
+
+/** The key an entry names its one variant by. Shown by title, as "variant" (#757). */
+const VARIANT = "variantGid";
 
 /**
  * One readable line for a row.
@@ -137,9 +209,21 @@ function toEntry(row: Row): ActivityEntry {
  * differences are shown for edits, because "settings updated" answers none of the
  * questions anybody opens this page with.
  */
-export function summarise(action: string, before: unknown, after: unknown): string {
+export function summarise(
+  action: string,
+  before: unknown,
+  after: unknown,
+  context: SummaryContext = {},
+): string {
   const from = asRecord(before);
   const to = asRecord(after);
+
+  // A variant is named by its title: "gid://shopify/ProductVariant/45725717004522" is not
+  // something a merchant can find in their admin. The GID stays in the export, in its own
+  // column, for whoever has to join this to something else.
+  const label = (key: string) => (key === VARIANT ? "variant" : key);
+  const show = (key: string, value: unknown) =>
+    render(key === VARIANT && typeof value === "string" ? (context.titles?.get(value) ?? value) : value);
 
   if (from && to) {
     const changed = Object.keys({ ...from, ...to }).filter(
@@ -148,7 +232,7 @@ export function summarise(action: string, before: unknown, after: unknown): stri
     if (changed.length > 0) {
       return changed
         .slice(0, 6)
-        .map((key) => `${key}: ${render(from[key])} → ${render(to[key])}`)
+        .map((key) => `${label(key)}: ${show(key, from[key])} → ${show(key, to[key])}`)
         .join(", ");
     }
     return "no fields changed";
@@ -158,7 +242,7 @@ export function summarise(action: string, before: unknown, after: unknown): stri
   if (only) {
     const parts = Object.entries(only)
       .slice(0, 6)
-      .map(([key, value]) => `${key}: ${render(value)}`);
+      .map(([key, value]) => `${label(key)}: ${show(key, value)}`);
     if (parts.length > 0) return parts.join(", ");
   }
 
@@ -172,6 +256,10 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function render(value: unknown): string {
   if (value === null || value === undefined) return "—";
+  // A price, written with its currency by the one function that writes them. Recognised
+  // by that shape and never by the field's name -- `lib/audit/money` says why.
+  const price = asAuditMoney(value);
+  if (price) return describeAuditMoney(price);
   if (typeof value === "string") return value.length > 60 ? `${value.slice(0, 57)}…` : value;
   if (Array.isArray(value)) return value.length === 0 ? "none" : `${value.length} item(s)`;
   if (typeof value === "object") return JSON.stringify(value).slice(0, 60);

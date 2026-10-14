@@ -23,9 +23,8 @@ import prisma from "../db.server";
 import { AppError } from "../lib/errors/app-error";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { notify } from "./notifications.server";
-import { formatMinorUnits } from "../lib/money/format";
-import { isKnownCurrency } from "../lib/money/currency";
-import { formatMoneyForDisplay, money } from "../lib/money/money";
+import { formatMinorUnits, formatPrice } from "../lib/money/format";
+import { auditMoney } from "../lib/audit/money";
 import { holdForDrift, releaseHold } from "./campaigns/lifecycle.server";
 import { LANDED } from "../lib/execution/landed";
 import { endingAmong } from "./campaigns/model.server";
@@ -408,8 +407,8 @@ export async function resolveDrift(
       throw new AppError({
         code: "VALIDATION",
         userMessage:
-          `The storefront no longer shows ${shown(event.observedPrice, event.currency)} for this variant ` +
-          `-- it shows ${shown(entry.livePrice, event.currency)} -- so there is no change to keep. Nothing was adopted. ` +
+          `The storefront no longer shows ${formatPrice(event.observedPrice, event.currency)} for this variant ` +
+          `-- it shows ${formatPrice(entry.livePrice, event.currency)} -- so there is no change to keep. Nothing was adopted. ` +
           "Choose Put it back or Leave it for now.",
       });
     }
@@ -459,7 +458,10 @@ export async function resolveDrift(
       action: `drift.${resolution}`,
       entity: "DriftEvent",
       entityId: eventId,
-      after: { variantGid: event.variantGid, observedPrice: String(event.observedPrice) },
+      // The price with its currency, so the log can say "$701.00" rather than "70100" (#757).
+      // `String(...)` wrote the bare minor units, which read as $70,100 -- and as the right
+      // answer in a zero-decimal currency, so a merchant could not tell which they had.
+      after: { variantGid: event.variantGid, observedPrice: auditMoney(event.observedPrice, event.currency) } as never,
     },
   });
 
@@ -515,11 +517,4 @@ async function notifyDrift(shopId: string, campaignId: string, campaignName: str
   });
 
   void notify(shopId, { kind: "drift-hold", campaignId, campaignName, driftedCount: pending });
-}
-
-/** A price as a merchant reads it in a sentence: "$2.34", not "2.34". */
-function shown(amount: bigint, currency: string): string {
-  return isKnownCurrency(currency)
-    ? formatMoneyForDisplay(money(Number(amount), currency))
-    : `${formatMinorUnits(amount, currency)} ${currency}`;
 }
