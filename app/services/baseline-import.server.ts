@@ -51,6 +51,8 @@ export interface BaselineImportResult {
   invalid: ImportProblem[];
   unmatched: ImportProblem[];
   ambiguous: ImportProblem[];
+  /** Rows naming a variant an earlier row already named (#736). */
+  duplicates: ImportProblem[];
   dryRun: boolean;
 }
 
@@ -77,6 +79,7 @@ export async function importBaselines(
     invalid: [],
     unmatched: [],
     ambiguous: [],
+    duplicates: [],
     dryRun: options.dryRun === true,
   };
 
@@ -99,6 +102,7 @@ export async function importBaselines(
   );
 
   let batch: Array<{ row: ValidRow; variantGid: string }> = [];
+  const seen = new Set<string>();
 
   const flush = async () => {
     if (batch.length === 0) return;
@@ -167,6 +171,22 @@ export async function importBaselines(
     }
 
     const variantGid = outcome.matched[0];
+
+    // A variant named twice is a question, not two instructions (#736). Both rows used to
+    // count as ready on the dry run, and on commit the second `createMany` hit the
+    // one-current-baseline index after earlier batches had already been written -- the
+    // half-applied import this module promises never to make. Reported here, as the price
+    // import reports it, so the dry run says so and the commit writes the first row only.
+    if (seen.has(variantGid)) {
+      record(result.duplicates, {
+        line: raw.line,
+        identifier: raw.identifier,
+        reason: "This variant already has a baseline earlier in the file. Remove one of the rows.",
+      });
+      continue;
+    }
+    seen.add(variantGid);
+
     const existing = current.get(variantGid);
 
     if (
@@ -201,6 +221,7 @@ export async function importBaselines(
         invalid: result.invalid.length,
         unmatched: result.unmatched.length,
         ambiguous: result.ambiguous.length,
+        duplicates: result.duplicates.length,
       },
     },
   });
@@ -238,6 +259,7 @@ function summary(result: BaselineImportResult) {
     invalid: result.invalid.length,
     unmatched: result.unmatched.length,
     ambiguous: result.ambiguous.length,
+    duplicates: result.duplicates.length,
     dryRun: result.dryRun,
   };
 }

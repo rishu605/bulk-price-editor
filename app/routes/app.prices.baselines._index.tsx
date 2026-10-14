@@ -138,6 +138,7 @@ export default function Baselines() {
         ...result.invalid.map((problem) => ({ ...problem, kind: "Will not parse" })),
         ...result.unmatched.map((problem) => ({ ...problem, kind: "No match" })),
         ...result.ambiguous.map((problem) => ({ ...problem, kind: "Matches several" })),
+        ...result.duplicates.map((problem) => ({ ...problem, kind: "Listed twice" })),
       ].sort((a, b) => a.line - b.line)
     : [];
 
