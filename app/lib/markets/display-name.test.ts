@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { priceListLabel } from "./display-name";
+import { labelled, priceListLabel } from "./display-name";
 
 describe("a name a person chose", () => {
   it("is left exactly alone", () => {
@@ -75,5 +75,23 @@ describe("when there is nothing readable at all", () => {
 
   it("survives an empty name", () => {
     expect(priceListLabel({ name: "", catalogTitle: null })).toBe("A market price list");
+  });
+});
+
+describe("labelled (#722)", () => {
+  it("replaces the name with the label and keeps everything else", () => {
+    const list = { priceListGid: "gid://shopify/PriceList/1", name: "pricing_by_market.1_2", catalogTitle: "Japan", currency: "JPY" };
+    expect(labelled(list)).toEqual({ ...list, name: "Japan" });
+  });
+
+  it("is idempotent, so a list labelled twice reads the same", () => {
+    for (const list of [
+      { name: "pricing_by_market.1_2", catalogTitle: "Japan" },
+      { name: "pricing_by_market.1_2", catalogTitle: null },
+      { name: "Europe pricing - c41258df-9f1a-4666-8768-bb90e196d685" },
+      { name: "Wholesale", surfaceKind: "B2B" },
+    ]) {
+      expect(labelled(labelled(list)).name).toBe(labelled(list).name);
+    }
   });
 });

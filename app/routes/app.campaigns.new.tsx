@@ -7,7 +7,7 @@ import { Form, redirect, useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { actorFor } from "../lib/audit/actor";
-import { priceListLabel } from "../lib/markets/display-name";
+import { labelled, priceListLabel } from "../lib/markets/display-name";
 import { GUIDED_PRODUCT_LIMIT } from "../lib/onboarding/steps";
 import { scopeChosen } from "../lib/onboarding/guided-scope";
 import { AppError } from "../lib/errors/app-error";
@@ -111,7 +111,7 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
         surfaceKind: true,
       },
       orderBy: [{ surfaceKind: "asc" }, { name: "asc" }],
-    }),
+    }).then((rows) => rows.map(labelled)),
     readSettings(shop.id),
     shopCurrency(shop.id),
     prisma.shop.findUniqueOrThrow({

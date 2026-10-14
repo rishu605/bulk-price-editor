@@ -17,9 +17,14 @@
  * ¥2,000. Nothing we hold is wrong afterwards, exactly — it just means something else.
  */
 
+import { priceListLabel } from "./display-name";
+
 export interface MarketSnapshot {
   priceListGid: string;
+  /** What Shopify calls the list, which for a market is often a generated id. */
   name: string;
+  /** The market catalog's title: what the merchant called it. */
+  catalogTitle?: string | null;
   currency: string;
   adjustmentBps: number | null;
   surfaceKind: "MARKET" | "B2B";
@@ -35,7 +40,13 @@ export type TopologyChangeKind =
 export interface TopologyChange {
   kind: TopologyChangeKind;
   priceListGid: string;
+  /**
+   * What the merchant calls the list, through `priceListLabel` (#722). Every notice quotes
+   * it, and Shopify's own name for a market's list is `pricing_by_market.19853246698_…`.
+   */
   name: string;
+  /** A rename's previous label. */
+  formerly?: string;
   before?: Partial<MarketSnapshot>;
   after?: Partial<MarketSnapshot>;
 }
@@ -62,7 +73,7 @@ export function diffTopology(
     const now = current.get(gid);
 
     if (!now) {
-      removed.push({ kind: "removed", priceListGid: gid, name: was.name, before: was });
+      removed.push({ kind: "removed", priceListGid: gid, name: priceListLabel(was), before: was });
       continue;
     }
 
@@ -72,7 +83,7 @@ export function diffTopology(
       currency.push({
         kind: "currency-changed",
         priceListGid: gid,
-        name: now.name,
+        name: priceListLabel(now),
         before: { currency: was.currency },
         after: { currency: now.currency },
       });
@@ -82,26 +93,29 @@ export function diffTopology(
       rest.push({
         kind: "adjustment-changed",
         priceListGid: gid,
-        name: now.name,
+        name: priceListLabel(now),
         before: { adjustmentBps: was.adjustmentBps },
         after: { adjustmentBps: now.adjustmentBps },
       });
     }
 
-    if (was.name !== now.name) {
+    // By what the merchant reads, not by Shopify's name: a generated name that changes
+    // under the same market title is no news, and a market retitled in Shopify is.
+    if (priceListLabel(was) !== priceListLabel(now)) {
       rest.push({
         kind: "renamed",
         priceListGid: gid,
-        name: now.name,
-        before: { name: was.name },
-        after: { name: now.name },
+        name: priceListLabel(now),
+        formerly: priceListLabel(was),
+        before: { name: was.name, catalogTitle: was.catalogTitle },
+        after: { name: now.name, catalogTitle: now.catalogTitle },
       });
     }
   }
 
   for (const [gid, now] of current) {
     if (!previous.has(gid)) {
-      added.push({ kind: "added", priceListGid: gid, name: now.name, after: now });
+      added.push({ kind: "added", priceListGid: gid, name: priceListLabel(now), after: now });
     }
   }
 
@@ -163,6 +177,6 @@ export function describeChange(change: TopologyChange, campaignNames: readonly s
       );
 
     case "renamed":
-      return `The market "${change.before?.name}" is now called "${change.after?.name}".`;
+      return `The market "${change.formerly ?? change.before?.name}" is now called "${change.name}".`;
   }
 }

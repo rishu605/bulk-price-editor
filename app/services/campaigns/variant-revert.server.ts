@@ -27,7 +27,7 @@
 import prisma from "../../db.server";
 import { AppError } from "../../lib/errors/app-error";
 import type { AdminClient } from "../../lib/execution/sync-executor";
-import { priceListLabel } from "../../lib/markets/display-name";
+import { labelled, priceListLabel } from "../../lib/markets/display-name";
 import { runCampaign } from "./run.server";
 import type { RunOutcome } from "./types";
 import { isLanded, LANDED } from "../../lib/execution/landed";
@@ -153,10 +153,10 @@ async function describe(campaignName: string, outcome: RunOutcome, already: bool
         orderBy: [{ priceListGid: "asc" }, { surfaceKind: "asc" }],
       })
     : [];
-  const lists = await prisma.priceListRecord.findMany({
+  const lists = (await prisma.priceListRecord.findMany({
     where: { priceListGid: { in: rows.map((row) => row.priceListGid).filter(Boolean) } },
     select: { priceListGid: true, name: true, currency: true, catalogTitle: true, surfaceKind: true },
-  });
+  })).map(labelled);
   const label = (row: { surfaceKind: string; priceListGid: string }) => {
     if (row.priceListGid === "") return "the base price";
     const list = lists.find((candidate) => candidate.priceListGid === row.priceListGid);

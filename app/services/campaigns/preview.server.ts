@@ -25,7 +25,7 @@ import {
 } from "./market-plan.server";
 import { describeMarketSkips, describeMovedMarket } from "../../lib/markets/guardrails";
 import { parseSurfaces } from "./market-surfaces.server";
-import { priceListLabel } from "../../lib/markets/display-name";
+import { labelled } from "../../lib/markets/display-name";
 import type { AdminClient } from "../../lib/execution/sync-executor";
 import prisma from "../../db.server";
 import {
@@ -448,7 +448,7 @@ async function costsFor(shopId: string, variantGids: readonly string[]) {
  * sentence built from a list below uses the same words.
  */
 async function namedLists(shopId: string, priceListGids: readonly string[]) {
-  const lists = await prisma.priceListRecord.findMany({
+  return (await prisma.priceListRecord.findMany({
     where: { shopId, priceListGid: { in: [...priceListGids] } },
     // Everything `planMarket` reads, the country included: without it a percentage market
     // is read in the shop's currency and refused, though the run prices it (#840).
@@ -461,9 +461,5 @@ async function namedLists(shopId: string, priceListGids: readonly string[]) {
       catalogTitle: true,
       surfaceKind: true,
     },
-  });
-  return lists.map(({ catalogTitle, surfaceKind, ...list }) => ({
-    ...list,
-    name: priceListLabel({ name: list.name, catalogTitle, surfaceKind }),
-  }));
+  })).map(labelled);
 }

@@ -165,9 +165,9 @@ export default function Reconciliation() {
               </s-option>
               {surfaces.map((surface) => (
                 <s-option
-                  key={surface.priceListGid || "base"}
-                  value={surface.priceListGid}
-                  defaultSelected={selected.surface === surface.priceListGid}
+                  key={surface.value}
+                  value={surface.value}
+                  defaultSelected={selected.surface === surface.value}
                 >
                   {surface.name}
                   {surface.currency ? ` (${surface.currency})` : ""}
