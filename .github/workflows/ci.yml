@@ -147,12 +147,22 @@ jobs:
   #
   # It blocks the merge. A green build with a red chaos run would mean shipping an
   # engine we have just watched fail to explain itself.
-  chaos:
-    name: Chaos scenarios
+  #
+  # Split four ways, each shard on its own runner with its own Postgres and Redis. Run
+  # one file after another on one runner, the suite had grown to nine minutes and every
+  # PR waited on it. Within a shard the scenarios still run one at a time
+  # (`fileParallelism: false`), so the isolation each scenario relies on is unchanged; the
+  # shards share nothing. `fail-fast: false` so one red shard still reports the others.
+  chaos-shard:
+    name: Chaos scenarios (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
     # The acceptance criterion is a practical runtime, so it is enforced rather than
     # hoped for. A suite that creeps toward an hour is one people start skipping.
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     services:
       postgres:
         image: postgres:16-alpine
@@ -198,7 +208,7 @@ jobs:
           repeats="${{ github.event.inputs.chaos_repeats || '1' }}"
           for i in $(seq 1 "$repeats"); do
             echo "::group::chaos run $i of $repeats"
-            CHAOS_SEED="$((20260825 + i))" npm run test:chaos
+            CHAOS_SEED="$((20260825 + i))" npm run test:chaos -- --shard=${{ matrix.shard }}/4
             echo "::endgroup::"
           done
 
@@ -209,6 +219,21 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: chaos-artefacts
+          name: chaos-artefacts-${{ matrix.shard }}
           path: chaos/artefacts/
           if-no-files-found: ignore
+
+  # The one check the merge reads, under the name it always had: green only when every
+  # shard is. A shard that was cancelled or skipped is not a pass.
+  chaos:
+    name: Chaos scenarios
+    runs-on: ubuntu-latest
+    needs: chaos-shard
+    if: always()
+    steps:
+      - name: Every shard passed
+        run: |
+          if [ "${{ needs.chaos-shard.result }}" != "success" ]; then
+            echo "::error::A chaos shard did not pass (${{ needs.chaos-shard.result }})."
+            exit 1
+          fi
