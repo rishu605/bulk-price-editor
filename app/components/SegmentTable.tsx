@@ -1,6 +1,7 @@
 import type { FetcherWithComponents } from "react-router";
 
 import { formatCount } from "../lib/format/display";
+import { deleteBlockedReason } from "../lib/segments/delete-rule";
 import { SPACE } from "../lib/ui/spacing";
 import { ActionRow } from "./ActionRow";
 import { Blank } from "./Blank";
@@ -12,7 +13,7 @@ export interface SegmentRow {
   name: string;
   kind: string;
   size: number;
-  usedBy: Array<{ name: string }>;
+  usedBy: Array<{ id: string; name: string; status: string }>;
 }
 
 /**
@@ -32,11 +33,17 @@ export function SegmentTable({
   segments,
   Form,
   busy,
+  confirmingDelete,
 }: {
   segments: SegmentRow[];
   /** The page's fetcher form, so a delete's reply reaches the page's banner. */
   Form: FetcherWithComponents<unknown>["Form"];
   busy: boolean;
+  /**
+   * The segment whose Delete was answered with "these campaigns use it" (#776). Its button
+   * now confirms: the same control, pressed again, deletes.
+   */
+  confirmingDelete?: string;
 }) {
   return (
     <s-table>
@@ -82,14 +89,16 @@ export function SegmentTable({
               <s-button variant="secondary" icon="edit" href={`?edit=${segment.id}`}>
                 Edit
               </s-button>
-              {segment.usedBy.length > 0 ? (
+              {deleteBlockedReason(segment.usedBy) ? (
                 // Not a disabled button: a control that does nothing invites
-                // clicking it repeatedly. The reason is the answer.
-                <s-text>In use — remove from campaigns first</s-text>
+                // clicking it repeatedly. The reason is the answer, and it names the
+                // campaign and what to do to it (#776).
+                <s-text>{deleteBlockedReason(segment.usedBy)}</s-text>
               ) : (
                 <Form method="post">
                   <input type="hidden" name="intent" value="delete" />
                   <input type="hidden" name="segmentId" value={segment.id} />
+                  {confirmingDelete === segment.id ? <input type="hidden" name="acknowledged" value="1" /> : null}
                   {/* Bordered, like every other row action that changes something.
                       Deleting a segment is the most consequential thing this table
                       does, and it was the quietest control on the page. */}
@@ -100,7 +109,7 @@ export function SegmentTable({
                     icon="delete"
                     loading={busy || undefined}
                   >
-                    Delete
+                    {confirmingDelete === segment.id ? "Delete anyway" : "Delete"}
                   </s-button>
                 </Form>
               )}

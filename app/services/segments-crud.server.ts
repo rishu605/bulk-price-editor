@@ -26,6 +26,7 @@ import {
 } from "../lib/segments/csv-import";
 import { resolveVariantGids, type FilterAst } from "./segments.server";
 import { formatCount } from "../lib/format/display";
+import { campaignsBlockingDelete, deleteBlockedReason } from "../lib/segments/delete-rule";
 
 export type SegmentKind = "DYNAMIC" | "FROZEN";
 
@@ -247,23 +248,35 @@ export async function updateSegment(shopId: string, id: string, input: UpdateSeg
 }
 
 /**
- * Deletes a segment, unless something is using it.
+ * Deletes a segment, unless a campaign pricing with it, or about to, still needs it (#776).
  *
- * Blocked rather than cascaded. A campaign whose targeting silently emptied would
- * either price nothing or -- far worse, if an empty filter were treated as
- * "everything" -- price the entire catalogue on its next run.
+ * Campaigns that only *used* it -- drafts, finished and cancelled ones -- no longer pin it
+ * for ever. Deleting asks first, naming them, because each is left pricing nothing: its
+ * scope resolves to no variants (`scopeOf`) and an Apply is refused by name, never widened
+ * to whatever the campaign's stored filter matches, which for a spreadsheet campaign is the
+ * whole catalogue.
  */
-export async function deleteSegment(shopId: string, id: string): Promise<void> {
+export async function deleteSegment(shopId: string, id: string, acknowledged = false): Promise<void> {
   const users = await referencingCampaigns(shopId, id);
 
-  if (users.length > 0) {
+  const blocked = deleteBlockedReason(users);
+  if (blocked) {
+    throw new AppError({
+      code: "VALIDATION",
+      userMessage: blocked,
+      context: { segmentId: id, campaigns: campaignsBlockingDelete(users).map((c) => c.id) },
+    });
+  }
+
+  if (users.length > 0 && !acknowledged) {
+    const names = users.map((c) => `"${c.name}"`).join(", ");
     throw new AppError({
       code: "VALIDATION",
       userMessage:
-        `This segment is used by ${users.map((c) => `"${c.name}"`).join(", ")}. ` +
-        `Remove it from ${users.length === 1 ? "that campaign" : "those campaigns"} first, ` +
-        `or the campaign would lose its targeting.`,
-      context: { segmentId: id, campaigns: users.map((c) => c.id) },
+        `${names} ${users.length === 1 ? "uses" : "use"} this segment, and none of them is running. Deleting it ` +
+        `leaves ${users.length === 1 ? "that campaign" : "them"} with no products to price, so ` +
+        `${users.length === 1 ? "it" : "they"} can't be applied again. Delete again to confirm.`,
+      context: { segmentId: id, confirmDelete: { segmentId: id, campaigns: users } },
     });
   }
 
