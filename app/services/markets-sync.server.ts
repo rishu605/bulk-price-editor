@@ -355,6 +355,14 @@ function contextCountryOf(list: PriceListNode): string | null {
  * `RELATIVE` entries are skipped even here. Shopify returns them alongside fixed ones —
  * they are the parent adjustment already applied — and storing them would make the
  * mirror disagree with itself about whether the list is derived.
+ *
+ * And a fixed price Shopify no longer has is removed (#732). Rows were only ever upserted,
+ * so once our own revert deleted a campaign's fixed price, the mirror kept it: What's live
+ * showed the market on sale, a recapture took the old sale price as the new baseline, and
+ * the B2B plan read it as one. Every row this read touches is stamped with this read's
+ * clock, created ones included, and once the read has reached its last page the list's
+ * rows it did not touch are deleted. A read that stopped short deletes nothing. These rows
+ * are this function's alone: every other writer of the mirror writes base prices.
  */
 async function mirrorFixedPrices(
   client: AdminClient,
@@ -364,6 +372,8 @@ async function mirrorFixedPrices(
 ): Promise<number> {
   let cursor: string | null = null;
   let written = 0;
+  const readAt = new Date();
+  let complete = false;
 
   for (;;) {
     const response: { data?: { priceList?: { prices: { pageInfo: { hasNextPage: boolean; endCursor: string }; nodes: PricesNode[] } } } } =
@@ -401,6 +411,9 @@ async function mirrorFixedPrices(
           currency,
           livePrice: BigInt(price.amount),
           liveCompareAt: compareAt ? BigInt(compareAt.amount) : null,
+          // This process's clock, not the database default, so the sweep below compares
+          // like with like.
+          syncedAt: new Date(),
         },
         update: {
           currency,
@@ -413,8 +426,18 @@ async function mirrorFixedPrices(
       written++;
     }
 
-    if (!page.pageInfo.hasNextPage) break;
+    if (!page.pageInfo.hasNextPage) {
+      complete = true;
+      break;
+    }
     cursor = page.pageInfo.endCursor;
+  }
+
+  if (complete) {
+    const { count } = await prisma.priceSurfaceEntry.deleteMany({
+      where: { shopId, priceListGid: list.id, syncedAt: { lt: readAt } },
+    });
+    if (count > 0) logger.info("removed fixed prices Shopify no longer has", { shopId, priceListGid: list.id, removed: count });
   }
 
   return written;
