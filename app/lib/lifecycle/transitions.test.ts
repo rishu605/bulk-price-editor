@@ -94,8 +94,8 @@ describe("legal transitions", () => {
 
 describe("a held campaign with an end (#784)", () => {
   it("says the end still comes, and what it does with the edited prices", () => {
-    const held = describeState("HELD", { heldUntil: "Nov 30, 2026, 11:59 PM (America/New_York)" });
-    expect(held.explanation).toContain("Its window still ends Nov 30, 2026, 11:59 PM (America/New_York)");
+    const held = describeState("HELD", { heldUntil: "30 Nov 2026, 23:59 (America/New_York)" });
+    expect(held.explanation).toContain("Its window still ends 30 Nov 2026, 23:59 (America/New_York)");
     expect(held.explanation).toContain("the edited ones stay as edited until you decide");
   });
 

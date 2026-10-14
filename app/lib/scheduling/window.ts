@@ -11,6 +11,8 @@
  * Equality checks silently drop any campaign whose moment fell in the gap.
  */
 
+import { formatWhen } from "../format/display";
+
 export type Schedule =
   | { kind: "manual" }
   | {
@@ -210,13 +212,13 @@ export function windowClosed(schedule: Schedule, now: Date): boolean {
  * whose nine o'clock, and a campaign that goes live at the wrong hour is a real
  * cost.
  */
-/** An instant as the schedule sentences write it, in the store's zone: "27 Nov 2026, 09:00". */
+/**
+ * An instant as the schedule sentences write it, in the store's zone: "27 Nov 2026, 09:00".
+ * The same string as every other timestamp on the page (#688), so a schedule and the run
+ * history under it can't disagree about the month or the clock.
+ */
 export function formatScheduleInstant(iso: string, timeZone: string): string {
-  return new Intl.DateTimeFormat("en", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone,
-  }).format(new Date(iso));
+  return formatWhen(iso, timeZone);
 }
 
 /** When a window ends, as the page writes it, or undefined for one with no end (#784). */

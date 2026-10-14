@@ -68,6 +68,6 @@ describe("what it refuses, and why", () => {
 
 describe("the name it gives the campaign", () => {
   it("says what it is and when it was made", () => {
-    expect(quickCampaignName(20, "29/08/2026")).toBe("20% off · 29/08/2026");
+    expect(quickCampaignName(20, "29 Aug 2026")).toBe("20% off · 29 Aug 2026");
   });
 });

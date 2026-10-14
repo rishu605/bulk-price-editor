@@ -176,7 +176,7 @@ describe("timezone conversion", () => {
 describe("windowEndText (#784)", () => {
   it("names a window's end in the store's zone, and nothing for a window with none", () => {
     expect(windowEndText({ kind: "window", startAt: "2026-11-27T14:00:00Z", endAt: "2026-12-01T04:59:00Z" }, "America/New_York")).toBe(
-      "Nov 30, 2026, 11:59 PM (America/New_York)",
+      "30 Nov 2026, 23:59 (America/New_York)",
     );
     expect(windowEndText({ kind: "window", startAt: "2026-11-27T14:00:00Z" }, "UTC")).toBeUndefined();
     expect(windowEndText({ kind: "manual" }, "UTC")).toBeUndefined();

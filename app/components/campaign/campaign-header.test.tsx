@@ -200,7 +200,7 @@ describe("a campaign that has not started can be moved or called off (#760)", ()
   const window = {
     start: "2026-11-27T09:00",
     end: "2026-11-30T23:59",
-    startText: "Nov 27, 2026, 9:00 AM (America/New_York)",
+    startText: "27 Nov 2026, 09:00 (America/New_York)",
   };
   const html = render(
     <CampaignHeader {...props({ lifecycle: describeState("SCHEDULED"), state: "SCHEDULED", window } as never)} />,
@@ -214,7 +214,7 @@ describe("a campaign that has not started can be moved or called off (#760)", ()
   });
 
   it("names the start date in the dialogs, and offers both ways to stop it", () => {
-    expect(dialogs).toContain("It is scheduled to start Nov 27, 2026, 9:00 AM (America/New_York).");
+    expect(dialogs).toContain("It is scheduled to start 27 Nov 2026, 09:00 (America/New_York).");
     expect(dialogs).toContain("Unschedule");
     expect(dialogs).toContain("Cancel campaign");
     expect(dialogs).toContain("Keep it scheduled");
@@ -261,7 +261,7 @@ describe("every dialog button opens a dialog that is there (#749)", () => {
             : null,
           window:
             state === "SCHEDULED"
-              ? { start: "2026-11-27T09:00", end: "", startText: "Nov 27, 2026, 9:00 AM (UTC)" }
+              ? { start: "2026-11-27T09:00", end: "", startText: "27 Nov 2026, 09:00 (UTC)" }
               : null,
         } as never)}
       />,
@@ -582,7 +582,7 @@ describe("the confirmation says what is about to happen", () => {
       />,
     );
     expect(started, "a second Apply was offered beside Applying").not.toContain("Apply to storefront");
-    expect(started).toContain("Started Sep 25, 2026, 10:39");
+    expect(started).toContain("Started 25 Sep 2026, 10:39");
     expect(started).toContain("this page updates when it finishes");
 
     // Handed to the worker (#790), which has not picked it up yet: no run row to date.
