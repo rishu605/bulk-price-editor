@@ -23,6 +23,8 @@ import { money, type Money } from "../lib/money/money";
 import { astToWhere, type FilterAst } from "./segments.server";
 import { guardrailsFor } from "./settings.server";
 import { LANDED } from "../lib/execution/landed";
+import { AppError } from "../lib/errors/app-error";
+import { countMovedMessage } from "../lib/pricing/cost-form";
 
 export interface CostEditResult {
   matched: number;
@@ -45,7 +47,19 @@ export async function editCosts(
   shopId: string,
   ast: FilterAst,
   rule: CostRule,
-  options: { dryRun?: boolean; actor?: string } = {},
+  options: {
+    dryRun?: boolean;
+    actor?: string;
+    /**
+     * How many costs the merchant was told would change, when this commit follows a
+     * check of it (#754).
+     *
+     * A different count now means the catalogue moved between the check and the click,
+     * and the number they confirmed is not the number that would be written. Refused
+     * before the first write, so a refusal never leaves half a change behind.
+     */
+    expectedChanged?: number;
+  } = {},
 ): Promise<CostEditResult> {
   const result: CostEditResult = {
     matched: 0,
@@ -75,6 +89,11 @@ export async function editCosts(
 
   const now = new Date();
 
+  // Worked out in full before anything is written. The writes used to happen inside this
+  // loop, which was fine while nothing could refuse part-way; a count that no longer
+  // matches the confirmation has to be known before the first one.
+  const writes: Array<{ baseline: (typeof baselines)[number]; cost: number }> = [];
+
   for (const baseline of baselines) {
     const currency = baseline.currency;
     const outcome = applyCostRule(rule, {
@@ -97,9 +116,24 @@ export async function editCosts(
     // holds would add a version to its history that says nothing happened.
     if (baseline.cost !== null && Number(baseline.cost) === outcome.cost.amount) continue;
 
-    result.changed += 1;
-    if (result.dryRun) continue;
+    writes.push({ baseline, cost: outcome.cost.amount });
+  }
 
+  result.changed = writes.length;
+
+  if (
+    !result.dryRun &&
+    options.expectedChanged !== undefined &&
+    options.expectedChanged !== result.changed
+  ) {
+    throw new AppError({
+      code: "VALIDATION",
+      userMessage: countMovedMessage(result.changed, options.expectedChanged),
+      context: { shopId, rule: rule.kind, changed: result.changed, expected: options.expectedChanged },
+    });
+  }
+
+  for (const { baseline, cost } of result.dryRun ? [] : writes) {
     await prisma.$transaction([
       prisma.baseline.update({
         where: { id: baseline.id },
@@ -111,19 +145,19 @@ export async function editCosts(
           variantGid: baseline.variantGid,
           surfaceKind: baseline.surfaceKind,
           priceListGid: baseline.priceListGid,
-          currency,
+          currency: baseline.currency,
           // Copied unchanged. This is a cost edit; recapturing the price here would
           // silently enshrine whatever the storefront currently shows as the new normal.
           basePrice: baseline.basePrice,
           baseCompareAt: baseline.baseCompareAt,
-          cost: BigInt(outcome.cost.amount),
+          cost: BigInt(cost),
           source: baseline.source,
           capturedBy: options.actor ?? null,
         },
       }),
       prisma.variantIndex.updateMany({
         where: { shopId, variantGid: baseline.variantGid },
-        data: { cost: BigInt(outcome.cost.amount) },
+        data: { cost: BigInt(cost) },
       }),
     ]);
   }

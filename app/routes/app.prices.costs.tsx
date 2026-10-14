@@ -12,7 +12,7 @@
  */
 
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
@@ -21,7 +21,15 @@ import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
 import { shopCurrency } from "../services/settings.server";
 import { editCosts, newlyViolating, type CostEditResult } from "../services/cost-edit.server";
-import { costRuleFrom, describeCostRule } from "../lib/pricing/cost-rules";
+import { describeCostRule } from "../lib/pricing/cost-rules";
+import {
+  changedMessage,
+  checkedMessage,
+  costCount,
+  costScopeOf,
+  readCommit,
+  readCostForm,
+} from "../lib/pricing/cost-form";
 import { format } from "../lib/money/format";
 import { facetDetails } from "../lib/segments/facets";
 import { facets, type FilterAst } from "../services/segments.server";
@@ -39,6 +47,12 @@ import { isCommit } from "../lib/imports/intent";
 import { reportError } from "../services/error-report.server";
 import { SPACE } from "../lib/ui/spacing";
 import { Card } from "../components/Card";
+import { Secondary } from "../components/Type";
+import {
+  COST_CHANGE_MODAL_ID,
+  CostChangeConfirmation,
+  type CostCheck,
+} from "../components/prices/CostChangeConfirmation";
 
 export const loader = withGuard("/app/prices/costs", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -72,9 +86,13 @@ export const loader = withGuard("/app/prices/costs", async ({ request }: LoaderF
 type ActionData = {
   ok: boolean;
   message: string;
+  /** The form field a refusal is about, so the field can say so as well as the banner. */
+  field?: "value";
   result?: CostEditResult;
+  /** What a dry run of the bulk editor counted. Absent after a commit, which spends it. */
+  check?: CostCheck;
   imported?: CostImportResult;
-  errorId?: string;
+  errorId?: string | null;
 };
 
 /**
@@ -131,26 +149,55 @@ export const action = withGuard("/app/prices/costs", async ({ request }: ActionF
     }
   }
 
-  const amount = Number(form.get("value") ?? 0);
-  const kind = String(form.get("ruleKind") ?? "percent-change");
-  const rule = costRuleFrom(kind, amount, currency);
+  // The bulk editor. Read through `readCostForm`, which the page reads its own fields with
+  // too, so "the values that were checked" means one thing on both sides (#754).
+  const read = readCostForm(form, currency);
+  if (!read.ok) return { ok: false, field: read.field, message: read.message };
 
-  const vendor = String(form.get("vendor") ?? "").trim();
+  const { vendor, rule, key } = read;
   const ast: FilterAst = vendor ? { groups: [{ conditions: [{ field: "vendor", value: vendor }] }] } : { groups: [] };
 
   const dryRun = !isCommit(intent);
-  const result = await editCosts(shop.id, ast, rule, {
-    dryRun,
-    actor: actorFor(sessionToken, session.shop),
-  });
 
-  return {
-    ok: true,
-    result,
-    message: dryRun
-      ? `${describeCostRule(rule)}: ${result.changed} of ${result.matched} would change. Nothing has been written.`
-      : `${result.changed} costs updated.`,
-  };
+  // A commit carries the check it follows: the key of what was counted, and the count the
+  // confirmation named. Without both, or with a form that has moved since, nothing is
+  // written — this button committed straight from the form once, on an amount the page
+  // had typed for the merchant.
+  const commit = dryRun ? null : readCommit(key, form);
+  if (commit && !commit.ok) return { ok: false, message: commit.message };
+
+  try {
+    const result = await editCosts(shop.id, ast, rule, {
+      dryRun,
+      actor: actorFor(sessionToken, session.shop),
+      expectedChanged: commit?.ok ? commit.expected : undefined,
+    });
+
+    const check: CostCheck | undefined = dryRun
+      ? {
+          key,
+          changed: result.changed,
+          matched: result.matched,
+          skipped: result.skipped.length,
+          rule: describeCostRule(rule),
+          scope: costScopeOf(vendor),
+        }
+      : undefined;
+
+    return {
+      ok: true,
+      result,
+      check,
+      message: dryRun ? checkedMessage(rule, result) : changedMessage(result.changed),
+    };
+  } catch (error) {
+    const reported = await reportError(error, {
+      shopId: shop.id,
+      shop: session.shop,
+      route: "/app/prices/costs",
+    });
+    return { ok: false, message: reported.userMessage, errorId: reported.errorId };
+  }
 });
 
 export default function Costs() {
@@ -166,6 +213,36 @@ export default function Costs() {
     if (intent.current) intent.current.value = value;
     form.current?.requestSubmit();
   };
+
+  // What the last check counted, while it is still the answer on screen. A commit's own
+  // response has none, so committing spends the check and the next change needs another.
+  const check = fetcher.data?.check ?? null;
+
+  // The form as it stands now, keyed the way the check was. Listened to natively: React 18
+  // never delivers `onChange` from a Polaris field (#863). Read again whenever an answer
+  // arrives as well, so a field that settles its value after its event cannot leave the
+  // button comparing against a keystroke ago.
+  const [current, setCurrent] = useState<string | null>(null);
+  useEffect(() => {
+    const element = form.current;
+    if (!element) return;
+    const read = () => {
+      const now = readCostForm(new FormData(element), currency);
+      setCurrent(now.ok ? now.key : null);
+    };
+    read();
+    element.addEventListener("input", read);
+    element.addEventListener("change", read);
+    return () => {
+      element.removeEventListener("input", read);
+      element.removeEventListener("change", read);
+    };
+  }, [currency, fetcher.data]);
+
+  // Committing needs a check of exactly these values that found something to change.
+  // The action holds the same line; this is the page not offering what it would refuse.
+  const ready = check !== null && check.changed > 0 && current === check.key;
+  const stale = check !== null && current !== check.key;
 
   const coverage = variants === 0 ? 0 : Math.round((withCost / variants) * 100);
   const imported = fetcher.data?.imported;
@@ -226,6 +303,11 @@ export default function Costs() {
               buttons set before submitting. One form, because both actions read the same
               rule and duplicating the fields would let them drift apart. */}
           <input type="hidden" name="intent" ref={intent} value="dry-run" readOnly />
+          {/* The check a commit follows, posted back so the action can refuse one whose
+              form has moved since — and the count the confirmation named, so it can
+              refuse one whose catalogue has. */}
+          <input type="hidden" name="checked" value={check?.key ?? ""} readOnly />
+          <input type="hidden" name="expected" value={check?.changed ?? ""} readOnly />
           {/* A grid, not a stack.
 
               Stacked, each of these took the full width of the card: a "Which products"
@@ -262,10 +344,15 @@ export default function Costs() {
             </s-select>
 
             <FullRow>
+              {/* Empty, and required. It opened at 4, which nobody typed: one click of the
+                  button beside the check raised 2,699 costs by it on a real store (#754).
+                  An amount is the merchant's to give, and the action refuses a form
+                  without one rather than reading the gap as zero. */}
               <s-number-field
                 name="value"
                 label={`Amount (percent, or ${currency})`}
-                value="4"
+                required
+                error={fetcher.data?.field === "value" ? fetcher.data.message : undefined}
                 details="Products with no cost are skipped by the first two rules rather than treated as zero."
               />
             </FullRow>
@@ -280,15 +367,27 @@ export default function Costs() {
               >
                 Check without changing
               </s-button>
+              {/* Opens the confirmation; it does not commit. Disabled until a check of
+                  these exact values has found something to change, and named for what
+                  it found, the way the import's "Import 12 costs" is. */}
               <s-button
                 type="button"
                 tone="critical"
                 loading={busy || undefined}
-                onClick={() => submitWith("commit")}
+                disabled={!ready || undefined}
+                commandFor={COST_CHANGE_MODAL_ID}
+                command="--show"
               >
-                Change these costs
+                {ready && check ? `Change ${costCount(check.changed)}` : "Change these costs"}
               </s-button>
             </ActionRow>
+
+            {stale ? (
+              <Secondary>
+                The form has changed since it was checked. Check it again to see what these
+                values would change.
+              </Secondary>
+            ) : null}
           </s-stack>
         </fetcher.Form>
 
@@ -300,6 +399,13 @@ export default function Costs() {
           </s-unordered-list>
         ) : null}
       </Card>
+
+      {/* Outside the card: a dialog is not one of the card's actions, and its primary
+          button is the dialog's, not a second black button on the form. */}
+      {check && check.changed > 0 ? (
+        <CostChangeConfirmation check={check} busy={busy} onConfirm={() => submitWith("commit")} />
+      ) : null}
+
       <ImportForm
         heading="Import costs from a spreadsheet"
         fetcher={fetcher}
