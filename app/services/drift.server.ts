@@ -485,6 +485,17 @@ export async function pruneWriteIntents(): Promise<number> {
  * during a sale would put several hundred identical emails in somebody's inbox, and
  * the next real one would arrive somewhere below them.
  *
+ * The limit is a claim, not a check (#806). It used to count this hour's notifications
+ * and send when there were none -- but a bulk edit's webhooks arrive together, and
+ * every one of them counted before the first had written its entry. On anchor-perf one
+ * burst logged 219 notifications for one campaign inside a minute; a shop with an alert
+ * address would have had 219 emails. Reading the last notification still decides whether
+ * one is due. Which caller sends it is decided by the primary key: every caller that read
+ * the same last notification inserts the same next one, the database admits exactly one
+ * of them, and only that one sends. A caller whose read was stale tries an id the winner
+ * already holds, and stops there. No lock and no transaction, so a burst that is already
+ * short of connections (#803) spends one more statement on this, not a held connection.
+ *
  * The count is read at send time rather than incremented, so the one email that does
  * go out reports the whole burst rather than the first of it.
  */
@@ -492,29 +503,51 @@ async function notifyDrift(shopId: string, campaignId: string, campaignName: str
   const HOUR = 60 * 60_000;
   const since = new Date(Date.now() - HOUR);
 
-  const [pending, alreadyTold] = await Promise.all([
-    prisma.driftEvent.count({ where: { shopId, campaignId, resolution: "PENDING" } }),
-    prisma.auditLogEntry.count({
-      where: {
+  // Newest first with `id` breaking ties, so every caller agrees which one is last even
+  // among entries written in the same millisecond, as a burst from before this fix could be.
+  const last = await prisma.auditLogEntry.findFirst({
+    where: { shopId, action: "notification.drift", entityId: campaignId },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { id: true, createdAt: true },
+  });
+  if (last && last.createdAt >= since) return;
+
+  const pending = await prisma.driftEvent.count({ where: { shopId, campaignId, resolution: "PENDING" } });
+
+  // `ON CONFLICT DO NOTHING`: a caller that lost the race inserts nothing and is told so,
+  // rather than failing a webhook over an email somebody else is already sending.
+  const claimed = await prisma.auditLogEntry.createMany({
+    data: [
+      {
+        id: driftNoticeId(campaignId, last?.id ?? null),
         shopId,
         action: "notification.drift",
+        entity: "campaign",
         entityId: campaignId,
-        createdAt: { gte: since },
+        after: { pending },
       },
-    }),
-  ]);
-
-  if (alreadyTold > 0) return;
-
-  await prisma.auditLogEntry.create({
-    data: {
-      shopId,
-      action: "notification.drift",
-      entity: "campaign",
-      entityId: campaignId,
-      after: { pending },
-    },
+    ],
+    skipDuplicates: true,
   });
+  if (claimed.count === 0) return;
 
   void notify(shopId, { kind: "drift-hold", campaignId, campaignName, driftedCount: pending });
+}
+
+/**
+ * The id of the drift notification that follows `previousId` for this campaign (#806).
+ *
+ * Derived, not generated, which is the whole of the rate limit's concurrency: callers that
+ * saw the same last notification compute the same id, so only one of their inserts lands.
+ * Keyed on the predecessor rather than on an hour bucket, so the window stays a rolling
+ * hour -- a burst straddling 09:00 is one burst, not two emails a second apart -- and so a
+ * pruned or erased log cannot leave an id taken that nobody can see. Hashed because the
+ * predecessor's id is usually one of these, and nesting them would grow without bound.
+ */
+function driftNoticeId(campaignId: string, previousId: string | null): string {
+  const digest = createHash("sha256")
+    .update(`${campaignId}|${previousId ?? ""}`)
+    .digest("hex")
+    .slice(0, 32);
+  return `drift-notice-${digest}`;
 }
