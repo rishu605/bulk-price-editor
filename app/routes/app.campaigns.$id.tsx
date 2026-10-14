@@ -27,7 +27,7 @@ import { runEvidence } from "../services/campaigns/run-evidence.server";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { reportError } from "../services/error-report.server";
 import { withGuard } from "../lib/errors/guard.server";
-import { blastRadiusRefusal } from "../services/campaigns/blast-radius.server";
+import { pressRefusal } from "../services/campaigns/blast-radius.server";
 import { describeCampaign } from "../lib/campaigns/describe";
 import { astOf, ruleOf } from "../services/campaigns/model.server";
 import { actorFor } from "../lib/audit/actor";
@@ -199,11 +199,8 @@ export const action = withGuard("/app/campaigns/$id", async ({ request, params }
     (intent === "resume" && (await runToResume(String(params.id)))?.kind === "REVERT");
 
   // A-3.11: over the blast-radius threshold a merchant types the word first, and the
-  // check is here rather than only in the modal. See `blastRadiusRefusal`.
-  const refusal =
-    intent === "apply" || intent === "resume"
-      ? await blastRadiusRefusal(shop.id, String(params.id), String(form.get("confirmation") ?? ""))
-      : null;
+  // check is here rather than only in the modal. See `pressRefusal`.
+  const refusal = await pressRefusal(shop.id, campaignId, intent, String(form.get("confirmation") ?? ""));
   if (refusal) return { ok: false, message: refusal, details: [] };
 
   try {

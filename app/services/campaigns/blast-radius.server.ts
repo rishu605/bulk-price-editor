@@ -1,3 +1,4 @@
+import prisma from "../../db.server";
 import { previewCampaign } from "./preview.server";
 import { scopeSize } from "./scope-size.server";
 import { BLAST_RADIUS_THRESHOLD } from "./types";
@@ -39,4 +40,28 @@ export async function blastRadiusRefusal(
     `This campaign writes ${formatCount(preview.counts.planned)} prices. ` +
     `Type \u201Capply\u201D in the confirmation box to run it.`
   );
+}
+
+/**
+ * The typed confirmation for a press on the campaign page, or null to proceed.
+ *
+ * Apply asks for the word over the threshold, and so does Resume -- except on a campaign
+ * whose run stopped part-way (#720). There it finishes a run that was already started, and
+ * confirmed if it was over the threshold, of a campaign that cannot have been edited since;
+ * and its button has no confirmation box, so the refusal asked the merchant to type into a
+ * box the page does not have. Posted for any other campaign, "resume" is an apply under
+ * another name, and is asked for the word like one.
+ */
+export async function pressRefusal(
+  shopId: string,
+  campaignId: string,
+  intent: string,
+  typed: string,
+): Promise<string | null> {
+  if (intent !== "apply" && intent !== "resume") return null;
+  if (intent === "resume") {
+    const campaign = await prisma.campaign.findFirst({ where: { id: campaignId, shopId }, select: { status: true } });
+    if (campaign?.status === "PARTIAL") return null;
+  }
+  return blastRadiusRefusal(shopId, campaignId, typed);
 }

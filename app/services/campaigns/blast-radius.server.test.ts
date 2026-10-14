@@ -15,11 +15,16 @@ import { describe, expect, it, vi } from "vitest";
 
 // `vi.mock` is hoisted above the imports, so the factory cannot close over a `const`
 // declared here — `vi.hoisted` is the way to share one spy with it.
-const { previewCampaign, scopeSize } = vi.hoisted(() => ({ previewCampaign: vi.fn(), scopeSize: vi.fn(async () => 5_000) }));
+const { previewCampaign, scopeSize, findCampaign } = vi.hoisted(() => ({
+  previewCampaign: vi.fn(),
+  scopeSize: vi.fn(async () => 5_000),
+  findCampaign: vi.fn(async () => ({ status: "DRAFT" }) as { status: string } | null),
+}));
 vi.mock("./preview.server", () => ({ previewCampaign }));
 vi.mock("./scope-size.server", () => ({ scopeSize }));
+vi.mock("../../db.server", () => ({ default: { campaign: { findFirst: findCampaign } } }));
 
-import { blastRadiusRefusal } from "./blast-radius.server";
+import { blastRadiusRefusal, pressRefusal } from "./blast-radius.server";
 
 const preview = (over: Record<string, unknown> = {}) => ({
   counts: { planned: 5000, noop: 0, skipped: 0, clamped: 0 },
@@ -91,5 +96,31 @@ describe("asked without a plan where it can be (#803)", () => {
     previewCampaign.mockResolvedValueOnce(preview());
     expect(await blastRadiusRefusal("shop", "c1", "")).toContain("5,000");
     expect(previewCampaign).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("which presses are asked (#720)", () => {
+  it("asks Apply, and Resume on anything but a run that stopped part-way", async () => {
+    for (const status of ["DRAFT", "SCHEDULED", "ACTIVE"]) {
+      findCampaign.mockResolvedValueOnce({ status });
+      previewCampaign.mockResolvedValueOnce(preview());
+      expect(await pressRefusal("shop", "c1", "resume", ""), `a "resume" of a ${status} campaign`).toContain("apply");
+    }
+    previewCampaign.mockResolvedValueOnce(preview());
+    expect(await pressRefusal("shop", "c1", "apply", "")).toContain("apply");
+  });
+
+  it("does not ask Resume to finish a run that stopped part-way, whose button has no box to type in", async () => {
+    findCampaign.mockResolvedValueOnce({ status: "PARTIAL" });
+    previewCampaign.mockClear();
+    expect(await pressRefusal("shop", "c1", "resume", "")).toBeNull();
+    expect(previewCampaign).not.toHaveBeenCalled();
+  });
+
+  it("does not ask anything else", async () => {
+    // Reverting is the way back: see the top of this file.
+    for (const intent of ["revert", "revert-variant", "archive"]) {
+      expect(await pressRefusal("shop", "c1", intent, "")).toBeNull();
+    }
   });
 });
