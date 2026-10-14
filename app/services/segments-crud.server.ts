@@ -25,6 +25,7 @@ import {
   type MatchOutcome,
 } from "../lib/segments/csv-import";
 import { resolveVariantGids, type FilterAst } from "./segments.server";
+import { formatCount } from "../lib/format/display";
 
 export type SegmentKind = "DYNAMIC" | "FROZEN";
 
@@ -158,48 +159,86 @@ export interface UpdateSegmentInput {
   name?: string;
   filterAst?: FilterAst;
   variantGids?: string[];
+  /**
+   * Pins a dynamic segment to what it matches now -- its new filter, if one is given -- and
+   * makes it frozen (#742). The one change of kind on offer: see `updateSegment`.
+   */
+  pin?: boolean;
   /** Confirms the merchant saw the warning about campaigns using this segment. */
   acknowledgedCampaigns?: boolean;
 }
 
+/** The campaigns an edit reaches into: the ones pricing, or about to. */
+const CAMPAIGNS_AN_EDIT_REACHES = new Set(["ACTIVE", "APPLYING", "PARTIAL", "HELD", "SCHEDULED"]);
+
+/** What an edit is asked to confirm: who uses the segment, and how its size changes. */
+export interface SegmentEditConfirmation {
+  campaigns: Array<{ id: string; name: string; status: string }>;
+  /** Variants the segment matches now, and would match after the edit. */
+  before: number;
+  after: number;
+}
+
 /**
- * Edits a segment.
+ * Edits a segment (#742).
  *
- * Kind is deliberately not editable. Flipping dynamic to frozen would silently pin
- * whatever the filter happens to match today; flipping frozen to dynamic would widen a
- * reviewed list to whatever a filter returns. Both change what a running campaign
- * prices without the merchant asking for it, and both are better expressed as making a
- * new segment.
+ * A segment exists so that a merchant fixes it once and every campaign using it follows
+ * (`scopeOf` resolves it at run time). There was no way to edit one: only Delete, which is
+ * blocked while a campaign uses it, and a new segment no campaign references.
+ *
+ * Name, filter and list are editable, and a dynamic segment can be **pinned** -- made
+ * frozen at what it matches now. A frozen segment cannot be made dynamic: that widens a
+ * list a merchant reviewed to whatever a filter returns, which is better as a new segment.
+ *
+ * An edit that reaches a campaign pricing or about to (`CAMPAIGNS_AN_EDIT_REACHES`) is
+ * refused until confirmed, with the campaigns and the segment's size before and after --
+ * not blocked, sometimes that is the point, but never silent.
  */
 export async function updateSegment(shopId: string, id: string, input: UpdateSegmentInput) {
   const segment = await getSegment(shopId, id);
-  const users = await referencingCampaigns(shopId, id);
-  const live = users.filter((c) => c.status === "ACTIVE" || c.status === "APPLYING");
-
-  // A segment edit reaches straight into a running sale. Not blocked -- sometimes
-  // that is exactly the intent -- but never silent.
-  if (live.length > 0 && !input.acknowledgedCampaigns) {
+  const name = input.name?.trim();
+  if (input.name !== undefined && !name) {
     throw new AppError({
       code: "VALIDATION",
-      userMessage:
-        `${live.map((c) => `"${c.name}"`).join(", ")} ${live.length === 1 ? "is" : "are"} running and ` +
-        `using this segment. Saving changes which products ${live.length === 1 ? "it prices" : "they price"}. ` +
-        `Confirm to continue.`,
-      context: { segmentId: id, campaigns: live.map((c) => c.id) },
+      userMessage: "Give the segment a name so you can find it when building a campaign.",
+      context: { field: "name" },
     });
   }
 
-  const name = input.name?.trim();
+  const dynamic = segment.kind === "DYNAMIC";
+  const filterAst = dynamic ? (input.filterAst ?? astOfSegment(segment.filterAst)) : astOfSegment(segment.filterAst);
+  const pinning = dynamic && input.pin === true;
+  const pinned = pinning ? await resolveVariantGids(shopId, filterAst) : null;
+  const variantGids = !dynamic ? (input.variantGids ?? segment.frozenVariantGids) : pinned;
+
+  const users = await referencingCampaigns(shopId, id);
+  const reached = users.filter((c) => CAMPAIGNS_AN_EDIT_REACHES.has(c.status));
+  if (reached.length > 0 && !input.acknowledgedCampaigns) {
+    const before = dynamic
+      ? (await resolveVariantGids(shopId, astOfSegment(segment.filterAst))).length
+      : segment.frozenVariantGids.length;
+    const after = variantGids ? variantGids.length : (await resolveVariantGids(shopId, filterAst)).length;
+    const confirmation: SegmentEditConfirmation = { campaigns: reached, before, after };
+    throw new AppError({
+      code: "VALIDATION",
+      userMessage:
+        `${reached.map((c) => `"${c.name}"`).join(", ")} ${reached.length === 1 ? "uses" : "use"} this segment. ` +
+        `Saving changes what ${reached.length === 1 ? "it prices" : "they price"}: ${formatCount(before)} ` +
+        `variant${before === 1 ? "" : "s"} now, ${formatCount(after)} after this edit. Save again to confirm.`,
+      context: { segmentId: id, confirm: confirmation },
+    });
+  }
 
   try {
     return await prisma.segment.update({
       where: { id: segment.id },
       data: {
         ...(name ? { name } : {}),
-        ...(input.filterAst ? { filterAst: input.filterAst as never } : {}),
-        // Frozen lists are re-pinned only when a new list is supplied; editing a
-        // frozen segment's name must not silently re-resolve what it contains.
-        ...(input.variantGids ? { frozenVariantGids: input.variantGids } : {}),
+        ...(dynamic && input.filterAst ? { filterAst: input.filterAst as never } : {}),
+        ...(pinning ? { kind: "FROZEN", frozenVariantGids: pinned ?? [] } : {}),
+        // Frozen lists are re-pinned only when a new list is supplied; editing a frozen
+        // segment's name must not silently re-resolve what it contains.
+        ...(!dynamic && input.variantGids ? { frozenVariantGids: input.variantGids } : {}),
       },
     });
   } catch (error) {
