@@ -152,3 +152,36 @@ export function astFrom(read: FieldReader): FilterAst {
 
   return conditions.length > 0 ? { groups: [{ conditions }] } : { groups: [] };
 }
+
+/** What a campaign's priority is when the field is left empty. */
+export const DEFAULT_PRIORITY = 100;
+/** How many minutes before a window ends its prices come back, when the field is empty. */
+export const DEFAULT_REVERT_BUFFER_MINUTES = 5;
+
+/**
+ * A whole number from the form, or `fallback` when the field is missing, blank or not a
+ * number -- and only then (#727).
+ *
+ * Both fields were read as `Number(value) || default`, and `0 || 100` is `100`: a merchant
+ * who typed priority 0 to make a campaign the lowest got 100, which outranked their
+ * priority-50 campaign, so on the variants they share the wrong price won. A revert buffer
+ * of 0 -- no early revert -- became five minutes.
+ *
+ * Whole, because both are stored as integers and Prisma refuses a fraction.
+ */
+export function wholeNumberOr(raw: string | null | undefined, fallback: number): number {
+  const text = (raw ?? "").trim();
+  if (text === "") return fallback;
+  const value = Number(text);
+  return Number.isFinite(value) ? Math.trunc(value) : fallback;
+}
+
+/** A campaign's priority, read the same way by the preview and by the action that saves it. */
+export function priorityFrom(read: FieldReader): number {
+  return wholeNumberOr(read("priority"), DEFAULT_PRIORITY);
+}
+
+/** Minutes before a window's end that its prices revert; never negative. */
+export function revertBufferFrom(read: FieldReader): number {
+  return Math.max(0, wholeNumberOr(read("revertBuffer"), DEFAULT_REVERT_BUFFER_MINUTES));
+}

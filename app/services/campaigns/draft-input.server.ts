@@ -10,7 +10,7 @@
  * sidebar and a different one in the run.
  */
 
-import { astFrom, compareAtFrom, readerFor, ruleFrom, ruleInputProblem } from "../../lib/campaigns/draft-form";
+import { astFrom, compareAtFrom, priorityFrom, readerFor, ruleFrom, ruleInputProblem } from "../../lib/campaigns/draft-form";
 import { readRoundingPolicy } from "../../lib/money/rounding-policy";
 import { segmentToAst } from "../segments.server";
 import type { DraftCampaign } from "./draft-preview.server";
@@ -55,6 +55,6 @@ export async function draftCampaignFrom(
       : { rule: ruleFrom(read, currency) }),
     compareAtPolicy: compareAtFrom(read),
     rounding: readRoundingPolicy(source.entries()),
-    priority: Number(read("priority") ?? 100) || 100,
+    priority: priorityFrom(read),
   };
 }
