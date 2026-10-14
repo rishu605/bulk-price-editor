@@ -19,5 +19,5 @@ runtime_url = "https://bulk-price-editor-production-eb91.up.railway.app/flow/act
   type = "single_line_text_field"
   key = "segment-id"
   name = "Segment ID"
-  description = "The segment whose prices become the new baseline."
+  description = "The segment whose prices become the new baseline. In Anchor, go to Settings > Segments: each segment's ID is under its name, with a copy button."
   required = true

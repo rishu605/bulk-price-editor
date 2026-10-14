@@ -13,6 +13,8 @@ import { humanise } from "../../lib/format/label";
 import { CampaignNote } from "./CampaignNote";
 import type { CampaignDetailProps } from "./props";
 import { Card } from "../Card";
+import { CopyableId } from "../CopyableId";
+import { Fact } from "../Fact";
 
 export function CampaignOverviewTab(props: CampaignDetailProps) {
   const {
@@ -23,6 +25,8 @@ export function CampaignOverviewTab(props: CampaignDetailProps) {
     lifecycle,
     history,
     timeZone,
+    campaignId,
+    practice,
   } = props;
 
   return (
@@ -93,6 +97,21 @@ export function CampaignOverviewTab(props: CampaignDetailProps) {
           </s-banner>
         ) : null}
       </Card>
+
+      {/* What Shopify Flow's Start and End actions ask for (#826). Last on the tab and
+          without a heading: it is reference, looked up once when an automation is set
+          up, and nothing else on the page depends on it. Not on a practice campaign,
+          which Flow's Start refuses — the ID would only set up an automation that fails. */}
+      {practice ? null : (
+        <Card>
+          <Fact
+            label="Campaign ID, used in Shopify Flow"
+            detail="Paste it into Anchor's Start a price campaign or End a price campaign action."
+          >
+            <CopyableId value={campaignId} what="campaign ID" />
+          </Fact>
+        </Card>
+      )}
     </>
   );
 }
