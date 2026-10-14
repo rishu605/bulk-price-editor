@@ -9,7 +9,6 @@
  */
 
 import { useEffect, useState } from "react";
-import { Blank } from "../components/Blank";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useFetcher, useLoaderData, useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -44,6 +43,7 @@ import { HelpNote } from "../components/HelpNote";
 import { Secondary } from "../components/Type";
 import { Card } from "../components/Card";
 import { TableBlock } from "../components/TableBlock";
+import { SegmentTable } from "../components/SegmentTable";
 
 export const loader = withGuard("/app/settings/segments", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -251,73 +251,23 @@ export default function Segments() {
 
       {result?.report ? <ImportReport report={result.report} /> : null}
 
-      <Card heading="Your segments">    {segments.length === 0 ? (
+      <Card
+        heading="Your segments"
+        // The ID under each name is what Flow asks for (#826), and it is a string of
+        // letters nobody would recognise without being told what it is.
+        secondary={
+          segments.length > 0
+            ? "Shopify Flow's Capture baselines for a segment action asks for a segment's ID. It is under each name, with a button that copies it."
+            : undefined
+        }
+      >
+        {segments.length === 0 ? (
           <EmptyState
             title="No segments yet"
             description="A segment is a saved way of describing which products a campaign covers, so you do not rebuild the same filter for every sale. Make one below."
           />
         ) : (
-          <s-table>
-            <s-table-header-row>
-              <s-table-header listSlot="primary">Name</s-table-header>
-              <s-table-header listSlot="inline">Kind</s-table-header>
-              {/* Variants, which is what it counts (#742): a list of 3 products and 4
-                  variants read "Products: 4". */}
-              <s-table-header listSlot="labeled" format="numeric">Variants</s-table-header>
-              <s-table-header listSlot="secondary">Used by</s-table-header>
-              <s-table-header listSlot="inline">Action</s-table-header>
-            </s-table-header-row>
-            <s-table-body>
-              {segments.map((segment) => (
-                <s-table-row key={segment.id}>
-                  <s-table-cell>{segment.name}</s-table-cell>
-                  <s-table-cell>
-                    <s-badge tone={segment.kind === "DYNAMIC" ? "info" : "neutral"}>
-                      {segment.kind === "DYNAMIC" ? "Dynamic" : "Frozen"}
-                    </s-badge>
-                  </s-table-cell>
-                  <s-table-cell>{variantCount(segment.size)}</s-table-cell>
-                  <s-table-cell>
-                    {segment.usedBy.length === 0 ? (
-                      <Blank />
-                    ) : (
-                      segment.usedBy.map((c) => c.name).join(", ")
-                    )}
-                  </s-table-cell>
-                  <s-table-cell>
-                    <ActionRow>
-                    {/* A link, so the form it opens survives a reload (#742). */}
-                    <s-button variant="secondary" icon="edit" href={`?edit=${segment.id}`}>
-                      Edit
-                    </s-button>
-                    {segment.usedBy.length > 0 ? (
-                      // Not a disabled button: a control that does nothing invites
-                      // clicking it repeatedly. The reason is the answer.
-                      <s-text>In use — remove from campaigns first</s-text>
-                    ) : (
-                      <fetcher.Form method="post">
-                        <input type="hidden" name="intent" value="delete" />
-                        <input type="hidden" name="segmentId" value={segment.id} />
-                        {/* Bordered, like every other row action that changes something.
-                            Deleting a segment is the most consequential thing this table
-                            does, and it was the quietest control on the page. */}
-                        <s-button
-                          type="submit"
-                          tone="critical"
-                          variant="secondary"
-                          icon="delete"
-                          loading={busy || undefined}
-                        >
-                          Delete
-                        </s-button>
-                      </fetcher.Form>
-                    )}
-                    </ActionRow>
-                  </s-table-cell>
-                </s-table-row>
-              ))}
-            </s-table-body>
-          </s-table>
+          <SegmentTable segments={segments} Form={fetcher.Form} busy={busy} />
         )}
       </Card>
 
@@ -522,11 +472,6 @@ function NewSegment({
       </fetcher.Form>
     </Card>
   );
-}
-
-/** The count column's text: a number, grouped like every other count in the app. */
-function variantCount(size: number): string {
-  return formatCount(size);
 }
 
 type Editing = NonNullable<ReturnType<typeof useLoaderData<typeof loader>>["editing"]>;

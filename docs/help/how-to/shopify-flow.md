@@ -21,11 +21,13 @@ and into whatever you connected next — a Slack channel, a spreadsheet, someone
 
 Flow asks Anchor to do something.
 
-| Action | What it does |
-|---|---|
-| Start a price campaign | Exactly what the Apply button does, including your guardrails and your plan's limits |
-| End a price campaign | Reverts it. Works on every plan, including free |
-| Capture baselines for a segment | Records today's prices as the new normal |
+| Action | What it does | Asks for |
+|---|---|---|
+| Start a price campaign | Exactly what the Apply button does, including your guardrails and your plan's limits | The campaign's ID |
+| End a price campaign | Reverts it. Works on every plan, including free | The campaign's ID |
+| Capture baselines for a segment | Records today's prices as the new normal | The segment's ID |
+
+Where to find each ID is at the end of this page.
 
 Each action does exactly what the equivalent button does. An action that could start a
 campaign the app would have refused would be a way round every safety feature in it.
@@ -42,7 +44,8 @@ automation cannot read a warning, so it is refused rather than confirmed on your
 
 1. **Trigger:** Shopify's *Inventory quantity changed*.
 2. **Condition:** inventory quantity is less than 10.
-3. **Action:** Anchor's *End a price campaign*, with the campaign ID from the campaign's page.
+3. **Action:** Anchor's *End a price campaign*, with the campaign's ID pasted into its
+   **Campaign ID** field.
 
 Prices revert, the ledger records it, and Anchor's *Campaign ended* trigger fires — so you
 can chain a Slack message onto the same Flow if you want to be told.
@@ -58,6 +61,24 @@ This is the one worth setting up. A held campaign is waiting for a decision, and
 somebody makes it the shorter the window where prices are neither the sale price nor the
 normal one.
 
-## Finding a campaign ID
+## Finding a campaign or segment ID
 
-Open the campaign in Anchor. The ID is in the address bar, after `/campaigns/`.
+Each ID is shown in Anchor with a clipboard button beside it that copies it.
+
+**A campaign's ID.** Open **Campaigns** and click the campaign's name. Its page opens on
+the **Overview** tab. At the foot of that tab, below **New products**, is the line
+*Campaign ID, used in Shopify Flow*, with the ID under it. Press the clipboard button
+beside the ID, then paste it into the action's **Campaign ID** field. A practice campaign
+has no ID there, because Flow cannot start a practice campaign.
+
+**A segment's ID.** Open **Settings**, then the **Segments** tab. In the **Your segments**
+table, each segment's ID is the grey line under its name, with the same clipboard button
+beside it. Paste it into the **Segment ID** field of *Capture baselines for a segment*.
+
+If the browser blocks the copy, Anchor says so. Select the ID and copy it with Ctrl+C, or
+⌘C on a Mac.
+
+<!-- TODO(#826): screenshots of both places, cropped as docs/help/images/README.md says:
+     the foot of a campaign's Overview tab showing "Campaign ID, used in Shopify Flow",
+     and Settings > Segments showing an ID under a segment's name. Put them under each
+     paragraph above, with alt text that describes what they show. -->

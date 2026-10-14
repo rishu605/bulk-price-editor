@@ -19,5 +19,5 @@ runtime_url = "https://bulk-price-editor-production-eb91.up.railway.app/flow/act
   type = "single_line_text_field"
   key = "campaign-id"
   name = "Campaign ID"
-  description = "The campaign to start. Copy it from the campaign's page."
+  description = "The campaign to start. In Anchor, open the campaign: its ID is at the foot of the Overview tab, with a copy button."
   required = true
