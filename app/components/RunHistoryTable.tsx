@@ -1,3 +1,5 @@
+import { useSearchParams } from "react-router";
+
 import { humanise } from "../lib/format/label";
 import { Blank } from "./Blank";
 import { formatWhen } from "../lib/format/display";
@@ -12,8 +14,27 @@ interface Props {
   selectedRunId: string | null;
 }
 
+/**
+ * Where "View ledger" goes: the Ledger tab, showing that run, the page's other parameters
+ * kept (#724).
+ *
+ * It was `?run=<id>`, and a relative query replaces the whole query: `tab=runs` went with
+ * it, the page fell back to its first tab, and the merchant who asked for a ledger landed on
+ * Overview with nothing saying where the ledger had gone.
+ */
+export function ledgerHref(current: URLSearchParams, runId: string): string {
+  const next = new URLSearchParams(current);
+  next.set("tab", "ledger");
+  next.set("run", runId);
+  return `?${next}`;
+}
+
+/** Whether a run left ledger rows: planned or skipped, every row it considered is one. */
+const hasLedger = (run: RunSummary) => run.planned + run.skipped > 0;
+
 /** Every apply and revert for a campaign, newest first. */
 export function RunHistoryTable({ runs, selectedRunId, timeZone }: Props) {
+  const [params] = useSearchParams();
   return (
     <s-table>
       <s-table-header-row>
@@ -41,8 +62,11 @@ export function RunHistoryTable({ runs, selectedRunId, timeZone }: Props) {
             <s-table-cell>
               {run.id === selectedRunId ? (
                 <s-text>Showing</s-text>
+              ) : hasLedger(run) ? (
+                <s-link href={ledgerHref(params, run.id)}>View ledger</s-link>
               ) : (
-                <s-link href={`?run=${run.id}`}>View ledger</s-link>
+                // No rows, so no Ledger tab to open: the page would fall back to Overview.
+                <s-text color="subdued">Nothing written</s-text>
               )}
             </s-table-cell>
           </s-table-row>
