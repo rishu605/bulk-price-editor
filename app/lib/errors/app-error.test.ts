@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import fc from "fast-check";
+import { Prisma } from "@prisma/client";
 
 import { AppError, toAppError, type ErrorCode } from "./app-error";
 import { isErrorId, newErrorId } from "./error-id";
@@ -167,5 +168,53 @@ describe("the database being busy is not the merchant's fault", () => {
 
     expect(error.userMessage).toContain("heavy load");
     expect(error.userMessage).toContain("Nothing was changed in your store");
+  });
+});
+
+describe("Prisma refusing a query is not Shopify refusing a change (#747)", () => {
+  // The message Prisma threw for `/app/campaigns?status=active`, as Diagnostics stored it.
+  // It has no `code`, so it reached the text matching, where "invalid value" was taken to
+  // mean Shopify -- and the merchant was told Shopify had rejected part of a change and
+  // pointed at a ledger, for a page load that never called Shopify.
+  const PRISMA_MESSAGE = [
+    "Invalid `prisma.campaign.count()` invocation:",
+    '  where: { shopId: "shop", archivedAt: null, status: "active" }',
+    "Invalid value for argument `status`. Expected CampaignStatus.",
+  ].join("\n");
+
+  const prismaValidation = () =>
+    new Prisma.PrismaClientValidationError(PRISMA_MESSAGE, {
+      clientVersion: Prisma.prismaVersion.client,
+    });
+
+  it("files Prisma's validation error as ours, by its class", () => {
+    const error = toAppError(prismaValidation());
+
+    expect(error.code).toBe("UNKNOWN");
+    expect(error.status).toBe(500);
+    expect(error.userMessage).toContain("on our side");
+    expect(error.userMessage).not.toMatch(/Shopify|ledger/);
+  });
+
+  it("is not retried, because the same query fails the same way", () => {
+    expect(toAppError(prismaValidation()).retryable).toBe(false);
+  });
+
+  it("does not read 'invalid value' from just anyone as Shopify", () => {
+    // The same two words from a library that is not Shopify, with no class to go on.
+    expect(toAppError(new Error("Invalid value for argument `status`")).code).toBe("UNKNOWN");
+    expect(toAppError(new RangeError("Invalid value: 2026-13-45")).code).toBe("UNKNOWN");
+  });
+
+  it("still reads Shopify's own refusals as Shopify's", () => {
+    // How Shopify's GraphQL layer refuses a variable, and the userErrors the executors
+    // surface. Scoping the match must not lose either.
+    const coercion = new Error(
+      "Variable $variants of type [ProductVariantsBulkInput!]! was provided invalid value for 0.price (Expected value to not be null)",
+    );
+    expect(toAppError(coercion).code).toBe("SHOPIFY_REJECTED");
+    expect(toAppError(new Error("productVariantsBulkUpdate userErrors: price is invalid")).code).toBe(
+      "SHOPIFY_REJECTED",
+    );
   });
 });

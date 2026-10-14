@@ -26,6 +26,7 @@ import { sourceOf } from "../lib/testing/source";
 import { EmptyState, NoMatches } from "./AsyncState";
 import { clearedSearch } from "./FilterForm";
 import { CampaignListView } from "./campaign/CampaignListView";
+import type { CampaignFilters } from "../services/campaigns/list.server";
 
 const render = (node: React.ReactElement) =>
   renderToStaticMarkup(<StaticRouter location="/app/prices">{node}</StaticRouter>);
@@ -95,7 +96,7 @@ describe("the campaigns index picks the right one of the two", () => {
     pages: 1,
   });
 
-  const view = (filters: { q: string; status: string }) =>
+  const view = (filters: Pick<CampaignFilters, "q" | "status">) =>
     renderToStaticMarkup(
       <StaticRouter location="/app/campaigns">
         <CampaignListView

@@ -12,8 +12,10 @@
  */
 
 import { describe, expect, it } from "vitest";
+import fc from "fast-check";
 
-import { filtersFrom, PAGE_SIZE } from "./list.server";
+import { ALL_STATES } from "../../lib/lifecycle/transitions";
+import { filtersFrom, PAGE_SIZE, statusFrom } from "./list.server";
 
 const from = (query: string) => filtersFrom(new URLSearchParams(query));
 
@@ -48,6 +50,43 @@ describe("reading the filters", () => {
   it("treats 'attention' as a filter, since it spans several states", () => {
     expect(from("status=attention").status).toBe("attention");
   });
+});
+
+describe("a status the page did not write (#747)", () => {
+  // The status went into the where clause as typed, and the column is an enum: `active`
+  // from a hand-typed link threw inside Prisma and the list became an error page that
+  // blamed Shopify. Whatever arrives, what leaves the parser must be something the
+  // database accepts.
+
+  it.each([
+    ["active", "ACTIVE"],
+    ["Active", "ACTIVE"],
+    ["  draft ", "DRAFT"],
+    ["partial", "PARTIAL"],
+    ["Attention", "attention"],
+    ["ATTENTION", "attention"],
+  ])("reads %j as the state it names, %j", (typed, read) => {
+    expect(from(`status=${encodeURIComponent(typed)}`).status).toBe(read);
+  });
+
+  it.each(["<script>alert(1)</script>", "nope", "ACTIVE;DROP", "activ", "attention-please", "%"])(
+    "drops %j rather than filtering by it, so the whole list shows",
+    (typed) => {
+      expect(from(`status=${encodeURIComponent(typed)}`).status).toBe("");
+    },
+  );
+
+  it("never hands the query a value outside the enum, whatever the link says", () => {
+    const allowed = new Set<string>(["", "attention", ...ALL_STATES]);
+    fc.assert(
+      fc.property(fc.string(), (typed) => {
+        expect(allowed.has(statusFrom(typed))).toBe(true);
+      }),
+    );
+  });
+});
+
+describe("paging", () => {
 
   it.each(["0", "-3", "not-a-number", ""])("never pages below one (%s)", (page) => {
     expect(from(`page=${page}`).page).toBe(1);

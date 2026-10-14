@@ -1,4 +1,4 @@
-import { addDays } from "./calendar";
+import { addDays, isCalendarDay } from "./calendar";
 import { localInputToUtc } from "./window";
 
 /**
@@ -11,21 +11,19 @@ import { localInputToUtc } from "./window";
  *
  * "First moment" rather than midnight: through `localInputToUtc`, a day whose clocks skip
  * midnight starts at the hour they skip to, and a day that repeats an hour is still one day.
- * Dates are `YYYY-MM-DD`; anything else leaves that end of the range open.
+ * Dates are `YYYY-MM-DD` days that exist; anything else leaves that end of the range open.
+ * "That exist" because `2026-02-31` has the right shape and used to filter to 3 March
+ * without saying so (#747).
  */
 export function dayRange(
   from: string | undefined,
   to: string | undefined,
   timeZone: string,
 ): { gte?: Date; lt?: Date } {
-  const start = isDay(from) ? localInputToUtc(`${from}T00:00`, timeZone) : null;
-  const end = isDay(to) ? localInputToUtc(`${addDays(to, 1)}T00:00`, timeZone) : null;
+  const start = isCalendarDay(from) ? localInputToUtc(`${from}T00:00`, timeZone) : null;
+  const end = isCalendarDay(to) ? localInputToUtc(`${addDays(to, 1)}T00:00`, timeZone) : null;
   return {
     ...(start ? { gte: new Date(start) } : {}),
     ...(end ? { lt: new Date(end) } : {}),
   };
-}
-
-function isDay(value: string | undefined): value is string {
-  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
 }

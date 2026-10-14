@@ -47,4 +47,13 @@ describe("a filtered day, in the store's zone", () => {
     expect(dayRange("2026-09-25", "", "Asia/Tokyo")).toEqual({ gte: new Date("2026-09-24T15:00:00Z") });
     expect(dayRange("25/09/2026", "nonsense", "Asia/Tokyo")).toEqual({});
   });
+
+  it("leaves an end open when it has a date's shape but is not a day (#747)", () => {
+    // `Date.UTC` rolls these forward rather than refusing them: 31 Feb filtered to the end
+    // of 3 March and 2026-13-45 to February 2027, under a filter still showing what was typed.
+    expect(dayRange("garbage", "2026-02-31", "America/New_York")).toEqual({});
+    expect(dayRange("2026-13-45", "2026-09-00", "Asia/Tokyo")).toEqual({});
+    // A real 29 February is still a day.
+    expect(dayRange("2028-02-29", undefined, "UTC")).toEqual({ gte: new Date("2028-02-29T00:00:00Z") });
+  });
 });

@@ -80,6 +80,24 @@ export function localDate(instant: Date, timeZone: string): string {
   }).format(instant);
 }
 
+/**
+ * Whether a value from a URL is a day that exists, as `YYYY-MM-DD` (#747).
+ *
+ * The shape is not enough. `Date.UTC` rolls an impossible day forward rather than
+ * refusing it, so `2026-02-31` became 3 March and `2026-13-45` became February of the
+ * next year -- a page showing a different period from the one in its own heading, with
+ * nothing to say so. A day only counts if it reads back as itself. Anything that does not
+ * is treated as absent by the pages that take one, which fall back to their default.
+ */
+export function isCalendarDay(value: string | null | undefined): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [y, m, d] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  return (
+    date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d
+  );
+}
+
 /** Adds days to a `YYYY-MM-DD` string without going near a timezone. */
 export function addDays(date: string, days: number): string {
   const [y, m, d] = date.split("-").map(Number);
