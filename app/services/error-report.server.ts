@@ -155,3 +155,71 @@ export async function recentErrors(shopId: string, limit = ROWS_PER_VIEW) {
 export async function errorByPublicId(shopId: string, errorId: string) {
   return prisma.errorEvent.findFirst({ where: { shopId, errorId: errorId.trim().toUpperCase() } });
 }
+
+/**
+ * Deletes every failure that belongs to a shop or names it, for `shop/redact` (#785).
+ *
+ * The one table the cascade from `Shop` does not clear. Its relation is `SetNull`, so
+ * deleting the shop detached its errors rather than removing them -- and a row written
+ * before the shop was known, or by a path that never resolved it, was never linked in
+ * the first place. Both kinds keep text that names the shop: a fetch failure quotes
+ * `https://<domain>/admin/...`, a stack carries the URL it was handling, and a call
+ * site's context is whatever it attached.
+ *
+ * So two passes. A row attributed to the shop goes by its id; any row at all whose text
+ * names the domain goes by that. The second is a scan of the table, which is fine for a
+ * webhook Shopify sends once per shop, 48 hours after it left, over a table the worker
+ * keeps to `ERROR_EVENT_DAYS`.
+ *
+ * Call it before deleting the shop. Afterwards nothing links the attributed rows to it.
+ */
+export async function forgetShopErrors(domain: string, shopId: string | null): Promise<number> {
+  const own = shopId ? (await prisma.errorEvent.deleteMany({ where: { shopId } })).count : 0;
+
+  // Only ever a hostname. An empty or malformed domain would turn the pattern below into
+  // one that matches every row, and a redact must never become "delete every error".
+  if (!HOSTNAME.test(domain)) return own;
+
+  const named = await prisma.$executeRaw`
+    DELETE FROM error_events
+    WHERE concat_ws(' ', message, stack, "userMessage", route, context::text) ~* ${mentionOf(domain)}
+  `;
+  return own + named;
+}
+
+const HOSTNAME = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i;
+
+/**
+ * The domain as a whole hostname, for Postgres's `~*`. Bounded on both sides, because a
+ * substring match is wrong in the direction that costs someone else: redacting
+ * `shop.myshopify.com` would also delete `myshop.myshopify.com`'s errors.
+ */
+function mentionOf(domain: string): string {
+  return `(^|[^a-z0-9-])${domain.replaceAll(".", "\\.")}($|[^a-z0-9-])`;
+}
+
+/**
+ * How long a failure is kept: long past the moment a merchant quotes its id, and short
+ * enough that a table nothing else bounds does not keep a shop's errors for ever (#785).
+ */
+export const ERROR_EVENT_DAYS = 90;
+
+/**
+ * Deletes failures older than `ERROR_EVENT_DAYS`, a batch at a time.
+ *
+ * Without it the table only ever grew, and a row `shop/redact` could not attribute -- an
+ * unattributed failure that did not happen to name its shop -- stayed in it for good.
+ * Bounded per call, like the webhook log's, so a backlog drains over a few scheduler
+ * ticks rather than in one long delete.
+ */
+export async function pruneErrorEvents(now: Date = new Date(), batch = 5_000): Promise<number> {
+  const cutoff = new Date(now.getTime() - ERROR_EVENT_DAYS * 24 * 60 * 60_000);
+  const old = await prisma.errorEvent.findMany({
+    where: { createdAt: { lt: cutoff } },
+    select: { id: true },
+    take: batch,
+  });
+  if (old.length === 0) return 0;
+  const { count } = await prisma.errorEvent.deleteMany({ where: { id: { in: old.map((row) => row.id) } } });
+  return count;
+}

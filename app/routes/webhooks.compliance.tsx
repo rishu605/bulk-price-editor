@@ -15,7 +15,8 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import { logger } from "../lib/logging/logger";
 import prisma from "../db.server";
-import { recordedWebhook } from "../services/webhook-log.server";
+import { forgetShopErrors } from "../services/error-report.server";
+import { forgetShopDeliveries, recordedWebhook } from "../services/webhook-log.server";
 
 export const action = recordedWebhook(async ({ request }: ActionFunctionArgs) => {
   // Shopify requires JSON; rejecting anything else before parsing keeps malformed
@@ -42,12 +43,26 @@ export const action = recordedWebhook(async ({ request }: ActionFunctionArgs) =>
       break;
 
     case "SHOP_REDACT": {
-      // This one is real. Everything we hold is keyed to the shop, and the cascade
-      // rules on Shop remove variants, baselines, campaigns, ledger rows and audit
-      // entries with it.
+      // This one is real. Almost everything we hold is keyed to the shop, and the cascade
+      // rules on Shop remove variants, baselines, campaigns, ledger rows, audit entries,
+      // feedback, imports and the deliveries attributed to it along with it. Three
+      // tables are not reached that way, and each is cleared here by name (#785):
+      //
+      // - `error_events` is SetNull, so a shop's failures outlived it, and the ones
+      //   recorded before it was known never pointed at it at all. Both kinds can name
+      //   the domain. Cleared first, while the shop's id still finds its own rows.
+      // - `session` is Shopify's session storage, keyed by domain with no relation.
+      // - `webhook_events` cascades only where a delivery found the shop; one recorded
+      //   without it carries only the domain.
+      //
+      // This delivery's own record is written after this returns, and without the domain
+      // (`recordedWebhook`). The log line below names the shop; logs roll over.
+      const record = await prisma.shop.findUnique({ where: { domain: shop }, select: { id: true } });
+      const errors = await forgetShopErrors(shop, record?.id ?? null);
       const deleted = await prisma.shop.deleteMany({ where: { domain: shop } });
       await prisma.session.deleteMany({ where: { shop } });
-      logger.info("compliance webhook: shop purged", { topic, shop, purged: deleted.count });
+      const deliveries = await forgetShopDeliveries(shop);
+      logger.info("compliance webhook: shop purged", { topic, shop, purged: deleted.count, errors, deliveries });
       break;
     }
 
