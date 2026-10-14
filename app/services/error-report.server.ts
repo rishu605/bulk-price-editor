@@ -11,12 +11,14 @@
  */
 
 import prisma from "../db.server";
-import { AppError, toAppError } from "../lib/errors/app-error";
+import { AppError, toAppError, userMessageFor } from "../lib/errors/app-error";
+import type { BrowserReport } from "../lib/errors/browser-report";
 import type { ReportedError } from "../lib/errors/report";
 import { newErrorId } from "../lib/errors/error-id";
 import { logger } from "../lib/logging/logger";
 import { redact, redactText } from "../lib/logging/redact";
 import { captureError, setShopContext } from "../lib/observability/sentry.server";
+import { redactPricesInText } from "../lib/telemetry/redact";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 
 export interface ReportContext {
@@ -117,6 +119,93 @@ export async function reportError(
 // The synchronous reporter lives in lib so the ErrorBoundary can use it without
 // pulling Prisma into the client bundle.
 export { reportErrorSync } from "../lib/errors/report";
+
+/** What a stored browser report's row has in `method`, where a server error has GET or POST. */
+export const BROWSER_METHOD = "BROWSER";
+
+/**
+ * Browser reports one shop may store in an hour.
+ *
+ * The page sends each reference once and only a few per load, but a crash that reloads
+ * itself starts every load afresh. Past this the report is logged and not stored, so one
+ * broken page cannot fill the table the alerts and Diagnostics read.
+ */
+export const BROWSER_REPORTS_PER_HOUR = 60;
+
+export type BrowserStoreOutcome = "stored" | "throttled" | "unstored";
+
+/**
+ * Stores a crash the browser reported, under the reference its error screen showed (#783).
+ *
+ * Stored like a server error, so Diagnostics' own lookup finds it: same table, same
+ * columns, attributed to the shop the endpoint authenticated. The shop is a parameter
+ * and never comes from the report.
+ *
+ * Idempotent on the reference. A retry of one already stored answers `stored` and writes
+ * nothing; the unique index is the backstop for two arriving at once. A reference already
+ * held by another shop's row is left alone and answers `unstored`, since this shop's
+ * lookup would not find it.
+ *
+ * The answer comes from the lookup Diagnostics itself uses, so `stored` means exactly
+ * "quoting this reference on this shop's Diagnostics page finds it".
+ */
+export async function recordBrowserError(
+  shop: { id: string; domain: string },
+  report: BrowserReport,
+  now: Date = new Date(),
+): Promise<BrowserStoreOutcome> {
+  if (await errorByPublicId(shop.id, report.errorId)) return "stored";
+
+  // Log first, as `reportError` does: if the database is what is failing, or the ceiling
+  // below refuses the row, the log line is all there will be.
+  logger.error("browser render failed", {
+    errorId: report.errorId,
+    code: report.code,
+    shop: shop.domain,
+    shopId: shop.id,
+    route: report.route ?? undefined,
+    errorName: report.name ?? undefined,
+  });
+
+  const recent = await prisma.errorEvent.count({
+    where: { shopId: shop.id, method: BROWSER_METHOD, createdAt: { gte: new Date(now.getTime() - 60 * 60_000) } },
+  });
+  if (recent >= BROWSER_REPORTS_PER_HOUR) return "throttled";
+
+  await prisma.errorEvent.createMany({
+    data: [
+      {
+        errorId: report.errorId,
+        shopId: shop.id,
+        code: report.code,
+        message: browserMessage(report),
+        stack: report.stack ? redactPricesInText(redactText(report.stack)) : null,
+        userMessage: userMessageFor(report.code),
+        route: report.route,
+        method: BROWSER_METHOD,
+        context: report.name ? { errorName: report.name } : undefined,
+        retryable: false,
+      },
+    ],
+    skipDuplicates: true,
+  });
+
+  return (await errorByPublicId(shop.id, report.errorId)) ? "stored" : "unstored";
+}
+
+/**
+ * The technical message for a browser crash, which the browser does not send.
+ *
+ * Says so, and says where to look instead. An error with no frames at all is one React
+ * Router carried over from the server's render — it empties the stack of every error it
+ * hands the browser — so its detail is in the server log, not here.
+ */
+function browserMessage(report: BrowserReport): string {
+  const what = `${report.code}: ${report.name ?? "Error"} while the page rendered in the browser.`;
+  return report.stack
+    ? `${what} Its message stays in the browser, since it can carry prices; the stack says where.`
+    : `${what} No stack came with it, which means it was raised while the server rendered the page: the server log has its detail.`;
+}
 
 // Both of these go through redactText before they are stored. The message and the
 // stack are plain columns rather than part of the context object, so they miss the

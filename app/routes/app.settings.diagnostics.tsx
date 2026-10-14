@@ -14,7 +14,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
-import { errorByPublicId, recentErrors } from "../services/error-report.server";
+import { ERROR_EVENT_DAYS, errorByPublicId, recentErrors } from "../services/error-report.server";
 import { isErrorId } from "../lib/errors/error-id";
 import { EmptyState } from "../components/AsyncState";
 import { RouteBoundary } from "../components/RouteBoundary";
@@ -43,6 +43,7 @@ export const loader = withGuard("/app/settings/diagnostics", async ({ request }:
 
   return {
     query,
+    keptForDays: ERROR_EVENT_DAYS,
     invalidQuery: query.length > 0 && !isErrorId(query),
     match: match
       ? {
@@ -88,7 +89,7 @@ function tilesFor(byCode: Array<[string, number]>) {
 }
 
 export default function Debug() {
-  const { query, invalidQuery, match, recent, byCode } = useLoaderData<typeof loader>();
+  const { query, keptForDays, invalidQuery, match, recent, byCode } = useLoaderData<typeof loader>();
   const byKind = tilesFor(byCode);
 
   return (
@@ -124,11 +125,18 @@ export default function Debug() {
           </s-banner>
         ) : null}
 
+        {/* Every reason a reference can be missing, not only the rarest (#783). This
+            used to blame a database outage alone, and sent the reader looking for one
+            when the usual cause was a crash in the browser whose report never arrived. */}
         {query && !invalidQuery && !match ? (
           <s-banner tone="warning">
             <s-paragraph>
-              No error stored under {query}. Errors are recorded when they happen; if
-              the database itself was down, only the server log will have it.
+              No error stored under {query}. A reference can be missing for three
+              reasons: the error happened in the browser and its report never reached
+              us (the connection dropped, or the page was closed first); it is more than{" "}
+              {keptForDays} days old; or the database was down when it happened, and only
+              the server log has it. Send support the reference with what you were doing,
+              and they can trace it from there.
             </s-paragraph>
           </s-banner>
         ) : null}

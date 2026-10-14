@@ -13,6 +13,7 @@
 
 import { ActionRow } from "./ActionRow";
 import { PageShell } from "./PageShell";
+import type { ReferenceState } from "../lib/errors/browser-report";
 import { helpLabelFor, helpPathFor } from "../lib/errors/help-links";
 import { SPACE } from "../lib/ui/spacing";
 
@@ -26,6 +27,12 @@ export interface ErrorScreenProps {
   stack?: string | null;
   /** Where "try again" should go. Defaults to reloading. */
   retryHref?: string;
+  /**
+   * Whether support can look the reference up (#783). Defaults to `recorded`, which is true
+   * of every error the server guard reported; a crash in the browser is `recording` until
+   * the server confirms it stored the report.
+   */
+  reference?: ReferenceState;
 }
 
 export function ErrorScreen({
@@ -35,6 +42,7 @@ export function ErrorScreen({
   retryable,
   stack,
   retryHref,
+  reference = "recorded",
 }: ErrorScreenProps) {
   return (
     <PageShell heading="Something went wrong">
@@ -72,10 +80,7 @@ export function ErrorScreen({
               <s-divider />
 
               <s-paragraph>
-                <s-text>
-                  This reference links straight to the full technical detail. Contacting
-                  support from here carries it for you.
-                </s-text>
+                <s-text>{REFERENCE_COPY[reference]}</s-text>
               </s-paragraph>
               <s-paragraph>
                 <s-text><strong>{errorId}</strong> · {code}</s-text>
@@ -106,6 +111,24 @@ export function ErrorScreen({
     </PageShell>
   );
 }
+
+/**
+ * What the reference is good for, said only as far as it is true (#783).
+ *
+ * "Links straight to the full technical detail" is a promise about a row in the database.
+ * A crash in the browser has one only once its report has reached the server, and the
+ * screen used to make the promise for references that were never stored: Diagnostics
+ * then answered "No error stored", on the screen whose job is getting somebody help.
+ * Until the server confirms it, the sentence says what support needs instead.
+ */
+export const REFERENCE_COPY: Record<ReferenceState, string> = {
+  recorded:
+    "This reference links straight to the full technical detail. Contacting support from here carries it for you.",
+  recording:
+    "Support needs this reference and a line about what you were doing. Contacting support from here carries the reference for you.",
+  unrecorded:
+    "This error's details didn't reach us, so the reference alone won't find them. Support needs it and a line about what you were doing; contacting support from here carries the reference for you.",
+};
 
 /**
  * The support route, carrying the error and the page it happened on.
