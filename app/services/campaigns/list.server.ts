@@ -10,7 +10,7 @@
 import { neverStarts, parseSchedule } from "../../lib/scheduling/window";
 import prisma from "../../db.server";
 import { describeCampaign } from "../../lib/campaigns/describe";
-import { astOf, ruleOf } from "./model.server";
+import { astOf, ruleOf, segmentNameOf } from "./model.server";
 import { ROWS_PER_VIEW } from "../../lib/ui/table-budget";
 import {
   ALL_STATES,
@@ -156,7 +156,7 @@ export async function listCampaigns(shopId: string, filters: CampaignFilters) {
       // What it does and what to, as sentences, through the one formatter every surface
       // uses. The index used to say everything *about* a campaign and nothing about what
       // it is.
-      ...describeCampaign({ rule: ruleOf(c), ast: astOf(c), segmentName: c.segments[0]?.name }),
+      ...describeCampaign({ rule: ruleOf(c), ast: astOf(c), segmentName: segmentNameOf(c) }),
       note: c.note,
       archived: c.archivedAt !== null,
       createdAt: c.createdAt.toISOString(),

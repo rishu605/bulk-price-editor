@@ -228,6 +228,30 @@ export function segmentIdOf(campaign: Pick<Campaign, "schedule">): string | null
 }
 
 /**
+ * True when the campaign was built on a segment that has since been deleted (#776).
+ *
+ * The campaign keeps the segment's id in its schedule; the relation goes with the segment.
+ */
+export async function segmentGone(shopId: string, campaign: Pick<Campaign, "schedule">): Promise<boolean> {
+  const segmentId = segmentIdOf(campaign);
+  if (!segmentId) return false;
+  return (await prisma.segment.count({ where: { id: segmentId, shopId } })) === 0;
+}
+
+/** How a campaign whose segment was deleted describes its scope, wherever it is listed. */
+export const DELETED_SEGMENT_SCOPE = "Its segment was deleted, so it prices nothing";
+
+/**
+ * The segment name to describe a campaign's scope by: the segment's, or
+ * `DELETED_SEGMENT_SCOPE` when it named one that is gone. Without this, a campaign whose
+ * segment was deleted described its stored filter instead -- "All variants" for a
+ * spreadsheet campaign -- which is exactly what it no longer prices.
+ */
+export function segmentNameOf(campaign: Pick<Campaign, "schedule"> & { segments: Array<{ name: string }> }): string | undefined {
+  return campaign.segments[0]?.name ?? (segmentIdOf(campaign) ? DELETED_SEGMENT_SCOPE : undefined);
+}
+
+/**
  * The scope a campaign actually runs against.
  *
  * Resolved rather than copied. A campaign that had its segment's filter written into
@@ -235,10 +259,12 @@ export function segmentIdOf(campaign: Pick<Campaign, "schedule">): string | null
  * which would make "reusable" a lie -- the merchant fixes the segment once and expects
  * every campaign using it to follow.
  *
- * A segment that has since been deleted falls back to the campaign's own stored
- * filter. The reference guard makes that nearly unreachable, but "nearly" is not a
- * basis for letting an empty AST through here: an empty AST matches the whole
- * catalogue, so the failure mode would be repricing every product in the store.
+ * A segment that has since been deleted matches nothing. It used to fall back to the
+ * campaign's own stored filter, and a spreadsheet campaign's is `{ groups: [] }`, which
+ * matches the whole catalogue. Once a segment only finished and draft campaigns use can
+ * be deleted (#776), that fallback is one Apply away from repricing every product in the
+ * store, so a campaign whose segment is gone has nothing in scope, and `runCampaign`
+ * refuses to apply it (`segmentGone`).
  */
 export async function scopeOf(
   shopId: string,
@@ -251,7 +277,9 @@ export async function scopeOf(
     where: { id: segmentId, shopId },
     select: { kind: true, filterAst: true, frozenVariantGids: true },
   });
-  if (!segment) return astOf(campaign);
+  if (!segment) {
+    return { groups: [{ conditions: [{ field: "variantGid", value: [] }] }], productStatuses: productStatusesFor(campaign) };
+  }
 
   return {
     ...segmentToAst({

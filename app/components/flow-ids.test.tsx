@@ -80,7 +80,7 @@ describe("the campaign page shows its ID for Flow", () => {
 describe("Settings → Segments shows each segment's ID", () => {
   const segments: SegmentRow[] = [
     { id: "seg_summer_01", name: "Summer", kind: "DYNAMIC", size: 12, usedBy: [] },
-    { id: "seg_outlet_02", name: "Outlet", kind: "FROZEN", size: 3, usedBy: [{ name: "Clearance" }] },
+    { id: "seg_outlet_02", name: "Outlet", kind: "FROZEN", size: 3, usedBy: [{ id: "cmp_clearance", name: "Clearance", status: "ACTIVE" }] },
   ];
   const html = render(<SegmentTable segments={segments} Form={"form" as never} busy={false} />);
 

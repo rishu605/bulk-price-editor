@@ -22,7 +22,7 @@ import { planRun } from "../../lib/planning/plan";
 import { recordWriteIntents, resolveOverwrittenDrift } from "../drift.server";
 import { loadCandidates, pricesWrittenBy, productMapFor, withWritten } from "./candidates.server";
 import { refreshBasePrices } from "../live-prices.server";
-import { isPractice, loadCampaignContext, scopeOf, importIdsOf} from "./model.server";
+import { isPractice, loadCampaignContext, scopeOf, importIdsOf, segmentGone } from "./model.server";
 import { astToWhere } from "../segments.server";
 import { DEFAULT_THRESHOLD } from "../../lib/planning/write-path";
 import { AppError, toAppError } from "../../lib/errors/app-error";
@@ -448,6 +448,18 @@ async function executeCampaignRun(
       userMessage:
         "This is a practice campaign, so it cannot be applied — that is the point of it. " +
         "Create a real campaign with the same scope and rule when you are ready.",
+      context: { campaignId },
+    });
+  }
+  // A campaign whose segment was deleted has nothing in scope (#776). Refused by name rather
+  // than run as an empty apply that reads as "nothing to change". A revert still runs: it
+  // takes back what the campaign wrote, whatever its scope says now.
+  if (!options.revert && practising && (await segmentGone(shopId, practising))) {
+    throw new AppError({
+      code: "VALIDATION",
+      userMessage:
+        "This campaign's segment was deleted, so it has no products to price. Duplicate it " +
+        "and choose a segment for the copy, or archive it.",
       context: { campaignId },
     });
   }

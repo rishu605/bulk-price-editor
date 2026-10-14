@@ -28,7 +28,7 @@ import { reportError } from "../services/error-report.server";
 import { withGuard } from "../lib/errors/guard.server";
 import { pressRefusal } from "../services/campaigns/blast-radius.server";
 import { describeCampaign } from "../lib/campaigns/describe";
-import { astOf, ruleOf } from "../services/campaigns/model.server";
+import { astOf, ruleOf, segmentNameOf } from "../services/campaigns/model.server";
 import { actorFor } from "../lib/audit/actor";
 import { isPractice } from "../services/campaigns/model.server";
 import {
@@ -136,7 +136,7 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     warnings,
     // The same two sentences the index shows, through the same formatter, so a merchant
     // reading "20% off · In Outerwear" in the list meets those words again here.
-    ...describeCampaign({ rule: ruleOf(record), ast: astOf(record), segmentName: record.segments[0]?.name }),
+    ...describeCampaign({ rule: ruleOf(record), ast: astOf(record), segmentName: segmentNameOf(record) }),
     campaignId,
     note: record.note,
     archived: record.archivedAt !== null,

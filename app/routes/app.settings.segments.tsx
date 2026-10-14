@@ -107,6 +107,8 @@ type ActionData = {
   field?: string;
   /** An edit that reaches running or scheduled campaigns, waiting to be confirmed (#742). */
   confirm?: SegmentEditConfirmation;
+  /** A delete that leaves draft or finished campaigns with nothing to price, waiting to be confirmed (#776). */
+  confirmDelete?: { segmentId: string; campaigns: Array<{ id: string; name: string; status: string }> };
   /** The edit was saved: the page leaves edit mode. */
   saved?: boolean;
 };
@@ -121,7 +123,7 @@ export const action = withGuard("/app/settings/segments", async ({ request }: Ac
 
   try {
     if (intent === "delete") {
-      await deleteSegment(shop.id, String(form.get("segmentId")));
+      await deleteSegment(shop.id, String(form.get("segmentId")), form.get("acknowledged") === "1");
       return { ok: true, message: "Segment deleted." };
     }
 
@@ -220,12 +222,17 @@ export const action = withGuard("/app/settings/segments", async ({ request }: Ac
     const field = error instanceof AppError && typeof error.context?.field === "string" ? error.context.field : undefined;
     const confirm =
       error instanceof AppError && error.context?.confirm ? (error.context.confirm as SegmentEditConfirmation) : undefined;
+    const confirmDelete =
+      error instanceof AppError && error.context?.confirmDelete
+        ? (error.context.confirmDelete as NonNullable<ActionData["confirmDelete"]>)
+        : undefined;
     return {
       ok: false,
       message: reported.userMessage,
       errorId: reported.errorId,
       ...(field ? { field } : {}),
       ...(confirm ? { confirm } : {}),
+      ...(confirmDelete ? { confirmDelete } : {}),
     };
   }
 });
@@ -243,7 +250,7 @@ export default function Segments() {
   return (
     <PageShell heading="Segments">
       {result ? (
-        <s-banner tone={result.ok ? "success" : "critical"}>
+        <s-banner tone={result.ok ? "success" : result.confirmDelete ? "warning" : "critical"}>
           <s-paragraph>{result.message}</s-paragraph>
           {result.errorId ? <s-paragraph>Reference {result.errorId}</s-paragraph> : null}
         </s-banner>
@@ -267,7 +274,12 @@ export default function Segments() {
             description="A segment is a saved way of describing which products a campaign covers, so you do not rebuild the same filter for every sale. Make one below."
           />
         ) : (
-          <SegmentTable segments={segments} Form={fetcher.Form} busy={busy} />
+          <SegmentTable
+            segments={segments}
+            Form={fetcher.Form}
+            busy={busy}
+            confirmingDelete={result && !result.ok ? result.confirmDelete?.segmentId : undefined}
+          />
         )}
       </Card>
 
