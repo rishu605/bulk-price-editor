@@ -32,6 +32,7 @@
 
 import { ActionRow } from "../ActionRow";
 import { ScheduleButtons, ScheduleModals } from "./ScheduleControls";
+import { ZoneShiftNotice } from "./ZoneShiftNotice";
 import { ApplyConfirmation, APPLY_MODAL_ID } from "./ApplyConfirmation";
 import { RevertConfirmation, REVERT_MODAL_ID } from "./RevertConfirmation";
 import { SPACE } from "../../lib/ui/spacing";
@@ -64,9 +65,13 @@ export function CampaignHeader({
   state,
   runs,
   timeZone,
+  zoneShift,
 }: CampaignDetailProps) {
   return (
     <>
+    {/* Above the row, with the page's other banners: it qualifies the schedule sentence
+        beside the badge, which reads in the store's zone now (#799). */}
+    {zoneShift ? <ZoneShiftNotice zoneShift={zoneShift} fetcher={fetcher} busy={busy} /> : null}
     <s-grid
       // The status takes the space, the actions take what they need. Centred, so the
       // badge and the buttons sit on one line whatever the schedule sentence wraps to.

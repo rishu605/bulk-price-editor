@@ -30,6 +30,7 @@ import { enqueueWithin, webQueue } from "../worker/web-queue.server";
 import { captureBaselines } from "./baselines.server";
 import { syncCatalogViaBulk } from "./catalog-bulk-sync.server";
 import { fetchShopBasics, syncCatalog, type GraphQLRunner } from "./catalog-sync.server";
+import { recordShopTimezone } from "./shop-timezone.server";
 import { syncMarkets } from "./markets-sync.server";
 import { markSyncComplete } from "./shop.server";
 
@@ -218,8 +219,11 @@ export async function runFullSync(shopId: string, client: AdminClient, actor: st
       where: { id: shopId },
       // Recorded at sync, because it answers "which plan applies": a development store gets
       // the top tier, and nothing else sets the flag.
-      data: { timezone: basics.timezone, developerStore: basics.developerStore },
+      data: { developerStore: basics.developerStore },
     });
+    // Through the one writer of the zone, which records what campaigns were typed in (#799).
+    // Left alone when Shopify did not say, rather than reset to a guess.
+    if (basics.timezone) await recordShopTimezone(shopId, basics.timezone, actor);
 
     // Bulk first: one operation and a streamed result beats ten thousand paginated round
     // trips. Its poll sleeps are the heartbeat while Shopify builds the file.

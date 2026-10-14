@@ -89,16 +89,16 @@ describe("reading the four fields", () => {
 
 describe("a practice campaign's dates (#827)", () => {
   it("refuses a start, naming Start and saying how to keep it as practice", () => {
-    const problem = practiceWindowProblem({ startUtc: "2026-11-27T05:00:00Z", endUtc: "2026-11-30T04:59:00Z" });
+    const problem = practiceWindowProblem({ start: "2026-11-27T00:00", end: "2026-11-29T23:59" });
     expect(problem).toMatch(/^Start: a practice campaign is only ever previewed, so it cannot be scheduled/);
     expect(problem).toMatch(/Clear Start and End to keep it as practice, or create a real campaign/);
   });
 
   it("refuses an end on its own too, naming End rather than asking for a start", () => {
-    expect(practiceWindowProblem({ startUtc: null, endUtc: "2026-11-30T04:59:00Z" })).toMatch(/^End: a practice campaign/);
+    expect(practiceWindowProblem({ start: null, end: "2026-11-29T23:59" })).toMatch(/^End: a practice campaign/);
   });
 
   it("has nothing to say when no date was given", () => {
-    expect(practiceWindowProblem({ startUtc: null, endUtc: null })).toBeNull();
+    expect(practiceWindowProblem({ start: null, end: null })).toBeNull();
   });
 });

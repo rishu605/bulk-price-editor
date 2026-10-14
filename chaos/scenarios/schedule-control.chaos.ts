@@ -14,15 +14,16 @@ import { describe, expect, it, vi } from "vitest";
 
 import prisma from "../../app/db.server";
 import { tick } from "../../app/services/scheduler.server";
-import { chaosAdminClient } from "../harness/http-client";
+import { chaosAdminClient, chaosAdminContext } from "../harness/http-client";
 import { withChaos, type ChaosContext } from "../harness/scenario";
 
 let pending = { shop: "" };
 let endpoint = "";
 
+// An `admin` the fake answers: dates are read in the zone Shopify has for the store (#799).
 vi.mock("../../app/shopify.server", () => ({
   authenticate: {
-    admin: async () => ({ session: { shop: pending.shop }, sessionToken: undefined, admin: {} }),
+    admin: async () => ({ session: { shop: pending.shop }, sessionToken: undefined, admin: chaosAdminContext(endpoint) }),
   },
 }));
 
@@ -194,6 +195,7 @@ describe("chaos: creating a campaign whose window could never run", () => {
     await withChaos("schedule-create-refused", CATALOG, async (chaos) => {
       const { shopId, domain } = chaos.fixture;
       pending = { shop: domain };
+      endpoint = chaos.server.endpoint();
       await prisma.shop.update({ where: { id: shopId }, data: { timezone: "UTC" } });
       const { action } = await import("../../app/routes/app.campaigns.new");
       const { ANCHOR_ERROR } = await import("../../app/lib/errors/guard.server");

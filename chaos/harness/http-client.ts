@@ -9,10 +9,15 @@
  */
 
 import type { AdminClient } from "../../app/lib/execution/sync-executor";
-import { toAdminClient } from "../../app/services/admin-client.server";
+import { toAdminClient, type ShopifyAdminContext } from "../../app/services/admin-client.server";
 
-export function chaosAdminClient(endpoint: string): AdminClient {
-  return toAdminClient({
+/**
+ * The `admin` that `authenticate.admin` hands a route, answered by the fake. For a scenario
+ * that replaces `authenticate.admin` and drives a route that asks Shopify something -- the
+ * store's zone, since #799 -- through the route's own `toAdminClient(admin)`.
+ */
+export function chaosAdminContext(endpoint: string): ShopifyAdminContext {
+  return {
     async graphql(query, options) {
       const response = await fetch(endpoint, {
         method: "POST",
@@ -21,5 +26,9 @@ export function chaosAdminClient(endpoint: string): AdminClient {
       });
       return { json: () => response.json() };
     },
-  });
+  };
+}
+
+export function chaosAdminClient(endpoint: string): AdminClient {
+  return toAdminClient(chaosAdminContext(endpoint));
 }

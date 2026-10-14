@@ -26,15 +26,31 @@ describe("the schedule's timezone line", () => {
     // A time rendered from the browser's clock differs between the server render and
     // hydration, and React replaces it — the same trap `formatAgo` carries a paragraph
     // about. The value is built in the loader.
-    expect(EDITOR).toContain("timeZoneNow: formatClock(new Date(), shop.timezone)");
+    expect(EDITOR).toContain("timeZoneNow: timeZone ? formatClock(new Date(), timeZone)");
   });
 
   it("sends the merchant to where the zone actually lives", () => {
-    // Deliberately not our own Settings. The zone is synced from Shopify's
-    // `ianaTimezone` — see `catalog-sync.server.ts` — and a second, editable copy here
-    // would let campaign times drift from the timestamps on the merchant's own orders.
-    // A setting that disagrees with the platform's is worse than one you cannot edit.
+    // Deliberately not our own Settings. The zone is Shopify's `ianaTimezone` — see
+    // `shop-timezone.server.ts` — and a second, editable copy here would let campaign
+    // times drift from the timestamps on the merchant's own orders. A setting that
+    // disagrees with the platform's is worse than one you cannot edit.
     expect(EDITOR).toMatch(/Shopify store settings/);
+  });
+
+  it("names only a zone it has just read from Shopify (#799)", () => {
+    // It printed the shop row's zone, which was UTC on every store that had not synced
+    // yet, beside "That comes from your Shopify store settings". A 9 AM sale typed under
+    // that sentence opened at 4 AM in New York.
+    expect(EDITOR).toContain("confirmShopTimezone(shop.id, toAdminClient(admin)");
+    expect(EDITOR).not.toMatch(/timeZone: shop\.timezone/);
+    // And converts typed times in the zone it asks for, not the row's.
+    expect(EDITOR).toContain("windowInStoreZone(shop.id, toAdminClient(admin)");
+    expect(EDITOR).not.toMatch(/windowFromFields\([\s\S]*?shop\.timezone/);
+  });
+
+  it("says so when Shopify did not answer, and takes the dates away", () => {
+    expect(EDITOR).toMatch(/couldn&rsquo;t read your store&rsquo;s time zone from Shopify/);
+    expect(EDITOR.match(/disabled=\{!timeZone \|\| undefined\}/g)).toHaveLength(4);
   });
 });
 

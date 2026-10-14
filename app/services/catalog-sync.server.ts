@@ -14,6 +14,7 @@
 import { carryShopifyCosts } from "./baselines.server";
 import prisma from "../db.server";
 import { parseMoney } from "../lib/money/money";
+import { isTimeZone } from "../lib/scheduling/zone-shift";
 
 /** Minimal client shape, so this is testable without an authenticated session. */
 export interface GraphQLRunner {
@@ -357,7 +358,7 @@ const SHOP_CURRENCY = `#graphql
 
 export async function fetchShopBasics(
   client: GraphQLRunner,
-): Promise<{ currency: string; timezone: string; developerStore: boolean }> {
+): Promise<{ currency: string; timezone: string | null; developerStore: boolean }> {
   const response = await client.graphql(SHOP_CURRENCY);
   const body = (await response.json()) as {
     data?: {
@@ -368,9 +369,12 @@ export async function fetchShopBasics(
       };
     };
   };
+  const zone = body.data?.shop?.ianaTimezone;
   return {
     currency: body.data?.shop?.currencyCode ?? "USD",
-    timezone: body.data?.shop?.ianaTimezone ?? "UTC",
+    // Null rather than "UTC" when Shopify did not say (#799). A guessed zone is recorded as
+    // if it were the store's, and every time typed against it is hours out.
+    timezone: isTimeZone(zone) ? zone : null,
     // Defaults to false, so a query that fails or a field Shopify stops returning leaves
     // the shop on its real plan rather than silently handing out the top tier.
     developerStore: body.data?.shop?.plan?.partnerDevelopment === true,

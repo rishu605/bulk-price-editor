@@ -207,6 +207,11 @@ The mirror is a cache; **Shopify is truth.**
 
 - All times stored UTC; the shop's IANA timezone is stored and the UI always shows which
   zone it is rendering.
+- The zone is Shopify's `shop.ianaTimezone`, read on every authenticated visit and again
+  wherever a typed time is converted. A typed time is never converted in a zone the app
+  could not read. Each window records the zone it was typed in (`schedule.zone`), so a
+  later change of zone can name the campaigns whose local time moved and offer to keep the
+  typed time (#799).
 - Recurrence is a constrained RRULE subset (WEEKLY byday, MONTHLY bymonthday, INTERVAL) —
   not a full iCal engine. Occurrences are materialised 60 days ahead.
 - DST (E14): ambiguous local times resolve to the first occurrence, skipped times roll
