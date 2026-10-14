@@ -6,6 +6,8 @@
  * earlier version of baseline capture appear to hang.
  */
 
+import { Prisma } from "@prisma/client";
+
 import prisma from "../../db.server";
 import { inChunks } from "../../lib/db/chunk";
 import { money, type Money } from "../../lib/money/money";
@@ -184,6 +186,55 @@ export async function loadCandidates(
   return candidates;
 }
 
+
+/**
+ * The variants whose base price this campaign has written since it last finished
+ * reverting: what a whole-campaign revert has to take back (#828). Deleted variants are
+ * left out -- there is nothing on the storefront to revert.
+ */
+export async function pricesWrittenBy(shopId: string, campaignId: string): Promise<string[]> {
+  const lastRevert = await prisma.campaignRun.findFirst({
+    where: { campaignId, kind: "REVERT", status: "COMPLETED", NOT: { occurrenceKey: { startsWith: "VARIANT-" } } },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  });
+  const rows = await prisma.$queryRaw<Array<{ variantGid: string }>>`
+    SELECT DISTINCT c."variantGid"
+    FROM "variant_changes" c
+    JOIN "campaign_runs" r ON r."id" = c."runId"
+    JOIN "variant_index" v ON v."shopId" = c."shopId" AND v."variantGid" = c."variantGid"
+    WHERE r."campaignId" = ${campaignId} AND r."kind" = 'APPLY'
+      AND c."shopId" = ${shopId} AND c."surfaceKind" = 'BASE' AND c."priceListGid" = ''
+      AND c."status" IN ('VERIFIED', 'CLAMPED')
+      AND v."deletedAt" IS NULL
+      ${lastRevert ? Prisma.sql`AND r."createdAt" > (${lastRevert.createdAt}::timestamptz AT TIME ZONE 'UTC')` : Prisma.empty}`;
+  return rows.map((row) => row.variantGid);
+}
+
+/**
+ * A whole-campaign revert's candidates: its scope's, and every variant it wrote that has
+ * since left that scope.
+ *
+ * What a campaign wrote is what its revert takes back, whatever the scope says now (#828,
+ * edge case E6) -- a product untagged mid-sale keeps the sale price otherwise. Since #751
+ * a scope also follows product status, so the ordinary case is a product archived or set
+ * back to draft mid-sale. One function for the revert and both of its previews (the
+ * confirmation's and the rollback report's): each used to plan from the scope alone, and
+ * said such a product "reverts to" its sale price while the revert put its baseline back.
+ *
+ * Loaded with no conditions and no status, so nothing about the scope can drop them again.
+ */
+export async function withWritten(
+  shopId: string,
+  scoped: PlanCandidate[],
+  written: readonly string[],
+  importIds: readonly string[],
+): Promise<PlanCandidate[]> {
+  const inScope = new Set(scoped.map((candidate) => candidate.ref.variantGid));
+  const strays = written.filter((gid) => !inScope.has(gid));
+  if (strays.length === 0) return scoped;
+  return [...scoped, ...(await loadCandidates(shopId, { groups: [] }, strays, importIds))];
+}
 
 /**
  * Imported prices for these variants, from these imports.

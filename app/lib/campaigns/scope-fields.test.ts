@@ -16,6 +16,7 @@
 import { describe, expect, it } from "vitest";
 
 import { SCOPE_CONDITION_FIELDS } from "./draft-form";
+import { PRODUCT_STATUS_FIELDS } from "./product-status";
 import { sourceOf } from "../testing/source";
 
 const EDITOR = sourceOf("app/routes/app.campaigns.new.tsx");
@@ -69,5 +70,20 @@ describe("the editor and the preview read the same fields", () => {
     );
 
     expect(EXPECTED.filter((field) => !named.has(field))).toEqual([]);
+  });
+});
+
+describe("the draft and archived boxes (#751)", () => {
+  it("renders a box for every status the reader knows", () => {
+    // A status the reader accepts and nothing renders is an opt-in no merchant can reach.
+    for (const field of Object.keys(PRODUCT_STATUS_FIELDS)) {
+      expect(EDITOR, `no checkbox named ${field}`).toMatch(new RegExp(`<s-checkbox[^>]*?name="${field}"`));
+    }
+  });
+
+  it("creates the campaign from the reader the preview uses", () => {
+    // `draftCampaignFrom` reads them through `productStatusesFrom`; the action reading the
+    // form any other way is a box the preview prices and the campaign forgets.
+    expect(EDITOR).toContain("productStatuses: productStatusesFrom(read)");
   });
 });

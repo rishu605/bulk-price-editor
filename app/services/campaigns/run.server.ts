@@ -10,7 +10,6 @@
  */
 
 import type { BulkOperationState } from "../../lib/execution/bulk-executor";
-import { Prisma } from "@prisma/client";
 
 import prisma from "../../db.server";
 import { formatAgo, formatCount } from "../../lib/format/display";
@@ -21,7 +20,7 @@ import { executeRows } from "./execute.server";
 import type { PlannedRow } from "../../lib/planning/types";
 import { planRun } from "../../lib/planning/plan";
 import { recordWriteIntents, resolveOverwrittenDrift } from "../drift.server";
-import { loadCandidates, productMapFor } from "./candidates.server";
+import { loadCandidates, pricesWrittenBy, productMapFor, withWritten } from "./candidates.server";
 import { refreshBasePrices } from "../live-prices.server";
 import { isPractice, loadCampaignContext, scopeOf, importIdsOf} from "./model.server";
 import { astToWhere } from "../segments.server";
@@ -248,30 +247,6 @@ export async function runCampaign(
     }
     throw error;
   }
-}
-
-/**
- * The variants whose base price this campaign has written since it last finished
- * reverting: what a whole-campaign revert has to take back (#828). Deleted variants are
- * left out -- there is nothing on the storefront to revert.
- */
-async function pricesWrittenBy(shopId: string, campaignId: string): Promise<string[]> {
-  const lastRevert = await prisma.campaignRun.findFirst({
-    where: { campaignId, kind: "REVERT", status: "COMPLETED", NOT: { occurrenceKey: { startsWith: "VARIANT-" } } },
-    orderBy: { createdAt: "desc" },
-    select: { createdAt: true },
-  });
-  const rows = await prisma.$queryRaw<Array<{ variantGid: string }>>`
-    SELECT DISTINCT c."variantGid"
-    FROM "variant_changes" c
-    JOIN "campaign_runs" r ON r."id" = c."runId"
-    JOIN "variant_index" v ON v."shopId" = c."shopId" AND v."variantGid" = c."variantGid"
-    WHERE r."campaignId" = ${campaignId} AND r."kind" = 'APPLY'
-      AND c."shopId" = ${shopId} AND c."surfaceKind" = 'BASE' AND c."priceListGid" = ''
-      AND c."status" IN ('VERIFIED', 'CLAMPED')
-      AND v."deletedAt" IS NULL
-      ${lastRevert ? Prisma.sql`AND r."createdAt" > (${lastRevert.createdAt}::timestamptz AT TIME ZONE 'UTC')` : Prisma.empty}`;
-  return rows.map((row) => row.variantGid);
 }
 
 /** A bulk operation's state as its record keeps it: status, how far it has got, and when it ended. */
@@ -664,11 +639,10 @@ async function executeCampaignRun(
   // sale price otherwise, and nothing else would ever revert it.
   const wholeRevert = options.revert === true && !options.variantGids;
   const written = wholeRevert ? await pricesWrittenBy(shopId, campaignId) : [];
-  const inScope = new Set(scoped.map((candidate) => candidate.ref.variantGid));
-  const strays = written.filter((gid) => !inScope.has(gid));
   const plan = async (base: typeof scoped) => {
-    const candidates =
-      strays.length > 0 ? [...base, ...(await loadCandidates(shopId, { groups: [] }, strays, importIdsOf(resolvable)))] : base;
+    // The same helper both revert previews use, so neither says a product archived mid-sale
+    // "reverts to" its sale price while this puts its baseline back (#751).
+    const candidates = await withWritten(shopId, base, written, importIdsOf(resolvable));
     return {
       candidates,
       outcome: planRun({

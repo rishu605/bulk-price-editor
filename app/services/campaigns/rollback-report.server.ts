@@ -23,7 +23,7 @@ import { inChunks } from "../../lib/db/chunk";
 import { format } from "../../lib/money/format";
 import { money } from "../../lib/money/money";
 import { planRun } from "../../lib/planning/plan";
-import { loadCandidates, titleMapFor } from "./candidates.server";
+import { loadCandidates, pricesWrittenBy, titleMapFor, withWritten } from "./candidates.server";
 import { loadCampaignContext, importIdsOf} from "./model.server";
 import { guardrailsFor } from "../settings.server";
 import {
@@ -48,11 +48,16 @@ export async function rollbackReport(
 ): Promise<RollbackReport> {
   const { campaign, resolvable, heldEdits, ast } = await loadCampaignContext(shopId, campaignId);
 
-  const [candidates, storeGuardrails, applied] = await Promise.all([
+  const [scoped, storeGuardrails, applied, written] = await Promise.all([
     loadCandidates(shopId, ast, undefined, importIdsOf(resolvable)),
     guardrailsFor(shopId),
     appliedValues(campaignId, campaign.excludedVariantGids),
+    pricesWrittenBy(shopId, campaignId),
   ]);
+  // Planned over what the revert plans over: the scope, and what the campaign wrote that
+  // has left it (#751, #828). From the scope alone, a product archived mid-sale "reverted
+  // to" its sale price here while the revert put its baseline back.
+  const candidates = await withWritten(shopId, scoped, written, importIdsOf(resolvable));
 
   // The report is a list of what this campaign wrote, so the ledger defines the rows
   // -- not the campaign's current filter. Those are different sets, and the

@@ -13,6 +13,23 @@
  * choose us.
  */
 
+import type { FilterAst } from "../../services/segments.server";
+import { ACTIVE_ONLY } from "./product-status";
+
+/**
+ * What "everything" means on the card: every variant of every active product (#751).
+ *
+ * One value for both halves -- the count the card prints and the scope the draft is given
+ * -- because they were two. The card counted every variant in the mirror, drafts, archived
+ * products and gift cards included, while the campaign it made priced whatever its scope
+ * compiled to; the merchant was promised one number and given another. Both now go through
+ * `astToWhere` with this.
+ *
+ * Statuses spelled out rather than left to the campaign's default, so the count cannot
+ * follow a different default from the campaign it describes.
+ */
+export const QUICK_CAMPAIGN_SCOPE: FilterAst = { groups: [], productStatuses: ACTIVE_ONLY };
+
 /** What a merchant typed, and what is wrong with it. */
 export type QuickPercent =
   | { ok: true; percent: number }

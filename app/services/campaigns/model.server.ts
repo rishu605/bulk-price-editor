@@ -22,6 +22,7 @@ import type { AdjustmentRule,
   ResolvableCampaign,
 } from "../../lib/pricing/types";
 import { PRICING_STATES } from "../../lib/lifecycle/transitions";
+import { productStatusesOf, type ProductStatus } from "../../lib/campaigns/product-status";
 import { astToWhere, segmentToAst, type FilterAst } from "../segments.server";
 import { readSettings } from "../settings.server";
 import type { CampaignInput } from "./types";
@@ -60,6 +61,11 @@ export async function createCampaign(
   input: CampaignInput,
   options: CreatedBy = {},
 ) {
+  // One place for the statuses, beside the filter rather than inside it (#751). A caller
+  // may hand them over either way -- the editor as a field, Home inside its constant scope
+  // -- and the stored filter keeps only the conditions, so `astOf` has one answer to read.
+  const { productStatuses: inAst, ...filter } = input.ast;
+
   const campaign = await prisma.campaign.create({
     data: {
       shopId,
@@ -87,7 +93,10 @@ export async function createCampaign(
       schedule: {
         ...(input.schedule ?? { kind: "manual" }),
         rounding: input.rounding,
-        ast: input.ast,
+        ast: filter,
+        // Written out even when it is the default, so a campaign's record says what it
+        // covers rather than leaving it to whatever the reader's default is that year.
+        productStatuses: productStatusesOf(input.productStatuses ?? inAst),
         ...(input.segmentId ? { segmentId: input.segmentId } : {}),
         ...(input.practice ? { practice: true } : {}),
       } as never,
@@ -155,10 +164,33 @@ export function ruleOf(campaign: Pick<Campaign, "ruleRows">): AdjustmentRule | n
   return rows[0]?.rule ?? null;
 }
 
-/** The filter that defines a campaign's scope, or an empty AST matching everything. */
+/**
+ * The filter that defines a campaign's scope -- an empty one matching every variant --
+ * limited to the product statuses the campaign covers (#751).
+ *
+ * The statuses are attached here rather than by each caller, because every caller wants
+ * them: the run and its preview through `scopeOf`, the calendar's fallback, and the
+ * sentence the campaigns list and header print. A caller that forgot would be a count or
+ * a description that includes the drafts the run leaves out.
+ */
 export function astOf(campaign: Pick<Campaign, "schedule">): FilterAst {
   const schedule = (campaign.schedule ?? {}) as { ast?: FilterAst };
-  return schedule.ast ?? { groups: [] };
+  return { ...(schedule.ast ?? { groups: [] }), productStatuses: productStatusesFor(campaign) };
+}
+
+/**
+ * The product statuses a campaign covers: what it recorded, or active products only.
+ *
+ * Active only for a campaign with nothing recorded, which is every campaign created before
+ * #751. Those covered draft and archived products because nobody had asked, not because
+ * anybody chose to, and the reader's default is what lets a forgotten path fail safe.
+ * Prices one of them already wrote on a draft or archived variant are not stranded by
+ * this: a whole-campaign revert takes back every price the campaign wrote, in its scope or
+ * not (#828) -- see D12 in `docs/decisions.md`.
+ */
+export function productStatusesFor(campaign: Pick<Campaign, "schedule">): ProductStatus[] {
+  const schedule = (campaign.schedule ?? {}) as { productStatuses?: unknown };
+  return productStatusesOf(schedule.productStatuses);
 }
 
 /**
@@ -206,11 +238,18 @@ export async function scopeOf(
   });
   if (!segment) return astOf(campaign);
 
-  return segmentToAst({
-    kind: segment.kind as "DYNAMIC" | "FROZEN",
-    filterAst: segment.filterAst,
-    frozenVariantGids: segment.frozenVariantGids,
-  });
+  return {
+    ...segmentToAst({
+      kind: segment.kind as "DYNAMIC" | "FROZEN",
+      filterAst: segment.filterAst,
+      frozenVariantGids: segment.frozenVariantGids,
+    }),
+    // The campaign's, not the segment's (#751). A segment is a definition shared by every
+    // campaign that targets it and means every status; which of its products this sale
+    // reaches is this campaign's choice. A frozen list is narrowed too: a variant pinned
+    // while active and archived since is not one the merchant asked to put on sale.
+    productStatuses: productStatusesFor(campaign),
+  };
 }
 
 /** Rehydrates a stored campaign into the shape the pure resolver expects. */

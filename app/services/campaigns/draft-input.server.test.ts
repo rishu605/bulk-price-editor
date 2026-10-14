@@ -18,6 +18,7 @@ vi.mock("../../db.server", () => ({
   default: { segment: { findFirst: vi.fn(async () => null) } },
 }));
 
+import prisma from "../../db.server";
 import { draftCampaignFrom } from "./draft-input.server";
 import { DRAFT_DEFAULTS, draftDefaultParams } from "../../lib/campaigns/draft-defaults";
 
@@ -71,11 +72,12 @@ describe("what the defaults actually price", () => {
     expect(draft.priority).toBe(Number(DRAFT_DEFAULTS.priority));
   });
 
-  it("targets the whole catalogue when no filter is set", async () => {
+  it("targets every active product when no filter is set", async () => {
     const draft = await draftCampaignFrom(SHOP, draftDefaultParams(), "USD");
 
     // An empty filter is every variant, not none — the editor says so in its own copy.
-    expect(draft.ast).toEqual({ groups: [] });
+    // Of active products only (#751): drafts and archived products are an opt-in.
+    expect(draft.ast).toEqual({ groups: [], productStatuses: ["ACTIVE"] });
   });
 
   it("builds a fixed amount in the shop's currency, not in dollars", async () => {
@@ -90,6 +92,43 @@ describe("what the defaults actually price", () => {
     expect(jpy.rule).toEqual({
       kind: "fixed-change",
       amount: { amount: -3000, currency: "JPY" },
+    });
+  });
+});
+
+describe("draft and archived products (#751)", () => {
+  it("covers them only when their boxes are ticked", async () => {
+    const statuses = async (fields: Record<string, string>) =>
+      (await draftCampaignFrom(SHOP, new URLSearchParams(fields), "USD")).ast.productStatuses;
+
+    expect(await statuses({})).toEqual(["ACTIVE"]);
+    expect(await statuses({ includeDraft: "1" })).toEqual(["ACTIVE", "DRAFT"]);
+    expect(await statuses({ includeArchived: "1" })).toEqual(["ACTIVE", "ARCHIVED"]);
+    expect(await statuses({ includeDraft: "on", includeArchived: "1" })).toEqual(["ACTIVE", "DRAFT", "ARCHIVED"]);
+  });
+
+  it("reads a ticked box the same from the form and from the full preview's link", async () => {
+    const { params, form } = bothShapes({ ruleValue: "-20", includeDraft: "1" });
+
+    expect(await draftCampaignFrom(SHOP, form, "USD")).toEqual(await draftCampaignFrom(SHOP, params, "USD"));
+  });
+
+  it("keeps the form's choice over a saved segment, which replaces the filter and not this", async () => {
+    vi.mocked(prisma.segment.findFirst).mockResolvedValueOnce({
+      kind: "DYNAMIC",
+      filterAst: { groups: [{ conditions: [{ field: "tag", value: "sale" }] }] },
+      frozenVariantGids: [],
+    } as never);
+
+    const draft = await draftCampaignFrom(
+      SHOP,
+      new URLSearchParams({ segment: "segment_1", includeArchived: "1", collection: "Ignored" }),
+      "USD",
+    );
+
+    expect(draft.ast).toEqual({
+      groups: [{ conditions: [{ field: "tag", value: "sale" }] }],
+      productStatuses: ["ACTIVE", "ARCHIVED"],
     });
   });
 });

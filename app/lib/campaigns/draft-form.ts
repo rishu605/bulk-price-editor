@@ -16,6 +16,7 @@ import { decimalsFor } from "../money/format";
 import { money } from "../money/money";
 import type { AdjustmentRule, CompareAtPolicy } from "../pricing/types";
 import type { FilterAst } from "../../services/segments.server";
+import { PRODUCT_STATUS_FIELDS, productStatusesOf, type ProductStatus } from "./product-status";
 
 /** Scope fields the editor offers, minus `segment`, which resolves to a whole AST. */
 export const SCOPE_CONDITION_FIELDS = [
@@ -151,6 +152,26 @@ export function astFrom(read: FieldReader): FilterAst {
     .map(([field, value]) => ({ field, value: value!.trim() }));
 
   return conditions.length > 0 ? { groups: [{ conditions }] } : { groups: [] };
+}
+
+/**
+ * The product statuses the form covers: active always, draft and archived when ticked
+ * (#751).
+ *
+ * Its own reader rather than part of `astFrom`, because a saved segment replaces the
+ * filter and not this: a campaign on a segment still chooses which of its products the
+ * sale reaches. The live preview and the create action both read it here, so a box ticked
+ * in the editor is a box the preview prices and the campaign keeps -- rule 4 again, on
+ * the inputs.
+ *
+ * Ticked is present and non-empty, which is how a checkbox posts and how the full
+ * preview's link carries it back.
+ */
+export function productStatusesFrom(read: FieldReader): ProductStatus[] {
+  const ticked = Object.entries(PRODUCT_STATUS_FIELDS)
+    .filter(([field]) => (read(field) ?? "").trim() !== "")
+    .map(([, status]) => status);
+  return productStatusesOf(["ACTIVE", ...ticked]);
 }
 
 /** What a campaign's priority is when the field is left empty. */

@@ -11,7 +11,7 @@ import { marketScope } from "../../lib/planning/market-scope";
 import { money, type Money } from "../../lib/money/money";
 import { planRun } from "../../lib/planning/plan";
 import { selectWritePath } from "../../lib/planning/write-path";
-import { loadCandidates, titleMapFor } from "./candidates.server";
+import { loadCandidates, pricesWrittenBy, titleMapFor, withWritten } from "./candidates.server";
 import { loadCampaignContext, importIdsOf} from "./model.server";
 import { guardrailsFor, readSettings } from "../settings.server";
 import { uncontrolledAmong } from "../reconciliation.server";
@@ -100,10 +100,14 @@ export async function previewCampaign(
   options: PreviewOptions = {},
 ): Promise<CampaignPreview> {
   const { campaign, resolvable, heldEdits, others, ast } = await loadCampaignContext(shopId, campaignId);
-  const [candidates, storeGuardrails] = await Promise.all([
+  const [scoped, storeGuardrails, written] = await Promise.all([
     loadCandidates(shopId, ast, undefined, importIdsOf(resolvable)),
     guardrailsFor(shopId),
+    options.revert ? pricesWrittenBy(shopId, campaignId) : Promise.resolve([]),
   ]);
+  // A revert takes back what it wrote, in scope or not, and so does its preview: a product
+  // archived mid-sale is out of scope and still comes back to its baseline (#751, #828).
+  const candidates = await withWritten(shopId, scoped, written, importIdsOf(resolvable));
 
   const outcome = planRun({
     campaigns: resolvable,

@@ -197,3 +197,21 @@ describe("what it applies to", () => {
     ).toBe("colour: red");
   });
 });
+
+describe("draft and archived products in the sentence (#751)", () => {
+  it("says nothing extra for the default, which is what the storefront sells", () => {
+    expect(describeScope({ groups: [], productStatuses: ["ACTIVE"] })).toBe("All variants");
+  });
+
+  it("names the opt-in after the rest, a segment included", () => {
+    expect(describeScope({ groups: [], productStatuses: ["ACTIVE", "DRAFT"] })).toBe(
+      "All variants · including draft products",
+    );
+    expect(
+      describeScope({ groups: [{ conditions: [{ field: "collection", value: "Outerwear" }] }], productStatuses: ["ACTIVE", "DRAFT", "ARCHIVED"] }),
+    ).toBe("In Outerwear · including draft and archived products");
+    expect(describeScope({ groups: [], productStatuses: ["ACTIVE", "ARCHIVED"] }, "Winter lines")).toBe(
+      "Winter lines · including archived products",
+    );
+  });
+});
