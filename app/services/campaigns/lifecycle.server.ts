@@ -283,10 +283,51 @@ export async function holdForDrift(
   // raise an alarm about a price nobody is maintaining any more.
   if (campaign.status !== "ACTIVE" && campaign.status !== "PARTIAL") return null;
 
-  return transitionCampaign(shopId, campaignId, "HELD", {
+  const result = await transitionCampaign(shopId, campaignId, "HELD", {
     reason: `price edited outside Anchor on ${variantGid}`,
     actor: "drift-detector",
   });
+
+  // The Flow trigger the help centre calls the one worth setting up (#711). It was
+  // published and declared, and nothing fired it, so "when a campaign is held, message the
+  // team" was a workflow that never ran. Fired only when this call held the campaign, and
+  // not awaited: it is an Admin API call, and this runs inside a products webhook that has
+  // to answer quickly. Best-effort, as every trigger is.
+  if (result.changed) void announceHold(shopId, campaignId);
+
+  return result;
+}
+
+async function announceHold(shopId: string, campaignId: string): Promise<void> {
+  try {
+    const [campaign, drifted] = await Promise.all([
+      prisma.campaign.findUnique({ where: { id: campaignId }, select: { name: true } }),
+      prisma.driftEvent.findMany({
+        where: { shopId, campaignId, resolution: "PENDING" },
+        distinct: ["variantGid"],
+        select: { variantGid: true },
+      }),
+    ]);
+    // Products, as the field says: a product edited on three variants is one product.
+    const products = await prisma.variantIndex.findMany({
+      where: { shopId, variantGid: { in: drifted.map((event) => event.variantGid) } },
+      distinct: ["productGid"],
+      select: { productGid: true },
+    });
+    const { fireTriggerForShop } = await import("../flow.server");
+    await fireTriggerForShop(shopId, "campaign-held", {
+      "campaign id": campaignId,
+      "campaign name": campaign?.name ?? "",
+      // A string, as the manifest declares: a number makes Flow refuse the whole trigger.
+      "products drifted": String(products.length),
+    });
+  } catch (error) {
+    logger.info("could not fire the campaign-held trigger", {
+      shopId,
+      campaignId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 /**
