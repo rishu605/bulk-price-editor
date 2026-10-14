@@ -10,7 +10,7 @@
 import { RollbackReportTable } from "../../components/RollbackReportTable";
 import { ActionRow } from "../ActionRow";
 import { downloadCsv, filenameSlug } from "../../lib/reporting/csv";
-import { rollbackReportCsv } from "../../lib/reporting/rollback";
+import { rollbackReportCsv, rollbackSummary, unaffectedSentence } from "../../lib/reporting/rollback";
 import type { CampaignDetailProps } from "./props";
 import { Card } from "../Card";
 
@@ -19,14 +19,17 @@ export function CampaignRevertTab({ rollback, preview, fetcher, busy }: Campaign
     <>
       {rollback && rollback.counts.total > 0 ? (
         <Card heading="If you revert this campaign">      <s-paragraph>
-            <s-text>
-              {rollback.straightforward
-                ? rollback.counts.total === 1
-                  ? "The 1 variant is still at the price this campaign set. Reverting recomputes its price without this campaign."
-                  : `All ${rollback.counts.total} variants are still at the price this campaign set. Reverting recomputes each one without it.`
-                : `${rollback.counts.drifted} of ${rollback.counts.total} variants have been changed since this campaign set them. Someone edited those on purpose — tick any you want left alone, then revert.`}
-            </s-text>
+            <s-text>{rollbackSummary(rollback.counts)}</s-text>
           </s-paragraph>
+
+          {/* A variant a higher-priority campaign took over is not an edit to decide about
+              (#836), and it is not at this campaign's price either. Said, so the rows
+              reading "Already there" below are not a mystery. */}
+          {unaffectedSentence(rollback.counts.unaffected) ? (
+            <s-paragraph>
+              <s-text>{unaffectedSentence(rollback.counts.unaffected)}</s-text>
+            </s-paragraph>
+          ) : null}
 
           {/* Moved here from the actions card, which is gone. It is the one thing about
               reverting a merchant is most likely to have wrong, and it belongs beside the

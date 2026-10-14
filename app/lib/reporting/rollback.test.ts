@@ -12,33 +12,99 @@ import { describe, expect, it } from "vitest";
 import {
   classifyRollbackRow,
   rollbackReportCsv,
+  rollbackSummary,
+  unaffectedSentence,
   type RollbackReport,
 } from "./rollback";
 
 describe("classifyRollbackRow", () => {
   it("calls a row clean when live matches what we applied", () => {
-    expect(classifyRollbackRow({ deleted: false, applied: 8_000, live: 8_000 })).toBe("clean");
+    expect(classifyRollbackRow({ deleted: false, applied: 8_000, live: 8_000, revertsTo: 10_000 })).toBe("clean");
   });
 
   it("calls a row drifted when somebody changed it since", () => {
-    expect(classifyRollbackRow({ deleted: false, applied: 8_000, live: 7_500 })).toBe("drifted");
+    expect(classifyRollbackRow({ deleted: false, applied: 8_000, live: 7_500, revertsTo: 10_000 })).toBe("drifted");
   });
 
   it("reports a deleted variant as deleted rather than drifted", () => {
     // A merchant removing a product mid-sale is ordinary. Surfacing it as a conflict
     // needing resolution would be asking a question with no answer (E4).
-    expect(classifyRollbackRow({ deleted: true, applied: 8_000, live: null })).toBe("deleted");
+    expect(classifyRollbackRow({ deleted: true, applied: 8_000, live: null, revertsTo: null })).toBe("deleted");
   });
 
   it("prefers deleted over drifted when both look true", () => {
-    expect(classifyRollbackRow({ deleted: true, applied: 8_000, live: 7_500 })).toBe("deleted");
+    expect(classifyRollbackRow({ deleted: true, applied: 8_000, live: 7_500, revertsTo: 10_000 })).toBe("deleted");
   });
 
   it("treats an unknown comparison as clean, not as a question", () => {
     // No mirrored live value, or nothing recorded as applied. There is no evidence of
     // an edit, and inventing one costs the merchant attention they will stop paying.
-    expect(classifyRollbackRow({ deleted: false, applied: null, live: 8_000 })).toBe("clean");
-    expect(classifyRollbackRow({ deleted: false, applied: 8_000, live: null })).toBe("clean");
+    expect(classifyRollbackRow({ deleted: false, applied: null, live: 8_000, revertsTo: 10_000 })).toBe("clean");
+    expect(classifyRollbackRow({ deleted: false, applied: 8_000, live: null, revertsTo: 10_000 })).toBe("clean");
+  });
+
+  /**
+   * The three cases of #836, from its live repro: a probe at 200.00, sale A (priority 100)
+   * at 180.00, then sale B (priority 200) at 170.00 over the same variant. A's revert is
+   * `resolve(without A)`, which is B's 170.00.
+   */
+  describe("against what the revert writes (#836)", () => {
+    it("is clean while the live price is what this campaign applied", () => {
+      expect(classifyRollbackRow({ deleted: false, applied: 18_000, live: 18_000, revertsTo: 20_000 })).toBe("clean");
+    });
+
+    it("is not drifted when a higher-priority campaign's price is what the revert leaves there", () => {
+      const kind = classifyRollbackRow({ deleted: false, applied: 18_000, live: 17_000, revertsTo: 17_000 });
+      expect(kind, "B's price read as somebody's edit").not.toBe("drifted");
+      expect(kind).toBe("unaffected");
+    });
+
+    it("is not drifted when the live price is already the baseline the revert writes", () => {
+      expect(classifyRollbackRow({ deleted: false, applied: 18_000, live: 20_000, revertsTo: 20_000 })).toBe("unaffected");
+    });
+
+    it("is still drifted when the live price is neither what was applied nor what the revert writes", () => {
+      // A real hand edit under B: 175.00 is not A's 180.00, and not B's 170.00.
+      expect(classifyRollbackRow({ deleted: false, applied: 18_000, live: 17_500, revertsTo: 17_000 })).toBe("drifted");
+    });
+
+    it("is still drifted when the revert gives no price to compare with", () => {
+      // The revert's planner skips the variant; there is no answer it could already be at.
+      expect(classifyRollbackRow({ deleted: false, applied: 18_000, live: 17_500, revertsTo: null })).toBe("drifted");
+    });
+  });
+});
+
+describe("what the Revert tab says about the rows (#836)", () => {
+  const counts = (over: Partial<RollbackReport["counts"]>): RollbackReport["counts"] => ({
+    total: 0,
+    clean: 0,
+    drifted: 0,
+    deleted: 0,
+    unaffected: 0,
+    ...over,
+  });
+
+  it("says every row is at the campaign's price only when every row is", () => {
+    expect(rollbackSummary(counts({ total: 3, clean: 3 }))).toContain("All 3 variants are still at the price this campaign set");
+    expect(rollbackSummary(counts({ total: 1, clean: 1 }))).toContain("The 1 variant is still at the price");
+  });
+
+  it("does not say a variant another campaign took over is at this campaign's price", () => {
+    const said = rollbackSummary(counts({ total: 3, clean: 2, unaffected: 1 }));
+    expect(said).not.toContain("All 3");
+    expect(said).toContain("2 of 3 variants are still at the price this campaign set");
+    expect(rollbackSummary(counts({ total: 1, unaffected: 1 }))).not.toContain("still at the price");
+  });
+
+  it("asks about the drifted rows, and only those", () => {
+    expect(rollbackSummary(counts({ total: 3, clean: 1, drifted: 1, unaffected: 1 }))).toContain("1 of 3 variants have been changed");
+  });
+
+  it("explains the rows reverting leaves where they are, and says nothing when there are none", () => {
+    expect(unaffectedSentence(0)).toBeNull();
+    expect(unaffectedSentence(1)).toContain("1 variant already shows the price reverting gives it");
+    expect(unaffectedSentence(4)).toContain("4 variants already show");
   });
 });
 
@@ -47,7 +113,7 @@ describe("rollbackReportCsv", () => {
     campaignId: "c1",
     campaignName: "Summer sale",
     rows,
-    counts: { total: rows.length, clean: 0, drifted: 0, deleted: 0 },
+    counts: { total: rows.length, clean: 0, drifted: 0, deleted: 0, unaffected: 0 },
     straightforward: false,
   });
 

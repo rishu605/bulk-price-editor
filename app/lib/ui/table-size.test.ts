@@ -163,11 +163,18 @@ describe("the rollback report never hides a decision", () => {
    * a line cannot see what the line does, and what this line does is decide whether a
    * merchant is shown a choice about somebody's deliberate price edit.
    */
-  const row = (kind: "drifted" | "deleted" | "clean", n: number) =>
+  const row = (kind: "drifted" | "deleted" | "clean" | "unaffected", n: number) =>
     ({ variantGid: `gid/${kind}/${n}`, kind }) as never;
 
-  const many = (kind: "drifted" | "deleted" | "clean", count: number) =>
+  const many = (kind: "drifted" | "deleted" | "clean" | "unaffected", count: number) =>
     Array.from({ length: count }, (_, i) => row(kind, i));
+
+  it("caps the rows another campaign took over, which are not decisions either (#836)", () => {
+    const shown = rowsToShow([...many("drifted", 2), ...many("unaffected", 3_000)]);
+
+    expect(shown.filter((r) => r.kind === "drifted")).toHaveLength(2);
+    expect(shown.length).toBeLessThanOrEqual(ROWS_PER_VIEW);
+  });
 
   it("shows every drifted row, however many there are", () => {
     const rows = [...many("drifted", 200), ...many("clean", 3_000)];

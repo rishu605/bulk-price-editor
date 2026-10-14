@@ -12,16 +12,24 @@ import { toCsv } from "./csv";
 export type RollbackRowKind =
   /** Live value matches what we applied. Reverting is uncontroversial. */
   | "clean"
-  /** Live value differs from what we applied — somebody edited it. */
+  /** Live value is neither what we applied nor what reverting writes — somebody edited it. */
   | "drifted"
   /** Variant no longer exists in Shopify. Nothing to revert. */
-  | "deleted";
+  | "deleted"
+  /**
+   * Live value is already what reverting writes: a higher-priority campaign's price, or the
+   * baseline. Nothing is written for it and there is nothing to decide (#836).
+   */
+  | "unaffected";
 
 export interface RollbackRow {
   variantGid: string;
   title: string;
   kind: RollbackRowKind;
-  /** What this campaign last wrote, from the ledger. */
+  /**
+   * What this campaign last wrote, from the ledger -- or, for a variant another campaign's
+   * revert handed it, this campaign's price as that revert wrote it (#837).
+   */
   applied: string | null;
   /** What the storefront shows now, from the mirror. */
   live: string | null;
@@ -33,13 +41,13 @@ export interface RollbackReport {
   campaignId: string;
   campaignName: string;
   rows: RollbackRow[];
-  counts: { total: number; clean: number; drifted: number; deleted: number };
+  counts: { total: number; clean: number; drifted: number; deleted: number; unaffected: number };
   /** True when nothing needs a decision and the revert can just run. */
   straightforward: boolean;
 }
 
 /**
- * Which of the three states a row is in.
+ * Which of the four states a row is in.
  *
  * Pure, so the boundaries are testable without a database — and they need to be,
  * because the default matters. An unknown comparison resolves to `clean`, meaning the
@@ -53,10 +61,57 @@ export function classifyRollbackRow(input: {
   applied: number | null;
   /** What the mirror says is live, in minor units. */
   live: number | null;
+  /**
+   * What reverting writes, in minor units: `resolve(without C)` from the revert's own
+   * planner. Null when that planner gives no price -- it leaves the variant alone.
+   */
+  revertsTo: number | null;
 }): RollbackRowKind {
   if (input.deleted) return "deleted";
   if (input.applied === null || input.live === null) return "clean";
-  return input.live === input.applied ? "clean" : "drifted";
+  if (input.live === input.applied) return "clean";
+  // A live price that is already the revert's answer is not a decision anybody has to make.
+  // Usually a higher-priority campaign took the variant over -- routine, which is what
+  // priority is for -- and the report called it "changed since … someone edited those on
+  // purpose" and took the plain Revert away for the ordinary case (#836). Asking would be
+  // asking whether to write a price that is already there.
+  if (input.live === input.revertsTo) return "unaffected";
+  return "drifted";
+}
+
+/**
+ * The Revert tab's opening sentence.
+ *
+ * "All N variants are still at the price this campaign set" was said of every row once
+ * nothing was drifted -- including a variant a higher-priority campaign had taken over,
+ * whose live price is that campaign's (#836). Only the clean rows are at this campaign's
+ * price, so only they are counted as such.
+ */
+export function rollbackSummary(counts: RollbackReport["counts"]): string {
+  const { total, clean, drifted } = counts;
+  if (drifted > 0) {
+    return `${drifted} of ${total} variants have been changed since this campaign set them. Someone edited those on purpose — tick any you want left alone, then revert.`;
+  }
+  if (clean === total) {
+    return total === 1
+      ? "The 1 variant is still at the price this campaign set. Reverting recomputes its price without this campaign."
+      : `All ${total} variants are still at the price this campaign set. Reverting recomputes each one without it.`;
+  }
+  if (clean === 0) return "None of these variants shows this campaign's price now.";
+  return `${clean} of ${total} variants ${clean === 1 ? "is" : "are"} still at the price this campaign set. Reverting recomputes ${clean === 1 ? "it" : "each one"} without this campaign.`;
+}
+
+/**
+ * The rows reverting leaves where they are, said where the report's counts are (#836): their
+ * live price is already the revert's answer. Null when there are none.
+ */
+export function unaffectedSentence(unaffected: number): string | null {
+  if (unaffected === 0) return null;
+  const one = unaffected === 1;
+  return (
+    `${unaffected} ${one ? "variant already shows" : "variants already show"} the price reverting gives ` +
+    `${one ? "it" : "them"} — another campaign's, or the normal price — so there is nothing to decide about ${one ? "it" : "them"}.`
+  );
 }
 
 /**

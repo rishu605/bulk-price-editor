@@ -94,6 +94,7 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     ...(state === "PARTIAL" ? await partialProgress(shop.id, campaignId) : {}), // #702, #927
     heldUntil: state === "HELD" ? windowEndText(record.schedule, shop.timezone) : undefined, // #784
     neverStarts: state === "SCHEDULED" ? neverStarts(parseSchedule(record.schedule), new Date(), shop.timezone) : null, // #824
+    outrankedBy: preview.outrankedBy, // a higher campaign prices every variant (#837)
   });
   const history = await transitionHistory(shop.id, campaignId, 8);
 

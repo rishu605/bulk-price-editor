@@ -49,3 +49,14 @@ describe("the campaign page's props bundle", () => {
     }
   });
 });
+
+describe("the status line hears who outranks this campaign (#837)", () => {
+  it("passes the preview's answer to describeState", () => {
+    // The context field is optional, so dropping it compiles and the status line goes back
+    // to "Your storefront shows the campaign price" under a sale that outranks it everywhere.
+    const call = route.slice(route.indexOf("describeState(state, {"));
+    expect(call.slice(0, call.indexOf("\n  });")), "describeState is no longer called with a context").toContain(
+      "outrankedBy: preview.outrankedBy",
+    );
+  });
+});

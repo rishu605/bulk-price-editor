@@ -5,7 +5,7 @@
  * run that follows.
  */
 
-import { overlapsFrom } from "../../lib/planning/overlaps";
+import { alreadyCorrectBy, outrankedBy, overlapsFrom } from "../../lib/planning/overlaps";
 import { format } from "../../lib/money/format";
 import { marketScope } from "../../lib/planning/market-scope";
 import { money, type Money } from "../../lib/money/money";
@@ -232,6 +232,11 @@ export async function previewCampaign(
     // From the planner's coverage, every candidate included: a variant another campaign
     // keeps is usually already at its price, and the rows leave those out (#821).
     overlaps: overlapsFrom(outcome.coverage, campaignId, others),
+    // From the same plan, by the resolver's winner (#837): which of the already-correct
+    // variants are this campaign's and which another campaign is pricing, and whether it
+    // prices any of its variants at all.
+    alreadyCorrect: alreadyCorrectBy(outcome.unchanged, campaignId, others),
+    outrankedBy: outrankedBy(outcome.coverage, campaignId, others),
   };
 }
 

@@ -5,7 +5,7 @@
  * each stay focused without importing one another just for a type.
  */
 
-import type { Overlap } from "../../lib/planning/overlaps";
+import type { AlreadyCorrect, Overlap } from "../../lib/planning/overlaps";
 import type { AdjustmentRule, CompareAtPolicy, Guardrails } from "../../lib/pricing/types";
 import type { PlannedRow } from "../../lib/planning/types";
 import type { MarginRow } from "../../lib/pricing/margin";
@@ -199,6 +199,17 @@ export interface CampaignPreview {
    * revert preview, the ones that keep the variants this campaign gives up.
    */
   overlaps?: Overlap[];
+  /**
+   * `counts.noop` by who prices those variants (#837): this campaign, nobody, or another
+   * campaign that outranks it, by name. Absent where there is no plan.
+   */
+  alreadyCorrect?: AlreadyCorrect;
+  /**
+   * The campaigns pricing every variant this one covers, when it prices none itself (#837).
+   * Empty or absent otherwise. The status line reads it: "your storefront shows the campaign
+   * price" is not true of a sale entirely under a higher-priority one.
+   */
+  outrankedBy?: string[];
 }
 
 export interface RunOutcome {

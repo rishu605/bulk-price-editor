@@ -23,6 +23,7 @@ import { sourceOf } from "../../lib/testing/source";
 
 import { CampaignHeader } from "./CampaignHeader";
 import { CampaignOverviewTab } from "./CampaignOverviewTab";
+import { CampaignRevertTab } from "./CampaignRevertTab";
 import { describeState } from "../../lib/lifecycle/transitions";
 import { describeCampaign } from "../../lib/campaigns/describe";
 import { formatWhen } from "../../lib/format/display";
@@ -257,7 +258,7 @@ describe("every dialog button opens a dialog that is there (#749)", () => {
           state,
           canApply: state === "DRAFT" || state === "SCHEDULED",
           rollback: live.has(state)
-            ? ({ straightforward: true, counts: { total: 4, drifted: 0, deleted: 0 }, rows: [] } as never)
+            ? ({ straightforward: true, counts: { total: 4, drifted: 0, deleted: 0, unaffected: 0 }, rows: [] } as never)
             : null,
           window:
             state === "SCHEDULED"
@@ -288,7 +289,7 @@ describe("a practice campaign is never offered a way to apply", () => {
 describe("a revert with edits to decide about points at the decision", () => {
   const drifted = {
     straightforward: false,
-    counts: { total: 40, drifted: 3, deleted: 0 },
+    counts: { total: 40, drifted: 3, deleted: 0, unaffected: 0 },
     rows: [],
   };
 
@@ -307,7 +308,7 @@ describe("a revert with edits to decide about points at the decision", () => {
     const clean = render(
       <CampaignHeader
         {...props({
-          rollback: { straightforward: true, counts: { total: 40, drifted: 0, deleted: 0 }, rows: [] } as never,
+          rollback: { straightforward: true, counts: { total: 40, drifted: 0, deleted: 0, unaffected: 0 }, rows: [] } as never,
         })}
       />,
     );
@@ -640,7 +641,7 @@ const withRollback = (over: Record<string, unknown> = {}) =>
       campaignId: "c1",
       campaignName: "Summer sale",
       rows: [],
-      counts: { total: 812, clean: 812, drifted: 0, deleted: 0 },
+      counts: { total: 812, clean: 812, drifted: 0, deleted: 0, unaffected: 0 },
       straightforward: true,
       ...over,
     },
@@ -659,7 +660,7 @@ describe("what the revert button does now", () => {
     // There are edits to decide about; a confirmation that skipped them would be a
     // one-click overwrite wearing a seatbelt.
     const html = render(
-      <CampaignHeader {...withRollback({ straightforward: false, counts: { total: 812, clean: 800, drifted: 12, deleted: 0 } })} />,
+      <CampaignHeader {...withRollback({ straightforward: false, counts: { total: 812, clean: 800, drifted: 12, deleted: 0, unaffected: 0 } })} />,
     );
 
     expect(html).toContain("Review 12 edited before reverting");
@@ -703,6 +704,112 @@ describe("the revert confirmation says what recomputing means", () => {
     const html = render(<CampaignHeader {...withRollback()} keepersPending />);
 
     expect(html).toContain("Working out what the prices would become");
+  });
+});
+
+/**
+ * A sale under a higher-priority one (#836, #837), from the live repros: A (priority 100) at
+ * 180.00 with B (priority 200) at 170.00 over the same variant.
+ */
+describe("a sale a higher-priority one has taken variants from", () => {
+  const takenOver = {
+    variantGid: "gid://shopify/ProductVariant/1",
+    title: "QA 686 UI probe · M",
+    kind: "unaffected",
+    applied: "$180.00",
+    live: "$170.00",
+    revertsTo: "$170.00",
+  };
+  const editedByHand = { ...takenOver, variantGid: "gid://shopify/ProductVariant/2", title: "Hand edited", kind: "drifted", live: "$175.00" };
+  const own = { ...takenOver, variantGid: "gid://shopify/ProductVariant/3", title: "Still ours", kind: "clean", live: "$180.00", revertsTo: "$200.00" };
+
+  it("offers plain Revert, and its dialog counts only what this campaign prices (#836)", () => {
+    const html = render(
+      <CampaignHeader
+        {...withRollback({ rows: [own, takenOver], counts: { total: 2, clean: 1, drifted: 0, deleted: 0, unaffected: 1 } })}
+      />,
+    );
+    const row = html.split("<s-modal")[0];
+    const dialog = modalOf(html, "revert-confirmation");
+
+    expect(row).toContain('commandFor="revert-confirmation"');
+    expect(row, "a takeover was offered as edits to review").not.toContain("edited before reverting");
+    expect(dialog).toMatch(/>1<\/s-text> <s-text>variant is priced by this campaign/);
+    expect(dialog).toContain("1 variant already shows the price reverting gives it");
+  });
+
+  it("counts a variant handed back by the higher sale's revert (#837)", () => {
+    // Its clean row, from the planner's winner rather than this campaign's ledger.
+    const dialog = modalOf(
+      render(<CampaignHeader {...withRollback({ rows: [own], counts: { total: 1, clean: 1, drifted: 0, deleted: 0, unaffected: 0 } })} />),
+      "revert-confirmation",
+    );
+    expect(dialog).toMatch(/>1<\/s-text> <s-text>variant is priced by this campaign/);
+    expect(dialog).not.toContain("already shows the price reverting");
+  });
+
+  it("asks about a real hand edit, and only that one, on the Revert tab", () => {
+    const html = render(
+      <CampaignRevertTab
+        {...withRollback({
+          straightforward: false,
+          rows: [editedByHand, own, takenOver],
+          counts: { total: 3, clean: 1, drifted: 1, deleted: 0, unaffected: 1 },
+        })}
+      />,
+    );
+
+    expect(html).toContain("1 of 3 variants have been changed since this campaign set them");
+    expect(html).toContain("Already there");
+    expect(html.match(/Leave as it is/g), "a checkbox on a row that is not an edit").toHaveLength(1);
+    expect(html).toContain(`value="${editedByHand.variantGid}"`);
+    expect(html).not.toContain(`value="${takenOver.variantGid}"`);
+  });
+
+  it("does not tell the Revert tab the taken-over variant is still at this campaign's price", () => {
+    const html = render(
+      <CampaignRevertTab {...withRollback({ rows: [takenOver], counts: { total: 1, clean: 0, drifted: 0, deleted: 0, unaffected: 1 } })} />,
+    );
+
+    expect(html).not.toContain("still at the price this campaign set");
+    expect(html).toContain("already shows the price reverting gives it");
+  });
+
+  it("names the higher sale in the Apply dialog instead of calling its variants this campaign's (#837)", () => {
+    const html = render(
+      <CampaignHeader
+        {...props({
+          preview: preview({
+            counts: { planned: 0, noop: 1, skipped: 0, clamped: 0, clampedToMinimum: 0 },
+            alreadyCorrect: { own: 0, unpriced: 0, others: [{ campaignId: "c_high", name: "QA 687 high", status: "ACTIVE", variants: 1 }] },
+          }),
+        } as never)}
+      />,
+    );
+    const dialog = modalOf(html, "apply-confirmation");
+
+    expect(dialog).not.toContain("still owned by this campaign");
+    expect(dialog).toContain("Priced by another campaign");
+    expect(dialog).toContain("1 variant priced by QA 687 high until it ends");
+  });
+
+  it("separates the variants at this campaign's own price", () => {
+    const dialog = modalOf(
+      render(
+        <CampaignHeader
+          {...props({
+            preview: preview({
+              counts: { planned: 0, noop: 3, skipped: 0, clamped: 0, clampedToMinimum: 0 },
+              alreadyCorrect: { own: 2, unpriced: 0, others: [{ campaignId: "c_high", name: "QA 687 high", status: "ACTIVE", variants: 1 }] },
+            }),
+          } as never)}
+        />,
+      ),
+      "apply-confirmation",
+    );
+
+    expect(dialog).toContain("2 variants already at this campaign&#x27;s price");
+    expect(dialog).toContain("1 variant priced by QA 687 high");
   });
 });
 
