@@ -33,6 +33,7 @@ import { skipReasonForRow } from "../../lib/planning/reasons";
 import { liveIfDrifted } from "../../lib/pricing/drift-note";
 import { resolvePolicy } from "../../lib/money/rounding-policy";
 import type { FilterAst } from "../segments.server";
+import { EVERY_STATUS } from "../../lib/campaigns/product-status";
 import type {
   AdjustmentRule,
   CompareAtPolicy,
@@ -133,6 +134,16 @@ export interface DraftPreview {
    * less. The panel says so instead of previewing the whole scope at 0.01.
    */
   ruleProblem?: string;
+  /**
+   * Variants the conditions match that are left out because their product is draft or
+   * archived and the draft does not include that status (#751).
+   *
+   * Counted so the default is visible rather than silent. The walk that found #751 scoped a
+   * campaign to one title whose product was archived; with the default in place that scope
+   * matches nothing, and "Nothing matches this scope" would send the merchant to loosen
+   * conditions that are right, when the answer is a box they have not ticked.
+   */
+  leftOutByStatus: number;
 }
 
 const EMPTY: DraftPreview = {
@@ -145,6 +156,7 @@ const EMPTY: DraftPreview = {
   overlaps: [],
   blocked: null,
   staleBaselines: 0,
+  leftOutByStatus: 0,
 };
 
 /**
@@ -199,23 +211,24 @@ export async function previewDraft(
   ];
   const heldEdits = await heldEditsOf(shopId, others);
 
-  const [candidates, storeGuardrails, matched] = await Promise.all([
+  const [candidates, storeGuardrails, matched, leftOutByStatus] = await Promise.all([
     loadCandidates(shopId, draft.ast, undefined, importIdsOf(resolvable)),
     guardrailsFor(shopId),
     countMatching(shopId, draft.ast),
+    countLeftOutByStatus(shopId, draft.ast),
   ]);
 
   if (candidates.length === 0) {
     // Nothing matched: asked whether there is anything to match at all, which costs one
     // count and only on this branch (#800).
-    if (matched === 0) {
+    if (matched === 0 && leftOutByStatus === 0) {
       const catalogue = await catalogueState(shopId);
       if (catalogue !== "ready") return { ...EMPTY, catalogue };
     }
     // Matched but unpriceable: every variant in scope is missing a baseline. Reported
     // rather than shown as "0 variants match", which would send the merchant to fix
     // their filter when the filter is fine.
-    return { ...EMPTY, matched, withoutBaseline: matched };
+    return { ...EMPTY, matched, withoutBaseline: matched, leftOutByStatus };
   }
 
   const outcome = planRun({ campaigns: resolvable, candidates, storeGuardrails, heldEdits });
@@ -224,6 +237,7 @@ export async function previewDraft(
     return {
       ...EMPTY,
       matched,
+      leftOutByStatus,
       withoutBaseline: matched - candidates.length,
       blocked: { reason: outcome.reason, variantGid: outcome.ref.variantGid },
     };
@@ -269,6 +283,7 @@ export async function previewDraft(
 
   return {
     matched,
+    leftOutByStatus,
     overlaps,
     changing: changing.length,
     alreadyCorrect: alreadyCorrect.length,
@@ -306,4 +321,17 @@ function isNoop(row: { beforePrice?: Money | null; intendedPrice?: Money | null 
 async function countMatching(shopId: string, ast: FilterAst): Promise<number> {
   const { astToWhere } = await import("../segments.server");
   return prisma.variantIndex.count({ where: astToWhere(shopId, ast) });
+}
+
+/**
+ * The same conditions over the statuses the draft leaves out, counted directly rather
+ * than as "every status minus matched", so the figure is the variants it names and not a
+ * difference that a sync landing between two counts could make negative.
+ */
+async function countLeftOutByStatus(shopId: string, ast: FilterAst): Promise<number> {
+  const covered = ast.productStatuses;
+  if (!covered) return 0;
+  const leftOut = EVERY_STATUS.filter((status) => !covered.includes(status));
+  if (leftOut.length === 0) return 0;
+  return countMatching(shopId, { ...ast, productStatuses: leftOut });
 }

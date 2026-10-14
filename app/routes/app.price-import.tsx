@@ -28,6 +28,7 @@ import { importedVariantGids, importPrices } from "../services/price-import.serv
 import { createCampaign } from "../services/campaigns/index.server";
 import { linesOf } from "../lib/reporting/lines";
 import { actorFor } from "../lib/audit/actor";
+import { EVERY_STATUS } from "../lib/campaigns/product-status";
 import { withGuard } from "../lib/errors/guard.server";
 import { isCommit } from "../lib/imports/intent";
 import { importSegmentName } from "../lib/imports/segment-name";
@@ -99,6 +100,12 @@ export const action = withGuard("/app/price-import", async ({ request }: ActionF
       name,
       ast: { groups: [] },
       segmentId: segment.id,
+      // Every status, unlike a campaign built in the editor (#751). A file names each
+      // variant it prices, which is a choice made row by row -- a draft in it is a launch
+      // price somebody typed, not a sale that reached further than meant. And the editor
+      // shows no scope for a file, so there would be no box to tick to get them back: the
+      // rows the import just reported as matched would be priced as nothing, unexplained.
+      productStatuses: EVERY_STATUS,
       rule: { kind: "from-import", importId },
       compareAtPolicy: { kind: "leave" },
       rounding: { default: "none", byCurrency: {} },

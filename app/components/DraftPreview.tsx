@@ -88,6 +88,18 @@ export function DraftPreview({
   const notice = preview.catalogue ? catalogueNotice(preview.catalogue) : null;
   if (notice) return <EmptyState {...notice} />;
 
+  // Everything the conditions match is on a draft or archived product (#751). Said as that
+  // rather than as "nothing matches": the conditions are right, and the way in is the two
+  // boxes under them, not loosening anything.
+  if (preview.matched === 0 && preview.leftOutByStatus > 0) {
+    return (
+      <EmptyState
+        title="Only draft or archived products match"
+        description={`${leftOutSentence(preview.leftOutByStatus)} Tick “Include draft products” or “Include archived products” under the scope to price them.`}
+      />
+    );
+  }
+
   if (preview.matched === 0) {
     return (
       // `EmptyState` rather than `NoMatches`, deliberately. `NoMatches` cannot be
@@ -151,6 +163,12 @@ export function DraftPreview({
             priced at all. Sync your catalogue to capture them.
           </s-text>
         </s-paragraph>
+      ) : null}
+      {/* Secondary, not caution: leaving drafts and archived products out is the default
+          working, not something to fix. It is said so a merchant who expected them knows
+          where they went (#751). */}
+      {preview.leftOutByStatus > 0 ? (
+        <Secondary>{leftOutSentence(preview.leftOutByStatus)}</Secondary>
       ) : null}
 
       {/* Said once, above the table, rather than on every row that has one.
@@ -287,4 +305,11 @@ export function DraftPreview({
       ) : null}
     </s-stack>
   );
+}
+
+/** The variants a scope leaves out by product status, in one sentence (#751). */
+function leftOutSentence(count: number): string {
+  return count === 1
+    ? "1 variant on a draft or archived product is left out."
+    : `${formatCount(count)} variants on draft or archived products are left out.`;
 }

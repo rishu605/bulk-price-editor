@@ -41,6 +41,7 @@ import {
   astFrom,
   compareAtFrom,
   priorityFrom,
+  productStatusesFrom,
   readerFor,
   revertBufferFrom,
   ruleFrom,
@@ -244,6 +245,10 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
       vendor: url.searchParams.get("vendor") ?? "",
       title: url.searchParams.get("title") ?? "",
       segment: segmentId,
+      // Ticked when the full preview's "Back to the campaign" carries them, so the boxes
+      // say what the preview the merchant just read was pricing (#751).
+      includeDraft: (url.searchParams.get("includeDraft") ?? "") !== "",
+      includeArchived: (url.searchParams.get("includeArchived") ?? "") !== "",
     },
     // A guided campaign that still covers everything. The banner says "narrow the scope
     // to a handful of products — five is plenty" and the form defaulted to the whole
@@ -369,6 +374,8 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
     name: String(form.get("name") ?? "Untitled campaign").trim() || "Untitled campaign",
     ast: astFrom(readerFor(params)),
     ...(segmentId ? { segmentId } : {}),
+    // The reader the live preview uses, so a box ticked there is a box this keeps (#751).
+    productStatuses: productStatusesFrom(read),
     ...(practice ? { practice: true } : {}),
     rule,
     compareAtPolicy,
@@ -773,8 +780,8 @@ export default function NewCampaign() {
           the second page caused in the first place. */}
       {fromFile ? null : (
       <Card heading={headings.scope}>    <s-paragraph>
-          Which variants the rule above applies to. Leave everything blank to target the
-          whole catalogue; conditions combine with AND.
+          Which variants the rule above applies to. Leave everything blank to target every
+          active product in the catalogue; conditions combine with AND.
         </s-paragraph>
 
         <FieldGrid>
@@ -800,7 +807,7 @@ export default function NewCampaign() {
               <s-banner tone="info">
                 <s-paragraph>
                   Targeting the segment <s-text>{usingSegment.name}</s-text>. The filter
-                  below is ignored.{" "}
+                  below is ignored, apart from the draft and archived boxes at the end.{" "}
                   {usingSegment.kind === "DYNAMIC"
                     ? "It re-checks its filter on every run, so products added later join this campaign."
                     : "Its product list is pinned, so this campaign hits exactly those products and nothing added later."}
@@ -883,6 +890,34 @@ export default function NewCampaign() {
                 </s-option>
               ))}
             </s-select>
+          </FullRow>
+
+          {/* Product status, after every condition because it narrows all of them -- and a
+              saved segment too, which is why it is not hidden when one is chosen (#751).
+
+              Unticked by default: a campaign covers what the storefront sells. A sale that
+              reached drafts held itself the moment the merchant set a draft's price in
+              Shopify, and one that reached the archive brought products back already
+              discounted and badged. Two boxes rather than one, because they are different
+              decisions: pricing a launch that is still a draft is a reason to tick one;
+              there is rarely a reason to tick the other. */}
+          <FullRow>
+            <s-stack gap={SPACE.tight}>
+              <s-checkbox
+                name="includeDraft"
+                value="1"
+                label="Include draft products"
+                checked={selected.includeDraft || undefined}
+                details="Drafts are products you are still preparing. Left out unless ticked, so one you publish during the sale does not go live at a price nobody chose for it."
+              />
+              <s-checkbox
+                name="includeArchived"
+                value="1"
+                label="Include archived products"
+                checked={selected.includeArchived || undefined}
+                details="Archived products are not for sale. Left out unless ticked, so one you bring back during the sale does not return already discounted and tagged."
+              />
+            </s-stack>
           </FullRow>
         </FieldGrid>
       </Card>

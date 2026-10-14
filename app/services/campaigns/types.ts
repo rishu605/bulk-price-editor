@@ -12,6 +12,7 @@ import type { MarginRow } from "../../lib/pricing/margin";
 import type { StoredRoundingPolicy } from "../../lib/money/rounding-policy";
 import type { Schedule } from "../../lib/scheduling/window";
 import type { FilterAst } from "../segments.server";
+import type { ProductStatus } from "../../lib/campaigns/product-status";
 
 export interface CampaignInput {
   name: string;
@@ -67,6 +68,14 @@ export interface CampaignInput {
    * using it -- which is what makes a segment reusable rather than a template.
    */
   segmentId?: string;
+  /**
+   * Product statuses this campaign covers (#751). Absent is active products only.
+   *
+   * Held by the campaign rather than by its filter or its segment, because it applies to
+   * either: a segment is shared and means every status, and which of its products this
+   * sale reaches is this campaign's decision.
+   */
+  productStatuses?: readonly ProductStatus[];
 }
 
 export interface PreviewRow {

@@ -50,6 +50,8 @@ vi.mock("./model.server", () => ({
 vi.mock("./candidates.server", () => ({
   loadCandidates: vi.fn().mockResolvedValue([]),
   titleMapFor: vi.fn().mockResolvedValue(new Map([["gid://v/1", "Alpine Backpack"]])),
+  pricesWrittenBy: vi.fn().mockResolvedValue([]),
+  withWritten: vi.fn(async (_shopId: string, scoped: unknown[]) => scoped),
 }));
 
 vi.mock("../settings.server", () => ({

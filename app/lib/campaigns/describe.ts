@@ -1,6 +1,7 @@
 import { format } from "../money/format";
 import type { AdjustmentRule } from "../pricing/types";
 import type { FilterAst } from "../../services/segments.server";
+import { describeProductStatuses } from "./product-status";
 
 /**
  * What a campaign does and what it does it to, in words.
@@ -89,6 +90,14 @@ function strip(percent: number): string {
  * is the scope with the largest consequence and the least visible cause.
  */
 export function describeScope(ast: FilterAst | null | undefined, segmentName?: string | null): string {
+  // Draft and archived products, when the campaign opted into them (#751). After the rest,
+  // because it widens whatever the rest says -- a segment included.
+  const statuses = describeProductStatuses(ast?.productStatuses);
+  const scope = describeConditions(ast, segmentName);
+  return statuses ? `${scope} · ${statuses}` : scope;
+}
+
+function describeConditions(ast: FilterAst | null | undefined, segmentName?: string | null): string {
   if (segmentName) return segmentName;
 
   const groups = (ast?.groups ?? []).filter((group) => (group.conditions ?? []).length > 0);

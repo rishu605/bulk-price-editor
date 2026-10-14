@@ -29,8 +29,12 @@ describe("what the card promises", () => {
     expect(promise, "the promise is below the button that makes it").toBeLessThan(button);
   });
 
-  it("says how many variants it covers, from the real count", () => {
-    expect(HOME).toContain("formatCount(health.variants)");
+  it("says how many variants it covers, counted from the scope its campaign gets", () => {
+    // Not the catalogue size (#751): `health.variants` counts drafts, archived products and
+    // gift cards, none of which the campaign prices.
+    expect(HOME).toContain("astToWhere(shop.id, QUICK_CAMPAIGN_SCOPE)");
+    expect(HOME).toContain("formatCount(onSale)");
+    expect(HOME).not.toContain("all ${formatCount(health.variants)} variants");
   });
 
   it("offers the full editor as the alternative rather than hiding it", () => {
@@ -46,10 +50,10 @@ describe("what the action does", () => {
     expect(branch, "quick create must not apply anything").not.toContain("runCampaign");
   });
 
-  it("targets every variant, which is what the card says", () => {
+  it("targets what the card counted: every active product (#751)", () => {
     const branch = HOME.slice(at('intent === "quick-campaign"'), at('intent === "sync"'));
 
-    expect(branch).toContain("ast: { groups: [] }");
+    expect(branch).toContain("ast: QUICK_CAMPAIGN_SCOPE");
   });
 
   it("negates the percentage, because the field asks for a discount", () => {

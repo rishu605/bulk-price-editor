@@ -10,6 +10,7 @@
 import type { Prisma } from "@prisma/client";
 import prisma from "../db.server";
 import { formatMinorUnits } from "../lib/money/format";
+import type { ProductStatus } from "../lib/campaigns/product-status";
 import { MAX_FACET_VALUES, type Facets } from "../lib/segments/facets";
 
 export type ConditionField =
@@ -66,6 +67,21 @@ export interface ConditionGroup {
 /** OR of groups. An empty AST matches the whole catalogue. */
 export interface FilterAst {
   groups: ConditionGroup[];
+  /**
+   * The product statuses the whole scope is limited to, ANDed over every group (#751).
+   *
+   * Absent means any status, which is what a segment, a cost edit or the baseline browser
+   * means by a filter. A campaign's scope always carries one -- `astOf` and `scopeOf`
+   * attach the campaign's, and the editor's draft attaches the form's -- so the default a
+   * campaign gets is decided in one place (`productStatusesOf`) rather than here, where
+   * it would quietly change what every other filter in the app matches.
+   *
+   * Beside the groups rather than a `status` condition inside each one, because it is
+   * not a condition the merchant built: it has to hold over a saved segment's groups,
+   * which the campaign does not own and must not rewrite, and over an empty AST, which
+   * has no group to put it in.
+   */
+  productStatuses?: readonly ProductStatus[];
 }
 
 export const EMPTY_AST: FilterAst = { groups: [] };
@@ -137,12 +153,20 @@ function conditionToWhere(condition: Condition): Prisma.VariantIndexWhereInput |
  * meter in `run.server` and the approvals and calendar counts all compile through it.
  * A caller that filtered for itself would be one more half of a contract to keep in
  * step, which is how gift cards got priced in the first place.
+ *
+ * The AST's product statuses are applied here for the same reason (#751), but they are
+ * not a floor: a merchant can opt a campaign into draft and archived products, and a
+ * segment means every status. What a campaign covers when it says nothing is decided by
+ * `productStatusesOf`, which `astOf`, `scopeOf` and the editor's draft all go through.
  */
 export function astToWhere(shopId: string, ast: FilterAst): Prisma.VariantIndexWhereInput {
   const base: Prisma.VariantIndexWhereInput = {
     shopId,
     deletedAt: null,
     isGiftCard: false,
+    // `in` even for a single status, so the shape does not depend on how many were
+    // chosen. `[shopId, status]` is indexed.
+    ...(ast.productStatuses ? { status: { in: [...ast.productStatuses] } } : {}),
   };
 
   const groups = (ast.groups ?? [])

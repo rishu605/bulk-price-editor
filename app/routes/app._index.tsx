@@ -1,7 +1,13 @@
 import { actorFor } from "../lib/audit/actor";
 import { formatAgo, formatCount, formatDay } from "../lib/format/display";
 import { useRef, type ReactNode } from "react";
-import { moreOptionsHref, quickCampaignName, readQuickPercent } from "../lib/campaigns/quick-campaign";
+import {
+  moreOptionsHref,
+  QUICK_CAMPAIGN_SCOPE,
+  quickCampaignName,
+  readQuickPercent,
+} from "../lib/campaigns/quick-campaign";
+import { astToWhere } from "../services/segments.server";
 import { merchantFacing } from "../lib/audit/housekeeping";
 import { createCampaign } from "../services/campaigns/index.server";
 import { readSettings } from "../services/settings.server";
@@ -113,7 +119,7 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
   // twelve seconds went: the first batch is 21ms and this one is 2ms. It is folded in
   // because two round trips where one would do is still one too many, not because it was
   // ever the problem.
-  const [notices, needsAttention, drafts, archivedRunning, cleanRuns, practiceCampaigns] = await Promise.all([
+  const [notices, needsAttention, drafts, archivedRunning, cleanRuns, practiceCampaigns, onSale] = await Promise.all([
     openNotices(shop.id),
     prisma.campaign.count({ where: { shopId: shop.id, archivedAt: null, status: { in: ["PARTIAL", "HELD"] } } }),
     // Campaigns the merchant made and has not applied. Counted because Home used to
@@ -128,6 +134,10 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
       where: { shopId: shop.id, kind: "APPLY", status: "COMPLETED", verifiedRows: { gt: 0 } },
     }),
     prisma.campaign.count({ where: { shopId: shop.id, schedule: { path: ["practice"], equals: true } } }),
+    // What "Put everything on sale" would cover, compiled the way its campaign's scope is
+    // (#751): active products, no gift cards. `health.variants` is the catalogue -- the
+    // right number for the Catalogue card and the wrong one to promise a sale over.
+    prisma.variantIndex.count({ where: astToWhere(shop.id, QUICK_CAMPAIGN_SCOPE) }),
   ]);
 
   const sync = syncStateOf(
@@ -156,6 +166,7 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
       staleBaselines,
     },
     campaigns,
+    onSale,
     onboarding: onboarding({
       hasBaselines: baselinesCaptured(health, shop.initialSyncCompletedAt !== null, sync.running),
       hasCampaign: campaigns > 0,
@@ -237,9 +248,10 @@ export const action = withGuard("/app", async ({ request }: ActionFunctionArgs) 
       shop.id,
       {
       name: quickCampaignName(parsed.percent, formatDay(new Date(), shop.timezone)),
-      // The whole catalogue: an empty filter is every variant, which is what "everything"
-      // means and what the card says it will do.
-      ast: { groups: [] },
+      // Everything on sale: every active product, which is what the card counts (#751). An
+      // empty filter alone also covered drafts the merchant is still preparing and products
+      // they have archived.
+      ast: QUICK_CAMPAIGN_SCOPE,
       rule: { kind: "percent-change", percent: -parsed.percent },
       // A sale that does not look like one converts worse, and it is the editor's own
       // default — a quick campaign that behaved differently from the same campaign made
@@ -286,6 +298,7 @@ export default function Dashboard() {
     usage,
     syncedAt,
     health,
+    onSale,
     onboarding: guide,
     live,
     upcoming,
@@ -754,7 +767,7 @@ export default function Dashboard() {
                   name="percent"
                   label="% off"
                   placeholder="20"
-                  details={`Applies to all ${formatCount(health.variants)} variants, priced from their baselines.`}
+                  details={`Applies to all ${formatCount(onSale)} variants of your active products, priced from their baselines.`}
                 />
               </Field>
               <Secondary>

@@ -10,7 +10,15 @@
  * sidebar and a different one in the run.
  */
 
-import { astFrom, compareAtFrom, priorityFrom, readerFor, ruleFrom, ruleInputProblem } from "../../lib/campaigns/draft-form";
+import {
+  astFrom,
+  compareAtFrom,
+  priorityFrom,
+  productStatusesFrom,
+  readerFor,
+  ruleFrom,
+  ruleInputProblem,
+} from "../../lib/campaigns/draft-form";
 import { readRoundingPolicy } from "../../lib/money/rounding-policy";
 import { segmentToAst } from "../segments.server";
 import type { DraftCampaign } from "./draft-preview.server";
@@ -41,13 +49,18 @@ export async function draftCampaignFrom(
   const ruleProblem = ruleInputProblem(read);
 
   return {
-    ast: segment
-      ? segmentToAst({
-          kind: segment.kind as "DYNAMIC" | "FROZEN",
-          filterAst: segment.filterAst,
-          frozenVariantGids: segment.frozenVariantGids,
-        })
-      : astFrom(read),
+    ast: {
+      ...(segment
+        ? segmentToAst({
+            kind: segment.kind as "DYNAMIC" | "FROZEN",
+            filterAst: segment.filterAst,
+            frozenVariantGids: segment.frozenVariantGids,
+          })
+        : astFrom(read)),
+      // Over the segment too, as `scopeOf` does for the campaign this becomes (#751): the
+      // segment replaces the filter, not the choice of draft and archived products.
+      productStatuses: productStatusesFrom(read),
+    },
     // A rule the merchant has not finished typing is never priced (#696): the preview says
     // why instead, and the placeholder below is never written anywhere.
     ...(ruleProblem

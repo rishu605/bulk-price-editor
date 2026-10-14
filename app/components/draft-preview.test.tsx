@@ -40,6 +40,7 @@ const preview = (over: Partial<Preview> = {}): Preview => ({
   skipped: 0,
   staleBaselines: 0,
   withoutBaseline: 0,
+  leftOutByStatus: 0,
   rows: [row()],
   overlaps: [],
   blocked: null,
@@ -199,5 +200,28 @@ describe("prices changed outside a campaign (#745)", () => {
   it("says nothing when there are none", () => {
     const html = render(preview());
     expect(html).not.toContain("outside this app while no");
+  });
+});
+
+describe("draft and archived products left out (#751)", () => {
+  it("says the conditions matched only draft or archived products, and where to include them", () => {
+    // The walk that found #751: one title, whose product is archived. "Nothing matches"
+    // would send the merchant to loosen a scope that is right.
+    const html = render(preview({ matched: 0, changing: 0, rows: [], leftOutByStatus: 2 }));
+
+    expect(html).toContain("Only draft or archived products match");
+    expect(html).toContain("2 variants on draft or archived products are left out.");
+    expect(html).toContain("Include draft products");
+    expect(html).not.toContain("Nothing matches this scope");
+  });
+
+  it("names the ones left out beside the counts", () => {
+    const html = render(preview({ leftOutByStatus: 1 }));
+    expect(html).toContain("1 variant on a draft or archived product is left out.");
+  });
+
+  it("says nothing when none are", () => {
+    const html = render(preview());
+    expect(html).not.toContain("left out");
   });
 });

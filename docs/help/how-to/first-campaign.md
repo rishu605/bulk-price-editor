@@ -15,7 +15,7 @@ off a sale price, permanently.
 
 **Campaigns → New campaign.**
 
-- **Scope** — leave everything blank to target the whole catalogue, or narrow by collection, vendor, tag or title.
+- **Scope** — leave everything blank to target every active product, or narrow by collection, vendor, tag or title. Draft and archived products are left out unless you tick **Include draft products** or **Include archived products**: a draft you publish mid-sale would otherwise go live at the sale price, and an archived product would come back already discounted.
 - **Rule** — "percent change from baseline", `-20` for 20% off.
 - **Compare-at** — "set to baseline" gives the strike-through shoppers expect.
 - **Rounding** — `.99` endings if you want them.
