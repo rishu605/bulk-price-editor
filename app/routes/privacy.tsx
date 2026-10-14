@@ -166,8 +166,10 @@ export default function Privacy() {
             Campaign history and the price ledger are retained for as long as the app is
             installed, because they are what makes a revert correct months after a sale
             ended. When you uninstall Anchor, the shop record and its catalogue mirror,
-            baselines, ledger, campaigns and audit log are deleted within 48 hours, which
-            is the window Shopify allows for a reinstall to recover a store in error.
+            baselines, ledger, campaigns, audit log and error reports are deleted within
+            48 hours, which is the window Shopify allows for a reinstall to recover a
+            store in error. While the app is installed, error reports are kept for 90
+            days.
           </p>
 
           <h2>Your rights</h2>

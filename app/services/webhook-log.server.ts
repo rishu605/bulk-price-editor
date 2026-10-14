@@ -23,6 +23,12 @@ import { logger } from "../lib/logging/logger";
 
 type WebhookAction = (args: ActionFunctionArgs) => Promise<Response>;
 
+/** The topic, as Shopify's `X-Shopify-Topic` header spells it, whose job is to erase a shop. */
+const SHOP_REDACT = "shop/redact";
+
+/** What an erased shop's deliveries are recorded under. Not a hostname, so never a shop's. */
+export const ERASED_SHOP = "(redacted)";
+
 export function recordedWebhook(handle: WebhookAction): WebhookAction {
   return async (args) => {
     const receivedAt = new Date();
@@ -51,15 +57,24 @@ async function record(
   const shopDomain = headers.get("x-shopify-shop-domain");
   if (!webhookId || !topic || !shopDomain) return;
 
+  // A `shop/redact` that succeeded has just erased this shop, deliveries included, and
+  // recording it under the domain would write the domain straight back (#785). Still
+  // recorded -- it is traffic, and the alerts count it -- but as nobody's. One that failed
+  // erased nothing: it keeps the domain, because whoever looks into it needs to know
+  // whose it was, and Shopify's retry overwrites it once one succeeds.
+  const erased = topic === SHOP_REDACT && status === "PROCESSED";
+
   try {
-    const shop = await prisma.shop.findUnique({ where: { domain: shopDomain }, select: { id: true } });
+    const shop = erased
+      ? null
+      : await prisma.shop.findUnique({ where: { domain: shopDomain }, select: { id: true } });
     const processedAt = new Date();
     await prisma.webhookEvent.upsert({
       where: { webhookId },
       create: {
         webhookId,
         shopId: shop?.id ?? null,
-        shopDomain,
+        shopDomain: erased ? ERASED_SHOP : shopDomain,
         topic,
         payload: {},
         status,
@@ -70,6 +85,7 @@ async function record(
       },
       // Shopify retries a delivery under the same id until it is answered with a 2xx.
       update: {
+        ...(erased ? { shopId: null, shopDomain: ERASED_SHOP } : {}),
         status,
         attempts: { increment: 1 },
         processedAt,
@@ -82,6 +98,18 @@ async function record(
       error: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+/**
+ * Deletes every delivery recorded for a shop, for `shop/redact` (#785).
+ *
+ * The cascade from `Shop` clears the ones attributed to it. Not the rest: a delivery that
+ * arrived before the shop row existed, or after it was gone, is recorded with no shop and
+ * only the domain -- which is the one thing on the row worth erasing.
+ */
+export async function forgetShopDeliveries(domain: string): Promise<number> {
+  const { count } = await prisma.webhookEvent.deleteMany({ where: { shopDomain: domain } });
+  return count;
 }
 
 /** How long a delivery is kept: far past the alerts' fifteen minutes, long enough to look into. */

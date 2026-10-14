@@ -25,6 +25,7 @@ import { noteCampaign } from "./campaigns/lifecycle.server";
 import { beat } from "./scheduler-heartbeat.server";
 import { checkAlerts } from "./alerting.server";
 import { sendDueDigests } from "./digest.server";
+import { pruneErrorEvents } from "./error-report.server";
 import { pruneWebhookLog } from "./webhook-log.server";
 import { auditMirror } from "./mirror-audit.server";
 import { logger } from "../lib/logging/logger";
@@ -179,6 +180,15 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
     await pruneWebhookLog(now);
   } catch (error) {
     logger.warn("could not prune the webhook log", { error: error instanceof Error ? error.message : String(error) });
+  }
+
+  // And failures past theirs (#785), for the same reason and on the same terms. The table
+  // had no other bound, and a failure `shop/redact` cannot attribute to its shop is only
+  // ever removed by this.
+  try {
+    await pruneErrorEvents(now);
+  } catch (error) {
+    logger.warn("could not prune the error log", { error: error instanceof Error ? error.message : String(error) });
   }
 
   // Emitted every tick, including the quiet ones. A scheduler panel that only has data
