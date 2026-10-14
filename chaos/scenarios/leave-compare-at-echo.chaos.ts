@@ -6,7 +6,8 @@
  * the echo carries the compare-at the variant already had, because "leave" left it there.
  * So on any variant with a compare-at, Anchor's own write did not match its own intent:
  * a DriftEvent, an email, and the controlling campaign HELD, which stops its scheduled end
- * and leaves its prices live. Every spreadsheet import uses "leave".
+ * and leaves its prices live. Every spreadsheet import used "leave", and a row of one with
+ * no compare-at still leaves it (#766).
  *
  * The echo is delivered through the products webhook while the mirror still holds the
  * pre-run price, which is when it really arrives: the mirror is refreshed after the whole

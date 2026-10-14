@@ -107,7 +107,10 @@ export const action = withGuard("/app/price-import", async ({ request }: ActionF
       // rows the import just reported as matched would be priced as nothing, unexplained.
       productStatuses: EVERY_STATUS,
       rule: { kind: "from-import", importId },
-      compareAtPolicy: { kind: "leave" },
+      // The file's compare-at column, where a row filled it in (#766). It was "leave": the
+      // column was checked against the price, refusing rows over it, and then never
+      // written. A row with no compare-at still leaves the variant's own alone.
+      compareAtPolicy: { kind: "from-import", importId },
       rounding: { default: "none", byCurrency: {} },
       ...(practice ? { practice: true } : {}),
       },

@@ -429,6 +429,10 @@ export function importIdsOf(campaigns: readonly ResolvableCampaign[]): string[] 
     for (const row of campaign.ruleRows) {
       if (row.rule.kind === "from-import") ids.add(row.rule.importId);
     }
+    // The compare-at a file gave is read from the same import (#766). Named by the rule
+    // too in every campaign the import route makes, but not loading it here would leave
+    // the policy with nothing to read, silently, should the two ever part.
+    if (campaign.compareAtPolicy?.kind === "from-import") ids.add(campaign.compareAtPolicy.importId);
   }
 
   return [...ids];

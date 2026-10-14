@@ -177,9 +177,7 @@ export async function loadCandidates(
       baseline: base,
       livePrice: asMoney(entry?.livePrice),
       liveCompareAt: asMoney(entry?.liveCompareAt),
-      ...(imported.size > 0
-        ? { importedPrices: pricesFor(imported, variant.variantGid, currency) }
-        : {}),
+      ...(imported.size > 0 ? pricesFor(imported, variant.variantGid, currency) : {}),
     });
   }
 
@@ -236,46 +234,62 @@ export async function withWritten(
   return [...scoped, ...(await loadCandidates(shopId, { groups: [] }, strays, importIds))];
 }
 
+/** One variant's row in one import: its price, and its compare-at where the row gave one. */
+interface ImportedRow {
+  price: bigint;
+  compareAt: bigint | null;
+}
+
 /**
  * Imported prices for these variants, from these imports.
  *
- * Keyed variant → import → price, because a variant can appear in more than one import
+ * Keyed variant → import → row, because a variant can appear in more than one import
  * and the rule names which one it means. Two campaigns from two files pricing the same
  * product is exactly the overlap the resolver exists to settle, and it can only do that
  * if both prices are available to it.
+ *
+ * The compare-at as well (#766). It was stored with every row and selected by nothing, so
+ * a file's compare-at column was checked, kept, and never written.
  */
 async function importedPricesByVariant(
   importIds: readonly string[],
   variantGids: readonly string[],
-): Promise<Map<string, Map<string, bigint>>> {
+): Promise<Map<string, Map<string, ImportedRow>>> {
   if (importIds.length === 0 || variantGids.length === 0) return new Map();
 
   const rows = await inChunks([...variantGids], (batch) =>
     prisma.priceImportRow.findMany({
       where: { importId: { in: [...importIds] }, variantGid: { in: batch } },
-      select: { importId: true, variantGid: true, price: true },
+      select: { importId: true, variantGid: true, price: true, compareAt: true },
     }),
   );
 
-  const byVariant = new Map<string, Map<string, bigint>>();
+  const byVariant = new Map<string, Map<string, ImportedRow>>();
   for (const row of rows) {
-    const forVariant = byVariant.get(row.variantGid) ?? new Map<string, bigint>();
-    forVariant.set(row.importId, row.price);
+    const forVariant = byVariant.get(row.variantGid) ?? new Map<string, ImportedRow>();
+    forVariant.set(row.importId, { price: row.price, compareAt: row.compareAt });
     byVariant.set(row.variantGid, forVariant);
   }
 
   return byVariant;
 }
 
+/** A variant's imported prices and compare-ats, by import id, in the surface's currency. */
 function pricesFor(
-  imported: Map<string, Map<string, bigint>>,
+  imported: Map<string, Map<string, ImportedRow>>,
   variantGid: string,
   currency: string,
-): Record<string, Money> {
-  const forVariant = imported.get(variantGid);
-  if (!forVariant) return {};
+): Pick<PlanCandidate, "importedPrices" | "importedCompareAts"> {
+  const forVariant = [...(imported.get(variantGid) ?? [])];
 
-  return Object.fromEntries(
-    [...forVariant].map(([importId, price]) => [importId, money(Number(price), currency)]),
-  );
+  return {
+    importedPrices: Object.fromEntries(
+      forVariant.map(([importId, row]) => [importId, money(Number(row.price), currency)]),
+    ),
+    importedCompareAts: Object.fromEntries(
+      forVariant
+        .filter(([, row]) => row.compareAt !== null)
+        .map(([importId, row]) => [importId, money(Number(row.compareAt), currency)]),
+    ),
+  };
 }

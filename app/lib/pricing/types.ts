@@ -89,7 +89,17 @@ export type CompareAtPolicy =
   /** Remove any compare-at. */
   | { kind: "clear" }
   /** Do not write compare-at at all. */
-  | { kind: "leave" };
+  | { kind: "leave" }
+  /**
+   * The compare-at each variant's row gave in an imported file (#766).
+   *
+   * A spreadsheet campaign used "leave", so a compare-at column was validated against the
+   * price -- refusing rows over it -- stored, and then never written. Now the file's own
+   * value is the strike-through, validated against the final price like any computed one
+   * (E11). A row that left it empty leaves the variant's compare-at alone, as "leave" does:
+   * an empty cell is not an instruction to wipe a merchant's own strike-through.
+   */
+  | { kind: "from-import"; importId: string };
 
 /** What to do when the computed compare-at would not exceed the final price. */
 export type CompareAtViolationPolicy = "skip" | "clear" | "block";
@@ -283,4 +293,9 @@ export interface ResolveInput {
    * correct outcome for a variant the file did not mention.
    */
   importedPrices?: Record<string, Money>;
+  /**
+   * This variant's compare-at in an imported file, keyed by import id, where its row gave
+   * one. Read by the `from-import` compare-at policy; absent leaves the compare-at alone.
+   */
+  importedCompareAts?: Record<string, Money>;
 }

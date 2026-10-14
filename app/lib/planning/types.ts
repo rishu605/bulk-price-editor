@@ -42,6 +42,8 @@ export interface PlanCandidate {
    * prices nothing, which is correct for a variant the file did not mention.
    */
   importedPrices?: Record<string, Money>;
+  /** Its compare-at in each import whose row gave one, for the `from-import` policy (#766). */
+  importedCompareAts?: Record<string, Money>;
 }
 
 export type PlannedRowStatus = "pending" | "skipped" | "clamped";
