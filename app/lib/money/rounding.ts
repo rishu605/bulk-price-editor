@@ -24,8 +24,10 @@ export type RoundingDirection = "up" | "down" | "nearest";
 export interface CharmProfile {
   mode: "charm";
   /**
-   * The forced ending, in minor units below one major unit.
-   * 99 → x.99, 95 → x.95, 0 → whole units.
+   * The forced ending, in hundredths of a major unit: 99 → x.99, 95 → x.95, 0 → whole
+   * units. Hundredths, not minor units, so it means the same in every currency (#695): in
+   * KWD, with three decimals, 99 is 0.990 and not 0.099 -- which priced 12.500 at 12.099,
+   * a 3.2% cut labelled as a cosmetic ending. `endingInMinorUnits` does the scaling.
    */
   ending: number;
   direction: RoundingDirection;
@@ -65,13 +67,20 @@ export function validateProfile(profile: RoundingProfile, currency: string): voi
       `Charm ending must be a non-negative integer, got ${profile.ending}.`,
     );
   }
-  const perMajor = 10 ** exponentOf(currency);
-  if (!isZeroDecimal(currency) && profile.ending >= perMajor) {
+  if (!isZeroDecimal(currency) && profile.ending >= 100) {
     throw new InvalidRoundingProfileError(
-      `Charm ending ${profile.ending} does not fit below one major unit of ${currency} ` +
-        `(max ${perMajor - 1}).`,
+      `Charm ending ${profile.ending} is in hundredths of a major unit and must be below 100.`,
     );
   }
+}
+
+/**
+ * A charm ending in the currency's own minor units: .99 is 99 cents in USD and 990 fils in
+ * KWD. Every currency with a charm ending has two or more decimals; one with none never
+ * gets here (`effectiveProfile` turns its charm into whole-unit steps).
+ */
+export function endingInMinorUnits(ending: number, currency: string): number {
+  return (ending * 10 ** exponentOf(currency)) / 100;
 }
 
 /**
@@ -179,7 +188,7 @@ export function applyRounding(value: Money, profile: RoundingProfile): Money {
 
   const perMajor = 10 ** exponentOf(value.currency);
   return money(
-    roundCharm(value.amount, effective.ending, perMajor, effective.direction),
+    roundCharm(value.amount, endingInMinorUnits(effective.ending, value.currency), perMajor, effective.direction),
     value.currency,
   );
 }
