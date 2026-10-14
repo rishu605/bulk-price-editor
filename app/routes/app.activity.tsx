@@ -140,7 +140,7 @@ export default function Activity() {
                 {timeZone}
               </s-text>
               {/* Every entry the filters select, read on the server (#819). It was this page's 15. */}
-              <ExportButton href={`/app/export/activity${exportQuery(params)}`} filename="anchor-activity.csv" rows={total} noun="entries" />
+              <ExportButton href={`/app/export/activity${exportQuery(params)}`} filename="anchor-activity.csv" rows={total} noun={["entry", "entries"]} />
             </ActionRow>
 
             <TableBlock

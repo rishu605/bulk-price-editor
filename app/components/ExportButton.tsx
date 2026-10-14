@@ -14,14 +14,18 @@ export function ExportButton({
   href,
   filename,
   rows,
-  noun = "rows",
+  noun = ["row", "rows"],
 }: {
   /** The export route, carrying the page's own filters. */
   href: string;
   filename: string;
   /** How many rows the file holds. */
   rows: number;
-  noun?: string;
+  /**
+   * What a row is, singular and plural. Both, not a plural with its "s" trimmed: that made
+   * one activity entry "Export the 1 entrie" (#947).
+   */
+  noun?: readonly [singular: string, plural: string];
 }) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -46,9 +50,14 @@ export function ExportButton({
           }
         }}
       >
-        {rows === 1 ? `Export the 1 ${noun.replace(/s$/, "")} (CSV)` : `Export all ${formatCount(rows)} ${noun} (CSV)`}
+        {exportLabel(rows, noun)}
       </s-button>
       {problem ? <s-text tone="critical">{problem}</s-text> : null}
     </>
   );
+}
+
+/** "Export the 1 entry (CSV)", or "Export all 1,204 entries (CSV)". */
+export function exportLabel(rows: number, [singular, plural]: readonly [string, string]): string {
+  return rows === 1 ? `Export the 1 ${singular} (CSV)` : `Export all ${formatCount(rows)} ${plural} (CSV)`;
 }

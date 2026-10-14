@@ -16,6 +16,7 @@
 
 import { EmptyState } from "../AsyncState";
 import { Blank } from "../Blank";
+import { describeActor } from "../../lib/audit/actor";
 import { formatCount } from "../../lib/format/display";
 import { Secondary } from "../Type";
 import { Card } from "../Card";
@@ -77,7 +78,8 @@ export function PriceImportHistory({
                       </s-text>
                     ) : null}
                   </s-table-cell>
-                  <s-table-cell>{row.createdBy ?? <Blank />}</s-table-cell>
+                  {/* Named as Activity names them (#956): "Staff 7946", not "staff:91614707946". */}
+                  <s-table-cell>{row.createdBy ? describeActor(row.createdBy) : <Blank />}</s-table-cell>
                 </s-table-row>
               ))}
             </s-table-body>
