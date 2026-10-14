@@ -65,13 +65,15 @@ export async function cancelScheduled(shopId: string, campaignId: string, actor:
  * The dates go with it: a draft that kept its window would revert on the old end date the
  * first time it was applied by hand.
  */
-export async function unschedule(shopId: string, campaignId: string, actor: string): Promise<string> {
+export async function unschedule(
+  shopId: string,
+  campaignId: string,
+  actor: string,
+  reason = "unscheduled before it started",
+): Promise<string> {
   const campaign = await scheduled(shopId, campaignId);
 
-  const result = await transitionCampaign(shopId, campaignId, "DRAFT", {
-    reason: "unscheduled before it started",
-    actor,
-  });
+  const result = await transitionCampaign(shopId, campaignId, "DRAFT", { reason, actor });
   if (!result.changed) throw notScheduled(campaign.name, result.from);
 
   await prisma.campaign.update({
