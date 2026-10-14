@@ -251,8 +251,13 @@ export interface DriftRow {
   id: string;
   variantGid: string;
   title: string;
+  sku: string | null;
   observed: string | null;
   expected: string | null;
+  currency: string;
+  /** Whether the edit raised or lowered the campaign's price; null when either is unknown. */
+  direction: "up" | "down" | null;
+  campaignId: string | null;
   campaignName: string | null;
   detectedAt: string;
   /**
@@ -269,24 +274,48 @@ export async function pendingDrift(shopId: string, limit = ROWS_PER_VIEW): Promi
     take: limit,
     include: { campaign: { select: { name: true } } },
   });
+  return driftRowsFor(shopId, events);
+}
 
-  const titles = await prisma.variantIndex.findMany({
-    where: { shopId, variantGid: { in: events.map((e) => e.variantGid) } },
-    select: { variantGid: true, title: true },
-  });
-  const titleBy = new Map(titles.map((t) => [t.variantGid, t.title ?? t.variantGid]));
-  const live = await prisma.priceSurfaceEntry.findMany({
-    where: { shopId, surfaceKind: "BASE", priceListGid: "", variantGid: { in: events.map((e) => e.variantGid) } },
-    select: { variantGid: true, livePrice: true },
-  });
+type EventWithCampaign = Awaited<ReturnType<typeof prisma.driftEvent.findMany>>[number] & {
+  campaign: { name: string } | null;
+};
+
+/**
+ * Events as the queue and its export show them: the variant by its title, both prices in
+ * their currency, and whether the edit is still on the storefront. Two lookups however many
+ * events there are; the caller has already chosen which.
+ */
+export async function driftRowsFor(shopId: string, events: readonly EventWithCampaign[]): Promise<DriftRow[]> {
+  const gids = [...new Set(events.map((e) => e.variantGid))];
+  const [titles, live] = await Promise.all([
+    prisma.variantIndex.findMany({
+      where: { shopId, variantGid: { in: gids } },
+      select: { variantGid: true, title: true, sku: true },
+    }),
+    prisma.priceSurfaceEntry.findMany({
+      where: { shopId, surfaceKind: "BASE", priceListGid: "", variantGid: { in: gids } },
+      select: { variantGid: true, livePrice: true },
+    }),
+  ]);
+  const variantBy = new Map(titles.map((t) => [t.variantGid, t]));
   const liveBy = new Map(live.map((entry) => [entry.variantGid, entry.livePrice]));
 
   return events.map((event) => ({
     id: event.id,
     variantGid: event.variantGid,
-    title: titleBy.get(event.variantGid) ?? event.variantGid,
+    title: variantBy.get(event.variantGid)?.title ?? event.variantGid,
+    sku: variantBy.get(event.variantGid)?.sku ?? null,
     observed: formatMinorUnits(event.observedPrice, event.currency),
     expected: formatMinorUnits(event.expectedPrice, event.currency),
+    currency: event.currency,
+    direction:
+      event.observedPrice === null || event.expectedPrice === null || event.observedPrice === event.expectedPrice
+        ? null
+        : event.observedPrice > event.expectedPrice
+          ? "up"
+          : "down",
+    campaignId: event.campaignId,
     campaignName: event.campaign?.name ?? null,
     detectedAt: event.detectedAt.toISOString(),
     // Unknown counts as still shown: refusing a merchant's choice needs evidence. Only the

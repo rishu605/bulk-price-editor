@@ -29,6 +29,9 @@ import { previewCsv } from "../lib/reporting/preview-csv";
 import { reconciliationCsv } from "../lib/reporting/reconciliation-csv";
 import { baselinesCsv } from "../lib/reporting/baselines-csv";
 import { activityCsv } from "../lib/reporting/activity-csv";
+import { driftCsv } from "../lib/reporting/drift-csv";
+import { driftFiltersFrom } from "../lib/drift/batch";
+import { driftPage } from "../services/drift-queue.server";
 import { filenameSlug } from "../lib/reporting/csv";
 import { formatCount } from "../lib/format/display";
 import { activityFiltersFrom, baselineFiltersFrom, reconciliationFiltersFrom } from "../lib/reporting/export-filters";
@@ -91,6 +94,14 @@ export const loader = withGuard("/app/export/$kind", async ({ request, params }:
           return { rows: result.entries, total: result.total };
         },
         activityCsv,
+      );
+
+    // Every drifted price the queue's filters match (#822): the page shows fifteen at a time.
+    case "drift":
+      return paged(
+        "anchor-price-drift.csv",
+        (page) => driftPage(shop.id, driftFiltersFrom(query), page, EXPORT_PAGE),
+        driftCsv,
       );
 
     default:
