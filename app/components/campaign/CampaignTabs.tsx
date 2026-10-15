@@ -73,10 +73,13 @@ export function tabsFor({
   runs,
   rollback,
   ledger,
+  ledgerTotal,
 }: {
   runs: unknown[];
   rollback: { counts: { total: number; drifted: number } } | null;
   ledger: unknown[];
+  /** Every ledger row of the run shown, not the capped page of them `ledger` holds (#728). */
+  ledgerTotal?: number;
 }): CampaignTab[] {
   return [
     { id: "overview", label: "Overview", available: true },
@@ -90,6 +93,7 @@ export function tabsFor({
       // the count belongs on the label.
       badge: rollback?.counts.drifted || undefined,
     },
-    { id: "ledger", label: "Ledger", available: ledger.length > 0, badge: ledger.length },
+    // The run's row count, not the capped page's: a 3,669-row run badged "60" (#728).
+    { id: "ledger", label: "Ledger", available: ledger.length > 0, badge: ledgerTotal ?? ledger.length },
   ];
 }

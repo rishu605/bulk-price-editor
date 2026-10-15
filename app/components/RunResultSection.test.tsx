@@ -65,7 +65,7 @@ describe("a clean run", () => {
   it("shows the margin movement and says it covered everything", () => {
     expect(html).toContain("50.0%");
     expect(html).toContain("37.5%");
-    expect(html).toContain("across all 4 products");
+    expect(html).toContain("across all 4 variants");
   });
 
   it("still says what it cannot tell you", () => {
@@ -104,12 +104,12 @@ describe("a run that did not finish", () => {
 });
 
 describe("what it says when it knows less", () => {
-  it("names the products it could not price rather than averaging over them", () => {
+  it("names the variants it could not price rather than averaging over them", () => {
     const html = render(
       result({ margin: { ...result().margin, covered: 3, unknown: 7 } }),
     );
 
-    expect(html).toContain("3 products that have a cost");
+    expect(html).toContain("3 variants that have a cost");
     expect(html).toContain("7 do not");
   });
 
@@ -120,7 +120,7 @@ describe("what it says when it knows less", () => {
       }),
     );
 
-    expect(html).toContain("none of the products this run changed has a cost recorded");
+    expect(html).toContain("none of the variants this run changed has a cost recorded");
     // And no invented 0% margin.
     expect(html).not.toContain("0.0%");
   });

@@ -7,7 +7,7 @@
  * the other, and a partial run is exactly where they disagree.
  */
 
-import { formatCount } from "../lib/format/display";
+import { countOf, formatCount } from "../lib/format/display";
 import { CountsRow } from "./CountsRow";
 import type { CampaignResult } from "../services/campaigns/result.server";
 import { Secondary } from "./Type";
@@ -55,11 +55,13 @@ export function RunResultSection({ result }: { result: CampaignResult }) {
         <>
           <s-paragraph>
             <s-text>
-              Average margin went from {margin.averageBefore.toFixed(1)}% to{" "}
+              {/* Per variant (#795): every count here is variants, and "1,241 products" on a
+                  1,038-product store was the run's variant count under the wrong noun. */}
+              Average margin per variant went from {margin.averageBefore.toFixed(1)}% to{" "}
               {margin.averageAfter.toFixed(1)}%
               {margin.unknown > 0
-                ? `, across the ${margin.covered} products that have a cost recorded. ${margin.unknown} do not, and are not included.`
-                : `, across all ${margin.covered} products.`}
+                ? `, across the ${countOf(margin.covered, "variant")} that have a cost recorded. ${formatCount(margin.unknown)} do not, and are not included.`
+                : `, across all ${countOf(margin.covered, "variant")}.`}
             </s-text>
           </s-paragraph>
 
@@ -96,7 +98,7 @@ export function RunResultSection({ result }: { result: CampaignResult }) {
       ) : (
         <s-paragraph>
           <s-text>
-            No margin figures: none of the products this run changed has a cost recorded.
+            No margin figures: none of the variants this run changed has a cost recorded.
             Import your costs and this fills in for the next run.
           </s-text>
         </s-paragraph>

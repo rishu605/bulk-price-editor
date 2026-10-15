@@ -1,5 +1,5 @@
 import { actorFor } from "../lib/audit/actor";
-import { formatAgo, formatCount, formatDay } from "../lib/format/display";
+import { countOf, formatAgo, formatCount, formatDay } from "../lib/format/display";
 import { useRef, type ReactNode } from "react";
 import {
   moreOptionsHref,
@@ -516,7 +516,7 @@ export default function Dashboard() {
       body: (
         <>
               <s-paragraph>
-            {formatCount(health.missing)} variants cannot be included in a campaign until they have
+            {countOf(health.missing, "variant")} cannot be included in a campaign until they have
             one. {syncing ? "They are being captured now." : "Re-syncing captures them."}
           </s-paragraph>
           {/* The banner carries the action it asks for.
