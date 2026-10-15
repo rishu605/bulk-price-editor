@@ -76,3 +76,57 @@ function decimalsOf(amount: Money): number {
   const dot = formatted.indexOf(".");
   return dot === -1 ? 0 : formatted.length - dot - 1;
 }
+
+/** What a row decided about its compare-at: nothing (`set: false`), a value, or a clear (null). */
+export interface IntendedCompareAt {
+  set: boolean;
+  value?: Money | null;
+}
+
+/**
+ * Whether a row may be called verified, compare-at included (#988).
+ *
+ * A row was VERIFIED when its price read back right, though the same mutation wrote its
+ * strike-through and nothing read that back: a compare-at Shopify dropped, altered or had
+ * reverted left a clean run over a storefront showing no saving, or the wrong one. Rule 5
+ * says clean means every row read back, and the compare-at is half of what the row wrote.
+ *
+ * Only when the row decided one. A `leave` policy wrote no compare-at, so there is nothing
+ * of ours to compare.
+ */
+export function readBackRowVerdict(
+  intended: Money | undefined,
+  observedText: string | null | undefined,
+  compareAt: IntendedCompareAt,
+  observedCompareAtText: string | null | undefined,
+): ReadBackVerdict {
+  const price = readBackVerdict(intended, observedText);
+  if (!price.ok || !compareAt.set || !intended) return price;
+
+  // Shopify answers an absent compare-at as null, and some stores as "0.00".
+  const observedCompareAt =
+    observedCompareAtText === null || observedCompareAtText === undefined || observedCompareAtText === ""
+      ? null
+      : parseObserved(observedCompareAtText, intended);
+  const none = observedCompareAt === null || observedCompareAt.amount === 0;
+
+  if (compareAt.value === null || compareAt.value === undefined) {
+    return none
+      ? price
+      : {
+          ok: false,
+          reason: `Read-back mismatch on the compare-at price: expected none, found ${observedCompareAtText}.`,
+          observed: price.observed,
+        };
+  }
+  if (none || observedCompareAt.amount !== compareAt.value.amount) {
+    return {
+      ok: false,
+      reason:
+        `Read-back mismatch on the compare-at price: expected ${formatMoney(compareAt.value)}, ` +
+        `found ${none ? "none" : observedCompareAtText}.`,
+      observed: price.observed,
+    };
+  }
+  return price;
+}

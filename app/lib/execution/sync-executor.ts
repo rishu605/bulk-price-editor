@@ -24,7 +24,7 @@
 
 import { chunk } from "../db/chunk";
 import { formatMoney, type Money } from "../money/money";
-import { readBackVerdict } from "./read-back";
+import { readBackRowVerdict } from "./read-back";
 import type { PlannedRow } from "../planning/types";
 import { isThrottledError, RateLimitBudget, withRetry } from "../shopify/budget";
 import {
@@ -420,8 +420,14 @@ async function verifyBatch(
 
   for (const entry of sample) {
     const node = byId.get(entry.row.ref.variantGid);
-    // Shared with the bulk path, so the two cannot disagree about what "verified" means.
-    const verdict = readBackVerdict(entry.row.intendedPrice, node?.price);
+    // Shared with the bulk path, so the two cannot disagree about what "verified" means --
+    // the compare-at the row wrote included (#988).
+    const verdict = readBackRowVerdict(
+      entry.row.intendedPrice,
+      node?.price,
+      { set: entry.row.intendedCompareAtSet, value: entry.row.intendedCompareAt },
+      node?.compareAtPrice,
+    );
 
     if (verdict.ok) {
       entry.status = "verified";

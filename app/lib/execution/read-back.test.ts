@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 
 import { money } from "../money/money";
-import { parseObserved, readBackVerdict } from "./read-back";
+import { parseObserved, readBackRowVerdict, readBackVerdict } from "./read-back";
 
 const usd = (minor: number) => money(minor, "USD");
 const jpy = (minor: number) => money(minor, "JPY");
@@ -84,5 +84,36 @@ describe("currency precision", () => {
       const text = (cents / 100).toFixed(2);
       expect(parseObserved(text, usd(0)), text).toEqual(usd(cents));
     }
+  });
+});
+
+describe("a row's compare-at is read back too (#988)", () => {
+  const usd = (amount: number) => money(amount, "USD");
+
+  it("passes when the stored compare-at is the one written", () => {
+    expect(readBackRowVerdict(usd(1999), "19.99", { set: true, value: usd(2999) }, "29.99").ok).toBe(true);
+  });
+
+  it("fails, naming the compare-at, when Shopify stored another or none", () => {
+    const altered = readBackRowVerdict(usd(1999), "19.99", { set: true, value: usd(2999) }, "24.99");
+    expect(altered).toMatchObject({ ok: false });
+    expect(!altered.ok && altered.reason).toMatch(/compare-at price: expected 29\.99, found 24\.99/);
+    const dropped = readBackRowVerdict(usd(1999), "19.99", { set: true, value: usd(2999) }, null);
+    expect(!dropped.ok && dropped.reason).toMatch(/found none/);
+  });
+
+  it("checks a clear: none, or zero, is right; a value left behind is not", () => {
+    expect(readBackRowVerdict(usd(1999), "19.99", { set: true, value: null }, null).ok).toBe(true);
+    expect(readBackRowVerdict(usd(1999), "19.99", { set: true, value: null }, "0.00").ok).toBe(true);
+    expect(readBackRowVerdict(usd(1999), "19.99", { set: true, value: null }, "29.99").ok).toBe(false);
+  });
+
+  it("compares nothing when the row decided nothing about its compare-at", () => {
+    expect(readBackRowVerdict(usd(1999), "19.99", { set: false }, "99.99").ok).toBe(true);
+  });
+
+  it("reports the price mismatch first, as before", () => {
+    const verdict = readBackRowVerdict(usd(1999), "18.99", { set: true, value: usd(2999) }, "1.00");
+    expect(!verdict.ok && verdict.reason).toMatch(/expected 19\.99, found 18\.99/);
   });
 });
