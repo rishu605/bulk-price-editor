@@ -25,7 +25,8 @@ import {
   updateSegment,
   type SegmentEditConfirmation,
 } from "../services/segments-crud.server";
-import { formatCount } from "../lib/format/display";
+import { countOf, formatCount } from "../lib/format/display";
+import { listCreatedMessage, listMatchedSentence } from "../lib/segments/list-report";
 import { facetDetails, type Facets } from "../lib/segments/facets";
 import { facets } from "../services/segments.server";
 import { RouteBoundary } from "../components/RouteBoundary";
@@ -188,7 +189,7 @@ export const action = withGuard("/app/settings/segments", async ({ request }: Ac
 
       return {
         ok: true,
-        message: `Created "${name}" with ${outcome.matched.length} of ${outcome.total} rows.`,
+        message: listCreatedMessage(name, report),
         report,
       };
     }
@@ -206,7 +207,7 @@ export const action = withGuard("/app/settings/segments", async ({ request }: Ac
       ok: true,
       message:
         kind === "FROZEN"
-          ? `Created "${segment.name}" and pinned ${segment.frozenVariantGids.length} variants.`
+          ? `Created "${segment.name}" and pinned ${countOf(segment.frozenVariantGids.length, "variant")}.`
           : `Created "${segment.name}". It re-checks the filter every time a campaign uses it.`,
     };
   } catch (error) {
@@ -617,7 +618,7 @@ function ImportReport({ report }: { report: NonNullable<ActionData["report"]> })
   return (
     <Card heading="What the list matched">  <s-paragraph>
         <s-text>
-          {report.matched} of {report.total} rows matched a product.
+          {listMatchedSentence(report)}
           {clean ? " Every row was placed." : ""}
         </s-text>
       </s-paragraph>
@@ -626,8 +627,8 @@ function ImportReport({ report }: { report: NonNullable<ActionData["report"]> })
         <>
           <s-banner tone="warning">
             <s-paragraph>
-              {report.ambiguous.length} row{report.ambiguous.length === 1 ? "" : "s"} matched
-              more than one product, so {report.ambiguous.length === 1 ? "it was" : "they were"}{" "}
+              {countOf(report.ambiguous.length, "row")} matched more than one variant, so{" "}
+              {report.ambiguous.length === 1 ? "it was" : "they were"}{" "}
               left out. Picking one for you could put the wrong product on sale.
             </s-paragraph>
           </s-banner>
@@ -649,7 +650,7 @@ function ImportReport({ report }: { report: NonNullable<ActionData["report"]> })
                 <s-table-row key={`${row.line}-${row.value}`}>
                   <s-table-cell>{row.line}</s-table-cell>
                   <s-table-cell>{row.value}</s-table-cell>
-                  <s-table-cell>{row.candidates} products</s-table-cell>
+                  <s-table-cell>{countOf(row.candidates, "variant")}</s-table-cell>
                 </s-table-row>
               ))}
             </s-table-body>
@@ -662,8 +663,7 @@ function ImportReport({ report }: { report: NonNullable<ActionData["report"]> })
         <>
           <s-paragraph>
             <s-text>
-              {report.unmatched.length} row{report.unmatched.length === 1 ? "" : "s"} matched
-              nothing in your catalogue:
+              {countOf(report.unmatched.length, "row")} matched nothing in your catalogue:
             </s-text>
           </s-paragraph>
                     <TableBlock
@@ -694,8 +694,8 @@ function ImportReport({ report }: { report: NonNullable<ActionData["report"]> })
       {report.repeated > 0 ? (
         <s-paragraph>
           <s-text>
-            {report.repeated} row{report.repeated === 1 ? " was" : "s were"} listed more than
-            once and counted once.
+            {countOf(report.repeated, "row")} {report.repeated === 1 ? "was" : "were"} listed more
+            than once and counted once.
           </s-text>
         </s-paragraph>
       ) : null}
