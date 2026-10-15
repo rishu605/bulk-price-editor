@@ -10,6 +10,7 @@
 import type { Campaign } from "@prisma/client";
 
 import prisma from "../../db.server";
+import { inChunks } from "../../lib/db/chunk";
 import { AppError } from "../../lib/errors/app-error";
 import {
   parseRoundingPolicy,
@@ -495,13 +496,20 @@ export async function heldEditsOf(
 export async function withScopes(
   shopId: string,
   campaigns: readonly Campaign[],
+  /**
+   * Only these variants, for a question about a handful of them (#998): each scope then
+   * says which of these it covers, without reading every variant it covers to say so.
+   */
+  only?: readonly string[],
 ): Promise<ResolvableCampaign[]> {
   return Promise.all(
     campaigns.map(async (campaign) => {
-      const covered = await prisma.variantIndex.findMany({
-        where: astToWhere(shopId, await scopeOf(shopId, campaign)),
-        select: { variantGid: true },
-      });
+      const where = astToWhere(shopId, await scopeOf(shopId, campaign));
+      const covered = only
+        ? await inChunks([...only], (batch) =>
+            prisma.variantIndex.findMany({ where: { AND: [where, { variantGid: { in: batch } }] }, select: { variantGid: true } }),
+          )
+        : await prisma.variantIndex.findMany({ where, select: { variantGid: true } });
       return { ...toResolvable(campaign), scope: new Set(covered.map((row) => row.variantGid)) };
     }),
   );

@@ -32,6 +32,14 @@ revert asks nothing about it. That is usually a higher-priority campaign that to
 product over: its price is live, and it stays when this campaign ends. The report lists such
 a product as **Already there**.
 
+## A product another campaign handed over
+
+The other way round works too. When a higher-priority campaign ends, its revert puts this
+campaign's price on the products they shared, and from then on those products are this
+campaign's: an edit to one is drift on this campaign, and reverting this campaign takes its
+price back off them — even if a product has been archived since, so this campaign no longer
+covers it.
+
 ## Related
 
 - [What a baseline is](./baselines.md)

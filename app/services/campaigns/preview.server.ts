@@ -21,7 +21,8 @@ import {
 } from "../../lib/campaigns/blast-radius";
 import { unappliableRule } from "../../lib/campaigns/rule-limits";
 import { selectWritePath } from "../../lib/planning/write-path";
-import { loadCandidates, pricesWrittenBy, titleMapFor, withWritten } from "./candidates.server";
+import { loadCandidates, titleMapFor, withWritten } from "./candidates.server";
+import { revertTakesBack } from "./handover.server";
 import { loadCampaignContext, importIdsOf} from "./model.server";
 import { guardrailsFor, readSettings } from "../settings.server";
 import { uncontrolledAmong } from "../reconciliation.server";
@@ -112,10 +113,11 @@ export async function previewCampaign(
   const [scoped, storeGuardrails, written] = await Promise.all([
     loadCandidates(shopId, ast, undefined, importIdsOf(resolvable)),
     guardrailsFor(shopId),
-    options.revert ? pricesWrittenBy(shopId, campaignId) : Promise.resolve([]),
+    options.revert ? revertTakesBack(shopId, campaignId) : Promise.resolve([]),
   ]);
   // A revert takes back what it wrote, in scope or not, and so does its preview: a product
   // archived mid-sale is out of scope and still comes back to its baseline (#751, #828).
+  // What another campaign's revert handed it too, by the same answer the revert uses (#998).
   const candidates = await withWritten(shopId, scoped, written, importIdsOf(resolvable));
 
   const outcome = planRun({

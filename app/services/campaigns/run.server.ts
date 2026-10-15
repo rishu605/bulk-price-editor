@@ -21,7 +21,8 @@ import { executeRows } from "./execute.server";
 import type { PlannedRow } from "../../lib/planning/types";
 import { planRun } from "../../lib/planning/plan";
 import { recordWriteIntents, resolveOverwrittenDrift } from "../drift.server";
-import { loadCandidates, pricesWrittenBy, productMapFor, withWritten } from "./candidates.server";
+import { loadCandidates, productMapFor, withWritten } from "./candidates.server";
+import { revertTakesBack } from "./handover.server";
 import { refreshBasePrices } from "../live-prices.server";
 import { isPractice, loadCampaignContext, scopeOf, importIdsOf, segmentGone } from "./model.server";
 import { astToWhere } from "../segments.server";
@@ -688,9 +689,10 @@ async function executeCampaignRun(
 
   // A whole-campaign revert takes back every price this campaign wrote, not only the ones
   // still inside its scope (#828, edge case E6): a variant untagged mid-campaign keeps the
-  // sale price otherwise, and nothing else would ever revert it.
+  // sale price otherwise, and nothing else would ever revert it. And every price another
+  // campaign's revert handed it (#998), which its own ledger never recorded.
   const wholeRevert = options.revert === true && !options.variantGids;
-  const written = wholeRevert ? await pricesWrittenBy(shopId, campaignId) : [];
+  const written = wholeRevert ? await revertTakesBack(shopId, campaignId) : [];
   const plan = async (base: typeof scoped) => {
     // The same helper both revert previews use, so neither says a product archived mid-sale
     // "reverts to" its sale price while this puts its baseline back (#751).
