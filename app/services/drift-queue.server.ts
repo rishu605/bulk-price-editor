@@ -25,6 +25,7 @@ import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 
 import prisma from "../db.server";
+import { adoptBaselines } from "./baseline-adopt.server";
 import {
   describeBatch,
   describeDriftFilters,
@@ -485,31 +486,13 @@ async function keepAll(shopId: string, events: readonly Selected[], actor: strin
     const claimed = await prisma.$transaction(async (tx) => {
       const rows = await claim(tx, keepable, "ADOPTED", actor);
       const priced = rows.filter((row) => row.observedPrice !== null);
-      const now = new Date();
-      for (const priceListGid of new Set(priced.map((row) => row.priceListGid))) {
-        await tx.baseline.updateMany({
-          where: {
-            shopId,
-            surfaceKind: "BASE",
-            priceListGid,
-            supersededAt: null,
-            variantGid: { in: priced.filter((row) => row.priceListGid === priceListGid).map((row) => row.variantGid) },
-          },
-          data: { supersededAt: now },
-        });
-      }
-      await tx.baseline.createMany({
-        data: priced.map((row) => ({
-          shopId,
-          variantGid: row.variantGid,
-          surfaceKind: "BASE" as const,
-          priceListGid: row.priceListGid,
-          currency: row.currency,
-          basePrice: row.observedPrice!,
-          source: "DRIFT_ADOPTION" as const,
-          capturedBy: actor,
-        })),
-      });
+      // The single keep's own function (#1013): compare-at and cost carried over.
+      await adoptBaselines(
+        tx,
+        shopId,
+        priced.map((row) => ({ variantGid: row.variantGid, priceListGid: row.priceListGid, currency: row.currency, observedPrice: row.observedPrice! })),
+        actor,
+      );
       return rows;
     });
     resolved.push(...claimed.map((row) => row.variantGid));

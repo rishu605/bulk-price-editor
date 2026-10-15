@@ -20,6 +20,7 @@
 import { createHash } from "node:crypto";
 
 import prisma from "../db.server";
+import { adoptBaselines } from "./baseline-adopt.server";
 import { AppError } from "../lib/errors/app-error";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { notify } from "./notifications.server";
@@ -499,31 +500,15 @@ export async function resolveDrift(
   }
 
   if (resolution === "adopt" && event.observedPrice !== null) {
-    await prisma.$transaction(async (tx) => {
-      await tx.baseline.updateMany({
-        where: {
-          shopId,
-          variantGid: event.variantGid,
-          surfaceKind: "BASE",
-          priceListGid: event.priceListGid,
-          supersededAt: null,
-        },
-        data: { supersededAt: new Date() },
-      });
-
-      await tx.baseline.create({
-        data: {
-          shopId,
-          variantGid: event.variantGid,
-          surfaceKind: "BASE",
-          priceListGid: event.priceListGid,
-          currency: event.currency,
-          basePrice: event.observedPrice!,
-          source: "DRIFT_ADOPTION",
-          capturedBy: actor ?? null,
-        },
-      });
-    });
+    // With the old baseline's compare-at and cost carried over (#1013), as the bulk keep does.
+    await prisma.$transaction((tx) =>
+      adoptBaselines(
+        tx,
+        shopId,
+        [{ variantGid: event.variantGid, priceListGid: event.priceListGid, currency: event.currency, observedPrice: event.observedPrice! }],
+        actor ?? null,
+      ),
+    );
   }
 
   await prisma.driftEvent.update({
