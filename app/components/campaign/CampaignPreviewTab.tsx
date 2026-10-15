@@ -23,6 +23,7 @@
  */
 
 import { OverlapPanel } from "../OverlapPanel";
+import { countOf } from "../../lib/format/display";
 import { confirmationReasons } from "../../lib/campaigns/blast-radius";
 import { CountsRow } from "../../components/CountsRow";
 import { PreviewTable } from "../../components/PreviewTable";
@@ -215,12 +216,13 @@ export function CampaignPreviewTab({ preview, approval, fetcher, busy }: Campaig
             ) : (
               <s-paragraph key={market.priceListGid}>
                 <s-text>{market.explanation}</s-text>
-                {market.clamped > 0 || market.skipped > 0 ? (
+                {/* Only what a guardrail did (#844). A skip has many causes -- a currency
+                    mismatch, a missing import -- and the market's own sentence above names
+                    them; counting them here as a guardrail's blamed the wrong thing. */}
+                {market.clamped > 0 ? (
                   <s-text tone="caution">
                     {" "}
-                    A guardrail affects {market.clamped + market.skipped} of them here
-                    {market.clamped > 0 ? ` (${market.clamped} raised to the floor)` : ""}
-                    {market.skipped > 0 ? ` (${market.skipped} left alone)` : ""}.
+                    A guardrail raises {countOf(market.clamped, "variant")} to its floor here.
                   </s-text>
                 ) : null}
               </s-paragraph>

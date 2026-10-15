@@ -267,4 +267,23 @@ describe("chaos: markets changing while campaigns run", () => {
       },
     );
   });
+
+  it("names a held campaign in the notice for its market's currency change (#858)", async () => {
+    await withChaos("market-currency-held", { catalog: { products: 2, variantsPerProduct: 1 }, percent: -20 }, async (chaos) => {
+      const { shopId, campaignId } = chaos.fixture;
+      addEuMarket(chaos);
+      await sync(chaos);
+      // Held by a hand edit, its other prices still live in the market.
+      await prisma.campaign.update({
+        where: { id: campaignId },
+        data: { status: "HELD", surfaces: { base: true, priceLists: [EU] } as never },
+      });
+
+      chaos.fake.priceLists[0].currency = "GBP";
+      await sync(chaos);
+
+      const notice = await prisma.topologyNotice.findFirstOrThrow({ where: { shopId, kind: "currency-changed", resolvedAt: null } });
+      expect(notice.campaignIds, "the held campaign whose prices changed meaning went unnamed").toEqual([campaignId]);
+    });
+  });
 });

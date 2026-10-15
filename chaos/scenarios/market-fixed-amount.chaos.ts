@@ -98,6 +98,11 @@ describe("chaos: a fixed amount against a market in another currency", () => {
         const japan = preview.markets.find((m) => m.priceListGid === JPY);
         expect(japan?.skipped).toBe(variantGids.length);
         expect(japan?.explanation).toMatch(/fixed amount in another currency/);
+        // Nothing is written there, so no write path is promised (#844).
+        expect(japan?.explanation, "a market getting no price was told it gets one per product").toMatch(
+          /will be left at its normal prices/,
+        );
+        expect(japan?.explanation).not.toMatch(/will get a price per product|percentage across the whole market/);
       },
     );
   });
