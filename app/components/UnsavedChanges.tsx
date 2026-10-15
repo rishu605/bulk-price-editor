@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
 import { useBlocker, useNavigation } from "react-router";
 
-import { hasChanged, snapshotOf } from "../lib/ui/dirty";
-import { ActionRow } from "./ActionRow";
+import { snapshotOf } from "../lib/ui/dirty";
+import { LeaveGuard, TOUCH_EVENTS } from "../lib/ui/leave-guard";
 
 /**
  * Stops a half-filled form being thrown away by a click.
@@ -14,13 +14,13 @@ import { ActionRow } from "./ActionRow";
  * trap this exists to close, and it is the reason the back link could not simply be
  * added on its own.
  *
- * ## Why a banner and not a dialog
+ * ## Why a dialog
  *
- * The app confirms destructive things inline — the recapture page asks for a typed
- * confirmation rather than opening a modal — and a browser `confirm()` inside the admin's
- * iframe is both ugly and not guaranteed to be permitted. So the block renders as the
- * app's own banner, and scrolls itself into view: a warning at the top of a page the
- * merchant has scrolled to the bottom of would look exactly like the click doing nothing.
+ * A browser `confirm()` inside the admin's iframe is both ugly and not guaranteed to be
+ * permitted. It was the app's own banner, scrolled into view -- but the scroll that matters
+ * is the admin page around the iframe, so from a click at the foot of the editor the banner
+ * stayed off screen and the click looked like it did nothing (#761). A Polaris modal is
+ * shown in view wherever the page is scrolled.
  *
  * ## What it does not cover
  *
@@ -47,18 +47,27 @@ export function UnsavedChanges({
   describe?: string;
   saved?: boolean;
 }) {
-  const pristine = useRef<string | null>(null);
-  const banner = useRef<HTMLElement | null>(null);
+  const guard = useRef(new LeaveGuard());
+  const modal = useRef<(HTMLElement & { showOverlay?: () => void; hideOverlay?: () => void }) | null>(null);
   const submitting = useRef(false);
   const navigation = useNavigation();
 
+  // The clean state is read at the merchant's first touch, not at mount (#761): the
+  // Polaris fields register their values after this component mounts, so a mount
+  // snapshot made every untouched form look changed.
   useEffect(() => {
-    if (form.current) pristine.current = snapshotOf(form.current);
+    const element = form.current;
+    if (!element) return;
+    const touched = () => guard.current.touch(snapshotOf(element));
+    for (const type of TOUCH_EVENTS) element.addEventListener(type, touched, true);
+    return () => {
+      for (const type of TOUCH_EVENTS) element.removeEventListener(type, touched, true);
+    };
   }, [form]);
 
   // Whatever is in the form now is what was accepted, so it is the new starting point.
   useEffect(() => {
-    if (saved && form.current) pristine.current = snapshotOf(form.current);
+    if (saved && form.current) guard.current.accept(snapshotOf(form.current));
   }, [saved, form]);
 
   // A page's own submit is not somebody walking away from their work — it is the work
@@ -88,33 +97,52 @@ export function UnsavedChanges({
     ({ currentLocation, nextLocation }) =>
       !submitting.current &&
       currentLocation.pathname !== nextLocation.pathname &&
-      hasChanged(form.current ? snapshotOf(form.current) : null, pristine.current),
+      guard.current.wouldDiscard(form.current ? snapshotOf(form.current) : null),
   );
 
+  // A dialog, not a banner (#761): the admin scrolls the page around this iframe, so a
+  // banner at the top of the form -- even scrolled "into view" from inside -- was off
+  // screen from a click at the bottom, and the click looked like it did nothing.
   useEffect(() => {
-    if (blocker.state === "blocked") banner.current?.scrollIntoView({ block: "center" });
+    if (blocker.state === "blocked") modal.current?.showOverlay?.();
   }, [blocker.state]);
 
-  if (blocker.state !== "blocked") return null;
+  // Closed any other way -- Escape, the close button -- is staying. Heard natively, as
+  // React 18 does not deliver a custom element's events through props (#863).
+  const reset = useRef<(() => void) | undefined>(undefined);
+  useEffect(() => {
+    reset.current = blocker.state === "blocked" ? blocker.reset : undefined;
+  }, [blocker]);
+  useEffect(() => {
+    const element = modal.current;
+    if (!element) return;
+    const stay = () => reset.current?.();
+    element.addEventListener("hide", stay);
+    return () => element.removeEventListener("hide", stay);
+  }, []);
 
   return (
-    <s-banner
-      ref={banner as never}
-      tone="warning"
+    <s-modal
       heading={`Leave without keeping ${describe}?`}
+      ref={(element) => {
+        modal.current = element;
+      }}
     >
       <s-paragraph>
-        Nothing here has been saved yet, so leaving this page discards it. Going back is
-        the only thing that keeps it.
+        Nothing here has been saved yet, so leaving this page discards it. Staying keeps it.
       </s-paragraph>
-      <ActionRow>
-        <s-button variant="primary" onClick={() => blocker.reset?.()}>
-          Stay on this page
-        </s-button>
-        <s-button variant="secondary" onClick={() => blocker.proceed?.()}>
-          Leave and discard
-        </s-button>
-      </ActionRow>
-    </s-banner>
+      <s-button
+        slot="secondary-actions"
+        onClick={() => {
+          blocker.reset?.();
+          modal.current?.hideOverlay?.();
+        }}
+      >
+        Stay on this page
+      </s-button>
+      <s-button slot="primary-action" variant="primary" tone="critical" onClick={() => blocker.proceed?.()}>
+        Leave and discard
+      </s-button>
+    </s-modal>
   );
 }
