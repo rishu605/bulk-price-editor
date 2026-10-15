@@ -20,8 +20,7 @@ import { describe, expect, it, vi } from "vitest";
 import prisma from "../../app/db.server";
 import { BLAST_RADIUS_THRESHOLD } from "../../app/services/campaigns/types";
 import type { JobRef, QueueName } from "../../app/worker/queues";
-import { chaosAdminClient } from "../harness/http-client";
-import { withChaos } from "../harness/scenario";
+import { fixtureAdminClient, withChaos } from "../harness/scenario";
 
 let pending = { shop: "", endpoint: "" };
 const enqueued: Array<{ name: QueueName; ref: JobRef }> = [];
@@ -60,7 +59,7 @@ vi.mock("../../app/worker/web-queue.server", async (importOriginal) => ({
 
 vi.mock("../../app/services/admin-client.server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../app/services/admin-client.server")>();
-  return { ...actual, adminClientForShop: async () => chaosAdminClient(pending.endpoint) };
+  return { ...actual, adminClientForShop: async (domain: string) => fixtureAdminClient(domain, pending.endpoint) };
 });
 
 /** The Resume button's form: the intent, and no confirmation. */

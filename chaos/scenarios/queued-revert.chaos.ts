@@ -15,8 +15,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import prisma from "../../app/db.server";
 import type { JobRef, QueueName } from "../../app/worker/queues";
-import { chaosAdminClient } from "../harness/http-client";
-import { withChaos, type ChaosContext } from "../harness/scenario";
+import { type ChaosContext, fixtureAdminClient, withChaos } from "../harness/scenario";
 
 let endpoint = "";
 const enqueued: Array<{ name: QueueName; ref: JobRef }> = [];
@@ -41,7 +40,7 @@ vi.mock("../../app/worker/web-queue.server", async (importOriginal) => ({
 
 vi.mock("../../app/services/admin-client.server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../app/services/admin-client.server")>();
-  return { ...actual, adminClientForShop: async () => chaosAdminClient(endpoint) };
+  return { ...actual, adminClientForShop: async (domain: string) => fixtureAdminClient(domain, endpoint) };
 });
 
 beforeEach(() => {

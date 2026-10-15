@@ -15,7 +15,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import prisma from "../../app/db.server";
 import type { JobRef, QueueName } from "../../app/worker/queues";
 import { chaosAdminClient } from "../harness/http-client";
-import { withChaos, type ChaosContext } from "../harness/scenario";
+import { type ChaosContext, fixtureAdminClient, withChaos } from "../harness/scenario";
 
 let pending: { shop: string; properties: Record<string, string>; admin?: unknown } = { shop: "", properties: {} };
 let endpoint = "";
@@ -31,7 +31,7 @@ vi.mock("../../app/services/admin-client.server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../app/services/admin-client.server")>();
   return {
     ...actual,
-    adminClientForShop: async () => chaosAdminClient(endpoint),
+    adminClientForShop: async (domain: string) => fixtureAdminClient(domain, endpoint),
     // The route hands Flow's `admin` to this; in the scenario that admin is the chaos client.
     toAdminClient: (admin: unknown) =>
       (admin as { __chaos?: unknown })?.__chaos ?? actual.toAdminClient(admin as never),

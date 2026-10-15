@@ -22,8 +22,7 @@ import { previewCampaign } from "../../app/services/campaigns/preview.server";
 import { BLAST_RADIUS_THRESHOLD } from "../../app/services/campaigns/types";
 import { readSettings } from "../../app/services/settings.server";
 import type { JobRef, QueueName } from "../../app/worker/queues";
-import { chaosAdminClient } from "../harness/http-client";
-import { withChaos } from "../harness/scenario";
+import { fixtureAdminClient, withChaos } from "../harness/scenario";
 
 let pending = { shop: "", endpoint: "", staff: "" };
 const enqueued: Array<{ name: QueueName; ref: JobRef }> = [];
@@ -64,7 +63,7 @@ vi.mock("../../app/worker/web-queue.server", async (importOriginal) => ({
 
 vi.mock("../../app/services/admin-client.server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../app/services/admin-client.server")>();
-  return { ...actual, adminClientForShop: async () => chaosAdminClient(pending.endpoint) };
+  return { ...actual, adminClientForShop: async (domain: string) => fixtureAdminClient(domain, pending.endpoint) };
 });
 
 type Answer = { ok: boolean; message: string };

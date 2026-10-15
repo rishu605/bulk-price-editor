@@ -20,7 +20,7 @@ import { resolveDrift } from "../../app/services/drift.server";
 import { tick } from "../../app/services/scheduler.server";
 import { isVariantWrite } from "../harness/faults";
 import { chaosAdminClient } from "../harness/http-client";
-import { withChaos, type ChaosContext } from "../harness/scenario";
+import { type ChaosContext, fixtureAdminClient, withChaos } from "../harness/scenario";
 
 let pending: { shop: string; topic: string; payload: unknown; admin?: unknown } = { shop: "", topic: "", payload: {} };
 let endpoint = "";
@@ -31,7 +31,7 @@ vi.mock("../../app/shopify.server", () => ({
 
 vi.mock("../../app/services/admin-client.server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../app/services/admin-client.server")>();
-  return { ...actual, adminClientForShop: async () => chaosAdminClient(endpoint) };
+  return { ...actual, adminClientForShop: async (domain: string) => fixtureAdminClient(domain, endpoint) };
 });
 
 const webhookAdmin = {
