@@ -77,6 +77,11 @@ export interface ExecuteContext {
   onPoll?: (operation: BulkOperationState) => void | Promise<void>;
   /** How long to wait for that operation before giving up on watching it. Tests only. */
   bulkWaitMs?: number;
+  /**
+   * Told which path the rows will take, before any is written (#1055), so a run that dies
+   * part-way still says whether it was a bulk operation or one call per product.
+   */
+  onPath?: (path: "sync" | "bulk") => Promise<void>;
 }
 
 /** Uploads a JSONL body to a staged target using multipart form data. */
@@ -99,6 +104,7 @@ export async function executeRows(
   const writable = rows.filter((row) => row.status !== "skipped" && row.intendedPrice);
   const decision = selectWritePath(writable.length);
   const path = context.forcePath ?? decision.path;
+  await context.onPath?.(path);
 
   if (path === "sync") {
     const budget = new RateLimitBudget();
