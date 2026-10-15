@@ -100,7 +100,8 @@ describe("import leftovers (#989)", () => {
   });
 
   it("commits with the key its check answered with, and offers the problems as a file", () => {
-    expect(EDITOR).toContain('name="checked" value={importFetcher.data?.checkKey ?? ""}');
+    // Through the shared form's field since #1059, which every importer renders.
+    expect(EDITOR).toContain("checkKey={importFetcher.data?.checkKey}");
     expect(EDITOR).toContain("csv: () => importErrorCsv(importResult)");
   });
 

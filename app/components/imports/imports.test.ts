@@ -278,7 +278,7 @@ describe("the three imports are one import", () => {
     // The button kept the checked file's count while the box stayed editable, and the
     // commit posts the box: a campaign from rows nobody checked. `ready` is now the check's
     // count only while the rows are the ones it read (`commitReady`, tested on its own).
-    expect(IMPORT_FORM).toContain("const ready = commitReady(lastCheck, rows, checkedRows);");
+    expect(IMPORT_FORM).toContain("const matched = commitReady(lastCheck, rows, checkedRows);");
     expect(IMPORT_FORM).toContain("ready: lastCheck,");
     // Heard natively: React 18 never delivers `onChange` from a Polaris field (#863), and
     // the drop zone fills the box with dispatched events.
@@ -291,6 +291,30 @@ describe("the three imports are one import", () => {
     expect(IMPORT_FORM).toMatch(/useEffect\(\(\) => \{\s*setCheckedRows\(sent\.current\);\s*\}, \[fetcher\.data\]\);/);
     // And the merchant is told why the button went grey.
     expect(IMPORT_FORM).toContain("The rows have changed since they were checked.");
+  });
+
+  it("posts the check's key with the commit, and offers no commit without one (#1059)", () => {
+    // The route refuses a commit without the key of exactly the rows it posts, so the
+    // button is not offered without one -- a commit's answer carries none, which is how
+    // committing spends the check. "Changed since checked" stays about the rows alone.
+    expect(IMPORT_FORM).toContain('<input type="hidden" name="checked" value={checkKey ?? ""} readOnly />');
+    expect(IMPORT_FORM).toContain("const ready = checkKey ? matched : null;");
+    expect(IMPORT_FORM).toContain("const stale = lastCheck !== null && matched === null && !busy;");
+    // Required, though it may be undefined: a page cannot render an importer and forget it.
+    expect(IMPORT_FORM).toContain("checkKey: string | undefined;");
+  });
+
+  it.each([
+    ["prices", PRICE_IMPORT, EDITOR, "importFetcher.data?.checkKey"],
+    ["baselines", BASELINES, BASELINES, "data?.checkKey"],
+    ["costs", COSTS, COSTS, "importAnswer?.checkKey"],
+  ])("%s refuses a commit of rows nobody checked, with the shared key (#1059)", (_name, action, page, key) => {
+    // The baseline and cost imports wrote whatever rows a commit posted: only the price
+    // import asked for the key. One helper, so none of them can lose it separately.
+    expect(action).toContain('uncheckedCommit(form.get("checked"), csv, {');
+    expect(action).toContain("importCheckKey(csv)");
+    expect(action, "a copy of the hashing").not.toContain("createHash");
+    expect(page, "the form is not handed the key").toContain(`checkKey={${key}}`);
   });
 
   it("marks the commit as the consequential one on every source", () => {

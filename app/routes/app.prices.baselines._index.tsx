@@ -39,6 +39,7 @@ import { shopCurrency } from "../services/settings.server";
 import { actorFor } from "../lib/audit/actor";
 import { linesOf } from "../lib/reporting/lines";
 import { isCommit } from "../lib/imports/intent";
+import { importCheckKey, uncheckedCommit } from "../lib/imports/check-key.server";
 import { reportError } from "../services/error-report.server";
 import { EmptyState, NoMatches } from "../components/AsyncState";
 import { clearedSearch } from "../components/FilterForm";
@@ -84,7 +85,7 @@ export const loader = withGuard("/app/prices/baselines", async ({ request }: Loa
   return { ...result, page, filters, variantGid, history, historyTitle, timeZone: shop.timezone };
 });
 
-type ActionData = { ok: boolean; message: string; result?: BaselineImportResult; errorId?: string };
+type ActionData = { ok: boolean; message: string; result?: BaselineImportResult; checkKey?: string; errorId?: string };
 
 /**
  * Importing baselines, on the page that lists them.
@@ -104,12 +105,22 @@ export const action = withGuard(
     const { session, sessionToken } = await authenticate.admin(request);
     const shop = await ensureShop(session.shop);
     const form = await request.formData();
+    const dryRun = !isCommit(form.get("intent"));
+    const csv = String(form.get("csv") ?? "");
+
+    // A commit of rows nobody checked is refused before anything is read (#1059).
+    const unchecked = dryRun
+      ? null
+      : uncheckedCommit(form.get("checked"), csv, {
+          outcome: "no baselines were written",
+          next: "import what the check shows",
+        });
+    if (unchecked) return unchecked;
 
     try {
-      const dryRun = !isCommit(form.get("intent"));
       const result = await importBaselines(
         shop.id,
-        linesOf(String(form.get("csv") ?? "")),
+        linesOf(csv),
         await shopCurrency(shop.id),
         { dryRun, actor: actorFor(sessionToken, session.shop) },
       );
@@ -117,6 +128,8 @@ export const action = withGuard(
       return {
         ok: true,
         result,
+        // The rows a commit may write; a commit's answer has none, so it spends the check.
+        checkKey: dryRun ? importCheckKey(csv) : undefined,
         message: dryRun
           ? `${result.ready} of ${result.total} rows would be imported. Nothing has been written.`
           : `Imported ${result.written} baselines.` +
@@ -189,13 +202,6 @@ export default function Baselines() {
 
   return (
     <PageShell heading="Baselines">
-      {data ? (
-        <s-banner tone={data.ok ? "success" : "critical"}>
-          <s-paragraph>{data.message}</s-paragraph>
-          {data.errorId ? <s-paragraph>Reference {data.errorId}</s-paragraph> : null}
-        </s-banner>
-      ) : null}
-
 
       <s-section>
         {/* The card's blocks at section rhythm. It was set nowhere, so they ran together:
@@ -350,6 +356,7 @@ export default function Baselines() {
         fetcher={fetcher}
         busy={busy}
         ready={result?.ready ?? null}
+        checkKey={data?.checkKey}
         commitLabel={(ready) => `Import ${ready} baselines`}
         placeholder={"Variant SKU,Price\nCH-1,129.00\nCH-2,149.00"}
         description={
@@ -372,6 +379,16 @@ export default function Baselines() {
           </>
         }
       />
+
+      {/* Under the form that asked, as the cost and price imports say theirs (#1059). At
+          the top of the page it was a table's length from the Import button, and a
+          refused commit has no report to show instead. */}
+      {data ? (
+        <s-banner tone={data.ok ? "success" : "critical"}>
+          <s-paragraph>{data.message}</s-paragraph>
+          {data.errorId ? <s-paragraph>Reference {data.errorId}</s-paragraph> : null}
+        </s-banner>
+      ) : null}
 
       {result ? (
         <ImportReport

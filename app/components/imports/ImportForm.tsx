@@ -57,6 +57,7 @@ export function ImportForm({
   checkLabel = "Check the file",
   commitLabel,
   ready: lastCheck,
+  checkKey,
   intent = INTENT,
   action,
   template,
@@ -85,6 +86,16 @@ export function ImportForm({
    * file's, and the commit posts the box as it is now.
    */
   ready: number | null;
+  /**
+   * The key the last check answered with, posted back with the commit (#989, #1059).
+   *
+   * Every importer's route refuses a commit without the key of exactly the rows it posts
+   * (`uncheckedCommit`), so the field is here rather than on each page: two of the three
+   * importers once had no check at all, because the key was posted per route. Required
+   * though it may be undefined, so a fourth importer cannot leave it out by omission.
+   * A commit's own answer carries none, so committing spends the check.
+   */
+  checkKey: string | undefined;
   /**
    * The two values this form's `intent` field can take.
    *
@@ -159,8 +170,13 @@ export function ImportForm({
     setCheckedRows(sent.current);
   }, [fetcher.data]);
 
-  const ready = commitReady(lastCheck, rows, checkedRows);
-  const stale = lastCheck !== null && ready === null && !busy;
+  // The check's count while the rows are the ones it read, and only while there is a key
+  // to post with them: without one the route refuses the commit, so the page does not
+  // offer it. "Changed since they were checked" is about the rows alone, though -- after
+  // a commit, which spends the key, the rows have not changed.
+  const matched = commitReady(lastCheck, rows, checkedRows);
+  const ready = checkKey ? matched : null;
+  const stale = lastCheck !== null && matched === null && !busy;
 
   return (
     <Card heading={heading}>  {/* A pasted CSV can be fifty thousand rows, and none of it exists anywhere until
@@ -175,6 +191,9 @@ export function ImportForm({
             read the same rows and duplicating the textarea would let them drift apart —
             which is the mistake this component exists to undo at a larger scale. */}
         <input type="hidden" name="intent" ref={field} value={intent.check} readOnly />
+        {/* What the last check answered with. A commit without it, or with rows that are
+            not the ones checked, is refused by the route before it reads a row. */}
+        <input type="hidden" name="checked" value={checkKey ?? ""} readOnly />
         <s-stack gap={SPACE.section}>
           {children}
           <CsvDropZone target="csv" />

@@ -1223,6 +1223,7 @@ export default function NewCampaign() {
           action="/app/price-import"
           busy={importFetcher.state !== "idle"}
           ready={importResult?.ready ?? null}
+          checkKey={importFetcher.data?.checkKey}
           commitLabel={(ready) => `Create a campaign from ${formatCount(ready)} rows`}
           template={{ href: "/app/campaigns/template.csv", label: "Get a template" }}
           placeholder={`Variant SKU,Variant Price\nCH-1,129.00\nCH-2,149.00`}
@@ -1247,9 +1248,6 @@ export default function NewCampaign() {
               editor's form, and a practice campaign made from a file came out real and
               appliable (#765). */}
           <input type="hidden" name="practice" value={practice ? "1" : ""} />
-          {/* What the last check answered with; a commit without it, or with rows that are
-              not the ones checked, is refused by the route (#989). */}
-          <input type="hidden" name="checked" value={importFetcher.data?.checkKey ?? ""} />
         </ImportForm>
       ) : null}
 
