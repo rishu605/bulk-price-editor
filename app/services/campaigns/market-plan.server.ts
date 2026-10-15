@@ -104,7 +104,7 @@ export async function planMarket(
   campaigns: readonly ResolvableCampaign[],
   client: AdminClient,
 ): Promise<MarketPlan | null> {
-  const { prices: baselines, moved } = await marketBaselines(shopId, list, [...variantGids], client);
+  const { prices: baselines, compareAts, moved } = await marketBaselines(shopId, list, [...variantGids], client);
   if (baselines.size === 0 && moved.length === 0) return null;
 
   const inStoreCurrency = list.currency === (await shopCurrency(shopId));
@@ -126,7 +126,11 @@ export async function planMarket(
       // A cost is recorded in the store's currency only. A market in that currency can
       // be checked against it like the base price; in any other, a cost-based guardrail
       // has nothing to compare with and leaves the row alone (#691).
-      baseline: { price: baseline, cost: costs.get(variantGid) },
+      //
+      // And the compare-at, as the base surface passes its own (#1039). With none, a row no
+      // campaign prices resolved to "clear the compare-at", so the revert that wrote a
+      // hand-set price back took the merchant's strike-through off it.
+      baseline: { price: baseline, compareAtPrice: compareAts.get(variantGid), cost: costs.get(variantGid) },
       // No mirrored live value for a relative list, and for a fixed one the stored
       // price is the baseline. Leaving it undefined means the planner writes rather
       // than deciding a row is already correct on evidence it does not have.
@@ -247,7 +251,7 @@ export async function marketBaselines(
   list: MarketList,
   variantGids: string[],
   client: AdminClient,
-): Promise<{ prices: Map<string, Money>; moved: string[] }> {
+): Promise<{ prices: Map<string, Money>; compareAts: Map<string, Money>; moved: string[] }> {
   const stored = await prisma.baseline.findMany({
     where: {
       shopId,
@@ -256,7 +260,7 @@ export async function marketBaselines(
       supersededAt: null,
       variantGid: { in: variantGids },
     },
-    select: { variantGid: true, basePrice: true, currency: true },
+    select: { variantGid: true, basePrice: true, baseCompareAt: true, currency: true },
   });
 
   const out = new Map<string, Money>(
@@ -265,9 +269,16 @@ export async function marketBaselines(
       money(Number(row.basePrice), row.currency || list.currency),
     ]),
   );
+  // Only a fixed price carries one -- see `captureMarketBaselines`. One a campaign captured
+  // before #1039 has none, and its revert clears the strike-through as it always did.
+  const compareAts = new Map<string, Money>(
+    stored
+      .filter((row) => row.baseCompareAt !== null)
+      .map((row) => [row.variantGid, money(Number(row.baseCompareAt), row.currency || list.currency)]),
+  );
 
   const missing = variantGids.filter((gid) => !out.has(gid));
-  if (missing.length === 0) return { prices: out, moved: [] };
+  if (missing.length === 0) return { prices: out, compareAts, moved: [] };
 
   const moved = await movedSinceBaseline(shopId, list, missing);
   const captured = await captureMarketBaselines(
@@ -276,9 +287,12 @@ export async function marketBaselines(
     missing.filter((gid) => !moved.has(gid)),
     client,
   );
-  for (const [variantGid, price] of captured) out.set(variantGid, price);
+  for (const [variantGid, baseline] of captured) {
+    out.set(variantGid, baseline.price);
+    if (baseline.compareAt) compareAts.set(variantGid, baseline.compareAt);
+  }
 
-  return { prices: out, moved: [...moved] };
+  return { prices: out, compareAts, moved: [...moved] };
 }
 
 /**
@@ -415,10 +429,15 @@ async function captureMarketBaselines(
   list: MarketList,
   variantGids: string[],
   client: AdminClient,
-): Promise<Map<string, Money>> {
+): Promise<Map<string, { price: Money; compareAt?: Money }>> {
   const found = new Map<string, Money>();
   // Which of those prices the merchant set by hand on the list, for the revert (#930).
   const handSet = new Set<string>();
+  // And the strike-through each of those carried, which the revert writes back with the
+  // price (#1039). A fixed price's only: a derived price's compare-at is the list's rule
+  // applied to the store's, which the list derives again once the price is let go -- and
+  // recorded, it would be pinned wherever the planner wrote the baseline as a fixed price.
+  const compareAts = new Map<string, Money>();
 
   // Ask Shopify what a shopper in this market pays, and take that as the baseline.
   //
@@ -451,7 +470,13 @@ async function captureMarketBaselines(
 
       found.set(variantGid, parseMoney(price.amount, list.currency));
     }
-    for (const gid of await readFixedPriceVariants(client, list.priceListGid, [...found.keys()])) handSet.add(gid);
+    for (const gid of await readFixedPriceVariants(client, list.priceListGid, [...found.keys()])) {
+      handSet.add(gid);
+      // The same answer that carried the price: a hand-set price comes back with its own
+      // strike-through, in the market's currency, which the check above has just confirmed.
+      const compareAt = contextual.get(gid)?.compareAtAmount;
+      if (compareAt) compareAts.set(gid, parseMoney(compareAt, list.currency));
+    }
   } else {
     // A list with no market behind it — a B2B catalogue, priced by company location rather
     // than by country, so there is no country context to ask about.
@@ -472,13 +497,16 @@ async function captureMarketBaselines(
           variantGid: { in: batch },
           livePrice: { not: null },
         },
-        select: { variantGid: true, livePrice: true, currency: true },
+        select: { variantGid: true, livePrice: true, liveCompareAt: true, currency: true },
       }),
     );
 
     for (const entry of entries) {
       found.set(entry.variantGid, money(Number(entry.livePrice), entry.currency || list.currency));
       handSet.add(entry.variantGid);
+      if (entry.liveCompareAt !== null) {
+        compareAts.set(entry.variantGid, money(Number(entry.liveCompareAt), entry.currency || list.currency));
+      }
     }
 
     if (list.adjustmentBps !== null) {
@@ -522,6 +550,7 @@ async function captureMarketBaselines(
         priceListGid: list.priceListGid,
         currency: price.currency,
         basePrice: BigInt(price.amount),
+        baseCompareAt: minorUnits(compareAts.get(variantGid)),
         // Null for the great majority: most wholesale variants have a single price, and
         // null says "no ladder" rather than "we did not look".
         // Cast at the boundary: Prisma's JSON input type is structurally strict and the
@@ -538,6 +567,10 @@ async function captureMarketBaselines(
   // A variant Shopify has no price for on this market is left out rather than guessed
   // at. It simply is not priced there, which the run reports — the alternative is
   // inventing a reference price and writing a real one on top of it.
-  return found;
+  return new Map([...found].map(([variantGid, price]) => [variantGid, { price, compareAt: compareAts.get(variantGid) }]));
+}
+
+function minorUnits(value: Money | undefined): bigint | null {
+  return value ? BigInt(value.amount) : null;
 }
 
