@@ -8,16 +8,34 @@ import {
 
 import { HelpNote } from "./HelpNote";
 import { QueryContainer } from "./QueryContainer";
+import { useTablesFit } from "./useTablesFit";
 import { SPACE } from "../lib/ui/spacing";
 
 /**
- * How much of the frame a page occupies, leaving a tenth on each side.
+ * How much of the frame a page occupies: four fifths, leaving a tenth on each side, until
+ * the frame is narrow -- then all of it.
  *
  * A percentage rather than a maximum in pixels, deliberately: the admin renders this app
  * in an iframe whose width is not the window's and changes with the merchant's own
  * sidebar, so a fixed column would be a different fraction of the frame on every screen.
+ *
+ * ## Why not a tenth at every width (#804)
+ *
+ * The inset is there so a card on a 1900px screen has something holding it. On a 606px
+ * window it held nothing: cards started 67px in on each side, over a fifth of the width,
+ * and their tables were clipping prices for want of that room. A 390px phone was the same
+ * fraction. `s-page` keeps a gutter of its own above 490px and goes nearly edge to edge
+ * below, which is how the admin's own pages look there, so below the admin's medium
+ * breakpoint the inset steps aside and lets it: 24px a side at 606, 8px at 390, measured
+ * with real Polaris (`scripts/measure-narrow-tables.ts`).
+ *
+ * Grid tracks rather than a box's `inlineSize`, because App Home's `s-box` does not take a
+ * responsive size and `s-grid`'s columns do. Percentages rather than `1fr`, because a
+ * percentage track is definite: an `fr` track's minimum is its content's, and one wide
+ * row would push the whole page past the frame. One comma only -- Polaris splits a
+ * responsive value on it (see `ASIDE_TRACK`).
  */
-const PAGE_WIDTH = "80%";
+const PAGE_COLUMNS = "@container (inline-size <= 768px) 100%, 80%";
 
 /**
  * The inset itself, for the things that sit outside a page and still have to line up
@@ -28,16 +46,20 @@ const PAGE_WIDTH = "80%";
  * edge to edge while the page below it started a tenth of the way in — the tabs and the
  * card they belong to visibly detached from each other.
  *
- * Both are 80% of the same parent, so they align rather than nesting: this does not
- * inset something already inset.
+ * Both are the same track of the same parent, so they align rather than nesting: this
+ * does not inset something already inset.
  */
 export function PageWidth({ children }: { children: ReactNode }) {
-  // A grid because `justifyItems` is how a box gets centred here; boxes take padding but
-  // not margins, so `margin: auto` is not available.
+  // A grid because `justifyContent` is how a column gets centred here; boxes take padding
+  // but not margins, so `margin: auto` is not available. The container is the frame: this
+  // is the outermost thing on every page, in the document's own block flow, which is the
+  // kind of parent `QueryContainer` needs.
   return (
-    <s-grid justifyItems="center">
-      <s-box inlineSize={PAGE_WIDTH}>{children}</s-box>
-    </s-grid>
+    <QueryContainer>
+      <s-grid gridTemplateColumns={PAGE_COLUMNS} justifyContent="center">
+        <s-box>{children}</s-box>
+      </s-grid>
+    </QueryContainer>
   );
 }
 
@@ -321,6 +343,11 @@ export function PageShell({
   );
   const main = all.filter((child) => !isAside(child) && !isHelp(child));
 
+  /* Every table on the page is drawn as a list when its columns do not fit the room it
+     has (#804) -- `s-table` decides that from the frame's width alone. The page is where
+     this lives because it is the one thing every table is inside; see `useTablesFit`. */
+  const fitTables = useTablesFit();
+
   if (aside.length === 0) {
     // Children go straight into `s-page`, with no wrapper of any kind.
     //
@@ -337,7 +364,7 @@ export function PageShell({
     // aside — `/app/prices/live` is one — and looking at it.
     return (
       <PageWidth>
-        <s-page heading={heading} inlineSize="large">
+        <s-page heading={heading} inlineSize="large" ref={fitTables}>
           <BackLink backTo={backTo} />
           {actions}
           {help}
@@ -349,7 +376,7 @@ export function PageShell({
 
   return (
     <PageWidth>
-      <s-page heading={heading} inlineSize="large">
+      <s-page heading={heading} inlineSize="large" ref={fitTables}>
         <BackLink backTo={backTo} />
         {actions}
         {/* The page's content area is what this grid's `@container` value is measured

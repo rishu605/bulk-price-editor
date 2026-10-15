@@ -193,7 +193,8 @@ describe("the column collapses before it gets unreadable", () => {
     </PageShell>,
   );
 
-  const columns = /gridTemplateColumns="([^"]+)"/i.exec(html)?.[1] ?? "";
+  // Inside the page: the grid outside it is the page's own width, not the aside's.
+  const columns = /gridTemplateColumns="([^"]+)"/i.exec(html.slice(html.indexOf("<s-page")))?.[1] ?? "";
 
   it("uses a container query, because the admin iframe is not the window", () => {
     expect(columns).toMatch(/^@container[^)]*inline-size/);
@@ -223,15 +224,42 @@ describe("the inset", () => {
     </PageShell>,
   );
 
+  /** The page's column: `@container (<query>) <narrow>, <wide>`. */
+  const template = (
+    /<s-grid gridTemplateColumns="([^"]*)" justifyContent="center">/.exec(html)?.[1] ?? ""
+  ).replaceAll("&lt;", "<");
+  const [narrow, wide] = template.replace(/^@container \([^)]*\)\s*/, "").split(",").map((part) => part.trim());
+
   it("leaves a tenth of the frame on each side", () => {
-    expect(html).toContain('inlineSize="80%"');
+    expect(wide).toBe("80%");
+  });
+
+  it("gives a narrow frame all of its width (#804)", () => {
+    // At 606px the inset cost about 66px a side, a fifth of the screen, from cards whose
+    // tables were already clipping prices for want of room. `s-page` keeps its own gutter
+    // there and goes edge to edge on a phone, as the admin's pages do.
+    expect(template).toMatch(/^@container \(inline-size <= \d+px\) /);
+    expect(narrow).toBe("100%");
+  });
+
+  it("sizes the column in percentages, which a wide row cannot push past the frame", () => {
+    // An `fr` track's minimum is its content's width, so one row that will not wrap would
+    // widen the whole page past the iframe. A percentage track is definite.
+    expect(template.match(/,/g), "Polaris splits a responsive value on its comma").toHaveLength(1);
+    expect(template).not.toMatch(/fr\b/);
+  });
+
+  it("measures the frame, from a container of its own", () => {
+    // The query resolves against the nearest `s-query-container`, and this is the
+    // outermost thing on the page: without one it matches nothing, at any width.
+    expect(html).toMatch(/^<s-query-container><s-grid gridTemplateColumns="@container/);
   });
 
   it("insets the heading with the content, not just the content", () => {
     // A title pinned to the far left of a 1900px screen, with the first card it names
-    // starting a tenth of the way in, reads as two unrelated things. So the box wraps
+    // starting a tenth of the way in, reads as two unrelated things. So the column holds
     // the whole page rather than its children.
-    expect(html.indexOf('inlineSize="80%"')).toBeLessThan(html.indexOf("<s-page"));
+    expect(html.indexOf('justifyContent="center"')).toBeLessThan(html.indexOf("<s-page"));
   });
 });
 
@@ -465,8 +493,13 @@ describe("pages that can lose typed work", () => {
 describe("how wide the second column is", () => {
   // `<=` arrives HTML-escaped from `renderToStaticMarkup`, which is correct output and
   // noise here — the assertions are about the track list, not about entity encoding.
+  //
+  // Read from inside the page: the grid outside it is the page's own width.
   const columnsOf = (html: string) =>
-    (/gridtemplatecolumns="([^"]*)"/i.exec(html)?.[1] ?? "").replaceAll("&lt;", "<");
+    (/gridtemplatecolumns="([^"]*)"/i.exec(html.slice(html.indexOf("<s-page")))?.[1] ?? "").replaceAll(
+      "&lt;",
+      "<",
+    );
 
   const page = (asideWidth?: "base" | "wide") =>
     render(

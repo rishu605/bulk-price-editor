@@ -63,11 +63,25 @@ narrows it — `TableProps.variant` is `Extract<..., 'list' | 'auto'>` — so `"
 not compile, and there is no way to pin the grid. Shopify said the same thing about the
 other end in the forums: on mobile the list variant is forced whatever you pass.
 
-`auto` collapses to the stacked layout somewhere around a 490px container. That is not the
-trap. The trap is that a container *close* to it resolves inconsistently: the campaigns
-list sits at ~566px next to a 22rem aside, and the same URL in the same window renders a
-grid on one reload and a stacked list on the next. Flooring the column's `minInlineSize`
-does not change it, so whatever Polaris measures is not the column we give it.
+`auto` collapses to the stacked layout below 490px -- of the **frame**, not of the table's
+container. This is the whole rule, from `polaris.js`:
+
+```js
+function Nm(e) { return "list" === e ? "list" : window.innerWidth >= 490 ? "table" : "list" }
+```
+
+So no container query is involved and no `s-query-container` changes it, and a table in a
+column narrower than its own columns stays a grid whenever the frame is 490px or wider. The
+grid sits in a box that scrolls sideways and clips at the card's edge -- with no fade, and a
+scrollbar at the foot of the table, a screen below. That was #804: "708.7" for 708.76 on
+What's live at 606px. It is also why flooring a column's `minInlineSize` never changed which
+shape a table took: Polaris was not measuring the column.
+
+`variant="list"` does work, and as an attribute, so `PageShell` measures every table on the
+page and asks for the list when the grid is wider than its room (`useTablesFit`,
+`lib/ui/table-fit.ts`). `scripts/measure-narrow-tables.ts` renders the pages in Chrome with
+the live `polaris.js` at 390 and 606px and fails on any clipped cell -- run it after a
+Polaris change, since the fit reads two things inside the table's shadow root.
 
 Since the shape cannot be pinned, **both shapes have to be worth looking at**. Every
 `s-table-header` takes `listSlot` — `primary | secondary | kicker | inline | labeled` —
