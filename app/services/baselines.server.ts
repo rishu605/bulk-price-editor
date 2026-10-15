@@ -86,6 +86,7 @@ export async function captureBaselines(
     basePrice: bigint;
     baseCompareAt: bigint | null;
     cost: bigint | null;
+    handSet: boolean | null;
     source: BaselineSource;
     capturedBy: string | null;
   }> = [];
@@ -114,6 +115,7 @@ export async function captureBaselines(
       basePrice: entry.livePrice,
       baseCompareAt: entry.liveCompareAt,
       cost: costs.get(entry.variantGid) ?? null,
+      handSet: handSetFromMirror(entry),
       source: options.source ?? (currentId ? "RECAPTURE" : "INSTALL_CAPTURE"),
       capturedBy: options.capturedBy ?? null,
     });
@@ -147,6 +149,25 @@ export async function captureBaselines(
   }
 
   return result;
+}
+
+/**
+ * Whether a baseline taken from this mirror row is a price the merchant set by hand on the
+ * list, as the revert reads it (#1064).
+ *
+ * A market's row is: the markets sync mirrors a list's fixed prices and nothing else -- a
+ * price the list derives has no row -- and a cell a campaign has written already has the
+ * MARKET baseline the campaign captured before writing, so this capture skips it. Left
+ * unsaid, the campaign took this baseline as its own without ever recording the flag, and
+ * the revert deleted the merchant's price for the one the list's percentage derives (#930).
+ *
+ * A wholesale row says nothing. It is filed under B2B, which no revert reads -- the campaign
+ * captures its own MARKET baseline for the cell -- and because that one is filed under
+ * another kind, a sync during a sale baselines the price the campaign wrote here (#1071).
+ * The base price has no list to be fixed on.
+ */
+function handSetFromMirror(entry: { surfaceKind: string; priceListGid: string }): boolean | null {
+  return entry.surfaceKind === "MARKET" && entry.priceListGid !== "" ? true : null;
 }
 
 export interface BaselineHealth {
