@@ -51,6 +51,7 @@ import { LANDED } from "../../lib/execution/landed";
 import { inChunks } from "../../lib/db/chunk";
 import { tallyStatuses } from "../../lib/campaigns/run-result";
 import type { PlannedRow } from "../../lib/planning/types";
+import { marketsHandedTo } from "./handover.server";
 import { mirrorMarketDelete, mirrorMarketWrite } from "./mirror.server";
 
 /** Which surfaces a campaign writes to. Stored on the campaign as JSON. */
@@ -618,19 +619,30 @@ export async function revertMarketSurfaces(
     },
     select: { variantGid: true, priceListGid: true },
   });
+  // And the prices another campaign's revert handed this one there (#1043), which no run of
+  // this campaign's wrote: on the lists it prices now or has written. Only with somewhere to
+  // ledger taking them back (I4).
+  const campaign = await prisma.campaign.findUnique({ where: { id: campaignId }, select: { surfaces: true } });
+  const lists = [...new Set([...parseSurfaces(campaign?.surfaces).priceLists, ...written.map((row) => row.priceListGid)])];
+  const handed = recompute ? await marketsHandedTo(shopId, campaignId, lists) : [];
+  const own = new Set(written.map((row) => `${row.variantGid}@${row.priceListGid}`));
+  const inherited = handed.filter((cell) => !own.has(`${cell.variantGid}@${cell.priceListGid}`));
+
   // The per-product sweep still runs after a market-wide revert, and should: the
   // apply may have corrected a handful of variants with exact prices where Shopify
   // rounded differently, and those really are fixed prices that have to be deleted.
   // Deleting one that is not there is a no-op, and the ledger rows need settling
   // either way.
-  if (written.length === 0) return wideOutcomes(wideMessages);
+  if (written.length === 0 && inherited.length === 0) return wideOutcomes(wideMessages);
 
   const byList = new Map<string, string[]>();
-  for (const row of written) {
+  const inheritedOn = new Map<string, Set<string>>();
+  for (const row of [...written, ...inherited]) {
     const existing = byList.get(row.priceListGid) ?? [];
     existing.push(row.variantGid);
     byList.set(row.priceListGid, existing);
   }
+  for (const cell of inherited) inheritedOn.set(cell.priceListGid, (inheritedOn.get(cell.priceListGid) ?? new Set()).add(cell.variantGid));
 
   const outcomes: MarketSurfaceOutcome[] = [];
 
@@ -652,7 +664,13 @@ export async function revertMarketSurfaces(
         ? await pricedByOthers(shopId, list, variantGids.filter((gid) => !handSet.has(gid)), recompute.campaigns, client)
         : new Set<string>();
     const rewrite = new Set([...handSet, ...others]);
-    const followed = variantGids.filter((gid) => !rewrite.has(gid));
+    // A handed-over price this campaign never wrote has no row of its own to settle, so it
+    // is let go the way "Revert this variant" lets one go: ledgered under the revert first.
+    const handedHere = inheritedOn.get(priceListGid) ?? new Set<string>();
+    const released =
+      recompute && list ? variantGids.filter((gid) => handedHere.has(gid) && !rewrite.has(gid)) : [];
+    const followed = variantGids.filter((gid) => !rewrite.has(gid) && !handedHere.has(gid));
+    const letGo = released.length > 0 ? await releaseFixedPrices(recompute!.runId, shopId, list!, released, client, onProgress) : null;
 
     const deleted = followed.length > 0 ? await deleteMarketPrices(client, priceListGid, followed, onProgress) : null;
     if (deleted) {
@@ -673,7 +691,7 @@ export async function revertMarketSurfaces(
     }
 
     outcomes.push({
-      ...summarise(list ?? { priceListGid, name: priceListGid, currency: "" }, combine(deleted, restored)),
+      ...summarise(list ?? { priceListGid, name: priceListGid, currency: "" }, combine(combine(deleted, letGo), restored)),
       path: "per-product",
     });
   }

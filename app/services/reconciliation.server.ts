@@ -39,6 +39,7 @@ import { formatMinorUnits } from "../lib/money/format";
 import { LANDED } from "../lib/execution/landed";
 import { labelled, priceListLabel } from "../lib/markets/display-name";
 import { BASE_SURFACE } from "../lib/reporting/export-filters";
+import { inheritedBy, inheritorsOf } from "./campaigns/handover.server";
 
 const PAGE_SIZE = ROWS_PER_VIEW;
 
@@ -174,13 +175,17 @@ export async function reconcile(
 
   // Narrowed in SQL, not after paging, for the same reason.
   if (filters.campaignId) {
-    const controlled = await prisma.variantChange.findMany({
-      where: { shopId, status: { in: [...LANDED] }, run: { campaignId: filters.campaignId } },
-      select: { variantGid: true },
-      distinct: ["variantGid"],
-      take: 5_000,
-    });
-    const gids = controlled.map((row) => row.variantGid);
+    const [controlled, inherited] = await Promise.all([
+      prisma.variantChange.findMany({
+        where: { shopId, status: { in: [...LANDED] }, run: { campaignId: filters.campaignId } },
+        select: { variantGid: true },
+        distinct: ["variantGid"],
+        take: 5_000,
+      }),
+      // And the prices another campaign's revert handed it, which it never wrote (#1043).
+      inheritedBy(shopId, filters.campaignId),
+    ]);
+    const gids = [...new Set([...controlled.map((row) => row.variantGid), ...inherited.keys()])];
     where.variantGid = where.variantGid
       ? { in: intersect((where.variantGid as { in: string[] }).in, gids) }
       : { in: gids };
@@ -261,6 +266,18 @@ export async function reconcile(
     } else if (!undone.has(row.run.campaignId) && stillPricing(row)) {
       causeBy.set(cell, { campaignId: row.run.campaignId, name: campaignBy.get(row.run.campaignId)!.name });
     }
+  }
+
+  // A base price another campaign's revert handed over (#998): the newest write is that
+  // revert's, and the campaign it went to never wrote the cell, so nothing above names it.
+  // Asked of the planner, as drift detection asks it (#1043).
+  const handedOver = new Map<string, bigint>();
+  for (const [cell, row] of writerBy) {
+    if (causeBy.has(cell) || row.run.kind !== "REVERT" || row.priceListGid !== "" || row.intendedPrice === null) continue;
+    handedOver.set(row.variantGid, row.intendedPrice);
+  }
+  for (const [variantGid, campaign] of await inheritorsOf(shopId, handedOver)) {
+    causeBy.set(key(variantGid, ""), { campaignId: campaign.id, name: campaign.name });
   }
 
   const listBy = new Map(lists.map((list) => [list.priceListGid, list]));
@@ -403,8 +420,38 @@ export function staleBaselineFrom(
           -- A live campaign that has let this variant go did not put its price there (#1003).
           AND NOT (c."variantGid" = ANY(k."excludedVariantGids"))
       )
+      AND NOT ${writtenByRevert}
   `;
 }
+
+/**
+ * The cell `e` shows what one of our reverts wrote there, and nothing has written over it
+ * since (#1043). Off baseline, that is another campaign's price, handed over when a higher
+ * one ended (#998) -- ledgered under the ended campaign's revert, so no running campaign's
+ * row covers it. It was not changed outside the app, and a recapture taking it for the
+ * variant's normal price would make the sale its own baseline (rule 1).
+ */
+const writtenByRevert = Prisma.sql`
+  EXISTS (
+    SELECT 1
+    FROM "variant_changes" c
+    JOIN "campaign_runs" r ON r."id" = c."runId"
+    WHERE c."shopId" = e."shopId"
+      AND c."variantGid" = e."variantGid"
+      AND c."priceListGid" = e."priceListGid"
+      AND c."status" IN ('VERIFIED', 'CLAMPED')
+      AND r."kind" = 'REVERT'
+      AND c."intendedPrice" = e."livePrice"
+      AND NOT EXISTS (
+        SELECT 1 FROM "variant_changes" n
+        WHERE n."shopId" = c."shopId"
+          AND n."variantGid" = c."variantGid"
+          AND n."priceListGid" = c."priceListGid"
+          AND n."status" IN ('VERIFIED', 'CLAMPED')
+          AND n."verifiedAt" > c."verifiedAt"
+      )
+  )
+`;
 
 /** How many base prices across the store were changed outside any campaign. */
 export async function staleBaselineCount(shopId: string): Promise<number> {
@@ -436,6 +483,18 @@ export async function uncontrolledAmong(shopId: string, offBaselineVariantGids: 
       select: { variantGid: true },
       distinct: ["variantGid"],
     });
+    for (const row of rows) controlled.add(row.variantGid);
+  }
+
+  // A price handed over by another campaign's revert is no running campaign's row, and was
+  // not changed outside the app either (#1043). Asked only of the few left over.
+  const rest = [...new Set(offBaselineVariantGids)].filter((gid) => !controlled.has(gid));
+  for (let i = 0; i < rest.length; i += 5_000) {
+    const rows = await prisma.$queryRaw<Array<{ variantGid: string }>>(Prisma.sql`
+      SELECT e."variantGid" FROM "price_surface_entries" e
+      WHERE e."shopId" = ${shopId} AND e."surfaceKind" = 'BASE' AND e."priceListGid" = ''
+        AND e."variantGid" = ANY(${rest.slice(i, i + 5_000)})
+        AND ${writtenByRevert}`);
     for (const row of rows) controlled.add(row.variantGid);
   }
 
