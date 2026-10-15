@@ -27,6 +27,7 @@ import { shopCurrency } from "../services/settings.server";
 import { importedVariantGids, importPrices } from "../services/price-import.server";
 import { createCampaign } from "../services/campaigns/index.server";
 import { linesOf } from "../lib/reporting/lines";
+import { countOf, formatCount } from "../lib/format/display";
 import { actorFor } from "../lib/audit/actor";
 import { EVERY_STATUS } from "../lib/campaigns/product-status";
 import { withGuard } from "../lib/errors/guard.server";
@@ -71,7 +72,7 @@ export const action = withGuard("/app/price-import", async ({ request }: ActionF
       result,
       // Carried back by the commit: the rows it creates a campaign from are these (#989).
       checkKey: importCheckKey(csv),
-      message: `${result.ready} of ${result.total} rows matched a product. Nothing has been created yet.`,
+      message: `${formatCount(result.ready)} of ${countOf(result.total, "row")} matched a product. Nothing has been created yet.`,
     };
   }
 

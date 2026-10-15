@@ -38,6 +38,7 @@ import { importErrorCsv } from "../lib/reporting/baseline-errors";
 import { shopCurrency } from "../services/settings.server";
 import { actorFor } from "../lib/audit/actor";
 import { linesOf } from "../lib/reporting/lines";
+import { checkedMessage, importedMessage, importLabel } from "../lib/imports/messages";
 import { isCommit } from "../lib/imports/intent";
 import { importCheckKey, uncheckedCommit } from "../lib/imports/check-key.server";
 import { reportError } from "../services/error-report.server";
@@ -130,12 +131,7 @@ export const action = withGuard(
         result,
         // The rows a commit may write; a commit's answer has none, so it spends the check.
         checkKey: dryRun ? importCheckKey(csv) : undefined,
-        message: dryRun
-          ? `${result.ready} of ${result.total} rows would be imported. Nothing has been written.`
-          : `Imported ${result.written} baselines.` +
-            (result.unchanged > 0
-              ? ` ${result.unchanged} already matched and were left alone.`
-              : ""),
+        message: dryRun ? checkedMessage(result.ready, result.total) : importedMessage(result.written, "baseline", result.unchanged),
       };
     } catch (error) {
       const reported = await reportError(error, {
@@ -357,7 +353,7 @@ export default function Baselines() {
         busy={busy}
         ready={result?.ready ?? null}
         checkKey={data?.checkKey}
-        commitLabel={(ready) => `Import ${ready} baselines`}
+        commitLabel={(ready) => importLabel(ready, "baseline")}
         placeholder={"Variant SKU,Price\nCH-1,129.00\nCH-2,149.00"}
         description={
           <>
@@ -395,7 +391,8 @@ export default function Baselines() {
           heading={result.dryRun ? "What would happen" : "What happened"}
           counts={[
             { label: "Rows read", value: result.total },
-            { label: "Ready", value: result.ready },
+            // What it wrote, once it has: "What happened" had no Written count (#759).
+            result.dryRun ? { label: "Ready", value: result.ready } : { label: "Written", value: result.written },
             { label: "Already correct", value: result.unchanged },
             // Counted by the importer, not the length of the lists it sends (#989).
             { label: "Need attention", value: result.problems },
