@@ -261,3 +261,17 @@ describe("a scheduled campaign past its start that has not started (#851)", () =
     expect(describeState("SCHEDULED", { lateStart: null }).label).toBe("Scheduled");
   });
 });
+
+describe("an active campaign whose scheduled end could not run (#1005)", () => {
+  it("says its sale prices are still live past its end, why, and to revert by hand", () => {
+    const described = describeState("ACTIVE", { endMissed: "Anchor couldn't reach its database." });
+    expect(described.label).toBe("Active — past its end");
+    expect(described.tone).toBe("critical");
+    expect(described.explanation).toMatch(/still on your storefront: Anchor couldn't reach its database\./);
+    expect(described.nextAction?.intent).toBe("revert");
+  });
+
+  it("reads as running when its end has not been missed", () => {
+    expect(describeState("ACTIVE", { endMissed: null }).label).toBe("Active");
+  });
+});

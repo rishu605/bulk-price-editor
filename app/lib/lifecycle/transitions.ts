@@ -155,6 +155,8 @@ export function describeState(
     startRefused?: string | null;
     /** Why a scheduled campaign past its start has not started yet (#851); see `lateStart`. */
     lateStart?: string | null;
+    /** Why its scheduled end has not run, while the scheduler keeps trying (#1005); see `endMissed`. */
+    endMissed?: string | null;
   } = {},
 ): StateDescription {
   switch (state) {
@@ -213,6 +215,17 @@ export function describeState(
         explanation: "Writing prices now. The ledger fills in as each row is verified.",
       };
     case "ACTIVE":
+      // Past its end with its sale prices still live (#1005): not "running" as planned.
+      if (context.endMissed) {
+        return {
+          label: "Active — past its end",
+          tone: "critical",
+          explanation:
+            `Its window has ended, but its revert could not run, so its sale prices are still on your storefront: ${context.endMissed} ` +
+            "The schedule keeps trying. To end the sale now, revert it by hand.",
+          nextAction: { label: "Revert", intent: "revert" },
+        };
+      }
       return {
         label: "Active",
         tone: "success",

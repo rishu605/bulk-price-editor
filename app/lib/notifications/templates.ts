@@ -57,6 +57,11 @@ export interface RunNotification {
    * over for a sale that never began and that the schedule will not try again.
    */
   notStarted?: boolean;
+  /**
+   * A scheduled end whose revert could not run (#1005). The sale's prices are still live past
+   * its window, and the schedule keeps trying -- so the merchant hears it once, not never.
+   */
+  notEnded?: boolean;
   /** Merchant-facing reasons, already through the error taxonomy. Never raw errors. */
   reasons?: string[];
   /** Deep link back into the app, filled in by `notify` — see `campaign-link.ts`. */
@@ -153,6 +158,21 @@ function runPartial(n: RunNotification): Email {
 }
 
 function runFailed(n: RunNotification): Email {
+  if (n.notEnded) {
+    return {
+      subject: `"${n.campaignName}" did not end on schedule`,
+      text: [
+        `"${n.campaignName}" was due to end, and its revert could not run, so its sale prices are still on your storefront.`,
+        ...reasonLines(n.reasons),
+        "",
+        "The schedule keeps trying, and you will not get another email about this end. To end the",
+        "sale now, revert the campaign by hand.",
+        link(n.campaignUrl, "Open the campaign"),
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    };
+  }
   if (n.notStarted) {
     return {
       subject: `"${n.campaignName}" did not start on schedule`,

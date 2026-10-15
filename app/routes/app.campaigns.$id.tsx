@@ -16,16 +16,14 @@ import {
 import { PAGE_INLINE_BUDGET_MS } from "../lib/execution/inline-budget";
 import { runResponse } from "../lib/campaigns/run-response";
 import { ResultBanner } from "../components/ResultBanner";
-import { describeSchedule, neverStarts, parseSchedule, scheduleWarnings, windowEndText } from "../lib/scheduling/window";
+import { describeSchedule, parseSchedule, scheduleWarnings } from "../lib/scheduling/window";
 import { scheduledWindow } from "../lib/scheduling/window-input";
 import { zoneShiftOf } from "../lib/scheduling/zone-shift";
-import { startRefusal } from "../lib/scheduling/start-refusal";
 import { scheduleAction } from "../services/campaigns/schedule-control.server";
 import { RunHistoryTable } from "../components/RunHistoryTable";
 import { RunResultSection } from "../components/RunResultSection";
 import { runEvidence } from "../services/campaigns/run-evidence.server";
-import { partialProgress } from "../services/campaigns/result.server";
-import { lateStart } from "../services/campaigns/late-start.server";
+import { lifecycleContext } from "../services/campaigns/lifecycle-context.server";
 import { variantAction } from "../services/campaigns/variant-action.server";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { reportError } from "../services/error-report.server";
@@ -91,14 +89,10 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     state === "HELD"
       ? await prisma.driftEvent.count({ where: { shopId: shop.id, campaignId, resolution: "PENDING" } })
       : 0;
-  const lifecycle = describeState(state, {
-    ...(state === "PARTIAL" ? await partialProgress(shop.id, campaignId) : {}), // #702, #927
-    heldUntil: state === "HELD" ? windowEndText(record.schedule, shop.timezone) : undefined, // #784
-    neverStarts: state === "SCHEDULED" ? neverStarts(parseSchedule(record.schedule), new Date(), shop.timezone) : null, // #824
-    outrankedBy: preview.outrankedBy, // a higher campaign prices every variant (#837)
-    startRefused: state === "SCHEDULED" ? startRefusal(record.schedule) : null, // #975
-    lateStart: state === "SCHEDULED" ? await lateStart(shop.id, campaignId, record.schedule) : null, // #851
-  });
+  const lifecycle = describeState(
+    state,
+    await lifecycleContext(shop.id, campaignId, state, record.schedule, shop.timezone, preview.outrankedBy),
+  );
   const history = await transitionHistory(shop.id, campaignId, 8);
 
   const schedule = parseSchedule(record.schedule);

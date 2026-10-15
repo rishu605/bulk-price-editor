@@ -33,7 +33,7 @@ import type { RunOutcome } from "./types";
 import { chunk, inChunksCounting } from "../../lib/db/chunk";
 import { overBudget, refuseInline, type InlineWork } from "../../lib/execution/inline-budget";
 import { releaseClaim, transitionCampaign } from "./lifecycle.server";
-import { recordStartRefused } from "./start-refusal.server";
+import { recordEndMissed, recordStartRefused } from "./start-refusal.server";
 import { refusedForGood, startRefusedEntry } from "../../lib/scheduling/start-refusal";
 import type { CampaignState } from "../../lib/lifecycle/transitions";
 import { SKIP_REASON_GROUP } from "../../lib/planning/reasons";
@@ -228,7 +228,7 @@ export async function runCampaign(
         await transitionCampaign(shopId, campaignId, "PARTIAL", {
           reason:
             `${options.revert ? "revert" : "apply"} stopped part-way, after ${failed.verified} of ${failed.planned} ` +
-            `prices were changed and read back: ${error instanceof Error ? error.message : String(error)}`,
+            `prices were changed and read back: ${toAppError(error).userMessage}`,
           runId: started.runId,
           actor: options.actor,
         });
@@ -254,8 +254,15 @@ export async function runCampaign(
       // stayed open. Marked before the release, so no tick sees it SCHEDULED and unmarked.
       const forGood = options.claimedFrom === "SCHEDULED" ? refusedForGood(error) : null;
       if (forGood) await recordStartRefused(shopId, campaignId, forGood.userMessage, { tell: !failed?.ended });
+      // A scheduled end that could not run is retried, but said once, on the page and by
+      // email (#1005): the sale's prices are still live past its window.
+      if (options.claimedFrom && options.revert) {
+        await recordEndMissed(shopId, campaignId, toAppError(error).userMessage, { tell: !failed?.ended });
+      }
       await releaseClaim(shopId, campaignId, releaseTo, {
-        reason: forGood ? startRefusedEntry(forGood.userMessage) : error instanceof Error ? error.message : String(error),
+        // The merchant's sentence from the error taxonomy, never the raw message (#1005):
+        // "fetch failed" in a campaign's history tells its reader nothing they can act on.
+        reason: forGood ? startRefusedEntry(forGood.userMessage) : toAppError(error).userMessage,
         actor: options.actor,
         // A blip is retried every tick while it lasts, as an early refusal is: one entry says
         // why, and a new one every thirty seconds would bury it.

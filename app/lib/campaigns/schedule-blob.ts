@@ -15,7 +15,7 @@
  * `startRefused` is a start the scheduler was refused for good (#975): it belongs to the
  * dates, so a copy, an unschedule or new dates leave it behind.
  */
-export const WINDOW_KEYS = ["kind", "startAt", "endAt", "revertBufferMinutes", "clockNotes", "zone", "startRefused"] as const;
+export const WINDOW_KEYS = ["kind", "startAt", "endAt", "revertBufferMinutes", "clockNotes", "zone", "startRefused", "endMissed"] as const;
 
 /** The blob without its window: the campaign's definition, which a copy keeps. */
 export function definitionOf(schedule: unknown): Record<string, unknown> {
