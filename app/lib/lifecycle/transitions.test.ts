@@ -236,3 +236,28 @@ describe("a scheduled campaign whose start was refused for good (#975)", () => {
     expect(describeState("SCHEDULED", { startRefused: null }).explanation).toMatch(/Waiting for its start time/);
   });
 });
+
+describe("a scheduled campaign past its start that has not started (#851)", () => {
+  const reason = "This campaign is waiting for approval. staff:1 asked on 2026-10-15; somebody else needs to approve it.";
+
+  it("names why, instead of waiting for a start time that has come", () => {
+    const described = describeState("SCHEDULED", { lateStart: reason });
+    expect(described.label).toBe("Scheduled — not started yet");
+    expect(described.tone).toBe("warning");
+    expect(described.explanation).toContain(reason);
+    expect(described.explanation).not.toMatch(/Waiting for its start time/);
+  });
+
+  it("gives way to a refusal for good and to a window that can never open", () => {
+    expect(describeState("SCHEDULED", { lateStart: reason, startRefused: "Its segment was deleted." }).label).toBe(
+      "Scheduled — couldn't start",
+    );
+    expect(describeState("SCHEDULED", { lateStart: reason, neverStarts: "Its window ended." }).label).toBe(
+      "Scheduled — will never start",
+    );
+  });
+
+  it("is still waiting before its start", () => {
+    expect(describeState("SCHEDULED", { lateStart: null }).label).toBe("Scheduled");
+  });
+});

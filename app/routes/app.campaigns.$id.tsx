@@ -25,15 +25,15 @@ import { RunHistoryTable } from "../components/RunHistoryTable";
 import { RunResultSection } from "../components/RunResultSection";
 import { runEvidence } from "../services/campaigns/run-evidence.server";
 import { partialProgress } from "../services/campaigns/result.server";
+import { lateStart } from "../services/campaigns/late-start.server";
 import { variantAction } from "../services/campaigns/variant-action.server";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { reportError } from "../services/error-report.server";
 import { withGuard } from "../lib/errors/guard.server";
 import { pressRefusal } from "../services/campaigns/blast-radius.server";
 import { describeCampaign } from "../lib/campaigns/describe";
-import { astOf, ruleOf, segmentNameOf } from "../services/campaigns/model.server";
+import { astOf, isPractice, ruleOf, segmentNameOf } from "../services/campaigns/model.server";
 import { actorFor } from "../lib/audit/actor";
-import { isPractice } from "../services/campaigns/model.server";
 import {
   canTransition,
   describeState,
@@ -97,6 +97,7 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     neverStarts: state === "SCHEDULED" ? neverStarts(parseSchedule(record.schedule), new Date(), shop.timezone) : null, // #824
     outrankedBy: preview.outrankedBy, // a higher campaign prices every variant (#837)
     startRefused: state === "SCHEDULED" ? startRefusal(record.schedule) : null, // #975
+    lateStart: state === "SCHEDULED" ? await lateStart(shop.id, campaignId, record.schedule) : null, // #851
   });
   const history = await transitionHistory(shop.id, campaignId, 8);
 
