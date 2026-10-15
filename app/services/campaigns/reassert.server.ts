@@ -14,9 +14,11 @@
  */
 
 import prisma from "../../db.server";
+import { notPricedMessage } from "../../lib/drift/not-priced";
 import { AppError } from "../../lib/errors/app-error";
 import type { AdminClient } from "../../lib/execution/sync-executor";
 import { releaseHold } from "./lifecycle.server";
+import { notPricedBy } from "./not-priced.server";
 import { pressedRunKey } from "./pressed-run.server";
 import { runCampaign } from "./run.server";
 
@@ -47,7 +49,7 @@ export async function reassertDrift(
   const campaign = event.campaignId
     ? await prisma.campaign.findFirst({
         where: { id: event.campaignId, shopId },
-        select: { id: true, name: true, status: true },
+        select: { id: true, name: true, status: true, schedule: true, excludedVariantGids: true },
       })
     : null;
   if (!campaign || !REASSERTABLE.has(campaign.status)) {
@@ -59,6 +61,20 @@ export async function reassertDrift(
         : "The campaign that set this price no longer exists, so there is no price to put back. Nothing was written. " +
           "Choose Keep the change or Leave it for now.",
     });
+  }
+
+  // The variant by name (#796), so two put-backs in a row are two different sentences.
+  const variant = await prisma.variantIndex.findFirst({
+    where: { shopId, variantGid: event.variantGid },
+    select: { title: true },
+  });
+  const which = variant?.title ? `"${variant.title}"` : "this variant";
+
+  // A variant the campaign no longer prices plans nothing, exactly as one already at its
+  // price does, and used to close the drift with the merchant's edit still live (#1042).
+  const notPriced = (await notPricedBy(shopId, campaign, [event.variantGid])).get(event.variantGid);
+  if (notPriced) {
+    throw new AppError({ code: "VALIDATION", userMessage: notPricedMessage(notPriced, campaign.name, which) });
   }
 
   const outcome = await runCampaign(shopId, campaign.id, client, {
@@ -90,9 +106,19 @@ export async function reassertDrift(
       };
     }
 
-    // Nothing to write: the campaign no longer sets a different price for this variant --
-    // it was excluded, or the storefront already shows the campaign's price. The merchant
-    // asked for the campaign's price and has it, so the question is answered.
+    // Nothing written and nothing to write is two things. The plan left the variant alone
+    // -- a guardrail, a currency it never converts -- and the edit is still live, so the
+    // question stays open (#1042). Or the storefront already shows the campaign's price:
+    // the merchant asked for it and has it, so the question is answered.
+    if (!outcome.unchanged?.includes(event.variantGid)) {
+      const why = outcome.messages[0] ? ` ${outcome.messages[0]}` : "";
+      return {
+        ok: false,
+        message:
+          `"${campaign.name}" left ${which} alone, so nothing was written and the drift stays open.${why} ` +
+          "Choose Keep the change or Leave it for now, or put it back once the campaign can price it.",
+      };
+    }
     await prisma.driftEvent.update({
       where: { id: eventId },
       data: { resolution: "REASSERTED", resolvedAt: new Date(), resolvedBy: actor ?? null },
@@ -113,12 +139,6 @@ export async function reassertDrift(
   const released = await releaseHold(shopId, campaign.id, actor);
   const running = released?.changed ? ` "${campaign.name}" is running again.` : "";
 
-  // The variant by name (#796), so two put-backs in a row are two different sentences.
-  const variant = await prisma.variantIndex.findFirst({
-    where: { shopId, variantGid: event.variantGid },
-    select: { title: true },
-  });
-  const which = variant?.title ? `"${variant.title}"` : "this variant";
   return {
     ok: true,
     message:

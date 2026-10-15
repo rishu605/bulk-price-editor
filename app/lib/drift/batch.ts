@@ -127,6 +127,12 @@ export interface BatchSummary {
   notConfirmed?: number;
   /** "Put back": the storefront already showed the campaign's price. Counted in `resolved`. */
   unchanged?: number;
+  /**
+   * "Put back": the campaign has no price it can write for these -- they left its scope, or
+   * its plan skips them -- so nothing was written and the edit is still live (#1042).
+   * Still waiting.
+   */
+  notPriced?: number;
   /** Why it stopped short, or never started: a refusal, or a failure part-way. */
   stopped?: string;
   /** Drifted prices still waiting for this campaign afterwards. */
@@ -168,6 +174,14 @@ export function describeBatch(summary: BatchSummary): string {
   if (summary.notKept) {
     sentences.push(
       `${prices(summary.notKept)} ${summary.notKept === 1 ? "wasn't" : "weren't"} kept: the storefront no longer shows the edit, so there is no change to keep. Choose Put it back or Leave it for now for ${summary.notKept === 1 ? "it" : "those"}.`,
+    );
+  }
+  if (summary.notPriced) {
+    const one = summary.notPriced === 1;
+    sentences.push(
+      `${prices(summary.notPriced)} ${one ? "wasn't" : "weren't"} put back: ${name} has no price it can write for ${one ? "it" : "them"} -- ` +
+        `${one ? "it is" : "they are"} outside its products now, or its guardrails leave ${one ? "it" : "them"} alone -- so ` +
+        `${one ? "it is" : "they are"} still waiting. Put it back on ${one ? "the price" : "each one"} says why; or keep or leave ${one ? "it" : "them"} instead.`,
     );
   }
   if (summary.notConfirmed) {
