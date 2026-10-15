@@ -36,6 +36,8 @@ describe("chaos: a baseline file that names a variant twice", () => {
       const dry = await importBaselines(shopId, lines(file), "USD", { dryRun: true });
       expect(dry.ready, "both rows for one variant counted as ready").toBe(VARIANTS);
       expect(dry.duplicates.map((p) => [p.line, p.identifier])).toEqual([[VARIANTS + 2, "TWICE-0"]]);
+      // The rule all three importers share (#989, D17): it names the row it repeats.
+      expect(dry.duplicates[0].reason).toMatch(new RegExp(`^Line ${VARIANTS + 2} repeats this variant's line 2; only line 2 is used\\.`));
 
       const committed = await importBaselines(shopId, lines(file), "USD");
       expect(committed.written).toBe(VARIANTS);

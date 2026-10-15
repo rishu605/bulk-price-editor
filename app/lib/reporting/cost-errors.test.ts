@@ -68,6 +68,12 @@ describe("the error report", () => {
     expect(csv).toContain('"unmatched"');
     expect(csv).toContain('"ambiguous"');
   });
+
+  it("labels a refused repeat 'duplicate', as the price and baseline downloads do (#989)", () => {
+    const csv = costErrorCsv(result({ duplicates: [problem(14, "SKU-1", "Line 14 repeats this variant's line 3")] }));
+
+    expect(lines(csv)[1]).toBe('"14","SKU-1","duplicate","Line 14 repeats this variant\'s line 3"');
+  });
 });
 
 describe("ordering, which is what makes the file usable", () => {

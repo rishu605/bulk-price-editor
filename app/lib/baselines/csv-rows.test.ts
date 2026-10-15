@@ -19,6 +19,8 @@ import {
   type InvalidRow,
   type RawRow,
   HANDLE_REFUSAL,
+  duplicateRefusal,
+  firstRows,
   identifierRefusal,
 } from "./csv-rows";
 
@@ -228,5 +230,34 @@ describe("readRows", () => {
   it("reads extra columns when the header names them", async () => {
     const rows = await collect(lines("sku,price,compare_at,currency", "SKU-1,10.00,15.00,EUR"));
     expect(rows[0]).toMatchObject({ compareAt: "15.00", currency: "EUR" });
+  });
+});
+
+describe("a variant named on more than one row (#989, D17)", () => {
+  // The price, baseline and cost imports each decided this for themselves: the first two
+  // kept the first row, the cost import refused every row. One rule now, read from here.
+  it("uses the first row and answers the first row's line for every later one", () => {
+    const earlier = firstRows();
+
+    expect(earlier("gid://shopify/ProductVariant/1", 3), "the first row is not a repeat").toBeNull();
+    expect(earlier("gid://shopify/ProductVariant/2", 5)).toBeNull();
+    expect(earlier("gid://shopify/ProductVariant/1", 14)).toBe(3);
+    // A third row repeats the first, not the second: the second was never used.
+    expect(earlier("gid://shopify/ProductVariant/1", 20)).toBe(3);
+    expect(earlier("gid://shopify/ProductVariant/2", 21)).toBe(5);
+  });
+
+  it("keeps each import's rows to itself", () => {
+    const one = firstRows();
+    const two = firstRows();
+    expect(one("gid://shopify/ProductVariant/1", 2)).toBeNull();
+    expect(two("gid://shopify/ProductVariant/1", 9), "a second file inherited the first file's rows").toBeNull();
+  });
+
+  it("names the row it repeats, which row is used, and what to do", () => {
+    const reason = duplicateRefusal(14, 3, "cost");
+    expect(reason).toMatch(/^Line 14 repeats this variant's line 3; only line 3 is used\./);
+    expect(reason).toMatch(/If this row's cost is the right one, delete line 3 and import the file again\./);
+    expect(duplicateRefusal(9, 2, "baseline")).toContain("this row's baseline");
   });
 });

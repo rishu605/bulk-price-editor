@@ -23,6 +23,8 @@ import {
   type CsvRow,
 } from "../lib/segments/csv-import";
 import {
+  duplicateRefusal,
+  firstRows,
   identifierRefusal,
   isValid,
   productRefusal,
@@ -51,7 +53,7 @@ export interface BaselineImportResult {
   invalid: ImportProblem[];
   unmatched: ImportProblem[];
   ambiguous: ImportProblem[];
-  /** Rows naming a variant an earlier row already named (#736). */
+  /** Rows naming a variant an earlier row already named (#736). The first row is used (#989, D17). */
   duplicates: ImportProblem[];
   /**
    * Every row that needs attention, counted rather than listed (#989). The four lists stop
@@ -113,7 +115,7 @@ export async function importBaselines(
   );
 
   let batch: Array<{ row: ValidRow; variantGid: string }> = [];
-  const seen = new Set<string>();
+  const earlierRow = firstRows();
 
   const flush = async () => {
     if (batch.length === 0) return;
@@ -187,16 +189,17 @@ export async function importBaselines(
     // count as ready on the dry run, and on commit the second `createMany` hit the
     // one-current-baseline index after earlier batches had already been written -- the
     // half-applied import this module promises never to make. Reported here, as the price
-    // import reports it, so the dry run says so and the commit writes the first row only.
-    if (seen.has(variantGid)) {
+    // and cost imports report it (D17), so the dry run says so and the commit writes the
+    // first row only.
+    const first = earlierRow(variantGid, raw.line);
+    if (first !== null) {
       note(result.duplicates, {
         line: raw.line,
         identifier: raw.identifier,
-        reason: "This variant already has a baseline earlier in the file. Remove one of the rows.",
+        reason: duplicateRefusal(raw.line, first, "baseline"),
       });
       continue;
     }
-    seen.add(variantGid);
 
     const existing = current.get(variantGid);
 

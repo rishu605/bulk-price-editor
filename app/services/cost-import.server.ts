@@ -23,7 +23,7 @@ import {
   matchIdentifiers,
   type CsvRow,
 } from "../lib/segments/csv-import";
-import { identifierRefusal, productRefusal, readRows } from "../lib/baselines/csv-rows";
+import { duplicateRefusal, firstRows, identifierRefusal, productRefusal, readRows } from "../lib/baselines/csv-rows";
 import { isValidCost, validateCostRow, type ValidCostRow } from "../lib/baselines/cost-rows";
 import { logger } from "../lib/logging/logger";
 
@@ -42,7 +42,10 @@ export interface CostImportResult {
   invalid: CostImportProblem[];
   unmatched: CostImportProblem[];
   ambiguous: CostImportProblem[];
-  /** Rows naming a variant another row also names (#767). None of them is written. */
+  /**
+   * Rows naming a variant an earlier row already named (#767). The first row is used and
+   * these are refused, as the price and baseline imports refuse them (#989, D17).
+   */
   duplicates: CostImportProblem[];
   /**
    * Every row that needs attention, counted rather than listed. The lists stop at
@@ -97,13 +100,14 @@ export async function importCosts(
   );
   const currentCost = new Map(variants.map((row) => [row.variantGid, baselineCost.get(row.variantGid) ?? row.cost]));
 
-  // Every matched row, by variant, before anything is written (#767). A variant named
-  // twice used to be written twice, the last row winning without a word; the price import
-  // refuses the same file. Which row is the merchant's real cost is a question, so
-  // neither is written -- and "neither" needs the whole file read first, since the first
-  // row may sit in a batch written long before the second turns up. A variant id and a
-  // cost a row is small enough to hold for a catalogue of any size.
-  const byVariant = new Map<string, Array<{ row: ValidCostRow; line: number; identifier: string }>>();
+  // A variant named twice used to be written twice, the last row winning without a word
+  // (#767). Its first row is used and each later one refused, naming the row it repeats:
+  // the rule the price and baseline imports share (#989, D17). Refusing every row of the
+  // variant would be possible here, since nothing is written until the file is read, but
+  // not in those two, which stream -- and three importers deciding one question three
+  // ways is the inconsistency this exists to end.
+  const earlierRow = firstRows();
+  const pending: Array<{ row: ValidCostRow; variantGid: string }> = [];
 
   // Read a line at a time; nothing is written until the file has been read.
   for await (const raw of readRows(lines)) {
@@ -162,33 +166,26 @@ export async function importCosts(
       continue;
     }
 
-    const rows = byVariant.get(variantGid) ?? [];
-    rows.push({ row: validated, line: raw.line, identifier: raw.identifier });
-    byVariant.set(variantGid, rows);
-  }
-
-  const pending: Array<{ row: ValidCostRow; variantGid: string }> = [];
-  for (const [variantGid, rows] of byVariant) {
-    if (rows.length > 1) {
-      for (const { line, identifier } of rows) {
-        problem(result.duplicates, {
-          line,
-          identifier,
-          reason: `This variant is listed ${rows.length} times (lines ${rows.map((r) => r.line).join(", ")}). Keep one row and import again; neither was imported.`,
-        });
-      }
+    // Refused even when the first row changed nothing: that row is still the one used.
+    const first = earlierRow(variantGid, raw.line);
+    if (first !== null) {
+      problem(result.duplicates, {
+        line: raw.line,
+        identifier: raw.identifier,
+        reason: duplicateRefusal(raw.line, first, "cost"),
+      });
       continue;
     }
-    const [{ row }] = rows;
+
     // Unchanged is a real answer, not a write. Rewriting an identical cost would churn
     // the mirror's syncedAt and make the audit look like something moved.
     const existing = currentCost.get(variantGid);
-    if (existing !== null && existing !== undefined && Number(existing) === row.parsedCost.amount) {
+    if (existing !== null && existing !== undefined && Number(existing) === validated.parsedCost.amount) {
       result.unchanged++;
       continue;
     }
     result.ready++;
-    pending.push({ row, variantGid });
+    pending.push({ row: validated, variantGid });
   }
 
   if (!result.dryRun) {

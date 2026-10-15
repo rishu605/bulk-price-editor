@@ -50,6 +50,34 @@ export function productRefusal(variants: number, what: "price" | "cost" | "basel
   );
 }
 
+/**
+ * The one duplicate-row rule, shared by the price, baseline and cost imports (#989, D17).
+ *
+ * A variant's first row is the one used, and every later row naming it is refused. The
+ * price and baseline imports stream: by the time a repeat turns up, the first row may sit
+ * in a batch already staged or written, so "refuse every row" would mean undoing it.
+ *
+ * Returns a function answering, for each matched row, the line that first named its
+ * variant, or null when this row is the first. One per import.
+ */
+export function firstRows(): (variantGid: string, line: number) => number | null {
+  const first = new Map<string, number>();
+  return (variantGid, line) => {
+    const earlier = first.get(variantGid);
+    if (earlier !== undefined) return earlier;
+    first.set(variantGid, line);
+    return null;
+  };
+}
+
+/** Why a repeated row is refused: which row it repeats, which one is used, and what to do. */
+export function duplicateRefusal(line: number, first: number, what: "price" | "cost" | "baseline"): string {
+  return (
+    `Line ${line} repeats this variant's line ${first}; only line ${first} is used. ` +
+    `If this row's ${what} is the right one, delete line ${first} and import the file again.`
+  );
+}
+
 /** The reason a row's identifier cannot be matched at all, or null when it can be tried. */
 export function identifierRefusal(row: Pick<RawRow, "identifierColumn">): string | null {
   return row.identifierColumn === "handle" ? HANDLE_REFUSAL : null;
