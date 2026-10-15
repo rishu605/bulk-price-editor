@@ -70,3 +70,44 @@ describe("the spreadsheet campaign's report", () => {
     expect(SERVICE).not.toMatch(/\bpush\(result\./);
   });
 });
+
+describe("import leftovers (#989)", () => {
+  const EDITOR = sourceOf("app/routes/app.campaigns.new.tsx");
+  const BASELINES = sourceOf("app/routes/app.prices.baselines._index.tsx");
+  const BASELINE_SERVICE = sourceOf("app/services/baseline-import.server.ts");
+
+  it("offers the rows it lists, and says 'all' only when they are all", () => {
+    const listed = Array.from({ length: 500 }, (_, i) => problem(i + 2));
+    const withDownload = (problemCount: number) =>
+      renderToStaticMarkup(
+        <ImportReport
+          heading="What would happen"
+          counts={[]}
+          problems={listed}
+          problemCount={problemCount}
+          download={{ filename: "x.csv", csv: () => "" }}
+        />,
+      );
+    expect(withDownload(800)).toContain("Download the first 500 (CSV)");
+    expect(withDownload(800)).not.toContain("Download all 500");
+    expect(withDownload(500)).toContain("Download all 500 (CSV)");
+  });
+
+  it("gives the file path one name field, the one its form posts", () => {
+    expect(EDITOR).toMatch(/fromFile \? null : \(\s*<FullRow>\s*<CampaignNameField/);
+    expect(EDITOR).toContain('<s-text-field name="name" label="Campaign name" value={defaultName} />');
+    expect(EDITOR).not.toContain('label="Call this"');
+  });
+
+  it("commits with the key its check answered with, and offers the problems as a file", () => {
+    expect(EDITOR).toContain('name="checked" value={importFetcher.data?.checkKey ?? ""}');
+    expect(EDITOR).toContain("csv: () => importErrorCsv(importResult)");
+  });
+
+  it("counts the baseline import's problems past its cap", () => {
+    expect(BASELINES).toContain('{ label: "Need attention", value: result.problems }');
+    expect(BASELINES).toContain("problemCount={result.problems}");
+    expect(BASELINE_SERVICE).toContain("result.problems++;");
+    expect(BASELINE_SERVICE).not.toMatch(/\brecord\(result\./);
+  });
+});

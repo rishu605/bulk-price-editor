@@ -328,9 +328,11 @@ export default function Baselines() {
             { label: "Rows read", value: result.total },
             { label: "Ready", value: result.ready },
             { label: "Already correct", value: result.unchanged },
-            { label: "Need attention", value: problems.length },
+            // Counted by the importer, not the length of the lists it sends (#989).
+            { label: "Need attention", value: result.problems },
           ]}
           problems={problems}
+          problemCount={result.problems}
           download={{
             filename: "baseline-import-errors.csv",
             csv: () => importErrorCsv(result),

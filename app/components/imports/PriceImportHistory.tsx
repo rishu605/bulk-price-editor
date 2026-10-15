@@ -68,13 +68,15 @@ export function PriceImportHistory({
                   </s-table-cell>
                   <s-table-cell>{formatCount(row.rowsRead)}</s-table-cell>
                   <s-table-cell>
-                    {/* The gap between these two is the number worth reading: rows that
-                        named a variant this shop does not have. */}
+                    {/* The gap between these two is the number worth reading: rows that were
+                        not imported. Not "matched nothing" (#989): a refused currency, a bad
+                        price and a repeated variant are in the gap too, and the record keeps
+                        only the two counts, not which reason each row had. */}
                     {formatCount(row.rowsMatched)}
                     {row.rowsMatched < row.rowsRead ? (
                       <s-text tone="caution">
                         {" "}
-                        · {formatCount(row.rowsRead - row.rowsMatched)} matched nothing
+                        · {formatCount(row.rowsRead - row.rowsMatched)} not imported
                       </s-text>
                     ) : null}
                   </s-table-cell>

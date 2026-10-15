@@ -53,6 +53,12 @@ export interface BaselineImportResult {
   ambiguous: ImportProblem[];
   /** Rows naming a variant an earlier row already named (#736). */
   duplicates: ImportProblem[];
+  /**
+   * Every row that needs attention, counted rather than listed (#989). The four lists stop
+   * at MAX_REPORTED each, and the tile showed their length: a file with 6,000 bad rows
+   * said 5,000, and rows read stopped adding up.
+   */
+  problems: number;
   dryRun: boolean;
 }
 
@@ -80,7 +86,12 @@ export async function importBaselines(
     unmatched: [],
     ambiguous: [],
     duplicates: [],
+    problems: 0,
     dryRun: options.dryRun === true,
+  };
+  const note = (into: ImportProblem[], problem: ImportProblem | InvalidRow) => {
+    result.problems++;
+    record(into, problem);
   };
 
   const variants = await prisma.variantIndex.findMany({
@@ -119,7 +130,7 @@ export async function importBaselines(
 
     const validated = validateRow(raw, shopCurrency);
     if (!isValid(validated)) {
-      record(result.invalid, validated);
+      note(result.invalid, validated);
       continue;
     }
 
@@ -129,7 +140,7 @@ export async function importBaselines(
     // reported as "no match" (#735).
     const refusal = identifierRefusal(raw);
     if (refusal) {
-      record(result.unmatched, { line: raw.line, identifier: raw.identifier, reason: refusal });
+      note(result.unmatched, { line: raw.line, identifier: raw.identifier, reason: refusal });
       continue;
     }
 
@@ -141,7 +152,7 @@ export async function importBaselines(
     const outcome = matchIdentifiers([csvRow], index);
 
     if (outcome.ambiguous.length > 0) {
-      record(result.ambiguous, {
+      note(result.ambiguous, {
         line: raw.line,
         identifier: raw.identifier,
         reason: ambiguousReason(outcome.ambiguous[0]),
@@ -150,7 +161,7 @@ export async function importBaselines(
     }
 
     if (outcome.matched.length === 0) {
-      record(result.unmatched, {
+      note(result.unmatched, {
         line: raw.line,
         identifier: raw.identifier,
         reason: "Nothing in your catalogue answers to this SKU, barcode or ID.",
@@ -162,7 +173,7 @@ export async function importBaselines(
       // A product gid naming several variants. Legitimate for a segment — "everything
       // in this product" — and meaningless for a baseline, where one row would have to
       // mean one price for several different variants.
-      record(result.ambiguous, {
+      note(result.ambiguous, {
         line: raw.line,
         identifier: raw.identifier,
         reason: productRefusal(outcome.matched.length, "baseline"),
@@ -178,7 +189,7 @@ export async function importBaselines(
     // half-applied import this module promises never to make. Reported here, as the price
     // import reports it, so the dry run says so and the commit writes the first row only.
     if (seen.has(variantGid)) {
-      record(result.duplicates, {
+      note(result.duplicates, {
         line: raw.line,
         identifier: raw.identifier,
         reason: "This variant already has a baseline earlier in the file. Remove one of the rows.",

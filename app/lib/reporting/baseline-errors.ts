@@ -21,6 +21,8 @@ export interface ProblemReport {
   invalid: ImportProblem[];
   unmatched: ImportProblem[];
   ambiguous: ImportProblem[];
+  /** Rows naming a variant another row named too, where the import reports them (#736, #766). */
+  duplicates?: ImportProblem[];
 }
 
 export function importErrorCsv(report: ProblemReport): string {
@@ -30,6 +32,7 @@ export function importErrorCsv(report: ProblemReport): string {
     ["invalid", report.invalid],
     ["unmatched", report.unmatched],
     ["ambiguous", report.ambiguous],
+    ["duplicate", report.duplicates ?? []],
   ] as const) {
     for (const problem of list) {
       rows.push([String(problem.line), problem.identifier, kind, problem.reason]);

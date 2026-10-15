@@ -51,7 +51,9 @@ async function check(csv: string): Promise<PriceImportResult> {
 }
 
 async function commit(csv: string): Promise<string> {
-  const response = (await post({ intent: "commit", csv, name: "Sale · 14/10/2026" })) as Response;
+  // As the editor does: a commit carries the key its check answered with (#989).
+  const { checkKey } = (await post({ intent: "dry-run", csv })) as { checkKey: string };
+  const response = (await post({ intent: "commit", csv, name: "Sale · 14/10/2026", checked: checkKey })) as Response;
   const location = response.headers.get("Location") ?? "";
   expect(location, "the import did not create a campaign").toMatch(/^\/app\/campaigns\//);
   return location.split("/").pop()!;
