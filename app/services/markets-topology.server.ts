@@ -19,6 +19,7 @@
 
 import prisma from "../db.server";
 import { logger } from "../lib/logging/logger";
+import { PRICES_MAY_BE_LIVE, type CampaignState } from "../lib/lifecycle/transitions";
 import {
   describeChange,
   diffTopology,
@@ -215,10 +216,18 @@ export async function resolveNotice(
   });
 }
 
+/**
+ * The campaigns a market notice names: every one that may have prices live there, and the
+ * drafts and scheduled ones about to (#858). Built from `PRICES_MAY_BE_LIVE` rather than
+ * retyped: the hand-written list left out HELD and REVERTING, so a held sale whose prices
+ * were still on a market that changed currency went unnamed in the notice about it.
+ */
+export const NOTICE_STATES: readonly CampaignState[] = [...PRICES_MAY_BE_LIVE, "DRAFT", "SCHEDULED"];
+
 /** Which campaigns target each price list. */
 async function campaignsByPriceList(shopId: string) {
   const campaigns = await prisma.campaign.findMany({
-    where: { shopId, status: { in: ["DRAFT", "SCHEDULED", "ACTIVE", "APPLYING", "PARTIAL"] } },
+    where: { shopId, status: { in: [...NOTICE_STATES] } },
     select: { id: true, name: true, surfaces: true },
   });
 

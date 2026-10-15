@@ -401,12 +401,17 @@ async function marketPathPreview(
       ...describeMovedMarket(list.name, plan.moved.length),
     ];
 
+    // Nothing to write (#844): no write path to describe -- "will get a price per product"
+    // over a market getting no price at all -- only that it is left as it is, and why.
+    const writes = plan.outcome.kind === "ok" ? plan.outcome.counts.planned : 0;
+    const path = writes > 0 ? describePath(decision, list.name) : `${list.name} will be left at its normal prices.`;
+
     previews.push({
       priceListGid: list.priceListGid,
       name: list.name,
       currency: list.currency,
       path: decision.path,
-      explanation: [describePath(decision, list.name), ...skipNotes].join(" "),
+      explanation: [path, ...skipNotes].join(" "),
       clamped: counts.clamped,
       skipped: counts.skipped,
       refused: false,
