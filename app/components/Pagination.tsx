@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useSearchParams } from "react-router";
 
 import { formatCount } from "../lib/format/display";
@@ -42,31 +43,58 @@ export function Pagination({
 }) {
   const [, setSearchParams] = useSearchParams();
 
-  const lastPage = Math.max(1, Math.ceil(total / pageSize));
-  const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
-  const to = Math.min(total, page * pageSize);
+  const { lastPage, from, to, beyond } = pageRange(page, total, pageSize);
 
-  const goTo = (next: number) =>
-    setSearchParams((params) => {
-      params.set("page", String(next));
-      return params;
-    });
+  const goTo = (next: number, replace = false) =>
+    setSearchParams(
+      (params) => {
+        params.set("page", String(next));
+        return params;
+      },
+      { replace, preventScrollReset: true },
+    );
+
+  // A bookmark or a shared link to page 40 lands past the end once the list has shrunk
+  // (#775): an empty table and "1499971–3669 of 3,669", with Next disabled and Previous
+  // going to another empty page. It goes to the last page instead, in place of the URL
+  // it came with, so Back does not return to the empty one.
+  useEffect(() => {
+    if (beyond) goTo(lastPage, true);
+    // `goTo` is rebuilt each render; the page numbers are what matter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [beyond, lastPage]);
 
   if (total === 0) return null;
 
   return (
     <s-stack direction="inline" gap={SPACE.item} alignItems="center">
-      <s-button disabled={page <= 1 || undefined} onClick={() => goTo(page - 1)}>
+      <s-button disabled={page <= 1 || undefined} onClick={() => goTo(Math.min(page, lastPage) - 1)}>
         Previous
       </s-button>
       <s-text color="subdued" fontVariantNumeric="tabular-nums">
-        {from}–{to} of {formatCount(total)} {noun}
+        {formatCount(from)}–{formatCount(to)} of {formatCount(total)} {noun}
       </s-text>
       <s-button disabled={page >= lastPage || undefined} onClick={() => goTo(page + 1)}>
         Next
       </s-button>
     </s-stack>
   );
+}
+
+/**
+ * The range a page shows, never past the end (#775): a page beyond the last reads as the
+ * last, so the range cannot run backwards, and `beyond` says the URL needs correcting.
+ */
+export function pageRange(page: number, total: number, pageSize: number) {
+  const lastPage = Math.max(1, Math.ceil(total / pageSize));
+  const shown = Math.min(Math.max(1, page), lastPage);
+  return {
+    lastPage,
+    shown,
+    from: total === 0 ? 0 : (shown - 1) * pageSize + 1,
+    to: Math.min(total, shown * pageSize),
+    beyond: total > 0 && page > lastPage,
+  };
 }
 
 /**
