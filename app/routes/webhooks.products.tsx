@@ -27,7 +27,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { logger } from "../lib/logging/logger";
 import { parseMoney } from "../lib/money/money";
-import { checkForDrift, ourEchoes } from "../services/drift.server";
+import { checkForDrift, ourEchoes, predatesOurWrite } from "../services/drift.server";
 import { enrollNewVariants } from "../services/auto-enroll.server";
 import { toAdminClient } from "../services/admin-client.server";
 import { giftCardFlagFor } from "../services/gift-card.server";
@@ -119,7 +119,7 @@ export const action = recordedWebhook(async ({ request }: ActionFunctionArgs) =>
 
     const existing = await prisma.variantIndex.findUnique({
       where: { shopId_variantGid: { shopId: shop.id, variantGid } },
-      select: { remoteUpdatedAt: true },
+      select: { remoteUpdatedAt: true, price: true },
     });
 
     // Stale delivery: we already hold something newer.
@@ -133,6 +133,19 @@ export const action = recordedWebhook(async ({ request }: ActionFunctionArgs) =>
 
     const price = safeMinor(variant.price, currency);
     const compareAt = safeMinor(variant.compare_at_price, currency);
+
+    // Not older to the second, but from before the write the mirror holds: an earlier
+    // call's snapshot of a product written in several, delivered late (#985). Asked only
+    // when the second is the same and the price differs, which an echo of that write never is.
+    if (
+      existing?.remoteUpdatedAt &&
+      remoteUpdatedAt &&
+      existing.remoteUpdatedAt.getTime() === remoteUpdatedAt.getTime() &&
+      price !== existing.price &&
+      (await predatesOurWrite(shop.id, variantGid, remoteUpdatedAt, price))
+    ) {
+      continue;
+    }
 
     const data = {
       productGid,

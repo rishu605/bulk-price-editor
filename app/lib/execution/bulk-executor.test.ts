@@ -6,9 +6,11 @@ import {
   buildMutationLines,
   collect,
   fromString,
+  layoutOf,
   parseResults,
   serializeJsonl,
   streamLines,
+  type VariantOutcome,
 } from "./jsonl";
 import {
   isTerminal,
@@ -44,6 +46,51 @@ function row(over: Partial<PlannedRow> = {}): PlannedRow {
 
 const productOf = (gid: string) =>
   gid.endsWith("/3") ? "gid://shopify/Product/B" : "gid://shopify/Product/A";
+
+/** `count` rows of one product, variant ids 1000, 1001, ... in order. */
+function variantsOfOneProduct(count: number, from = 1_000): PlannedRow[] {
+  return Array.from({ length: count }, (_, i) => row({ ref: ref(`gid://shopify/ProductVariant/${from + i}`) }));
+}
+const variantGid = (n: number) => `gid://shopify/ProductVariant/${n}`;
+
+/**
+ * Shopify's answer to an upload, as a result file: one line per upload line, under its
+ * `__lineNumber`. A line over 250 variants is refused whole, as the mutation refuses it
+ * when called directly; `refuse` refuses others the same way; `failing` puts a userError
+ * on the variants at those indexes of a line and leaves them out of `productVariants`.
+ */
+function shopifyAnswers(
+  lines: Array<{ variants: Array<Record<string, unknown>> }>,
+  options: { refuse?: number[]; failing?: Map<number, number[]> } = {},
+): string {
+  return lines
+    .map((line, lineNumber) => {
+      if (line.variants.length > 250 || options.refuse?.includes(lineNumber)) {
+        return JSON.stringify({
+          __lineNumber: lineNumber,
+          errors: [{ message: `The input array size of ${line.variants.length} is greater than the maximum allowed of 250.` }],
+        });
+      }
+      const failing = new Set(options.failing?.get(lineNumber) ?? []);
+      return JSON.stringify({
+        __lineNumber: lineNumber,
+        data: {
+          productVariantsBulkUpdate: {
+            product: { updatedAt: "2026-10-15T10:00:00Z" },
+            productVariants: line.variants
+              .filter((_, index) => !failing.has(index))
+              .map((v) => ({ id: v.id, price: v.price, compareAtPrice: null })),
+            userErrors: [...failing].map((index) => ({
+              field: ["variants", String(index), "price"],
+              message: "Price is invalid",
+              code: "INVALID",
+            })),
+          },
+        },
+      });
+    })
+    .join("\n");
+}
 
 describe("JSONL builder", () => {
   it("emits one line per product, not per variant", () => {
@@ -89,6 +136,77 @@ describe("JSONL builder", () => {
     const gen = buildMutationLines([row()], productOf);
     expect(typeof gen[Symbol.iterator]).toBe("function");
     expect(typeof (gen as { next?: unknown }).next).toBe("function");
+  });
+
+  it("splits a product with more than 250 variants in scope across lines of at most 250 (#985)", () => {
+    // 600 of product A, then 2 of product B. One line per product sent A's 600 as one
+    // array, which `productVariantsBulkUpdate` refuses whole.
+    const rows = [...variantsOfOneProduct(600), ...variantsOfOneProduct(2, 2_000)];
+    const productFor = (gid: string) =>
+      Number(gid.split("/").pop()) < 2_000 ? "gid://shopify/Product/A" : "gid://shopify/Product/B";
+    const lines = [...buildMutationLines(rows, productFor)];
+
+    expect(lines.map((line) => line.variants.length)).toEqual([250, 250, 100, 2]);
+    expect(lines.map((line) => line.productId)).toEqual([
+      "gid://shopify/Product/A",
+      "gid://shopify/Product/A",
+      "gid://shopify/Product/A",
+      "gid://shopify/Product/B",
+    ]);
+    // Every variant exactly once, in the order it was planned.
+    const sent = lines.flatMap((line) => line.variants.map((v) => v.id));
+    expect(sent).toEqual(rows.map((r) => r.ref.variantGid));
+  });
+
+  it("keeps a product of exactly 250 on one line, and puts the 251st on a second", () => {
+    expect([...buildMutationLines(variantsOfOneProduct(250), productOf)].map((l) => l.variants.length)).toEqual([250]);
+    expect([...buildMutationLines(variantsOfOneProduct(251), productOf)].map((l) => l.variants.length)).toEqual([250, 1]);
+  });
+
+  it("lays out each line's variant ids in the order the line sends them", () => {
+    const lines = [...buildMutationLines(variantsOfOneProduct(300), productOf)];
+    const layout = layoutOf(lines);
+    expect(layout.map((line) => line.length)).toEqual([250, 50]);
+    expect(layout[1][3]).toBe(variantGid(1_253));
+  });
+});
+
+describe("a product over the cap, end to end through the result file (#985)", () => {
+  // Built, answered as Shopify answers it, and read back -- so a builder that put the
+  // product back on one line is caught by its results as well as by its line sizes.
+  it("writes all 600 variants of one product, every one reported verified", async () => {
+    const rows = variantsOfOneProduct(600);
+    const lines = [...buildMutationLines(rows, () => "gid://shopify/Product/A")];
+
+    const out = await reconcileResults(
+      { id: "1", status: "COMPLETED", url: "https://r" },
+      rows.map((r) => r.ref.variantGid),
+      () => fromString(shopifyAnswers(lines)),
+      layoutOf(lines),
+    );
+
+    expect(out.unreported).toEqual([]);
+    expect([...out.outcomes.values()].filter((o) => !o.ok)).toEqual([]);
+    expect(out.outcomes.size).toBe(600);
+  });
+
+  it("fails a refused line's variants, and only those", async () => {
+    const rows = variantsOfOneProduct(600);
+    const lines = [...buildMutationLines(rows, () => "gid://shopify/Product/A")];
+
+    const out = await reconcileResults(
+      { id: "1", status: "COMPLETED", url: "https://r" },
+      rows.map((r) => r.ref.variantGid),
+      () => fromString(shopifyAnswers(lines, { refuse: [1] })),
+      layoutOf(lines),
+    );
+
+    const failed = [...out.outcomes.values()].filter((o) => !o.ok).map((o) => o.variantGid);
+    expect(failed).toEqual(Array.from({ length: 250 }, (_, i) => variantGid(1_250 + i)));
+    expect(out.outcomes.get(variantGid(1_250))?.failureReason).toMatch(/Line-level error/);
+    expect(out.outcomes.get(variantGid(1_249))?.ok).toBe(true);
+    expect(out.outcomes.get(variantGid(1_500))?.ok).toBe(true);
+    expect(out.unreported).toEqual([]);
   });
 });
 
@@ -188,6 +306,108 @@ describe("result parsing", () => {
   });
 });
 
+describe("result parsing against the upload's layout (#985)", () => {
+  // One product, 600 variants: lines of 250, 250 and 100. Variant 1000 + n is the
+  // product's n-th, so line 1's index 3 is variant 1253 -- not 1003, and not 1254.
+  const rows = variantsOfOneProduct(600);
+  const lines = [...buildMutationLines(rows, () => "gid://shopify/Product/A")];
+  const layout = layoutOf(lines);
+
+  async function outcomes(text: string): Promise<Map<string, VariantOutcome>> {
+    const out = await collect(parseResults(streamLines(fromString(text)), layout));
+    return new Map(out.filter((o): o is VariantOutcome => "variantGid" in o).map((o) => [o.variantGid, o]));
+  }
+
+  it("puts a userError on line N on line N's variant at that index", async () => {
+    const out = await outcomes(shopifyAnswers(lines, { failing: new Map([[1, [3]]]) }));
+
+    expect(out.get(variantGid(1_253))).toMatchObject({ ok: false, failureReason: "INVALID: Price is invalid" });
+    // Its neighbour, which Shopify reported at index 3 of `productVariants` once 1253 was
+    // left out, landed -- and the product's own 4th variant was never in question.
+    expect(out.get(variantGid(1_254))?.ok).toBe(true);
+    expect(out.get(variantGid(1_003))?.ok).toBe(true);
+    expect([...out.values()].filter((o) => !o.ok).map((o) => o.variantGid)).toEqual([variantGid(1_253)]);
+    expect(out.size).toBe(600);
+  });
+
+  it("names the failed variant when Shopify reports no variants for its line at all", async () => {
+    // `productVariantsBulkUpdate` is all-or-nothing unless asked otherwise, so a line with a
+    // userError may come back with no variants. The error still names its own variant;
+    // the rest of that line are unreported -- unverified, not assumed either way.
+    const text = shopifyAnswers(lines)
+      .split("\n")
+      .map((line, n) =>
+        n === 1
+          ? JSON.stringify({
+              __lineNumber: 1,
+              data: {
+                productVariantsBulkUpdate: {
+                  product: null,
+                  productVariants: null,
+                  userErrors: [{ field: ["variants", "3", "price"], message: "Price is invalid", code: "INVALID" }],
+                },
+              },
+            })
+          : line,
+      )
+      .join("\n");
+
+    const out = await reconcileResults(
+      { id: "1", status: "COMPLETED", url: "https://r" },
+      rows.map((r) => r.ref.variantGid),
+      () => fromString(text),
+      layout,
+    );
+
+    expect(out.outcomes.get(variantGid(1_253))).toMatchObject({ ok: false, failureReason: "INVALID: Price is invalid" });
+    expect(out.unreported).toHaveLength(249);
+    expect(out.unreported).not.toContain(variantGid(1_253));
+    expect(out.unreported.every((gid) => layout[1].includes(gid))).toBe(true);
+  });
+
+  it("fails every variant of a line refused whole, and no other line's", async () => {
+    const out = await outcomes(shopifyAnswers(lines, { refuse: [2] }));
+
+    const failed = [...out.values()].filter((o) => !o.ok).map((o) => o.variantGid);
+    expect(failed).toEqual([...layout[2]]);
+    expect(out.get(variantGid(1_599))?.failureReason).toMatch(/greater than the maximum allowed/);
+  });
+
+  it("takes an index the line does not have as an error for the whole line", async () => {
+    const text = shopifyAnswers(lines)
+      .split("\n")
+      .map((line, n) => {
+        if (n !== 2) return line;
+        const parsed = JSON.parse(line);
+        parsed.data.productVariantsBulkUpdate.userErrors = [{ field: ["variants", "100", "price"], message: "Out of range" }];
+        return JSON.stringify(parsed);
+      })
+      .join("\n");
+
+    const out = await outcomes(text);
+    const failed = [...out.values()].filter((o) => !o.ok).map((o) => o.variantGid);
+    expect(failed).toEqual([...layout[2]]);
+  });
+
+  it("matches by line number, whatever order the result file is in", async () => {
+    const shuffled = shopifyAnswers(lines, { failing: new Map([[0, [7]]]) }).split("\n").reverse().join("\n");
+    const out = await outcomes(shuffled);
+    expect([...out.values()].filter((o) => !o.ok).map((o) => o.variantGid)).toEqual([variantGid(1_007)]);
+    expect(out.size).toBe(600);
+  });
+
+  it("does not trust a layout the result line disagrees with", async () => {
+    // Line 0's answer filed under line 1: it reports variants line 1 never sent. Read
+    // against the layout, its userError would land on 1253; read against what it reports,
+    // it lands on the variant the line itself names.
+    const misfiled = shopifyAnswers([lines[0]], { failing: new Map([[0, [3]]]) }).replace('"__lineNumber":0', '"__lineNumber":1');
+    const out = await outcomes(misfiled);
+
+    expect(out.has(variantGid(1_253))).toBe(false);
+    expect([...out.keys()].every((gid) => layout[0].includes(gid))).toBe(true);
+  });
+});
+
 // ------------------------------------------------------------------ submission
 
 function stagedTarget(): StagedTarget {
@@ -244,10 +464,30 @@ function submitClient(options: FakeSubmitOptions = {}) {
 describe("submission", () => {
   it("uploads the payload and submits the operation", async () => {
     const { client, upload, uploaded } = submitClient();
-    const op = await submitBulkMutation([row()], { client, upload, productOf, sleep: noSleep });
+    const { operation: op, layout } = await submitBulkMutation([row()], { client, upload, productOf, sleep: noSleep });
     expect(op.id).toBe("gid://bulk/1");
     expect(uploaded).toHaveLength(1);
     expect(JSON.parse(uploaded[0].trim())).toMatchObject({ productId: "gid://shopify/Product/A" });
+    expect(layout).toEqual([["gid://shopify/ProductVariant/1"]]);
+  });
+
+  it("returns the layout of the lines it uploaded, line for line (#985)", async () => {
+    // The results are read against this, so it has to be what was sent -- not a second
+    // build that happens to agree with it.
+    const { client, upload, uploaded } = submitClient();
+    const { layout } = await submitBulkMutation(variantsOfOneProduct(600), {
+      client,
+      upload,
+      productOf: () => "gid://shopify/Product/A",
+      sleep: noSleep,
+    });
+
+    const sent = uploaded[0]
+      .trim()
+      .split("\n")
+      .map((line) => (JSON.parse(line) as { variants: Array<{ id: string }> }).variants.map((v) => v.id));
+    expect(layout).toEqual(sent);
+    expect(layout.map((line) => line.length)).toEqual([250, 250, 100]);
   });
 
   it("refuses to submit an empty payload, and not as a Shopify rejection", async () => {
