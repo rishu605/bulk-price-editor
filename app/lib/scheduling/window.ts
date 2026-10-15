@@ -11,7 +11,7 @@
  * Equality checks silently drop any campaign whose moment fell in the gap.
  */
 
-import { formatWhen } from "../format/display";
+import { countOf, formatWhen } from "../format/display";
 
 export type Schedule =
   | { kind: "manual" }
@@ -290,7 +290,7 @@ export function describeSchedule(
   const buffer = schedule.revertBufferMinutes ?? DEFAULT_REVERT_BUFFER_MINUTES;
   return (
     `${start}, reverts ${format(schedule.endAt)} (${timeZone}). ` +
-    `Reverting begins ${buffer} minutes early so prices are back before the window closes.`
+    `Reverting begins ${countOf(buffer, "minute")} early so prices are back before the window closes.`
   );
 }
 
