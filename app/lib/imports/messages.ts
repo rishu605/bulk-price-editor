@@ -14,7 +14,7 @@ export function importLabel(ready: number, noun: string): string {
 }
 
 /** What a check found: how many of the file's rows would be imported, and that none were. */
-export function checkedMessage(ready: number, total: number): string {
+export function importCheckMessage(ready: number, total: number): string {
   return `${formatCount(ready)} of ${countOf(total, "row")} would be imported. Nothing has been written.`;
 }
 

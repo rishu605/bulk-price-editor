@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import { sourceOf } from "../testing/source";
 
-import { checkedMessage, importedMessage, importLabel } from "./messages";
+import { importCheckMessage, importedMessage, importLabel } from "./messages";
 
 describe("the commit button", () => {
   it("says the noun in the singular for one, and groups a large count", () => {
@@ -21,8 +21,8 @@ describe("the commit button", () => {
 
 describe("a check", () => {
   it("says how many rows of the file would be imported, and that nothing was written", () => {
-    expect(checkedMessage(2_702, 3_669)).toBe("2,702 of 3,669 rows would be imported. Nothing has been written.");
-    expect(checkedMessage(1, 1)).toBe("1 of 1 row would be imported. Nothing has been written.");
+    expect(importCheckMessage(2_702, 3_669)).toBe("2,702 of 3,669 rows would be imported. Nothing has been written.");
+    expect(importCheckMessage(1, 1)).toBe("1 of 1 row would be imported. Nothing has been written.");
   });
 });
 
@@ -41,7 +41,7 @@ describe("the baseline and cost pages say them", () => {
   it("both answer with these sentences rather than their own", () => {
     for (const [page, source, noun] of [["baselines", BASELINES, "baseline"], ["costs", COSTS, "cost"]] as const) {
       expect(source, page).toContain(`importLabel(ready, "${noun}")`);
-      expect(source, page).toContain("checkedMessage(");
+      expect(source, page).toContain("importCheckMessage(");
       expect(source, page).toContain(`importedMessage(`);
       expect(source, page).not.toMatch(/`Import \$\{ready\}/);
     }

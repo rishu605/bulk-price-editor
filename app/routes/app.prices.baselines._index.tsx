@@ -38,7 +38,7 @@ import { importErrorCsv } from "../lib/reporting/baseline-errors";
 import { shopCurrency } from "../services/settings.server";
 import { actorFor } from "../lib/audit/actor";
 import { linesOf } from "../lib/reporting/lines";
-import { checkedMessage, importedMessage, importLabel } from "../lib/imports/messages";
+import { importCheckMessage, importedMessage, importLabel } from "../lib/imports/messages";
 import { isCommit } from "../lib/imports/intent";
 import { importCheckKey, uncheckedCommit } from "../lib/imports/check-key.server";
 import { reportError } from "../services/error-report.server";
@@ -131,7 +131,7 @@ export const action = withGuard(
         result,
         // The rows a commit may write; a commit's answer has none, so it spends the check.
         checkKey: dryRun ? importCheckKey(csv) : undefined,
-        message: dryRun ? checkedMessage(result.ready, result.total) : importedMessage(result.written, "baseline", result.unchanged),
+        message: dryRun ? importCheckMessage(result.ready, result.total) : importedMessage(result.written, "baseline", result.unchanged),
       };
     } catch (error) {
       const reported = await reportError(error, {

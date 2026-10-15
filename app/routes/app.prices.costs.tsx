@@ -43,7 +43,7 @@ import { ImportForm, ImportReport, type ImportProblem } from "../components/impo
 import { importCosts, type CostImportResult } from "../services/cost-import.server";
 import { costErrorCsv } from "../lib/reporting/cost-errors";
 import { linesOf } from "../lib/reporting/lines";
-import { checkedMessage, importedMessage, importLabel } from "../lib/imports/messages";
+import { importCheckMessage, importedMessage, importLabel } from "../lib/imports/messages";
 import { countOf, formatCount } from "../lib/format/display";
 import { isCommit } from "../lib/imports/intent";
 import { importCheckKey, uncheckedCommit } from "../lib/imports/check-key.server";
@@ -150,7 +150,7 @@ export const action = withGuard("/app/prices/costs", async ({ request }: ActionF
         // The rows a commit may write; a commit's answer has none, so it spends the check.
         checkKey: dryRun ? importCheckKey(csv) : undefined,
         message: imported.dryRun
-          ? checkedMessage(imported.ready, imported.total)
+          ? importCheckMessage(imported.ready, imported.total)
           : importedMessage(imported.written, "cost", imported.unchanged),
       };
     } catch (error) {
