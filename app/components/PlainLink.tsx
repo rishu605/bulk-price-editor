@@ -1,6 +1,8 @@
 import type { CSSProperties, ReactNode } from "react";
 import { Link } from "react-router";
 
+import { ariaCurrent, type Currentness } from "../lib/ui/current-tab";
+
 /**
  * A client-side link the browser has not painted.
  *
@@ -39,17 +41,18 @@ export function PlainLink({
   /** See `TabBar` — set when the link swaps a panel rather than changing page. */
   preventScrollReset?: boolean;
   /**
-   * Marks the link to the page being shown, as `aria-current="page"`. See `TabBar`: the
-   * current tab stays a link, so the one a keyboard user just pressed keeps focus.
+   * Marks the link to the page being shown, as `aria-current="page"`, or to the page above
+   * the one being shown, as `"true"` (#1016). See `TabBar`: the current tab stays a link,
+   * so the one a keyboard user just pressed keeps focus.
    */
-  current?: boolean;
+  current?: Currentness;
   children: ReactNode;
 }) {
   return (
     <Link
       to={to}
       preventScrollReset={preventScrollReset}
-      aria-current={current ? "page" : undefined}
+      aria-current={ariaCurrent(current)}
       style={UNPAINTED}
     >
       {children}

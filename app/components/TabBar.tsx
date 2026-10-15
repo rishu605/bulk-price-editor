@@ -1,6 +1,7 @@
 import type { ComponentProps, ReactNode } from "react";
 
 import { PlainLink } from "./PlainLink";
+import type { Currentness } from "../lib/ui/current-tab";
 import { PAD, SPACE } from "../lib/ui/spacing";
 
 export interface Tab {
@@ -15,7 +16,12 @@ export interface Tab {
    * "Drift" are subjects, and an icon per subject is decoration.
    */
   icon?: ComponentProps<"s-icon">["type"];
-  current: boolean;
+  /**
+   * Whether this is the tab being looked at. `"beneath"` when the page shown is under the
+   * tab's own (Baselines → recapture): drawn the same, and announced as the current item
+   * rather than as this page (#1016).
+   */
+  current: Currentness;
 }
 
 /**
@@ -211,7 +217,8 @@ function TabItem({
     </>
   );
 
-  // The current tab is a link too, marked `aria-current="page"` (#797).
+  // The current tab is a link too, marked `aria-current="page"` (#797) -- or `"true"` on a
+  // page beneath it, which the link does not go to (#1016).
   //
   // It used to be an `s-box`, on the reasoning that a link to the page you are on goes
   // nowhere. But the tab a keyboard user presses is the one that becomes current, and

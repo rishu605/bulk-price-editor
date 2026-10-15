@@ -2,6 +2,7 @@ import { useLocation, useSearchParams } from "react-router";
 
 import { PageWidth } from "./PageShell";
 import { TabBar } from "./TabBar";
+import { currentness } from "../lib/ui/current-tab";
 import { PAGE_INSET } from "../lib/ui/spacing";
 
 export interface SectionTab {
@@ -61,7 +62,8 @@ export function SectionTabs({ tabs }: { tabs: SectionTab[] }) {
           tabs={tabs.map((tab) => ({
             label: tab.label,
             badge: tab.badge,
-            current: isCurrent(pathname, tab.href, tabs),
+            // "page" or "beneath": drawn the same, announced differently (#1016).
+            current: currentness(pathname, tab.href, tabs),
             href: query ? `${tab.href}?${query}` : tab.href,
           }))}
         />
@@ -71,17 +73,9 @@ export function SectionTabs({ tabs }: { tabs: SectionTab[] }) {
 }
 
 /**
- * Whether this tab is the one being looked at.
- *
- * Exact match, or a page beneath it — but never for the section root, which is a prefix
- * of every tab in the section and would otherwise be permanently current.
- *
- * The root is identified by being a prefix of another tab's href rather than by being
- * first in the list, so a section that reorders its tabs cannot quietly break this.
+ * Whether this tab is the one being looked at: its own page, or a page beneath it. See
+ * `currentness`, which also says which of the two.
  */
 export function isCurrent(pathname: string, href: string, tabs: { href: string }[]): boolean {
-  if (pathname === href) return true;
-
-  const isRoot = tabs.some((other) => other.href !== href && other.href.startsWith(`${href}/`));
-  return !isRoot && pathname.startsWith(`${href}/`);
+  return currentness(pathname, href, tabs) !== false;
 }
