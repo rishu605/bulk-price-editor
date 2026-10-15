@@ -129,6 +129,13 @@ export class FakeShopify {
     | null = null;
 
   /**
+   * Stores a different compare-at than the one requested on the base price, and reports
+   * the stored one (#988): a strike-through Shopify dropped or altered with no error, which
+   * only a read-back of the compare-at itself can see.
+   */
+  distortStoredCompareAt: ((requested: string | null, variantGid: string) => string | null) | null = null;
+
+  /**
    * Exchange rates from the shop currency, per market currency.
    *
    * Present so the fake can derive a relative list's prices the way Shopify does:
@@ -398,7 +405,8 @@ export class FakeShopify {
         this.writeLog.push({ variantGid: id, price: stored, priceListGid: null });
       }
       if ("compareAtPrice" in input) {
-        variant.compareAtPrice = input.compareAtPrice === null ? null : String(input.compareAtPrice);
+        const requested = input.compareAtPrice === null ? null : String(input.compareAtPrice);
+        variant.compareAtPrice = this.distortStoredCompareAt ? this.distortStoredCompareAt(requested, id) : requested;
       }
 
       productVariants.push({

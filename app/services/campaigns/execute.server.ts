@@ -29,7 +29,7 @@ import { isClampReason } from "../../lib/campaigns/clamp-reasons";
 import { chunk } from "../../lib/db/chunk";
 import { money } from "../../lib/money/money";
 import { executeSync, type AdminClient, type ExecutedRow } from "../../lib/execution/sync-executor";
-import { readBackVerdict } from "../../lib/execution/read-back";
+import { readBackRowVerdict } from "../../lib/execution/read-back";
 import type { PlannedRow } from "../../lib/planning/types";
 import { selectWritePath } from "../../lib/planning/write-path";
 import { RateLimitBudget } from "../../lib/shopify/budget";
@@ -218,7 +218,12 @@ async function executeBulk(
     // marking a row verified because no `userError` came back. That is a claim about the
     // mutation, not about the storefront, and invariant I5 asks for the second one. The
     // comparison is free: no extra request, the number is already in hand.
-    const verdict = readBackVerdict(row.intendedPrice, outcome.price);
+    const verdict = readBackRowVerdict(
+      row.intendedPrice,
+      outcome.price,
+      { set: row.intendedCompareAtSet, value: row.intendedCompareAt },
+      outcome.compareAtPrice,
+    );
     if (!verdict.ok) {
       return {
         row,
@@ -313,7 +318,15 @@ export async function settleSubmittedBulk(
 
   const rows = await prisma.variantChange.findMany({
     where: { runId: record.runId, shopId, status: "WRITING" },
-    select: { id: true, variantGid: true, intendedPrice: true, currency: true, failureReason: true },
+    select: {
+      id: true,
+      variantGid: true,
+      intendedPrice: true,
+      intendedCompareAt: true,
+      intendedCompareAtSet: true,
+      currency: true,
+      failureReason: true,
+    },
   });
   // Shopify no longer knows the operation: nothing can be read from it, so the rows are
   // what they were -- written, not read back -- and the resume writes them again.
@@ -346,7 +359,11 @@ export async function settleSubmittedBulk(
     }
     const outcome = outcomes.get(row.variantGid);
     const intended = row.intendedPrice === null ? undefined : money(Number(row.intendedPrice), row.currency);
-    const verdict = outcome?.ok ? readBackVerdict(intended, outcome.price) : null;
+    const compareAt = {
+      set: row.intendedCompareAtSet,
+      value: row.intendedCompareAt === null ? null : money(Number(row.intendedCompareAt), row.currency),
+    };
+    const verdict = outcome?.ok ? readBackRowVerdict(intended, outcome.price, compareAt, outcome.compareAtPrice) : null;
     if (verdict?.ok) {
       // The submit step wrote a clamped row's reason up front; nothing else tells them apart.
       (isClampReason(row.failureReason) ? clamped : verified).push(row.id);
