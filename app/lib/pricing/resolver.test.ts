@@ -5,7 +5,7 @@ import { applyPercentChange, money } from "../money/money";
 import { applyRounding, charm99, NO_ROUNDING, type RoundingProfile } from "../money/rounding";
 import { policyOf, profileFor, ROUNDING_PROFILES } from "../money/rounding-policy";
 import { compareCampaigns, resolve, resolveWithout, selectWinner } from "./resolver";
-import { selectRule } from "./rules";
+import { applyRule, selectRule } from "./rules";
 import type {
   AdjustmentRule,
   Baseline,
@@ -440,6 +440,39 @@ describe("rule engine", () => {
     const result = withRule({ kind: "from-cost-margin", marginPercent: 100 });
     expect(result.meta.outcome).toBe("skipped");
     expect(result.meta.reason).toBe("invalid-margin");
+  });
+
+  describe("a target-margin price is exact, rounded half to even (#697)", () => {
+    const atMargin = (cost: number, marginPercent: number) =>
+      applyRule({ kind: "from-cost-margin", marginPercent }, { price: usd(10_000), cost: usd(cost) })
+        .amount;
+
+    it("rounds an exact half cent to even, not by float noise", () => {
+      // 0.04 at 68% is exactly 0.125, so half-even gives 0.12. The float factor made it
+      // 12.500000000000002 and it became 0.13; 0.06 at 84% is exactly 0.375, which the
+      // float made 37.49999999999999 and rounded down to 0.37 instead of 0.38.
+      expect(atMargin(4, 68)).toBe(12);
+      expect(atMargin(6, 84)).toBe(38);
+      expect(atMargin(1, 92)).toBe(12);
+    });
+
+    it("is the nearest price to the exact margin, ties to even, over a grid", () => {
+      // Every margin a tenth of a percent apart is `tenths / 1000` of the price, so the
+      // exact price is cost × 1000 / (1000 − tenths). Checked by cross-multiplying, on
+      // integers small enough to be exact in a double.
+      const failures: string[] = [];
+      for (let cost = 1; cost <= 1_000; cost += 1) {
+        for (let tenths = 1; tenths <= 999; tenths += 1) {
+          const kept = 1_000 - tenths;
+          const price = atMargin(cost, tenths / 10);
+          const twiceOff = 2 * Math.abs(price * kept - cost * 1_000);
+          const nearest = twiceOff < kept || (twiceOff === kept && price % 2 === 0);
+          if (!nearest) failures.push(`cost ${cost} at ${tenths / 10}% → ${price}`);
+        }
+      }
+      expect(failures.slice(0, 10)).toEqual([]);
+      expect(failures).toHaveLength(0);
+    }, 30_000);
   });
 
   it("last matching rule row wins (edge case E16)", () => {

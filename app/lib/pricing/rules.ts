@@ -12,6 +12,7 @@ import {
   multiplyByFactor,
   type Money,
 } from "../money/money";
+import { priceAtMargin } from "./guardrails";
 import type { AdjustmentRule, Baseline, RuleRow } from "./types";
 
 /** Per-variant inputs a rule may need that the baseline does not carry. */
@@ -109,7 +110,9 @@ export function applyRule(
             `the selling price, so 100% would require an infinite price.`,
         );
       }
-      return multiplyByFactor(cost, 1 / (1 - rule.marginPercent / 100));
+      // On integers, as the margin floor is: the float factor sent an exact half cent the
+      // wrong way, so 0.04 at 68% (exactly 0.125) priced at 0.13 rather than 0.12 (#697).
+      return priceAtMargin(cost, rule.marginPercent, "half-even");
     }
 
     case "percent-of-compare-at": {
