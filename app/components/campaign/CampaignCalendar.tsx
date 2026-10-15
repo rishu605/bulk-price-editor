@@ -2,7 +2,7 @@
 import { ActionRow } from "../ActionRow";
 import { CalendarGrid } from "../CalendarGrid";
 import { TabBar } from "../TabBar";
-import type { calendarFor } from "../../services/calendar.server";
+import type { calendarFor, Overlap } from "../../services/calendar.server";
 import { Card } from "../Card";
 
 type Calendar = Awaited<ReturnType<typeof calendarFor>>;
@@ -15,6 +15,8 @@ export interface CampaignCalendarProps extends Calendar {
   next: string;
   today: string;
   heading: string;
+  /** The list's archive filter, which the calendar reads too (#979). */
+  archived: boolean;
 }
 
 /**
@@ -28,8 +30,15 @@ export interface CampaignCalendarProps extends Calendar {
  * running at once is a scheduling fact, and scheduling is what a calendar is for.
  */
 export function CampaignCalendar({
-  days, overlaps, timeZone, period, on, previous, next, today, heading,
+  days, overlaps, timeZone, period, on, previous, next, today, heading, archived,
 }: CampaignCalendarProps) {
+  // Every link here keeps the archive filter, so moving through time does not quietly
+  // swap the archived campaigns for the active ones (#979).
+  const to = (target: { period?: string; on: string }, keepArchived = archived) =>
+    `/app/campaigns?view=calendar&period=${target.period ?? period}&on=${target.on}${
+      keepArchived ? "&archived=1" : ""
+    }`;
+
   return (
     <>
       <Card heading={heading}>    <s-paragraph>
@@ -38,6 +47,15 @@ export function CampaignCalendar({
             a campaign starting then.
           </s-text>
         </s-paragraph>
+
+        {/* Said, because the grid looks the same either way: a calendar of filed-away
+            campaigns that did not say so would read as the shop's schedule (#979). */}
+        {archived ? (
+          <s-paragraph>
+            <s-text>Showing archived campaigns only, as the list&rsquo;s filter is set.</s-text>{" "}
+            <s-link href={to({ on }, false)}>Show active campaigns</s-link>
+          </s-paragraph>
+        ) : null}
 
         {/* Two different kinds of control, and they used to be one undifferentiated row of
             four identical tertiary buttons: "Previous Today Next Week view", which reads
@@ -60,12 +78,12 @@ export function CampaignCalendar({
           tabs={[
             {
               label: "Month",
-              href: `/app/campaigns?view=calendar&period=month&on=${on}`,
+              href: to({ period: "month", on }),
               current: period === "month",
             },
             {
               label: "Week",
-              href: `/app/campaigns?view=calendar&period=week&on=${on}`,
+              href: to({ period: "week", on }),
               current: period === "week",
             },
           ]}
@@ -74,7 +92,7 @@ export function CampaignCalendar({
               <s-button
                 variant="tertiary"
                 icon="chevron-left"
-                href={`/app/campaigns?view=calendar&period=${period}&on=${previous}`}
+                href={to({ on: previous })}
               >
                 Previous
               </s-button>
@@ -84,14 +102,14 @@ export function CampaignCalendar({
               <s-button
                 variant="tertiary"
                 icon="calendar"
-                href={`/app/campaigns?view=calendar&period=${period}&on=${today}`}
+                href={to({ on: today })}
               >
                 Today
               </s-button>
               <s-button
                 variant="tertiary"
                 icon="chevron-right"
-                href={`/app/campaigns?view=calendar&period=${period}&on=${next}`}
+                href={to({ on: next })}
               >
                 Next
               </s-button>
@@ -113,13 +131,8 @@ export function CampaignCalendar({
           {overlaps.map((overlap) => (
             <s-paragraph key={`${overlap.a.id}-${overlap.b.id}`}>
               <s-text>
-                <s-text>{overlap.a.name}</s-text> and <s-text>{overlap.b.name}</s-text> run
-                together
-                {overlap.sharedVariants > 0
-                  ? ` and share ${overlap.sharedVariants} ${
-                      overlap.sharedVariants === 1 ? "product" : "products"
-                    }.`
-                  : ", but have no products in common."}{" "}
+                <s-text>{overlap.a.name}</s-text> and <s-text>{overlap.b.name}</s-text>{" "}
+                {overlapSentence(overlap)}
               </s-text>
             </s-paragraph>
           ))}
@@ -144,4 +157,22 @@ export function CampaignCalendar({
       ) : null}
     </>
   );
+}
+
+/**
+ * What two campaigns on the calendar at once did together, after their names.
+ *
+ * In the past tense once both have finished (#979). "Run together and share" over two
+ * campaigns completed months ago read as a collision on the storefront now. One still
+ * running keeps the present: the overlap is still happening, or still to come.
+ */
+export function overlapSentence(overlap: Pick<Overlap, "a" | "b" | "sharedVariants">): string {
+  const past = overlap.a.finished && overlap.b.finished;
+  const together = past ? "ran together" : "run together";
+  const products = overlap.sharedVariants === 1 ? "product" : "products";
+
+  if (overlap.sharedVariants > 0) {
+    return `${together} and ${past ? "shared" : "share"} ${overlap.sharedVariants} ${products}.`;
+  }
+  return `${together}, but ${past ? "had" : "have"} no products in common.`;
 }

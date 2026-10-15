@@ -42,7 +42,8 @@ export const loader = withGuard("/app/campaigns", async ({ request }: LoaderFunc
   // period the merchant would have got without it, not an error about a parameter.
   const asked = params.get("on");
   const on = isCalendarDay(asked) ? asked : todayIn(shop.timezone);
-  const calendar = await calendarFor(shop.id, shop.timezone, { view: period, on });
+  // The list's archive filter, so the two views show the same campaigns (#979).
+  const calendar = await calendarFor(shop.id, shop.timezone, { view: period, on, archived: filters.archived });
 
   // Neighbouring periods, computed here rather than in the browser so the links work
   // without JavaScript and are the same arithmetic the grid was built from.
@@ -57,6 +58,7 @@ export const loader = withGuard("/app/campaigns", async ({ request }: LoaderFunc
       ...calendar,
       period,
       on,
+      archived: filters.archived,
       previous,
       next,
       today: todayIn(shop.timezone),

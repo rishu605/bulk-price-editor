@@ -1,8 +1,8 @@
 
 import { SPACE } from "../lib/ui/spacing";
 
-import type { CalendarDay } from "../lib/scheduling/calendar";
-import { CAMPAIGN_TONE, toneFor } from "./tone";
+import { dayLinkLabel, entryLabel, runLine, type CalendarDay } from "../lib/scheduling/calendar";
+import { CAMPAIGN_TONE, RUN_TONE, toneFor } from "./tone";
 
 /**
  * The grid itself.
@@ -63,8 +63,15 @@ export function CalendarGrid({ days, today }: { days: CalendarDay[]; today: stri
                     every one of the thirty-five dates carried a browser underline and the
                     grid read as a page of links rather than as a calendar. `s-clickable`
                     is Polaris' "this is pressable" primitive: it takes an href, so this
-                    is still an anchor, and it brings no styling of its own. */}
-                <s-clickable href={`/app/campaigns/new?startAt=${day.date}`}>
+                    is still an anchor, and it brings no styling of its own.
+
+                    Named for where it goes and which day it is (#797). Its contents are the
+                    day number, so a screen reader heard "5": no month, no weekday, and no
+                    hint that following it starts a campaign. */}
+                <s-clickable
+                  href={`/app/campaigns/new?startAt=${day.date}`}
+                  accessibilityLabel={dayLinkLabel(day.date, today)}
+                >
                   <s-text
                     type={day.date === today ? "strong" : "generic"}
                     color={day.inFocus ? "base" : "subdued"}
@@ -78,8 +85,10 @@ export function CalendarGrid({ days, today }: { days: CalendarDay[]; today: stri
                     key={`${day.date}-${entry.campaignId}`}
                     href={`/app/campaigns/${entry.campaignId}`}
                     // The name on every day for a screen reader, which cannot see that a
-                    // dot sits in the same place as the name at the start of its row.
-                    accessibilityLabel={entry.name}
+                    // dot sits in the same place as the name at the start of its row, and
+                    // the status and where in the campaign this day falls, which the eye
+                    // reads off the badge's colour and the row (#797).
+                    accessibilityLabel={entryLabel(entry)}
                   >
                     <s-badge tone={toneFor(CAMPAIGN_TONE, entry.status)}>
                       {/* The name where it starts and at the start of every week row it
@@ -107,13 +116,15 @@ export function CalendarGrid({ days, today }: { days: CalendarDay[]; today: stri
                     Each names its campaign (#768). A busy day was a column of eleven
                     "applied" and "reverted" with no way to tell whose was whose short of
                     clicking each. The state is in brackets rather than after a "·",
-                    because campaign names use that dot themselves. */}
+                    because campaign names use that dot themselves.
+
+                    Each says what it did (#979): a drift reassert or an auto-enrolment
+                    is an apply over a few variants, and "Applied" made it read as the
+                    whole sale going live again. The tone is the run's own, so one still
+                    writing is info rather than the red of a run that failed. */}
                 {day.runs.map((run) => (
                   <s-clickable key={run.runId} href={`/app/campaigns/${run.campaignId}`}>
-                    <s-text tone={run.status === "COMPLETED" ? "success" : "critical"}>
-                      {run.kind === "REVERT" ? "Reverted" : "Applied"} {run.name}
-                      {run.status === "COMPLETED" ? "" : ` (${run.status.toLowerCase()})`}
-                    </s-text>
+                    <s-text tone={toneFor(RUN_TONE, run.status)}>{runLine(run)}</s-text>
                   </s-clickable>
                 ))}
 

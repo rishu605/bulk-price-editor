@@ -114,16 +114,24 @@ describe("the tab bar's semantics", () => {
   });
 
   it("tells a screen reader which tab is current, not only the eye", () => {
-    // The filled pill says it to everyone who can see it and nothing to anyone who
-    // cannot.
-    expect(bar).toContain('accessibilityVisibility="exclusive"');
-    expect(bar).toMatch(/\(current\)/i);
+    // The indicator says it to everyone who can see it and nothing to anyone who cannot.
+    // It used to be a visually hidden " (current)" inside a box nothing could focus, so
+    // nobody heard it (#797). It is the link's own state now, which a screen reader
+    // announces on the tab it is on. `tab-bar.test.tsx` renders it.
+    expect(bar).toContain("current={tab.current}");
+    expect(sourceOf(process.cwd(), "app", "components", "PlainLink.tsx")).toContain(
+      'aria-current={current ? "page" : undefined}',
+    );
   });
 
-  it("does not link the tab you are already on", () => {
-    // A link to the page you are on is a control that does nothing.
-    const currentBranch = bar.slice(bar.indexOf("tab.current ?"), bar.indexOf(") : ("));
-    expect(currentBranch).not.toContain("<Link");
+  it("keeps the tab you are already on a link, so pressing it does not drop focus", () => {
+    // It was an `s-box` when current and a link otherwise, so the tab a keyboard user
+    // pressed was unmounted as it became current and focus fell to the page (#797). One
+    // element for both states, with nothing that branches on `tab.current` around it.
+    const item = bar.slice(bar.indexOf("function TabItem"));
+    const returned = item.slice(item.lastIndexOf("return ("));
+    expect(returned).toMatch(/^return \(\s*<PlainLink/);
+    expect(returned).not.toMatch(/tab\.current \?/);
   });
 });
 
