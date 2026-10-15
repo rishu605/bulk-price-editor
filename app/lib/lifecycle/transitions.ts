@@ -199,6 +199,11 @@ export function describeState(
     startingLate?: string | null;
     /** A run handed to the background worker and refused before it wrote (#1046); see `queuedRefusal`. */
     queuedRefused?: QueuedRefusal | null;
+    /**
+     * A practice campaign, which is never applied (#759): its draft explanation may not
+     * promise a write "until you apply it" under a banner saying nothing ever will be.
+     */
+    practice?: boolean;
   } = {},
 ): StateDescription {
   // Said over whatever state the refusal left it in, until a later run claims it (#1046): the
@@ -216,6 +221,14 @@ export function describeState(
   }
   switch (state) {
     case "DRAFT":
+      if (context.practice) {
+        return {
+          label: "Draft",
+          tone: STATE_TONE.DRAFT,
+          explanation:
+            "A practice campaign. Nothing has been written to your storefront, and nothing ever will be: a practice campaign is never applied.",
+        };
+      }
       return {
         label: "Draft",
         tone: STATE_TONE.DRAFT,

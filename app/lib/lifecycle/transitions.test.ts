@@ -152,6 +152,23 @@ describe("what the merchant is told", () => {
   });
 });
 
+describe("a practice campaign's status (#759)", () => {
+  it("does not promise a write when it is applied, because it never can be", () => {
+    // Under a banner saying "nothing has been or will be written", the Status card said
+    // "nothing will be until you apply it" -- of a campaign with no Apply.
+    const practice = describeState("DRAFT", { practice: true });
+
+    expect(practice.explanation).not.toMatch(/until you apply/);
+    expect(practice.explanation).toContain("nothing ever will be");
+    expect(practice.nextAction).toBeUndefined();
+  });
+
+  it("leaves a real draft's explanation and its Apply alone", () => {
+    expect(describeState("DRAFT").explanation).toContain("until you apply it");
+    expect(describeState("DRAFT", { practice: false }).nextAction?.intent).toBe("apply");
+  });
+});
+
 describe("a scheduled campaign that will never start (#824)", () => {
   it("is not described as waiting, and says what to do", () => {
     const described = describeState("SCHEDULED", { neverStarts: "Its end is not after its start, so it will never be applied." });
