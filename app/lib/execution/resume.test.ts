@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import fc from "fast-check";
 
 import {
+  baseRowsOnly,
   planResume,
   runOutcome,
   stateChecksum,
@@ -215,3 +216,25 @@ function simulate(rows: readonly PlannedRow[], count: number): PriorRow[] {
 function checksum(rows: readonly PriorRow[]): string {
   return stateChecksum(rows.map((r) => ({ ...r, price: 1000 })));
 }
+
+describe("resuming a run that also priced a market (#1037)", () => {
+  const base = { surfaceKind: "BASE", priceListGid: "" };
+  const market = { surfaceKind: "MARKET", priceListGid: "gid://shopify/PriceList/eu" };
+
+  it("retries a failed base price whose market price landed, whichever row is read last", () => {
+    const planned = [row("gid://v/1")];
+    for (const order of [
+      [{ variantGid: "gid://v/1", status: "FAILED" as const, attempt: 1, ...base }, { variantGid: "gid://v/1", status: "VERIFIED" as const, attempt: 1, ...market }],
+      [{ variantGid: "gid://v/1", status: "VERIFIED" as const, attempt: 1, ...market }, { variantGid: "gid://v/1", status: "FAILED" as const, attempt: 1, ...base }],
+    ]) {
+      const plan = planResume(planned, baseRowsOnly(order));
+      expect(plan.todo.map((row) => row.ref.variantGid), "a landed market row stood in for the failed base row").toEqual(["gid://v/1"]);
+      expect(plan.alreadyVerified).toBe(0);
+    }
+  });
+
+  it("still leaves a verified base price alone", () => {
+    const plan = planResume([row("gid://v/1")], baseRowsOnly([{ variantGid: "gid://v/1", status: "VERIFIED", attempt: 1, ...base }]));
+    expect(plan.todo).toEqual([]);
+  });
+});

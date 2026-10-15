@@ -59,6 +59,23 @@ const SETTLED: ReadonlySet<LedgerState> = new Set<LedgerState>([
 ]);
 
 /**
+ * The base price's rows of the run being resumed (#1037).
+ *
+ * `planResume` decides base rows and keys the prior ledger by variant. A run that also
+ * priced markets has a row per surface for each variant, so a market row that landed could
+ * stand in for the same variant's failed base row -- whichever came last in the read -- and
+ * the resume would count it verified, skip it, and could end clean with the base price never
+ * written. Markets resume on their own terms (#841).
+ */
+export function baseRowsOnly<Row extends PriorRow & { surfaceKind: string; priceListGid: string }>(
+  rows: readonly Row[],
+): PriorRow[] {
+  return rows
+    .filter((row) => row.surfaceKind === "BASE" && row.priceListGid === "")
+    .map(({ variantGid, status, attempt }) => ({ variantGid, status, attempt }));
+}
+
+/**
  * Works out what a resumed run should do.
  *
  * `maxAttempts` bounds retries per row so a poison row cannot make a run immortal --
