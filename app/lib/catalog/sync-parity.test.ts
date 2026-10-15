@@ -129,4 +129,29 @@ describe("the bulk path writes everything the paginated path does", () => {
       sourceOf(process.cwd(), "app", "lib", "catalog", "bulk-jsonl.ts"),
     ).toContain("featuredImage { url }");
   });
+
+  it("asks for the same variant fields on every page of the paginated path as the bulk query does (#738)", () => {
+    // The follow-up page for a product's 101st variant onwards left out `image { url }`, so
+    // those variants lost their own image whenever this path ran.
+    const fieldsOf = (selection: string) =>
+      selection
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith("pageInfo") && line !== "}")
+        .sort();
+    const variantNodes = (source: string) =>
+      [...source.matchAll(/variants\([^)]*\) \{[\s\S]*?nodes \{([\s\S]*?)\n\s*\}\n\s*\}/g)].map((match) => fieldsOf(match[1]));
+    const pages = variantNodes(paginated);
+    expect(pages, "found the page's and the follow-up's variant selections").toHaveLength(2);
+    const bulkQuery = sourceOf(process.cwd(), "app", "lib", "catalog", "bulk-jsonl.ts");
+    const bulkFields = fieldsOf(/variants \{\s*edges \{\s*node \{([\s\S]*?)\n\s*\}\n\s*\}/.exec(bulkQuery)![1]);
+    expect(pages[0], "the page asks for different variant fields than the bulk query").toEqual(bulkFields);
+    expect(pages[1], "the follow-up page asks for different variant fields than the first").toEqual(bulkFields);
+  });
+
+  it("pages a product's collections past the first page, as the bulk query gets them all (#738)", () => {
+    expect(paginated).toMatch(/collections\(first: \d+\) \{\s*pageInfo \{ hasNextPage endCursor \}/);
+    expect(paginated).toContain("collections(first: 250, after: $cursor)");
+  });
 });
+
