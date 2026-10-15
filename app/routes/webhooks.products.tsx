@@ -22,6 +22,7 @@
  */
 
 import type { ActionFunctionArgs } from "react-router";
+import { variantDisplayTitle } from "../lib/catalog/variant-title";
 
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
@@ -151,7 +152,7 @@ export const action = recordedWebhook(async ({ request }: ActionFunctionArgs) =>
       productGid,
       sku: variant.sku ?? null,
       barcode: variant.barcode ?? null,
-      title: [product.title, variant.title].filter(Boolean).join(" · "),
+      title: variantDisplayTitle(product.title, variant.title),
       price,
       compareAt,
       currency,

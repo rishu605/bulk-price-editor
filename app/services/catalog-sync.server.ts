@@ -13,6 +13,7 @@
 
 import { carryShopifyCosts } from "./baselines.server";
 import prisma from "../db.server";
+import { variantDisplayTitle } from "../lib/catalog/variant-title";
 import { parseMoney } from "../lib/money/money";
 import { isTimeZone } from "../lib/scheduling/zone-shift";
 
@@ -285,7 +286,7 @@ async function upsertVariant(
     productGid: product.id,
     sku: variant.sku ?? null,
     barcode: variant.barcode ?? null,
-    title: [product.title, variant.title].filter(Boolean).join(" · "),
+    title: variantDisplayTitle(product.title, variant.title),
     // The variant's own image, falling back to the product's. A size that shares the
     // product photo is the common case, and showing nothing for it would make the
     // difference between "no photo" and "same photo as its siblings" invisible.
