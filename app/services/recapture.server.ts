@@ -15,6 +15,7 @@
 
 import prisma from "../db.server";
 import { AppError } from "../lib/errors/app-error";
+import { countOf, formatCount } from "../lib/format/display";
 import {
   assessRecapture,
   confirmationMatches,
@@ -77,7 +78,7 @@ export async function recapture(shopId: string, options: RecaptureOptions = {}) 
     throw new AppError({
       code: "VALIDATION",
       userMessage:
-        `This scope is ${plan.scope} variant${plan.scope === 1 ? "" : "s"} now, not the ${options.expectedScope} you were shown, so nothing was recaptured. ` +
+        `This scope is ${countOf(plan.scope, "variant")} now, not the ${formatCount(options.expectedScope)} you were shown, so nothing was recaptured. ` +
         "Check the scope again and read the new count before recapturing.",
       context: { shopId, scope: plan.scope, expected: options.expectedScope, segmentId: options.segmentId ?? null },
     });
