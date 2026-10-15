@@ -95,6 +95,18 @@ export interface JobRef {
   /** Variants the merchant asked to leave as they are, and why (#790). */
   skipVariantGids?: string[];
   skipReason?: string;
+  /**
+   * One decision over a filtered set of the campaign's drifted prices (#822), too many to
+   * resolve while the page waits. The filters and the moment the merchant saw them, not
+   * the events: the handler reads those again, as every handler does.
+   */
+  drift?: {
+    resolution: "adopt" | "reassert" | "ignore";
+    /** When the page that confirmed it was loaded; an edit after this is not in it. */
+    asOf: string;
+    q?: string;
+    direction?: "up" | "down";
+  };
 }
 
 /**

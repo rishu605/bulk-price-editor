@@ -29,14 +29,38 @@ There are three answers, and the first is the only one that changes anything per
   permanent repricing: every future campaign computes its discount from this number
   instead of the old one. This is the one worth being sure about, and it is the only one
   the page marks as consequential.
-- **Put it back** — the campaign rewrites its own price on the next run. Use it when the
-  edit was a mistake.
+- **Put it back** — the campaign writes its own price again now, and reads it back. Use it
+  when the edit was a mistake.
 - **Leave it for now** — nothing changes and the alert closes. The baseline is untouched,
   so the next campaign still computes from the old price and the edit stands until
   something else changes it.
 
 Nothing is decided for you and nothing expires: a price stays on this page until you
 answer.
+
+## Deciding many at once
+
+A bulk edit in Shopify admin, a spreadsheet import or another app repricing during a sale
+can drift hundreds of prices in one go. The page filters by **campaign**, by **product**
+(title, SKU or variant ID) and by **direction** — raised above the campaign's price, or
+lowered below it — and always shows how many match against how many are waiting in all.
+
+Once the matching prices all belong to one campaign, the same three answers are offered
+for all of them at once: **Keep all … changes**, **Put all … back** and **Leave all … for
+now**. Each asks first, naming the campaign and the count, and covers exactly the prices the
+page showed: an edit made after the page loaded is not included. A decision is recorded in
+the Activity log as one entry listing every variant it covered.
+
+- **Put them all back** writes every price in one run for the campaign, read back like any
+  other, so the campaign's Runs and Ledger tabs show it. A price Shopify does not confirm
+  stays here for another try.
+- **Keep them all** leaves out any edit the storefront no longer shows, since there is no
+  change left to keep.
+- More than a thousand at a time, or a put-back too long to wait for, runs in the
+  background; the page shows how far it has got, and you can leave it.
+
+**Export all … drifted prices** downloads every price the filters match as a spreadsheet,
+not only the ones on screen.
 
 When you revert a campaign, drifted products are listed separately with a tick box, so
 ending a sale never silently discards a price you set on purpose.

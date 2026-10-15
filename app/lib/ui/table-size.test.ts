@@ -137,7 +137,6 @@ describe("a table that cannot show everything says so", () => {
     ["components/LedgerTable.tsx", "a run wrote more rows than the ledger renders"],
     ["components/PreviewTable.tsx", "rowsThatFit caps the preview, and shrinks it per market"],
     ["components/RollbackReportTable.tsx", "clean rows are capped; decisions are not"],
-    ["routes/app.prices.drift.tsx", "the queue shows a page of pending decisions"],
     ["routes/app.settings.segments.tsx", "the match report lists the first rows only"],
   ] as const;
 
@@ -222,6 +221,9 @@ describe("every paged table has a control to reach the next page", () => {
     "routes/app.prices.baselines._index.tsx",
     "routes/app.prices.live.tsx",
     "routes/app.activity.tsx",
+    // It showed fifteen and said "resolve these and the next appear" -- the next were
+    // reachable only by deciding the first (#822).
+    "routes/app.prices.drift.tsx",
   ];
 
   it.each(PAGED)("app/%s renders a pager", (path) => {

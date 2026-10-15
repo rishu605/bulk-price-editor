@@ -1,13 +1,13 @@
 import type { ComponentProps } from "react";
 import { Blank } from "../components/Blank";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import type {
   ActionFunctionArgs,
   FetcherWithComponents,
   HeadersFunction,
   LoaderFunctionArgs,
 } from "react-router";
-import { useFetcher, useLoaderData } from "react-router";
+import { useFetcher, useLoaderData, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
@@ -15,35 +15,61 @@ import { ensureShop } from "../services/shop.server";
 import { actorFor } from "../lib/audit/actor";
 import { toAdminClient } from "../services/admin-client.server";
 import { reassertDrift } from "../services/campaigns/reassert.server";
+import { resolveDrift, type DriftResolution, type DriftRow } from "../services/drift.server";
+import { batchStatus, decideDrift, driftQueue } from "../services/drift-queue.server";
 import {
-  pendingDrift,
-  resolveDrift,
-  type DriftResolution,
-  type DriftRow,
-} from "../services/drift.server";
+  batchParamFrom,
+  describeBatch,
+  describeDriftFilters,
+  describeProgress,
+  DRIFT_CHOICES,
+  DRIFT_FILTER_FIELDS,
+  driftFiltersFrom,
+  isFiltered,
+  type DriftChoice,
+} from "../lib/drift/batch";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { AppError } from "../lib/errors/app-error";
 import { PageShell } from "../components/PageShell";
-import { EmptyState } from "../components/AsyncState";
+import { EmptyState, NoMatches } from "../components/AsyncState";
 import { ActionRow } from "../components/ActionRow";
-import { ShowingSome } from "../components/Pagination";
+import { Pagination } from "../components/Pagination";
 import { HelpNote } from "../components/HelpNote";
-import prisma from "../db.server";
 import { Secondary } from "../components/Type";
 import { TableBlock } from "../components/TableBlock";
+import { ExportButton } from "../components/ExportButton";
+import { clearedSearch } from "../components/FilterForm";
+import { VariantSearch } from "../components/prices/VariantSearch";
+import { DriftBulkActions, DriftBulkConfirmations, useFollowBatch, type BulkTarget } from "../components/drift/DriftBulk";
+import { exportQuery } from "../lib/reporting/export-filters";
+import { formatCount } from "../lib/format/display";
+import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
+import { SPACE } from "../lib/ui/spacing";
+
+/**
+ * The filter form's fields, and `batch`: a filter changed while the page follows a decision
+ * stops following it, because the decision was over the old filters.
+ */
+const FILTER_FIELDS = [...DRIFT_FILTER_FIELDS, "batch"] as const;
 
 export const loader = withGuard("/app/prices/drift", async ({ request }: LoaderFunctionArgs) => {
+  // Before anything is read: a decision made from this page covers the edits it showed,
+  // and an edit that lands while it loads is not one of them (#822).
+  const asOf = new Date().toISOString();
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
-  // The count as well as the page: a queue that shows fifteen of forty and says nothing
-  // reads as forty resolved decisions when it is fifteen.
-  const [events, pending] = await Promise.all([
-    pendingDrift(shop.id),
-    prisma.driftEvent.count({ where: { shopId: shop.id, resolution: "PENDING" } }),
-  ]);
+  const url = new URL(request.url);
+  const filters = driftFiltersFrom(url.searchParams);
+  const page = Math.max(1, Number(url.searchParams.get("page") ?? 1) || 1);
 
-  return { events, pending };
+  // The true total and the filtered count, both: a queue that shows fifteen of forty and
+  // says nothing reads as forty resolved decisions when it is fifteen.
+  const queue = await driftQueue(shop.id, filters, page);
+  const following = batchParamFrom(url.searchParams.get("batch"));
+  const status = following ? await batchStatus(shop.id, following, filters) : null;
+
+  return { ...queue, filters, page, asOf, status };
 });
 
 export const action = withGuard("/app/prices/drift", async ({ request }: ActionFunctionArgs) => {
@@ -54,6 +80,24 @@ export const action = withGuard("/app/prices/drift", async ({ request }: ActionF
   const actor = actorFor(sessionToken, session.shop);
 
   const form = await request.formData();
+
+  // One decision over everything the filters match (#822). The filters come back with it,
+  // and the page's load time, so it covers exactly what the merchant was shown.
+  if (form.get("intent") === "bulk") {
+    const resolution = String(form.get("resolution"));
+    const filters = driftFiltersFrom(new URLSearchParams([...form.entries()].map(([key, value]) => [key, String(value)])));
+    const asOf = new Date(String(form.get("asOf")));
+    if (!DRIFT_CHOICES.includes(resolution as DriftChoice) || !filters.campaignId || Number.isNaN(asOf.getTime())) {
+      return { ok: false, message: "That decision arrived incomplete, so nothing was changed. Reload the page and choose again." };
+    }
+    return decideDrift(
+      shop.id,
+      { campaignId: filters.campaignId, resolution: resolution as DriftChoice, q: filters.q, direction: filters.direction, asOf: asOf.toISOString() },
+      actor,
+      toAdminClient(admin),
+    );
+  }
+
   const eventId = String(form.get("eventId"));
   const resolution = String(form.get("resolution")) as DriftResolution;
 
@@ -83,64 +127,155 @@ export const action = withGuard("/app/prices/drift", async ({ request }: ActionF
   }
 });
 
-type ActionData = { ok: boolean; message: string };
+type ActionData = { ok: boolean; message: string; batch?: string };
 
 export default function DriftQueue() {
-  const { events, pending } = useLoaderData<typeof loader>();
+  const { rows, total, filtered, campaigns, bulk, matchingCampaigns, filters, page, asOf, status } =
+    useLoaderData<typeof loader>();
+  const [params, setSearchParams] = useSearchParams();
   const fetcher = useFetcher<ActionData>();
   const busy = fetcher.state !== "idle";
 
+  // A decision the worker has: the page follows it through its URL, so a reload keeps
+  // following, and asks again every few seconds until it is done.
+  const handedOff = fetcher.data?.batch;
+  useEffect(() => {
+    if (!handedOff) return;
+    setSearchParams((next) => {
+      next.set("batch", handedOff);
+      return next;
+    });
+  }, [handedOff, setSearchParams]);
+  useFollowBatch(Boolean(status && !status.done));
+
+  const target: BulkTarget | null = bulk
+    ? {
+        campaign: bulk,
+        count: filtered,
+        waiting: campaigns.find((campaign) => campaign.id === bulk.id)?.pending ?? filtered,
+        filters: describeDriftFilters(filters),
+      }
+    : null;
+  const decide = (resolution: DriftChoice) =>
+    target &&
+    fetcher.submit(
+      {
+        intent: "bulk",
+        resolution,
+        campaign: target.campaign.id,
+        q: filters.q ?? "",
+        direction: filters.direction ?? "",
+        asOf,
+      },
+      { method: "post" },
+    );
+
   return (
     <PageShell heading="Price drift">
-      {fetcher.data ? (
+      {status ? (
+        <s-banner tone={status.done ? (status.done.stopped || status.done.notConfirmed ? "warning" : "success") : "info"}>
+          <s-paragraph>
+            {status.done ? describeBatch(status.done) : describeProgress(status.ref, status.campaign, status.progress)}
+          </s-paragraph>
+        </s-banner>
+      ) : fetcher.data && !handedOff ? (
         <s-banner tone={fetcher.data.ok ? "success" : "critical"}>
           <s-paragraph>{fetcher.data.message}</s-paragraph>
         </s-banner>
       ) : null}
 
       <s-section>
-        {events.length === 0 ? (
-          // Not a NoMatches: this page has no filters, and it is the one empty state in
-          // the app that is good news. It says so, rather than reading as a page that
-          // failed to load.
+        {total === 0 ? (
+          // The one empty state in the app that is good news. It says so, rather than
+          // reading as a page that failed to load.
           <EmptyState
             title="No drift detected"
             description="Every price your campaigns set is still what they set. If somebody edits one in the Shopify admin while a campaign is running, it is held here for your decision rather than overwritten."
           />
         ) : (
-          <>
+          <s-stack direction="block" gap={SPACE.section}>
             <s-paragraph>
               These prices changed outside Anchor while a campaign was running. Someone
               did that deliberately, so nothing has been overwritten — choose what
-              should happen to each.
+              should happen to each, or to all of them at once.
             </s-paragraph>
 
-                        <TableBlock
-              pagination={<ShowingSome
-              shown={events.length}
-              total={pending}
-              noun="drifted prices"
-              suffix="Resolve these and the next appear."
-            />}
+            <VariantSearch
+              fields={FILTER_FIELDS}
+              query={filters.q ?? ""}
+              label="Product title, SKU or variant ID"
+              direction="block"
             >
-<s-table>
-              <s-table-header-row>
-                <s-table-header listSlot="primary">Variant</s-table-header>
-                <s-table-header listSlot="labeled" format="currency">Campaign set</s-table-header>
-                <s-table-header listSlot="labeled" format="currency">Now shows</s-table-header>
-                <s-table-header listSlot="secondary">Campaign</s-table-header>
-                <s-table-header listSlot="inline">Resolve</s-table-header>
-              </s-table-header-row>
-              <s-table-body>
-                {events.map((event) => (
-                  <DriftDecision key={event.id} event={event} fetcher={fetcher} busy={busy} />
+              <s-select name="campaign" label="Campaign">
+                <s-option value="" defaultSelected={!filters.campaignId}>
+                  Every campaign
+                </s-option>
+                {campaigns.map((campaign) => (
+                  <s-option key={campaign.id} value={campaign.id} defaultSelected={filters.campaignId === campaign.id}>
+                    {`${campaign.name} (${formatCount(campaign.pending)})`}
+                  </s-option>
                 ))}
-              </s-table-body>
-            </s-table>
-            </TableBlock>
-          </>
+              </s-select>
+              <s-select name="direction" label="Direction">
+                <s-option value="" defaultSelected={!filters.direction}>
+                  Raised or lowered
+                </s-option>
+                <s-option value="up" defaultSelected={filters.direction === "up"}>
+                  Raised above the campaign&rsquo;s price
+                </s-option>
+                <s-option value="down" defaultSelected={filters.direction === "down"}>
+                  Lowered below the campaign&rsquo;s price
+                </s-option>
+              </s-select>
+            </VariantSearch>
+
+            {filtered === 0 ? (
+              <NoMatches
+                noun="drifted prices"
+                description={`${formatCount(total)} drifted ${total === 1 ? "price is" : "prices are"} waiting in all. Clear the filters to see ${total === 1 ? "it" : "them"}.`}
+                clearHref={clearedSearch(params, FILTER_FIELDS)}
+              />
+            ) : (
+              <>
+                {/* The count and the export on one line, because the count is exactly what
+                    the export holds and what a decision below covers. */}
+                <ActionRow>
+                  <s-text fontVariantNumeric="tabular-nums">{countLine(filtered, total, isFiltered(filters))}</s-text>
+                  <ExportButton
+                    href={`/app/export/drift${exportQuery(params)}`}
+                    filename="anchor-price-drift.csv"
+                    rows={filtered}
+                    noun={["drifted price", "drifted prices"]}
+                  />
+                </ActionRow>
+
+                <DriftBulkActions target={target} campaigns={matchingCampaigns} busy={busy} />
+
+                <TableBlock
+                  pagination={<Pagination page={page} total={filtered} pageSize={ROWS_PER_VIEW} noun="drifted prices" />}
+                >
+                  <s-table>
+                    <s-table-header-row>
+                      <s-table-header listSlot="primary">Variant</s-table-header>
+                      <s-table-header listSlot="labeled" format="currency">Campaign set</s-table-header>
+                      <s-table-header listSlot="labeled" format="currency">Now shows</s-table-header>
+                      <s-table-header listSlot="secondary">Campaign</s-table-header>
+                      <s-table-header listSlot="inline">Resolve</s-table-header>
+                    </s-table-header-row>
+                    <s-table-body>
+                      {rows.map((event) => (
+                        <DriftDecision key={event.id} event={event} fetcher={fetcher} busy={busy} />
+                      ))}
+                    </s-table-body>
+                  </s-table>
+                </TableBlock>
+              </>
+            )}
+          </s-stack>
         )}
       </s-section>
+
+      {target && target.count > 0 ? <DriftBulkConfirmations target={target} busy={busy} onConfirm={decide} /> : null}
 
       <HelpNote label="What the three choices do">
         <s-paragraph>
@@ -157,11 +292,19 @@ export default function DriftQueue() {
         <Secondary>
           Only the first changes what future campaigns compute from, which is why it is
           the one marked consequential. A campaign held by edits runs again once every one
-          of them is resolved.
+          of them is resolved. Filter to one campaign to decide all of its prices at once.
         </Secondary>
       </HelpNote>
     </PageShell>
   );
+}
+
+/** "1,113 drifted prices waiting", or "40 of 1,113 match these filters": never just the page. */
+function countLine(filtered: number, total: number, narrowed: boolean): string {
+  const noun = total === 1 ? "drifted price" : "drifted prices";
+  return narrowed
+    ? `${formatCount(filtered)} of ${formatCount(total)} ${noun} match these filters`
+    : `${formatCount(total)} ${noun} waiting for a decision`;
 }
 
 export function ErrorBoundary() {

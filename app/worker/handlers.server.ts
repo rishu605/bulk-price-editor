@@ -20,7 +20,9 @@ import type { JobRef, QueueName } from "./queues";
 export async function handleJob(name: QueueName, ref: JobRef): Promise<void> {
   switch (name) {
     case "execution":
-      return runCampaignJob(ref);
+      // A drift decision over many prices is execution too: a put-back is a run, and
+      // keeping or leaving thousands is the same queue's kind of work (#822).
+      return ref.drift ? driftDecisionJob(ref) : runCampaignJob(ref);
     case "audit":
       return auditJob(ref);
     case "sync":
@@ -72,6 +74,32 @@ async function runCampaignJob(ref: JobRef): Promise<void> {
     skipReason: ref.skipReason,
     ...(ref.claimedFrom ? { claimedFrom: ref.claimedFrom as CampaignState } : {}),
   });
+}
+
+/**
+ * One decision over a campaign's drifted prices, handed over by the drift page (#822).
+ *
+ * A put-back needs the shop's client and is refused without one. Keeping or leaving needs
+ * none, so a missing session does not hold them up. Either way the outcome is recorded as
+ * the decision's audit entry, which is what the page following it reads.
+ */
+async function driftDecisionJob(ref: JobRef): Promise<void> {
+  if (!ref.campaignId || !ref.drift) return;
+
+  const shop = await prisma.shop.findUnique({
+    where: { id: ref.shopId },
+    select: { domain: true, uninstalledAt: true },
+  });
+  if (!shop || shop.uninstalledAt) return;
+
+  const client = ref.drift.resolution === "reassert" ? await adminClientForShop(shop.domain) : null;
+  const { executeDriftBatch } = await import("../services/drift-queue.server");
+  await executeDriftBatch(
+    ref.shopId,
+    { campaignId: ref.campaignId, ...ref.drift },
+    ref.actor ?? SCHEDULER_ACTOR,
+    client,
+  );
 }
 
 async function auditJob(ref: JobRef): Promise<void> {
