@@ -25,6 +25,9 @@ describe("a campaign still applying past its start or its end (#1056)", () => {
     expect(lifecycleOf("APPLYING", window, at(end))).toMatchObject({ label: "Applying — ending late", tone: "warning" });
     expect(lifecycleOf("APPLYING", window, at(start, 30_000)).label).toBe("Applying");
     expect(lifecycleBadge("APPLYING", window, at(end))).toEqual({ label: "Applying — ending late", tone: "warning" });
+    // And a run the background worker could not run (#1046), on Home and the calendar too.
+    const refused = { kind: "manual", queuedRefused: { verb: "apply", reason: "A guardrail stopped this run." } };
+    expect(lifecycleBadge("DRAFT", refused, at(start))).toEqual({ label: "Draft — couldn't apply", tone: "warning" });
   });
 
   it("is carried to Home's upcoming list and the calendar's spoken label", () => {

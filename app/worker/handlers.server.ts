@@ -67,6 +67,8 @@ async function runCampaignJob(ref: JobRef): Promise<void> {
   await runCampaign(ref.shopId, ref.campaignId, client, {
     revert: ref.revert === true,
     resume: ref.resume === true,
+    // Claimed and answered "under way" before it was queued: one that cannot run says so (#1046).
+    queued: true,
     // The actor `queueRun` carries -- the merchant, Flow or the scheduler (#746). A job
     // queued before jobs carried one has none, and was queued by the scheduler.
     actor: ref.actor ?? SCHEDULER_ACTOR,
