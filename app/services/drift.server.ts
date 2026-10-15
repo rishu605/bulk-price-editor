@@ -29,6 +29,7 @@ import { auditMoney } from "../lib/audit/money";
 import { holdForDrift, releaseHold } from "./campaigns/lifecycle.server";
 import { LANDED } from "../lib/execution/landed";
 import { endingAmong } from "./campaigns/model.server";
+import { inheritorOf } from "./campaigns/handover.server";
 
 /** Campaigns that keep their prices live, so a hand edit to one of them is drift (#878). */
 const DRIFT_CONTROLLING = ["ACTIVE", "PARTIAL", "HELD"] as const;
@@ -208,47 +209,11 @@ export async function checkForDrift(
 
   if (await isOurEcho(shopId, variantGid, incomingPrice, incomingCompareAt)) return false;
 
-  // The campaign that controls *this variant*, which is the one that last priced it and
-  // is still running.
-  //
-  // This used to take any ACTIVE campaign on the shop, highest priority first, with no
-  // reference to the variant at all — while the doc above claimed the opposite. So a
-  // merchant editing one product by hand stopped whichever unrelated campaign happened to
-  // be running, and the drift event named a variant that campaign had never priced. On a
-  // store running several campaigns at once, which is what this product is for, the
-  // highest-priority one absorbed every hand edit in the catalogue.
-  //
-  // The ledger answers it exactly: a VERIFIED base-surface row is us having written this
-  // variant, and its run carries the campaign. Newest first, because a variant repriced by
-  // a later campaign is controlled by that one.
-  //
-  // Any campaign keeping its prices live, not only an ACTIVE one (#878). A held campaign
-  // still controls its variants, and taking ACTIVE alone meant every edit after the first
-  // was dropped: a second edit left its event showing a price the storefront no longer
-  // had, and an edit to another of its variants recorded nothing, so the queue never asked
-  // about it and the next Apply wrote over it unrecorded. Partial is included for the same
-  // reason, and is what `holdForDrift` already holds. A campaign being ended is not: it is
-  // handing its variants back, not keeping them.
-  const controlling = await prisma.variantChange.findFirst({
-    where: {
-      shopId,
-      variantGid,
-      surfaceKind: "BASE",
-      status: { in: [...LANDED] },
-      run: { campaign: { status: { in: [...DRIFT_CONTROLLING] } } },
-    },
-    orderBy: { createdAt: "desc" },
-    select: { run: { select: { campaignId: true, campaign: { select: { name: true, status: true } } } } },
-  });
-  if (!controlling) return false;
-  if ((await endingAmong([controlling.run.campaignId])).size > 0) return false;
+  const activeCampaign = await controllingCampaign(shopId, variantGid);
+  if (!activeCampaign) return false;
 
-  const activeCampaign = {
-    id: controlling.run.campaignId,
-    name: controlling.run.campaign.name,
-  };
   // Already held: the merchant has been told, and holding it again would change nothing.
-  const alreadyHeld = controlling.run.campaign.status === "HELD";
+  const alreadyHeld = activeCampaign.status === "HELD";
 
   // Collapse repeats: one open event per variant, updated rather than duplicated.
   const existing = await prisma.driftEvent.findFirst({
@@ -286,6 +251,68 @@ export async function checkForDrift(
   await holdForDrift(shopId, activeCampaign.id, variantGid);
 
   return true;
+}
+
+/**
+ * The campaign that controls *this variant*: the one whose price the storefront showed
+ * before the edit, and still running.
+ *
+ * This used to take any ACTIVE campaign on the shop, highest priority first, with no
+ * reference to the variant at all — while the doc above claimed the opposite. So a
+ * merchant editing one product by hand stopped whichever unrelated campaign happened to
+ * be running, and the drift event named a variant that campaign had never priced. On a
+ * store running several campaigns at once, which is what this product is for, the
+ * highest-priority one absorbed every hand edit in the catalogue.
+ *
+ * The ledger answers it: a landed base-surface row is us having written this variant.
+ * Newest first, because a variant repriced by a later campaign is controlled by that one.
+ *
+ * Unless that newest write was a revert's (#998). A revert writes `resolve(without C)`,
+ * which is often another campaign's price: B ends over A, and A's sale goes live on what B
+ * was pricing. The row is B's, so the campaign that wrote the price is not the one pricing
+ * it, and A -- which never wrote it -- found no row: a hand edit there raised nothing, held
+ * nothing, and A's revert later wrote over it without asking. Who the revert handed it to
+ * is the planner's answer, from what the revert wrote. A price that is nobody's -- the
+ * baseline, a variant a campaign let go -- is nobody's drift.
+ *
+ * Any campaign keeping its prices live, not only an ACTIVE one (#878). A held campaign
+ * still controls its variants, and taking ACTIVE alone meant every edit after the first
+ * was dropped: a second edit left its event showing a price the storefront no longer
+ * had, and an edit to another of its variants recorded nothing, so the queue never asked
+ * about it and the next Apply wrote over it unrecorded. Partial is included for the same
+ * reason, and is what `holdForDrift` already holds. A campaign being ended is not: it is
+ * handing its variants back, not keeping them.
+ */
+async function controllingCampaign(
+  shopId: string,
+  variantGid: string,
+): Promise<{ id: string; name: string; status: string } | null> {
+  const newest = await prisma.variantChange.findFirst({
+    where: { shopId, variantGid, surfaceKind: "BASE", priceListGid: "", status: { in: [...LANDED] } },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { intendedPrice: true, run: { select: { kind: true } } },
+  });
+  if (!newest) return null;
+  if (newest.run.kind === "REVERT") {
+    const inheritor = newest.intendedPrice === null ? null : await inheritorOf(shopId, variantGid, newest.intendedPrice);
+    // Keeping its prices live, as below: not one still applying.
+    return inheritor && (DRIFT_CONTROLLING as readonly string[]).includes(inheritor.status) ? inheritor : null;
+  }
+
+  const controlling = await prisma.variantChange.findFirst({
+    where: {
+      shopId,
+      variantGid,
+      surfaceKind: "BASE",
+      status: { in: [...LANDED] },
+      run: { campaign: { status: { in: [...DRIFT_CONTROLLING] } } },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { run: { select: { campaignId: true, campaign: { select: { name: true, status: true } } } } },
+  });
+  if (!controlling) return null;
+  if ((await endingAmong([controlling.run.campaignId])).size > 0) return null;
+  return { id: controlling.run.campaignId, ...controlling.run.campaign };
 }
 
 export interface DriftRow {

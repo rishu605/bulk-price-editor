@@ -28,6 +28,7 @@ import { money } from "../../lib/money/money";
 import { planRun } from "../../lib/planning/plan";
 import { loadCandidates, pricesWrittenBy, titleMapFor, withWritten } from "./candidates.server";
 import { loadCampaignContext, importIdsOf} from "./model.server";
+import { inheritedBy } from "./handover.server";
 import { guardrailsFor } from "../settings.server";
 import {
   classifyRollbackRow,
@@ -51,16 +52,23 @@ export async function rollbackReport(
 ): Promise<RollbackReport> {
   const { campaign, resolvable, heldEdits, ast } = await loadCampaignContext(shopId, campaignId);
 
-  const [scoped, storeGuardrails, applied, written] = await Promise.all([
+  const [scoped, storeGuardrails, applied, written, inherited] = await Promise.all([
     loadCandidates(shopId, ast, undefined, importIdsOf(resolvable)),
     guardrailsFor(shopId),
     appliedValues(campaignId, campaign.excludedVariantGids),
     pricesWrittenBy(shopId, campaignId),
+    inheritedBy(shopId, campaignId),
   ]);
-  // Planned over what the revert plans over: the scope, and what the campaign wrote that
-  // has left it (#751, #828). From the scope alone, a product archived mid-sale "reverted
-  // to" its sale price here while the revert put its baseline back.
-  const candidates = await withWritten(shopId, scoped, written, importIdsOf(resolvable));
+  // Planned over what the revert plans over: the scope, what the campaign wrote that has
+  // left it (#751, #828), and what another campaign's revert handed it (#998). From the
+  // scope alone, a product archived mid-sale "reverted to" its sale price here while the
+  // revert put its baseline back.
+  const candidates = await withWritten(
+    shopId,
+    scoped,
+    [...new Set([...written, ...inherited.keys()])],
+    importIdsOf(resolvable),
+  );
 
   // The same planner the revert itself will use, so the "reverts to" column cannot
   // disagree with what happens when the merchant clicks the button.
@@ -84,8 +92,13 @@ export async function rollbackReport(
   // "0 variants are priced by this campaign" before rewriting every one. Who prices them is
   // the planner's answer, as an apply sees it: already at this campaign's price, with this
   // campaign the resolver's winner.
+  //
+  // Handed over by a revert, the price that revert wrote is what this campaign "applied"
+  // (#998): newer than anything it wrote there itself, and what a hand edit since is
+  // measured against. Without it, an edited one was in neither list -- not this campaign's
+  // write, no longer at its price -- and the revert rewrote the edit without asking.
   const inScope = new Map(candidates.map((c) => [c.ref.variantGid, c]));
-  const owned = new Map(applied);
+  const owned = new Map<string, bigint | null>([...applied, ...inherited]);
   const current = planRun({ campaigns: resolvable, candidates, storeGuardrails, heldEdits });
   for (const { ref, campaignId: winner } of current.kind === "ok" ? current.unchanged : []) {
     const price = inScope.get(ref.variantGid)?.livePrice;
