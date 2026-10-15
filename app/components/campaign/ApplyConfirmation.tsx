@@ -3,6 +3,7 @@ import { useRef, type ElementRef } from "react";
 
 import { confirmationReasons } from "../../lib/campaigns/blast-radius";
 import { describeRunDuration } from "../../lib/planning/duration";
+import { describeTagKit } from "../../lib/tags/plan";
 import { formatCount } from "../../lib/format/display";
 import { SPACE } from "../../lib/ui/spacing";
 import type { CampaignPreview } from "../../services/campaigns/types";
@@ -161,6 +162,12 @@ export function ApplyConfirmation({
           ) : null}
 
           {scheduleText ? <Fact label="Schedule">{scheduleText}</Fact> : null}
+
+          {/* The other thing Apply writes to the storefront (#759): absent when the
+              campaign adds no tags, like every other line here that does not apply. */}
+          {describeTagKit(preview.tagKit ?? []) ? (
+            <Fact label="Storefront tags">{describeTagKit(preview.tagKit ?? [])}</Fact>
+          ) : null}
 
           <Fact label="How long">
             {describeRunDuration(writePath === "bulk" ? "bulk" : "sync", counts.planned)}

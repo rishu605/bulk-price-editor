@@ -834,6 +834,18 @@ describe("a sale a higher-priority one has taken variants from", () => {
     expect(html).toContain("already shows the price reverting gives it");
   });
 
+  it("lists the storefront tags Apply adds, and says nothing of tags when there are none (#759)", () => {
+    const tagged = modalOf(
+      render(<CampaignHeader {...props({ preview: preview({ tagKit: ["Sale", "summer-26"] }) } as never)} />),
+      "apply-confirmation",
+    ).replace(/&quot;/g, '"');
+    expect(tagged).toContain("Storefront tags");
+    expect(tagged).toContain('Adds "Sale" and "summer-26" to each product it prices.');
+
+    const untagged = modalOf(render(<CampaignHeader {...props()} />), "apply-confirmation");
+    expect(untagged).not.toContain("Storefront tags");
+  });
+
   it("names the higher sale in the Apply dialog instead of calling its variants this campaign's (#837)", () => {
     const html = render(
       <CampaignHeader

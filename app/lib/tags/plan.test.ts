@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { planTagRemoval, planTagsFor } from "./plan";
+import { describeTagKit, planTagRemoval, planTagsFor, tagKitTags } from "./plan";
 
 describe("planTagsFor", () => {
   it("adds tags the product does not have", () => {
@@ -116,5 +116,26 @@ describe("planTagRemoval", () => {
 
   it("returns nothing when the campaign never tagged anything", () => {
     expect(planTagRemoval([])).toEqual([]);
+  });
+});
+
+describe("the tags Apply adds, said before it adds them (#759)", () => {
+  it("names each tag once, as the run would add it", () => {
+    // Trimmed, blanks dropped, and one "Sale" for "Sale" and "sale": `planTagsFor` adds
+    // it once, so the dialog says it once.
+    expect(tagKitTags([" Sale ", "", "summer-26", "sale"])).toEqual(["Sale", "summer-26"]);
+  });
+
+  it("says where they go and that reverting takes back only its own", () => {
+    expect(describeTagKit(["Sale", "summer-26"])).toBe(
+      'Adds "Sale" and "summer-26" to each product it prices. Reverting removes only the tags it added.',
+    );
+    expect(describeTagKit(["SALE"])).toBe('Adds "SALE" to each product it prices. Reverting removes only the tags it added.');
+    expect(describeTagKit(["a", "b", "c"])).toContain('"a", "b" and "c"');
+  });
+
+  it("says nothing when the campaign has no tags", () => {
+    expect(describeTagKit([])).toBeNull();
+    expect(describeTagKit(["  ", ""])).toBeNull();
   });
 });
