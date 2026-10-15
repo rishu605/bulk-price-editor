@@ -119,7 +119,10 @@ describe("chaos: a practice campaign is never scheduled", () => {
       await practiceScheduledAndDue(chaos);
       const { shopId, campaignId, variantGids, baseline } = chaos.fixture;
       const entries = () => prisma.auditLogEntry.findMany({ where: { shopId, entityId: campaignId } });
-      const before = (await entries()).length;
+      // By id, not by count: `entries()` has no order, and under load Postgres does not return
+      // rows in the order they were written, so slicing off the first N picked up the
+      // fixture's own "campaign.create" -- no actor -- as written by a tick (#1072).
+      const before = new Set((await entries()).map((entry) => entry.id));
 
       // Three ticks, ninety seconds of the worker. Each used to claim, be refused, release
       // and write "claim released without running: This is a practice campaign…"; then #827
@@ -141,18 +144,16 @@ describe("chaos: a practice campaign is never scheduled", () => {
       }
 
       // Once, by the scheduler, saying why -- not once per tick.
-      const written = (await entries()).slice(before);
+      const written = (await entries()).filter((entry) => !before.has(entry.id));
       expect(written.map((entry) => entry.action)).toContain("campaign.unschedule");
-      // Each entry named in the failure: CI has twice found one with no actor here, which no
-      // local run reproduces, and the bare sets did not say what wrote it.
       expect(
         new Set(written.map((entry) => entry.actor)),
-        JSON.stringify(written.map(({ action, actor, entity, before, after, createdAt }) => ({ action, actor, entity, before, after, createdAt }))),
+        JSON.stringify(written.map(({ action, actor }) => ({ action, actor }))),
       ).toEqual(new Set(["scheduler"]));
       expect(JSON.stringify(written)).toContain("practice campaigns never run on a schedule");
       const afterFirst = written.length;
       await tick(new Date());
-      expect((await entries()).length - before, "a later tick wrote to it again").toBe(afterFirst);
+      expect((await entries()).filter((entry) => !before.has(entry.id)), "a later tick wrote to it again").toHaveLength(afterFirst);
 
       expect(await prisma.campaignRun.count({ where: { campaignId } })).toBe(0);
       expect(chaos.fake.writeLog).toHaveLength(0);
