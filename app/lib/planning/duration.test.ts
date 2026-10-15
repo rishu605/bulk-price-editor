@@ -46,6 +46,22 @@ describe("what it is willing to claim", () => {
   });
 });
 
+describe("in the merchant's words, not the engine's (#759)", () => {
+  it("says how long and whether it goes to the background, without naming a write path", () => {
+    // The Preview tab read "Write path: sync — 2 rows is under the 1000-row threshold and
+    // fits the available rate-limit budget; sync avoids bulk queue latency." This sentence
+    // replaces it there, so it may not carry the same vocabulary.
+    for (const [path, rows] of [["sync", 2], ["sync", 1_000], ["bulk", 50_000]] as const) {
+      const text = describeRunDuration(path, rows);
+
+      expect(text).not.toMatch(/\b(sync|bulk|threshold|rate-limit|budget|write path|latency)\b/i);
+    }
+    expect(describeRunDuration("sync", 2)).toContain("while you wait");
+    expect(describeRunDuration("sync", 2)).toContain("in the background");
+    expect(describeRunDuration("bulk", 50_000)).toContain("in the background");
+  });
+});
+
 describe("the number the merchant is actually checking", () => {
   it("groups the count, because 3669 and 36690 are one glance apart", () => {
     expect(describeRunDuration("bulk", 3669)).toContain("3,669");
