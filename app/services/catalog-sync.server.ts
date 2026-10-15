@@ -50,8 +50,27 @@ const PRODUCT_VARIANTS_PAGE = `#graphql
           price
           compareAtPrice
           inventoryQuantity
+          image { url }
           inventoryItem { unitCost { amount currencyCode } }
         }
+      }
+    }
+  }
+`;
+
+/**
+ * The rest of one product's collections (#738).
+ *
+ * The page asks for twenty, and a product in a twenty-first was missing from every campaign
+ * scoped to it -- on exactly the stores this path runs for, while the bulk path, which pages
+ * nothing, got them all. Asked only for the products that need it, as their variants are.
+ */
+const PRODUCT_COLLECTIONS_PAGE = `#graphql
+  query AnchorProductCollectionsPage($id: ID!, $cursor: String) {
+    product(id: $id) {
+      collections(first: 250, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { id }
       }
     }
   }
@@ -71,7 +90,10 @@ const PRODUCTS_PAGE = `#graphql
         updatedAt
         isGiftCard
         featuredImage { url }
-        collections(first: 20) { nodes { id } }
+        collections(first: 20) {
+          pageInfo { hasNextPage endCursor }
+          nodes { id }
+        }
         variants(first: 100) {
           pageInfo { hasNextPage endCursor }
           nodes {
@@ -101,7 +123,10 @@ interface ProductNode {
   updatedAt?: string | null;
   isGiftCard?: boolean | null;
   featuredImage?: { url?: string | null } | null;
-  collections?: { nodes?: Array<{ id: string }> | null } | null;
+  collections?: {
+    pageInfo?: { hasNextPage?: boolean; endCursor?: string | null } | null;
+    nodes?: Array<{ id: string }> | null;
+  } | null;
   variants?: {
     pageInfo?: { hasNextPage?: boolean; endCursor?: string | null } | null;
     nodes?: VariantNode[] | null;
@@ -171,6 +196,18 @@ export async function syncCatalog(
     for (const product of nodes) {
       result.products++;
       const collections = product.collections?.nodes?.map((c) => c.id) ?? [];
+      if (product.collections?.pageInfo?.hasNextPage) {
+        try {
+          collections.push(...(await remainingCollections(client, product.id, product.collections.pageInfo.endCursor ?? null)));
+        } catch (error) {
+          // Recorded, as a missing variant page is: a product missing a collection is one a
+          // campaign scoped to that collection silently leaves out.
+          result.errors.push(
+            `${product.id}: could not read past its first 20 collections — ` +
+              `${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
 
       // Everything the page gave us, then everything it did not. A product with more
       // variants than one page holds is rare and expensive to get wrong: those variants
@@ -226,6 +263,36 @@ export async function syncCatalog(
  * reported by the caller rather than passing silently, for the same reason everything
  * else here is.
  */
+async function remainingCollections(
+  client: GraphQLRunner,
+  productId: string,
+  after: string | null,
+): Promise<string[]> {
+  const found: string[] = [];
+  let cursor = after;
+
+  // Bounded as the variants are: forty pages of 250 is more collections than a store has.
+  for (let page = 0; page < 40; page += 1) {
+    const response = await client.graphql(PRODUCT_COLLECTIONS_PAGE, { variables: { id: productId, cursor } });
+    const body = (await response.json()) as {
+      data?: {
+        product?: {
+          collections?: { pageInfo?: { hasNextPage?: boolean; endCursor?: string | null }; nodes?: Array<{ id: string }> } | null;
+        } | null;
+      };
+      errors?: Array<{ message: string }>;
+    };
+    if (body.errors?.length) throw new Error(body.errors.map((error) => error.message).join("; "));
+
+    const connection = body.data?.product?.collections;
+    found.push(...(connection?.nodes ?? []).map((node) => node.id));
+    cursor = connection?.pageInfo?.endCursor ?? null;
+    if (!connection?.pageInfo?.hasNextPage || !cursor) break;
+  }
+
+  return found;
+}
+
 async function remainingVariants(
   client: GraphQLRunner,
   productId: string,

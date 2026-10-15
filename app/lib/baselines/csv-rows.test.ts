@@ -114,6 +114,10 @@ describe("splitCsvLine", () => {
   it("honours quotes and doubled quotes", () => {
     expect(splitCsvLine('SKU-1,"Red, large",19.99')).toEqual(["SKU-1", "Red, large", "19.99"]);
     expect(splitCsvLine('"24"" monitor",99')).toEqual(['24" monitor', "99"]);
+    // A quote mid-cell is a character (#738): it used to open a value that swallowed the
+    // comma after it, so the price went missing.
+    expect(splitCsvLine('27" monitor,99')).toEqual(['27" monitor', "99"]);
+    expect(splitCsvLine('SKU-1, "quoted, with a comma",5')).toEqual(["SKU-1", "quoted, with a comma", "5"]);
   });
 });
 
@@ -261,3 +265,22 @@ describe("a variant named on more than one row (#989, D17)", () => {
     expect(duplicateRefusal(9, 2, "baseline")).toContain("this row's baseline");
   });
 });
+
+describe("an export whose Body HTML holds line breaks (#738)", () => {
+  it("reads each product as one row, at the line its spreadsheet gives it", async () => {
+    const { linesOf } = await import("../reporting/lines");
+    const file = [
+      "Handle,Body HTML,Variant SKU,Variant Price",
+      'jumper,"<p>Soft.</p>',
+      '<p>Warm.</p>",JUMPER-M,45.00',
+      "socks,,SOCKS-1,8.00",
+    ].join("\n");
+    const rows = [];
+    for await (const row of readRows(linesOf(file))) rows.push(row);
+    expect(rows.map((row) => [row.line, row.identifier, row.price])).toEqual([
+      [2, "JUMPER-M", "45.00"],
+      [4, "SOCKS-1", "8.00"],
+    ]);
+  });
+});
+

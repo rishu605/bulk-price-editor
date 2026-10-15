@@ -300,7 +300,13 @@ export function mapColumns(header: readonly string[]): ColumnMap | null {
   };
 }
 
-/** Splits one CSV line into cells, honouring quotes and doubled quotes. */
+/**
+ * Splits one CSV record into cells, honouring quotes and doubled quotes.
+ *
+ * A quote opens a quoted value only at the start of a cell (RFC 4180), as `linesOf` reads
+ * it (#738). Anywhere else it is a character: `27" monitor` opened a quoted value that
+ * never closed, swallowing the commas after it, and its row failed for a missing price.
+ */
 export function splitCsvLine(line: string): string[] {
   const cells: string[] = [];
   let cell = "";
@@ -323,7 +329,7 @@ export function splitCsvLine(line: string): string[] {
       continue;
     }
 
-    if (char === '"') quoted = true;
+    if (char === '"' && cell.trim() === "") quoted = true;
     else if (char === ",") {
       cells.push(cell);
       cell = "";

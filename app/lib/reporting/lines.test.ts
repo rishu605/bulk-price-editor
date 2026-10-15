@@ -75,3 +75,40 @@ describe("splitting a paste into lines", () => {
     expect((await iterator.next()).value).toBe("first");
   });
 });
+
+describe("a quoted value that holds a line break (#738)", () => {
+  it("is one record, padded with a blank line per break so later line numbers still match", async () => {
+    // A Shopify export's Body HTML. Split at its newline, one product became two rows that
+    // each failed for "no SKU", and the real row was lost.
+    expect(await collect('A-1,"<p>Soft</p>\n<p>Warm</p>",12.00\nB-2,,9.00\n')).toEqual([
+      'A-1,"<p>Soft</p>\n<p>Warm</p>",12.00',
+      "",
+      "B-2,,9.00",
+    ]);
+  });
+
+  it("holds a Windows line break inside the value, and strips only the record's own", async () => {
+    expect(await collect('A-1,"one\r\ntwo\r\nthree",12.00\r\nB-2,,9.00\r\n')).toEqual([
+      'A-1,"one\r\ntwo\r\nthree",12.00',
+      "",
+      "",
+      "B-2,,9.00",
+    ]);
+  });
+
+  it("reads a doubled quote as a quote, not the end of the value", async () => {
+    expect(await collect('A-1,"he said ""hi""\nthen left",1\nB-2,2')).toEqual(['A-1,"he said ""hi""\nthen left",1', "", "B-2,2"]);
+  });
+
+  it("takes a quote in the middle of a cell for a character", async () => {
+    expect(await collect('27" monitor,1\nB-2,2\n')).toEqual(['27" monitor,1', "B-2,2"]);
+    expect(await collect('A-1, "spaced\nvalue",1\n')).toEqual(['A-1, "spaced\nvalue",1', ""]);
+  });
+
+  it("reads the rest line by line when a quote is never closed, rather than as one value", async () => {
+    // One stray quote must not swallow every row after it.
+    expect(await collect('A-1,"open,1\nB-2,2\nC-3,3')).toEqual(['A-1,"open,1', "B-2,2", "C-3,3"]);
+    expect(await collect('A-1,1\nB-2,"open\r\nC-3,3\r\n')).toEqual(["A-1,1", 'B-2,"open', "C-3,3"]);
+  });
+});
+
