@@ -43,7 +43,9 @@ describe("the current tab", () => {
     // all, which is the bug `/app/imports` had. `isCurrent` is exercised directly below
     // rather than checked for the absence of a `startsWith`, because the interesting part
     // is now which prefixes are allowed.
-    expect(tabs).toContain("isCurrent(pathname, tab.href, tabs)");
+    // `currentness` rather than `isCurrent` since #1016: the same match, saying whether the
+    // tab is the page itself or a page beneath it, which the link announces differently.
+    expect(tabs).toContain("currentness(pathname, tab.href, tabs)");
   });
 });
 
@@ -117,10 +119,11 @@ describe("the tab bar's semantics", () => {
     // The indicator says it to everyone who can see it and nothing to anyone who cannot.
     // It used to be a visually hidden " (current)" inside a box nothing could focus, so
     // nobody heard it (#797). It is the link's own state now, which a screen reader
-    // announces on the tab it is on. `tab-bar.test.tsx` renders it.
+    // announces on the tab it is on. `tab-bar.test.tsx` renders it, and `current-tab.test.ts`
+    // says which value: "page" on the tab's own page, "true" beneath it (#1016).
     expect(bar).toContain("current={tab.current}");
     expect(sourceOf(process.cwd(), "app", "components", "PlainLink.tsx")).toContain(
-      'aria-current={current ? "page" : undefined}',
+      "aria-current={ariaCurrent(current)}",
     );
   });
 

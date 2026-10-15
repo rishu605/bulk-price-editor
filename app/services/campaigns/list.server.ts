@@ -13,6 +13,7 @@ import prisma from "../../db.server";
 import { describeCampaign } from "../../lib/campaigns/describe";
 import { astOf, ruleOf, segmentNameOf } from "./model.server";
 import { ROWS_PER_VIEW } from "../../lib/ui/table-budget";
+import { ATTENTION_STATES, campaignFilterWhere, type StatusFilter } from "../../lib/campaigns/list-filters";
 import {
   ALL_STATES,
   describeState,
@@ -22,8 +23,7 @@ import {
 
 export const PAGE_SIZE = ROWS_PER_VIEW;
 
-/** What the status filter can be: everything, the ones needing a decision, or one state. */
-export type StatusFilter = "" | "attention" | CampaignState;
+export type { StatusFilter };
 
 export interface CampaignFilters {
   /** Matches the campaign name. */
@@ -71,33 +71,15 @@ export function statusFrom(raw: string | null): StatusFilter {
   return (ALL_STATES as readonly string[]).includes(value) ? (value as CampaignState) : "";
 }
 
-/** Turns the filters into a Prisma where clause, minus the parts SQL cannot express. */
+/**
+ * Turns the filters into a Prisma where clause, minus the parts SQL cannot express.
+ *
+ * The clause itself is shared with the calendar (#1016), so the two views of the index
+ * cannot disagree about which campaigns there are.
+ */
 function whereFor(shopId: string, filters: CampaignFilters) {
-  const contains = { contains: filters.q, mode: "insensitive" as const };
-
-  return {
-    shopId,
-    // Archived is the *filter*, not a second list: one view, one control, and the row
-    // still says what state the campaign is in. `null` and "not null" rather than a
-    // boolean column, so the archive can be read in the order things were filed.
-    archivedAt: filters.archived ? { not: null } : null,
-    // The note is searched alongside the name, which is the point of having one: "why did
-    // we run this" is not a question a merchant can answer by remembering what they
-    // called it. Prisma leaves a null note out of a `contains` match, so a shop with no
-    // notes searches exactly as it did before.
-    ...(filters.q ? { OR: [{ name: contains }, { note: contains }] } : {}),
-    // "attention" is not a status — it is a property of several of them, so it is
-    // expanded here rather than being a magic string the database has to understand.
-    ...(filters.status === "attention"
-      ? { status: { in: ATTENTION_STATES } }
-      : filters.status
-        ? { status: filters.status }
-        : {}),
-  };
+  return { shopId, ...campaignFilterWhere(filters) };
 }
-
-/** The states `needsAttention` is true for, as the database sees them. */
-const ATTENTION_STATES: CampaignState[] = ["PARTIAL", "HELD"];
 
 export async function listCampaigns(shopId: string, filters: CampaignFilters) {
   const where = whereFor(shopId, filters);

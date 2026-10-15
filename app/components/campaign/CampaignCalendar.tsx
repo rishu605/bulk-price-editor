@@ -2,7 +2,9 @@
 import { ActionRow } from "../ActionRow";
 import { CalendarGrid } from "../CalendarGrid";
 import { TabBar } from "../TabBar";
-import type { calendarFor, Overlap } from "../../services/calendar.server";
+import type { calendarFor } from "../../services/calendar.server";
+import { calendarFilterNote, calendarHref, type ListFilters } from "../../lib/campaigns/list-filters";
+import { overlapCard, overlapSentence } from "../../lib/scheduling/overlap-card";
 import { Card } from "../Card";
 
 type Calendar = Awaited<ReturnType<typeof calendarFor>>;
@@ -15,8 +17,8 @@ export interface CampaignCalendarProps extends Calendar {
   next: string;
   today: string;
   heading: string;
-  /** The list's archive filter, which the calendar reads too (#979). */
-  archived: boolean;
+  /** The list's status, search and archive filters, which the calendar reads too (#979, #1016). */
+  filters: ListFilters;
 }
 
 /**
@@ -30,14 +32,15 @@ export interface CampaignCalendarProps extends Calendar {
  * running at once is a scheduling fact, and scheduling is what a calendar is for.
  */
 export function CampaignCalendar({
-  days, overlaps, timeZone, period, on, previous, next, today, heading, archived,
+  days, overlaps, timeZone, period, on, previous, next, today, heading, filters,
 }: CampaignCalendarProps) {
-  // Every link here keeps the archive filter, so moving through time does not quietly
-  // swap the archived campaigns for the active ones (#979).
-  const to = (target: { period?: string; on: string }, keepArchived = archived) =>
-    `/app/campaigns?view=calendar&period=${target.period ?? period}&on=${target.on}${
-      keepArchived ? "&archived=1" : ""
-    }`;
+  // Every link here keeps the list's filters, so moving through time does not quietly swap
+  // the campaigns being looked at for every campaign in the shop (#979), and List
+  // afterwards -- built from this page's query string -- still has them (#1016).
+  const to = (target: { period?: "week" | "month"; on: string }) =>
+    calendarHref({ period: target.period ?? period, on: target.on }, filters);
+  const note = calendarFilterNote(filters);
+  const card = overlapCard(overlaps);
 
   return (
     <>
@@ -49,11 +52,13 @@ export function CampaignCalendar({
         </s-paragraph>
 
         {/* Said, because the grid looks the same either way: a calendar of filed-away
-            campaigns that did not say so would read as the shop's schedule (#979). */}
-        {archived ? (
+            campaigns, or of the three a search matched, that did not say so would read as
+            the shop's schedule (#979, #1016). The list shows its filters as tabs and a
+            search box; the calendar has neither, so this is the only place they show. */}
+        {note ? (
           <s-paragraph>
-            <s-text>Showing archived campaigns only, as the list&rsquo;s filter is set.</s-text>{" "}
-            <s-link href={to({ on }, false)}>Show active campaigns</s-link>
+            <s-text>{note.text}</s-text>{" "}
+            <s-link href={calendarHref({ period, on }, note.clear.filters)}>{note.clear.label}</s-link>
           </s-paragraph>
         ) : null}
 
@@ -121,11 +126,11 @@ export function CampaignCalendar({
       </Card>
 
       {overlaps.length > 0 ? (
-        <Card heading="Campaigns running at the same time">      <s-paragraph>
-            <s-text>
-              Overlapping campaigns never stack. The higher priority one wins every
-              product they share, and the preview shows exactly which price each gets.
-            </s-text>
+        // In the past when every overlap on it has ended (#1016): "running at the same time"
+        // over two sales that ended in March read as a collision on the storefront now.
+        <Card heading={card.heading}>
+          <s-paragraph>
+            <s-text>{card.intro}</s-text>
           </s-paragraph>
 
           {overlaps.map((overlap) => (
@@ -138,17 +143,16 @@ export function CampaignCalendar({
           ))}
 
           {/* Out of the sentence: an action inside a paragraph is the shape the rest of
-              the app stopped using, and there is one of these per overlap. */}
-          {overlaps.some((overlap) => overlap.sharedVariants > 0) ? (
+              the app stopped using, and there is one of these per overlap.
+
+              Only to a page that compares the pair: a campaign planned against one still
+              pricing (#1016). It opened the first pair's first campaign, which could be
+              one that finished months ago, with nothing to compare. */}
+          {card.priceLink ? (
             <ActionRow>
               {/* Secondary: it sits in a row of actions rather than inside the prose,
                   so it is looked for rather than read. */}
-              <s-button
-                variant="secondary"
-                href={`/app/campaigns/${
-                  overlaps.find((overlap) => overlap.sharedVariants > 0)?.a.id
-                }`}
-              >
+              <s-button variant="secondary" href={card.priceLink}>
                 See which price each product gets
               </s-button>
             </ActionRow>
@@ -157,22 +161,4 @@ export function CampaignCalendar({
       ) : null}
     </>
   );
-}
-
-/**
- * What two campaigns on the calendar at once did together, after their names.
- *
- * In the past tense once both have finished (#979). "Run together and share" over two
- * campaigns completed months ago read as a collision on the storefront now. One still
- * running keeps the present: the overlap is still happening, or still to come.
- */
-export function overlapSentence(overlap: Pick<Overlap, "a" | "b" | "sharedVariants">): string {
-  const past = overlap.a.finished && overlap.b.finished;
-  const together = past ? "ran together" : "run together";
-  const products = overlap.sharedVariants === 1 ? "product" : "products";
-
-  if (overlap.sharedVariants > 0) {
-    return `${together} and ${past ? "shared" : "share"} ${overlap.sharedVariants} ${products}.`;
-  }
-  return `${together}, but ${past ? "had" : "have"} no products in common.`;
 }

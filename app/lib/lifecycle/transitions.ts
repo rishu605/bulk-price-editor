@@ -118,6 +118,29 @@ export function pricesMayBeLive(state: CampaignState): boolean {
 
 export type StateTone = "info" | "success" | "critical" | "neutral" | "warning";
 
+/**
+ * The tone of each state's badge, wherever a campaign's state is drawn (#1016).
+ *
+ * One map. The calendar and Home's upcoming list had their own, which agreed with this
+ * one until they did not: a Partial campaign was critical in the list and on its own page,
+ * and warning on the calendar beside it. Partial is critical because some of its rows did
+ * not complete, which is the failure this product exists to make visible.
+ *
+ * `describeState` starts from this and departs from it only where what it knows changes
+ * the answer: a scheduled campaign that cannot start, an active one past its end.
+ */
+export const STATE_TONE: Readonly<Record<CampaignState, StateTone>> = {
+  DRAFT: "neutral",
+  SCHEDULED: "info",
+  APPLYING: "info",
+  ACTIVE: "success",
+  HELD: "warning",
+  REVERTING: "info",
+  COMPLETED: "info",
+  PARTIAL: "critical",
+  CANCELLED: "neutral",
+};
+
 export interface StateDescription {
   label: string;
   tone: StateTone;
@@ -168,7 +191,7 @@ export function describeState(
     case "DRAFT":
       return {
         label: "Draft",
-        tone: "neutral",
+        tone: STATE_TONE.DRAFT,
         explanation:
           "Not running. Nothing has been written to your storefront, and nothing will be until you apply it.",
         nextAction: { label: "Apply to storefront", intent: "apply" },
@@ -221,14 +244,14 @@ export function describeState(
       }
       return {
         label: "Scheduled",
-        tone: "info",
+        tone: STATE_TONE.SCHEDULED,
         explanation:
           "Waiting for its start time. Prices change automatically when the window opens.",
       };
     case "APPLYING":
       return {
         label: "Applying",
-        tone: "info",
+        tone: STATE_TONE.APPLYING,
         explanation: "Writing prices now. The ledger fills in as each row is verified.",
       };
     case "ACTIVE":
@@ -245,7 +268,7 @@ export function describeState(
       }
       return {
         label: "Active",
-        tone: "success",
+        tone: STATE_TONE.ACTIVE,
         // Not while a higher-priority campaign prices every variant this one covers (#837):
         // the storefront shows that campaign's price, and this one's takes over when it ends.
         explanation: context.outrankedBy?.length
@@ -256,7 +279,7 @@ export function describeState(
     case "HELD":
       return {
         label: "Held — price edited outside Anchor",
-        tone: "warning",
+        tone: STATE_TONE.HELD,
         explanation:
           "Someone changed a price this campaign controls, so the campaign stopped writing rather than overwrite a deliberate decision. Nothing has been lost; choose what should win." +
           // The end still comes while it is held (#784), and the merchant should know what
@@ -269,14 +292,14 @@ export function describeState(
     case "REVERTING":
       return {
         label: "Reverting",
-        tone: "info",
+        tone: STATE_TONE.REVERTING,
         explanation:
           "Recomputing each price without this campaign. Variants another campaign still covers keep that campaign's price.",
       };
     case "PARTIAL":
       return {
         label: "Partial — some rows did not complete",
-        tone: "critical",
+        tone: STATE_TONE.PARTIAL,
         explanation: partialExplanation(context.resumes === "REVERT", context.progress),
         nextAction: {
           label:
@@ -291,14 +314,14 @@ export function describeState(
     case "COMPLETED":
       return {
         label: "Completed",
-        tone: "info",
+        tone: STATE_TONE.COMPLETED,
         explanation:
           "Finished and reverted. Prices are back to what they would be without this campaign.",
       };
     case "CANCELLED":
       return {
         label: "Cancelled",
-        tone: "neutral",
+        tone: STATE_TONE.CANCELLED,
         explanation: "Stopped and will not run again.",
       };
   }

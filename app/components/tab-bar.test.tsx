@@ -219,6 +219,23 @@ describe("switching tabs keeps focus on the tab that was pressed (#797)", () => 
     expect(anchorOf(before, "List")).toMatch(/aria-current="page"/);
   });
 
+  it("marks a tab you are on a page beneath as the current item, not as this page (#1016)", () => {
+    // Baselines on Baselines → recapture: drawn current, and its link goes up a level, so
+    // `aria-current="page"` would tell a screen reader it goes nowhere.
+    const beneath = render([
+      { label: "Baselines", href: "/app/prices/baselines", current: "beneath" },
+      { label: "Costs", href: "/app/prices/costs", current: false },
+    ]);
+    expect(anchorOf(beneath, "Baselines")).toMatch(/aria-current="true"/);
+    expect(anchorOf(beneath, "Baselines")).not.toMatch(/aria-current="page"/);
+    expect(anchorOf(beneath, "Costs")).not.toMatch(/aria-current/);
+    // Drawn exactly as the tab's own page is: only what a screen reader hears differs.
+    expect(occurrences(beneath, "background:currentColor")).toBe(1);
+
+    const own = render([{ label: "Baselines", href: "/app/prices/baselines", current: "page" }]);
+    expect(anchorOf(own, "Baselines")).toMatch(/aria-current="page"/);
+  });
+
   it("says it once, rather than with a hidden suffix nothing focusable carried", () => {
     expect(after).not.toContain("(current)");
   });
