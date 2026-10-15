@@ -31,6 +31,7 @@ import {
   smallestPositive,
   violatesFloor,
 } from "./guardrails";
+import { marginPercent } from "./margin";
 import type { Baseline, Guardrails } from "./types";
 
 const usd = (amount: number): Money => money(amount, "USD");
@@ -126,20 +127,17 @@ describe("the price that achieves a margin", () => {
     expect(priceForMargin(jpy(500), 20).currency).toBe("JPY");
   });
 
-  it("handles a margin just under the ceiling", () => {
+  it("handles a margin just under the ceiling, exactly", () => {
     // 99.9% is what settings.server.ts clamps to, so it is reachable and must not
     // overflow or divide by something that rounds to zero.
     //
-    // Asserted as a property rather than a literal: `1 - 0.999` is 0.0009999999999999454
-    // in binary floating point, so the exact answer of 100,000 comes out a minor unit
-    // high. That is the *correct* direction — a floor that errs upward still achieves the
-    // margin, and one that errs downward does not — and pinning 100_001 would be pinning
-    // an artefact of the arithmetic rather than the guarantee.
-    const price = priceForMargin(usd(100), 99.9);
-
-    expect(price.amount).toBeGreaterThanOrEqual(100_000);
-    expect(price.amount).toBeLessThanOrEqual(100_001);
-    expect(Number.isSafeInteger(price.amount)).toBe(true);
+    // $1.00 at 99.9% is exactly $1,000.00. This used to be asserted as "100,000 or
+    // 100,001", because `1 - 0.999` is 0.0009999999999999454 in floats and the answer
+    // came out a cent high. A cent high is still a floor that refuses a price meeting the
+    // margin (#697) — every clamped price in the editor's preview ended in .01 — so the
+    // tolerance was pinning the bug, not the guarantee.
+    expect(priceForMargin(usd(100), 99.9)).toEqual(usd(100_000));
+    expect(priceForMargin(usd(6_886), 99.9)).toEqual(usd(6_886_000));
   });
 
   it.each([100, 100.5, 250])("refuses %s%%, which no price can achieve", (margin) => {
@@ -152,6 +150,77 @@ describe("the price that achieves a margin", () => {
   it("names the margin in the refusal, so the setting can be found", () => {
     expect(() => priceForMargin(usd(1_000), 100)).toThrow(/100%/);
   });
+});
+
+describe("the margin floor is exact, not a cent high (#697)", () => {
+  it("is 5.00 for a 4.95 cost at 1%, which the app's own margin says is exactly 1%", () => {
+    // 495 / 0.99 is exactly 500. In floats it was 500.00000000000006, and `ceil` made it
+    // 501: policy "block" refused 5.00 as below a 5.01 floor, and "clamp" wrote 5.01.
+    expect(priceForMargin(usd(495), 1)).toEqual(usd(500));
+    expect(marginPercent(usd(500), usd(495))).toBe(1);
+  });
+
+  it("is exact for a margin typed with a decimal place", () => {
+    // 9.87 at 1.3% is exactly 10.00: 987 / 0.987. The float path gave 10.01.
+    expect(priceForMargin(usd(987), 1.3)).toEqual(usd(1_000));
+  });
+
+  it("is exact for a margin with more decimal places than basis points can hold", () => {
+    // 12.3456% is 123456 / 10^6 of the price. 876544 / (1 - 0.123456) is exactly 1,000,000.
+    expect(priceForMargin(usd(876_544), 12.3456)).toEqual(usd(1_000_000));
+  });
+
+  it("is the same floor in the computed floor the resolver uses", () => {
+    expect(computeFloor(baseline({ cost: usd(495) }), { minMarginPercent: 1 })).toEqual(usd(500));
+  });
+
+  it("still rounds up a floor that is not a whole number of minor units", () => {
+    // ¥1000 at 30% is ¥1428.57…: ¥1428 is a 29.97% margin, so the floor is ¥1429.
+    expect(priceForMargin(jpy(1_000), 30)).toEqual(jpy(1_429));
+  });
+
+  it("handles a zero cost, and a one-cent cost at the smallest margin", () => {
+    expect(priceForMargin(usd(0), 40)).toEqual(usd(0));
+    expect(priceForMargin(usd(1), 0.1)).toEqual(usd(2));
+  });
+
+  it.each([Number.NaN, Number.NEGATIVE_INFINITY])("refuses a margin of %s rather than guessing", (margin) => {
+    expect(() => priceForMargin(usd(1_000), margin)).toThrow(RangeError);
+  });
+
+  /**
+   * The property the floor exists for: the floor meets the margin, and one minor unit
+   * less does not. Checked with the same `marginPercent` the preview prints beside the
+   * floor, so the two cannot disagree at the boundary.
+   *
+   * The sweep that found #697 was every cent from 0.01 to 30.00 against every tenth of a
+   * percent from 0.1 to 99.9: 27,859 wrong floors in about 3M pairs, roughly one in a
+   * hundred. This keeps every cent to 10.00 and every seventh beyond it, about 1.3M pairs,
+   * which the float version fails over 10,000 times; the second grid adds margins typed to
+   * two decimal places.
+   */
+  it("is the lowest price meeting the margin, over a grid of costs and margins", () => {
+    const failures: string[] = [];
+
+    const check = (cost: number, margin: number) => {
+      const floor = priceForMargin(usd(cost), margin);
+      const meets = marginPercent(floor, usd(cost)) >= margin;
+      const oneLessFails = marginPercent(usd(floor.amount - 1), usd(cost)) < margin;
+      if (!meets || !oneLessFails) failures.push(`cost ${cost} at ${margin}% → ${floor.amount}`);
+    };
+
+    // `tenths / 10`, not `tenths * 0.1`: division lands on the double nearest the decimal,
+    // which is what a merchant typing "1.3" gets, and the product does not.
+    for (let cost = 1; cost <= 3_000; cost += cost < 1_000 ? 1 : 7) {
+      for (let tenths = 1; tenths <= 999; tenths += 1) check(cost, tenths / 10);
+    }
+    for (const cost of [1, 7, 99, 495, 987, 1_999, 4_321, 10_000, 123_457]) {
+      for (let hundredths = 1; hundredths <= 9_999; hundredths += 1) check(cost, hundredths / 100);
+    }
+
+    expect(failures.slice(0, 10)).toEqual([]);
+    expect(failures).toHaveLength(0);
+  }, 30_000);
 });
 
 describe("the effective floor", () => {

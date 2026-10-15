@@ -54,10 +54,17 @@ export interface MarginImpact {
   belowCost: MarginRow[];
 }
 
-/** Gross margin as a percentage of selling price. */
+/**
+ * Gross margin as a percentage of selling price.
+ *
+ * Multiplied by 100 *before* dividing, so the only rounding is the one division: the
+ * result is the closest number to the exact margin. Dividing first rounded twice, and a
+ * price exactly at a margin read a hair under it — $100.00 on a $43.00 cost came out
+ * 56.99999999999999%, listed below a 57% target beside the 57% floor that set it (#697).
+ */
 export function marginPercent(price: Money, cost: Money): number {
   if (price.amount === 0) return 0;
-  return ((price.amount - cost.amount) / price.amount) * 100;
+  return ((price.amount - cost.amount) * 100) / price.amount;
 }
 
 /**

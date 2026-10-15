@@ -35,6 +35,17 @@ describe("gross margin", () => {
   it("does not divide by zero on a free product", () => {
     expect(marginPercent(money(0, "USD"), money(5_000, "USD"))).toBe(0);
   });
+
+  it("reads a price exactly at a margin as that margin, not a hair under it (#697)", () => {
+    // $43.00 cost at $100.00 is a 57% margin. `(57 / 100) * 100` is 56.99999999999999 in
+    // floats, so a price clamped exactly to a 57% floor was listed as below the 57% target
+    // beside the floor that put it there.
+    expect(marginPercent(money(10_000, "USD"), money(4_300, "USD"))).toBe(57);
+    expect(marginPercent(money(125, "USD"), money(6, "USD"))).toBe(95.2);
+
+    const atFloor = marginImpact([row({ cost: money(4_300, "USD"), after: money(10_000, "USD") })], 57);
+    expect(atFloor.belowTarget).toEqual([]);
+  });
 });
 
 describe("the impact of a campaign", () => {

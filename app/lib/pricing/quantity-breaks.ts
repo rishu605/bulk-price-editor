@@ -73,6 +73,11 @@ function lessBps(amount: Money, bps: number): Money {
   return money(Math.round((amount.amount * kept) / 10_000), amount.currency);
 }
 
+/** A tier's discount as the merchant set it: `1250` is "12.5% off". A percentage, not money. */
+function percentOff(bps: number): string {
+  return `${bps / 100}% off`;
+}
+
 /**
  * The ladder for one variant, or a refusal explaining why there isn't one.
  *
@@ -139,15 +144,19 @@ export function resolveBreaks(
     });
   }
 
-  // Checked *after* clamping, because clamping is what breaks a ladder in practice: two
-  // tiers that both hit the floor end up equal, and a lower tier hitting it while a
-  // higher one does not inverts the ladder outright.
-  const inversion = breaks.find(
+  // Checked on the prices that would be written. The floor cannot cause an inversion: it
+  // is one price for every tier, and max(floor, x) never reverses an order, so clamping
+  // can make two tiers equal but never makes a larger tier dearer (#690). The only cause
+  // is the tiers themselves -- a larger quantity given a smaller discount -- so that is
+  // what the refusal names.
+  const inverted = breaks.findIndex(
     (tier, index) => index > 0 && greaterThan(tier.price, breaks[index - 1]!.price),
   );
-  if (inversion) {
+  if (inverted > 0) {
+    const larger = sorted[inverted]!;
+    const smaller = sorted[inverted - 1]!;
     return refuse(
-      `Ordering ${inversion.minimumQuantity} or more would cost more per unit than ordering fewer. That happens when the wholesale floor lifts a larger tier above a smaller one; lower the floor or the discount on the smaller tier.`,
+      `The ${larger.minimumQuantity}+ tier takes ${percentOff(larger.discountBps)}, less than the ${percentOff(smaller.discountBps)} the ${smaller.minimumQuantity}+ tier below it, so ordering ${larger.minimumQuantity} or more would cost more per unit than ordering ${smaller.minimumQuantity}. Give larger quantities an equal or larger discount.`,
     );
   }
 
