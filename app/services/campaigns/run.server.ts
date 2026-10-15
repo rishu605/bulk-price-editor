@@ -35,9 +35,10 @@ import { chunk, inChunksCounting } from "../../lib/db/chunk";
 import { overBudget, refuseInline, type InlineWork } from "../../lib/execution/inline-budget";
 import { recordClaim, releaseClaim, transitionCampaign } from "./lifecycle.server";
 import { endingLateWatch } from "./ending-late.server";
-import { recordEndMissed, recordStartRefused } from "./start-refusal.server";
+import { clearQueuedRefused, recordEndMissed, recordQueuedRefused, recordStartRefused } from "./start-refusal.server";
 import { refuseUnconfirmedStart } from "./start-confirmation.server";
 import { startsUnattended } from "../../lib/audit/actor";
+import { queuedVerb } from "../../lib/campaigns/queued-refusal";
 import { refusedForGood, startRefusedEntry } from "../../lib/scheduling/start-refusal";
 import type { CampaignState } from "../../lib/lifecycle/transitions";
 import { SKIP_REASON_GROUP } from "../../lib/planning/reasons";
@@ -57,6 +58,12 @@ import { addLogContext, withLogContext } from "../../lib/logging/context.server"
 
 export interface RunOptions {
   revert?: boolean;
+  /**
+   * Set by the worker for a run the web process or Flow claimed and handed it (#1046). One
+   * that ends before it writes is said on the campaign and told once: the merchant, or Flow's
+   * run log, had already been told it was under way.
+   */
+  queued?: boolean;
   /**
    * Who asked for this run, recorded on every transition it makes and anything it resolves
    * on their behalf (#755, #746): `actorFor(...)` for a person, `SCHEDULER_ACTOR` for the
@@ -200,6 +207,9 @@ export async function runCampaign(
     // Released back to where the scheduler took it from, so the next tick asks again.
     // A full run that stood down for a scoped one (#763) took its claim itself, so it
     // gives it back whoever started it.
+    if (options.queued && outcome.refused && !outcome.deferredTo) {
+      await recordQueuedRefused(shopId, campaignId, { verb: queuedVerb(options), reason: outcome.refused }, { tell: true });
+    }
     if (
       outcome.refused &&
       releaseTo &&
@@ -266,6 +276,12 @@ export async function runCampaign(
       // stayed open. Marked before the release, so no tick sees it SCHEDULED and unmarked.
       const forGood = options.claimedFrom === "SCHEDULED" ? refusedForGood(error) : null;
       if (forGood) await recordStartRefused(shopId, campaignId, forGood.userMessage, { tell: !failed?.ended });
+      // A queued run that never got to write, whatever stopped it (#1046): the job is not
+      // tried again, so a blip is as final for it as a refusal.
+      if (options.queued) {
+        const refusal = { verb: queuedVerb(options), reason: toAppError(error).userMessage };
+        await recordQueuedRefused(shopId, campaignId, refusal, { tell: !failed?.ended });
+      }
       // A scheduled end that could not run is retried, but said once, on the page and by
       // email (#1005): the sale's prices are still live past its window.
       if (options.claimedFrom && options.revert) {
@@ -662,6 +678,8 @@ async function executeCampaignRun(
       reason: options.resume ? "resume requested" : options.revert ? "revert requested" : "apply requested",
       actor: options.actor,
     });
+    // A queued run refused earlier is no longer the latest word on this campaign (#1046).
+    await clearQueuedRefused(campaignId);
 
     // One writer at a time, whichever kind (rule 2, #763). A run over one variant never
     // takes this claim, so it cannot collide on it: it writes its run row first and then

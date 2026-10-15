@@ -1,3 +1,4 @@
+import { queuedRefusal } from "../../lib/campaigns/queued-refusal";
 import { startConfirmationOf, unconfirmedStart } from "../../lib/campaigns/start-confirmation";
 import { endMissed } from "../../lib/scheduling/end-missed";
 import { endingLateText, startingLateText } from "../../lib/scheduling/ending-late";
@@ -34,5 +35,6 @@ export async function lifecycleContext(
     unconfirmedStart: state === "SCHEDULED" && preview.confirm ? unconfirmedStart(preview.confirm, startConfirmationOf(schedule)) : null,
     endingLate: endingLateText(schedule, state, timeZone, new Date()), // still applying when its revert was due (#829)
     startingLate: startingLateText(schedule, state, timeZone, new Date()), // still applying well after its start (#1056)
+    queuedRefused: queuedRefusal(schedule), // a run the worker was handed and could not run (#1046)
   };
 }

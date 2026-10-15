@@ -9,6 +9,7 @@
  * though its source was practice, and lost its rounding (#762).
  */
 
+import { QUEUED_REFUSED_KEY } from "./queued-refusal";
 import { START_CONFIRMED_KEY } from "./start-confirmation";
 
 /**
@@ -50,8 +51,10 @@ export function manualSchedule(schedule: unknown): Record<string, unknown> {
  * `startConfirmed` is a person's typed confirmation of what this campaign reaches (#1009). It
  * is not a window key: moving the dates changes nothing the campaign writes, and every start
  * is checked against it anyway. But a copy is a new campaign that person never confirmed.
+ *
+ * `queuedRefused` is a run of this campaign's the worker refused (#1046): a copy never ran.
  */
-export const OWN_KEYS = [START_CONFIRMED_KEY] as const;
+export const OWN_KEYS = [START_CONFIRMED_KEY, QUEUED_REFUSED_KEY] as const;
 
 /** What a copy stores: the definition, run by hand, without the source's own record. */
 export function copiedSchedule(schedule: unknown): Record<string, unknown> {

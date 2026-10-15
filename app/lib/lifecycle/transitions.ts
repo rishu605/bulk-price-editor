@@ -24,6 +24,8 @@
  * delivery).
  */
 
+import type { QueuedRefusal } from "../campaigns/queued-refusal";
+
 export type CampaignState =
   | "DRAFT"
   | "SCHEDULED"
@@ -195,8 +197,23 @@ export function describeState(
      * see `startingLateText`.
      */
     startingLate?: string | null;
+    /** A run handed to the background worker and refused before it wrote (#1046); see `queuedRefusal`. */
+    queuedRefused?: QueuedRefusal | null;
   } = {},
 ): StateDescription {
+  // Said over whatever state the refusal left it in, until a later run claims it (#1046): the
+  // merchant was told the worker had it, and Flow's run log says "queued". Not while a run
+  // holds the claim, which is that later run.
+  if (context.queuedRefused && state !== "APPLYING" && state !== "REVERTING") {
+    const base = describeState(state, { ...context, queuedRefused: null });
+    const { verb, reason } = context.queuedRefused;
+    return {
+      ...base,
+      label: `${base.label.split(" — ")[0]} — couldn't ${verb}`,
+      tone: base.tone === "critical" ? "critical" : "warning",
+      explanation: `Its ${verb} was handed to the background worker and could not run: ${reason} It wrote nothing. ${base.explanation}`,
+    };
+  }
   switch (state) {
     case "DRAFT":
       return {

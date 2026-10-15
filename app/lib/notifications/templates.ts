@@ -67,6 +67,11 @@ export interface RunNotification {
    * its window until the apply finishes, so the merchant hears it once rather than never.
    */
   endingLate?: boolean;
+  /**
+   * A run handed to the background worker and refused before it wrote (#1046): an apply, a
+   * revert or a resume the merchant or Flow had been told was under way.
+   */
+  queued?: "apply" | "revert" | "resume";
   /** Merchant-facing reasons, already through the error taxonomy. Never raw errors. */
   reasons?: string[];
   /** Deep link back into the app, filled in by `notify` — see `campaign-link.ts`. */
@@ -188,6 +193,22 @@ function runFailed(n: RunNotification): Email {
         "",
         "The schedule keeps trying, and you will not get another email about this end. To end the",
         "sale now, revert the campaign by hand.",
+        link(n.campaignUrl, "Open the campaign"),
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    };
+  }
+  if (n.queued) {
+    const past = { apply: "applied", revert: "reverted", resume: "resumed" }[n.queued];
+    return {
+      subject: `"${n.campaignName}" was not ${past}`,
+      text: [
+        `The background worker was handed "${n.campaignName}"'s ${n.queued}, and it could not run. It wrote nothing` +
+          (n.queued === "revert" ? `, so the campaign's prices are still on your storefront.` : "."),
+        ...reasonLines(n.reasons),
+        "",
+        `Once the cause is fixed, ${n.queued} the campaign again from its page.`,
         link(n.campaignUrl, "Open the campaign"),
       ]
         .filter(Boolean)
