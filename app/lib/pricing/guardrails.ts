@@ -7,7 +7,14 @@
  * floor.
  */
 
-import { greaterThan, max, money, type Money } from "../money/money";
+import {
+  exactDecimal,
+  greaterThan,
+  max,
+  money,
+  scaleExactly,
+  type Money,
+} from "../money/money";
 import type { Baseline, Guardrails } from "./types";
 
 export class MissingCostError extends Error {
@@ -124,8 +131,9 @@ export function priceForMargin(cost: Money, marginPercent: number): Money {
  * On integers, with the margin read as the decimal the merchant typed. The float factor
  * `1 / (1 − m/100)` lands a hair off whenever the exact price is a whole or half minor
  * unit, which is exactly where the rounding decides: `ceil` added a cent to a whole
- * answer, and half-even sent a half the wrong way (#697). With the margin as
- * `digits / 10^scale`, the price is `cost × 100·10^scale / (100·10^scale − digits)`.
+ * answer, and half-even sent a half the wrong way (#697). With the margin as `n / d`
+ * (`exactDecimal`), the price is `cost × 100d / (100d − n)`, rounded once by
+ * `scaleExactly` — the same step a percentage change takes (#1051).
  *
  * @throws {RangeError} for a margin of 100% or more, or one that is not a number.
  */
@@ -134,59 +142,16 @@ export function priceAtMargin(
   marginPercent: number,
   rounding: "ceil" | "half-even",
 ): Money {
-  const margin = exactDecimal(marginPercent);
-  const whole = 100n * 10n ** margin.scale;
-  const kept = whole - margin.digits;
+  const margin = exactDecimal(marginPercent, "A margin");
+  const whole = 100n * margin.denominator;
+  const kept = whole - margin.numerator;
   if (kept <= 0n) {
     throw new RangeError(
       `A margin of ${marginPercent}% is unreachable: margin is a share of the selling ` +
         `price, so 100% would require an infinite price.`,
     );
   }
-  const numerator = BigInt(cost.amount) * whole;
-  const price =
-    rounding === "ceil" ? ceilDivide(numerator, kept) : halfEvenDivide(numerator, kept);
-  return money(Number(price), cost.currency);
-}
-
-/**
- * A finite number as the exact decimal it prints as: `1.3` is 13 / 10^1, not the binary
- * fraction a hair above it. `String` gives the shortest decimal that reads back as the
- * same number, which for anything typed into a margin box is what was typed.
- */
-function exactDecimal(value: number): { digits: bigint; scale: bigint } {
-  const parts = /^(-?)(\d+)(?:\.(\d+))?(?:e([+-]\d+))?$/.exec(String(value));
-  if (!parts) {
-    throw new RangeError(`A margin must be a number, got ${value}.`);
-  }
-  const [, sign = "", whole = "", fraction = "", exponent = "0"] = parts;
-  const scale = fraction.length - Number(exponent);
-  const digits = BigInt(sign + whole + fraction);
-  return scale >= 0
-    ? { digits, scale: BigInt(scale) }
-    : { digits: digits * 10n ** BigInt(-scale), scale: 0n };
-}
-
-/** `ceil(numerator / denominator)` for a positive denominator. */
-function ceilDivide(numerator: bigint, denominator: bigint): bigint {
-  const quotient = numerator / denominator; // BigInt division truncates toward zero
-  return numerator % denominator > 0n ? quotient + 1n : quotient;
-}
-
-/**
- * `numerator / denominator` to the nearest integer, ties to even, for a positive
- * denominator. Symmetric about zero, as `roundToInteger`'s half-even is.
- */
-function halfEvenDivide(numerator: bigint, denominator: bigint): bigint {
-  const negative = numerator < 0n;
-  const size = negative ? -numerator : numerator;
-  const quotient = size / denominator;
-  const twiceRemainder = 2n * (size % denominator);
-  const rounded =
-    twiceRemainder > denominator || (twiceRemainder === denominator && quotient % 2n === 1n)
-      ? quotient + 1n
-      : quotient;
-  return negative ? -rounded : rounded;
+  return scaleExactly(cost, whole, kept, rounding);
 }
 
 /** True when `price` sits below `floor`. */

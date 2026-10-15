@@ -119,16 +119,105 @@ export function roundToInteger(value: number, mode: IntermediateRounding = "half
   }
 }
 
+/**
+ * A percentage or factor as the exact decimal it prints as, `numerator / denominator`, the
+ * denominator a power of ten.
+ */
+export interface ExactDecimal {
+  readonly numerator: bigint;
+  readonly denominator: bigint;
+}
+
+/**
+ * Reads a finite number as the decimal it prints as: `0.7` is 7/10, not the double a hair
+ * under it (0.69999999999999995559…). `String` gives the shortest decimal that reads back
+ * as the same number, which for anything typed into a percentage, margin or multiplier box
+ * is what was typed.
+ *
+ * Multiplying by the double instead is what decided exact half cents by float error: 12.85
+ * at 30% off is exactly 8.995, but 1,285 × 0.7 is 899.4999999999999, so half-even never saw
+ * the tie and 8.99 was written (#1051).
+ *
+ * @throws {RangeError} for NaN or an infinity, naming `what` it was meant to be.
+ */
+export function exactDecimal(value: number, what = "A number"): ExactDecimal {
+  if (!Number.isFinite(value)) {
+    throw new RangeError(`${what} must be a finite number, got ${value}.`);
+  }
+  // Whole numbers are the common case, and every integer double is exactly a BigInt. That
+  // includes all of them from 1e21 up, the only ones `String` writes with a `e+` exponent.
+  if (Number.isInteger(value)) return { numerator: BigInt(value), denominator: 1n };
+
+  // "8.25", or below 1e-6 "1.5e-7": either way the digits over a power of ten.
+  const parts = /^(-?)(\d+)(?:\.(\d+))?(?:e-(\d+))?$/.exec(String(value));
+  if (!parts) throw new RangeError(`${what} must be a finite number, got ${value}.`);
+
+  const [, sign = "", whole = "", fraction = "", exponent = "0"] = parts;
+  const places = BigInt(fraction.length + Number(exponent));
+  return { numerator: BigInt(sign + whole + fraction), denominator: 10n ** places };
+}
+
+/**
+ * `numerator / denominator` rounded to an integer by `mode`, exactly.
+ *
+ * The one rounding step every percentage and factor goes through. On BigInt, so a tie is a
+ * remainder of exactly half the denominator and never a float that lands either side of
+ * it. Symmetric about zero in the half modes, as `roundToInteger` is.
+ *
+ * @throws {RangeError} for a zero denominator.
+ */
+export function divideRounded(
+  numerator: bigint,
+  denominator: bigint,
+  mode: IntermediateRounding = "half-even",
+): bigint {
+  if (denominator === 0n) throw new RangeError("Cannot divide an amount by zero.");
+  if (denominator < 0n) return divideRounded(-numerator, -denominator, mode);
+
+  const negative = numerator < 0n;
+  const size = negative ? -numerator : numerator;
+  const quotient = size / denominator; // truncates, so this is the magnitude rounded down
+  const remainder = size % denominator;
+  if (remainder === 0n) return negative ? -quotient : quotient;
+
+  let away: boolean; // whether the magnitude rounds away from zero
+  switch (mode) {
+    case "floor":
+      away = negative;
+      break;
+    case "ceil":
+      away = !negative;
+      break;
+    default: {
+      const twice = 2n * remainder;
+      if (twice !== denominator) away = twice > denominator;
+      else if (mode === "half-even") away = quotient % 2n === 1n;
+      else away = mode === "half-up";
+    }
+  }
+  const magnitude = away ? quotient + 1n : quotient;
+  return negative ? -magnitude : magnitude;
+}
+
+/** `a × numerator / denominator`, landing on a whole minor unit by one exact rounding step. */
+export function scaleExactly(
+  a: Money,
+  numerator: bigint,
+  denominator: bigint,
+  mode: IntermediateRounding = "half-even",
+): Money {
+  const scaled = divideRounded(BigInt(a.amount) * numerator, denominator, mode);
+  return money(Number(scaled), a.currency);
+}
+
 /** Multiplies by a factor (1.15 marks up 15%), landing back on an integer. */
 export function multiplyByFactor(
   a: Money,
   factor: number,
   mode: IntermediateRounding = "half-even",
 ): Money {
-  if (!Number.isFinite(factor)) {
-    throw new RangeError(`Factor must be finite, got ${factor}`);
-  }
-  return money(roundToInteger(a.amount * factor, mode), a.currency);
+  const f = exactDecimal(factor, "A factor");
+  return scaleExactly(a, f.numerator, f.denominator, mode);
 }
 
 /** `percentOf(m, 20)` → 20% of m. Negative percentages are allowed. */
@@ -137,19 +226,22 @@ export function percentOf(
   percent: number,
   mode: IntermediateRounding = "half-even",
 ): Money {
-  if (!Number.isFinite(percent)) {
-    throw new RangeError(`Percent must be finite, got ${percent}`);
-  }
-  return money(roundToInteger((a.amount * percent) / 100, mode), a.currency);
+  const p = exactDecimal(percent, "A percentage");
+  return scaleExactly(a, p.numerator, 100n * p.denominator, mode);
 }
 
-/** `applyPercentChange(m, -20)` → m reduced by 20%. */
+/**
+ * `applyPercentChange(m, -20)` → m reduced by 20%: `m × (100 + p) / 100`, with p read as
+ * the decimal it prints as and rounded once.
+ */
 export function applyPercentChange(
   a: Money,
   percentChange: number,
   mode: IntermediateRounding = "half-even",
 ): Money {
-  return multiplyByFactor(a, 1 + percentChange / 100, mode);
+  const p = exactDecimal(percentChange, "A percentage change");
+  const whole = 100n * p.denominator;
+  return scaleExactly(a, whole + p.numerator, whole, mode);
 }
 
 // ---------------------------------------------------------------- comparison

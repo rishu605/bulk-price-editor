@@ -13,7 +13,7 @@
  */
 
 import { decimalsFor, format } from "../money/format";
-import { abs, money, type Money } from "../money/money";
+import { abs, applyPercentChange, money, percentOf, type Money } from "../money/money";
 
 export type CostRule =
   | { kind: "set-exact"; amount: Money }
@@ -49,14 +49,15 @@ export function applyCostRule(rule: CostRule, input: CostRuleInput): CostOutcome
     case "set-exact":
       return positive(rule.amount);
 
+    // Half a cent rounds up, as it did under `Math.round`, but on the exact product: in
+    // floats 12.85 lowered 30% was 899.4999999999999 and became 8.99 where 8.995 is 9.00,
+    // and 9.2% of 3.75 fell a hair under 0.345 the same way (#1051).
     case "share-of-price":
-      return positive(money(Math.round((input.basePrice.amount * rule.percent) / 100), currency));
+      return positive(percentOf(input.basePrice, rule.percent, "half-up"));
 
     case "percent-change": {
       if (!input.cost) return { kind: "skipped", reason: "no-cost" };
-      return positive(
-        money(Math.round(input.cost.amount * (1 + rule.percent / 100)), currency),
-      );
+      return positive(applyPercentChange(input.cost, rule.percent, "half-up"));
     }
 
     case "fixed-change": {
