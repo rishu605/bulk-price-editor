@@ -39,14 +39,18 @@ function slowTags(chaos: ChaosContext): AdminClient {
   };
 }
 
-/** Runs to the end while the reaper sweeps beside it; returns the runs it reclaimed. */
-async function sweptWhileRunning(run: Promise<unknown>) {
+/**
+ * Runs to the end while the reaper sweeps beside it; returns the runs it reclaimed. Its own
+ * shop only (#1069): swept at this staleness, any other scenario's run on the database is
+ * "dead" too, and reclaiming it would fail both.
+ */
+async function sweptWhileRunning(run: Promise<unknown>, shopId: string) {
   let done = false;
   const reclaimed: string[] = [];
   void run.finally(() => (done = true));
   while (!done) {
     await new Promise((r) => setTimeout(r, 100));
-    reclaimed.push(...(await reclaimStaleRuns(new Date())).runIds);
+    reclaimed.push(...(await reclaimStaleRuns(new Date(), undefined, { shopId })).runIds);
   }
   await run;
   return reclaimed;
@@ -65,7 +69,7 @@ describe("chaos: a run writing its tags, with the reaper sweeping", () => {
       const { shopId, campaignId, productOf, variantGids } = chaos.fixture;
       const started = Date.now();
 
-      const reclaimed = await sweptWhileRunning(runCampaign(shopId, campaignId, slowTags(chaos), { actor: "chaos" }));
+      const reclaimed = await sweptWhileRunning(runCampaign(shopId, campaignId, slowTags(chaos), { actor: "chaos" }), shopId);
 
       expect(Date.now() - started, "the tag phase did not outlast the threshold, so this proved nothing").toBeGreaterThan(STALE_AFTER_MS);
       expect(reclaimed, "the reaper took a live run for a dead one").toEqual([]);
@@ -81,7 +85,7 @@ describe("chaos: a run writing its tags, with the reaper sweeping", () => {
 
       // A revert's tag removal settles the apply run's tag rows, not its own: its ledger
       // is quiet throughout, and only the heartbeat says it is alive.
-      const reclaimed = await sweptWhileRunning(runCampaign(shopId, campaignId, slowTags(chaos), { actor: "chaos", revert: true }));
+      const reclaimed = await sweptWhileRunning(runCampaign(shopId, campaignId, slowTags(chaos), { actor: "chaos", revert: true }), shopId);
 
       expect(reclaimed, "the reaper took a live revert for a dead one").toEqual([]);
       expect(await statusOf(campaignId)).toBe("COMPLETED");
@@ -103,12 +107,12 @@ describe("chaos: the reaper reads the ledger as well as the heartbeat", () => {
         data: { shopId, runId: run.id, campaignId, productGid: productOf.get(variantGids[0])!, addedTags: ["SALE"], status: "APPLIED", appliedAt: new Date() },
       });
 
-      expect((await reclaimStaleRuns(new Date())).runIds, "a run tagging a product this second was declared dead").toEqual([]);
+      expect((await reclaimStaleRuns(new Date(), undefined, { shopId })).runIds, "a run tagging a product this second was declared dead").toEqual([]);
       expect(await statusOf(campaignId)).toBe("APPLYING");
 
       // The same run, a minute on with nothing written since: dead, and reclaimed.
       const later = new Date(Date.now() + 60_000);
-      expect((await reclaimStaleRuns(later)).runIds).toEqual([run.id]);
+      expect((await reclaimStaleRuns(later, undefined, { shopId })).runIds).toEqual([run.id]);
       expect(await statusOf(campaignId)).toBe("PARTIAL");
     });
   });

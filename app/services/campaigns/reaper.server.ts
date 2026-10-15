@@ -114,13 +114,19 @@ export interface ReapResult {
 export async function reclaimStaleRuns(
   now: Date = new Date(),
   staleAfterMs: number = STALE_AFTER_MS,
+  /**
+   * One shop only (#1069). The scheduler sweeps every shop; a chaos scenario sweeping with a
+   * short staleness, or an hour ahead, sweeps its own fixture, or it reclaims whatever other
+   * scenario shares the database -- Partial mid-run, with nothing wrong.
+   */
+  scope: { shopId?: string } = {},
 ): Promise<ReapResult> {
   // Fetched by status and filtered in code, rather than expressing the staleness rule
   // twice. The candidate set is every run currently in flight, which is small by
   // construction -- and if it ever is not, that unbounded growth is exactly the
   // condition this function exists to clear.
   const candidates = await prisma.campaignRun.findMany({
-    where: { status: { in: [...NON_TERMINAL] } },
+    where: { status: { in: [...NON_TERMINAL] }, ...(scope.shopId ? { shopId: scope.shopId } : {}) },
     select: {
       id: true,
       shopId: true,
