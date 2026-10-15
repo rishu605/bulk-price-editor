@@ -14,6 +14,7 @@ import type { BulkOperationState } from "../../lib/execution/bulk-executor";
 import prisma from "../../db.server";
 import { formatAgo, formatCount } from "../../lib/format/display";
 import { CLAMP_REASONS } from "../../lib/campaigns/clamp-reasons";
+import { unappliableRule } from "../../lib/campaigns/rule-limits";
 import { marketScope } from "../../lib/planning/market-scope";
 import type { AdminClient } from "../../lib/execution/sync-executor";
 import { executeRows } from "./execute.server";
@@ -440,7 +441,7 @@ async function executeCampaignRun(
   // caller, or a future button somebody adds without knowing.
   const practising = await prisma.campaign.findUnique({
     where: { id: campaignId },
-    select: { schedule: true },
+    select: { schedule: true, ruleRows: true },
   });
   if (practising && isPractice(practising)) {
     throw new AppError({
@@ -463,6 +464,12 @@ async function executeCampaignRun(
       context: { campaignId },
     });
   }
+  // A reduction of 100% or more prices the whole scope at the smallest price (#818). The
+  // editor refuses it as typed; a campaign stored before that, or by any other path, is
+  // refused here, for the scheduler and Flow as much as the page. The preview says the same
+  // sentence, so the page never offers the Apply. Never a revert: taking it back is allowed.
+  const unappliable = options.revert ? null : unappliableRule(practising?.ruleRows);
+  if (unappliable) throw new AppError({ code: "VALIDATION", userMessage: unappliable, context: { campaignId } });
 
   // Enter the running state here, before anything is planned or written, rather than
   // leaving it to each caller.

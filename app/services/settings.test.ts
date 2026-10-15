@@ -32,6 +32,28 @@ describe("parseSettings", () => {
     expect(parseSettings({ neverBelowCost: "yes" }).neverBelowCost).toBe(false);
     expect(parseSettings({ neverBelowCost: true }).neverBelowCost).toBe(true);
   });
+
+  it("reads settings saved before the typed-confirmation thresholds as the PRD's defaults (#818)", () => {
+    // Every shop's stored JSON predates the two keys. Missing has to mean 1,000 and 50%,
+    // not "off": a threshold that read as null would ask for nothing.
+    const stored = { neverBelowCost: true, minPrice: 5, approvalThreshold: 200 };
+    expect(parseSettings(stored)).toMatchObject({ confirmAboveVariants: 1_000, confirmAboveChangePercent: 50 });
+    expect(parseSettings({ confirmAboveVariants: "", confirmAboveChangePercent: null })).toMatchObject({
+      confirmAboveVariants: 1_000,
+      confirmAboveChangePercent: 50,
+    });
+  });
+
+  it("keeps a stored threshold, and pulls one out of range back inside it", () => {
+    expect(parseSettings({ confirmAboveVariants: 250, confirmAboveChangePercent: 30 })).toMatchObject({
+      confirmAboveVariants: 250,
+      confirmAboveChangePercent: 30,
+    });
+    expect(parseSettings({ confirmAboveVariants: 0, confirmAboveChangePercent: 400 })).toMatchObject({
+      confirmAboveVariants: 1,
+      confirmAboveChangePercent: 100,
+    });
+  });
 });
 
 describe("toGuardrails", () => {

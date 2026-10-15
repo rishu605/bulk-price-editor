@@ -13,6 +13,7 @@ import type { StoredRoundingPolicy } from "../../lib/money/rounding-policy";
 import type { Schedule } from "../../lib/scheduling/window";
 import type { FilterAst } from "../segments.server";
 import type { ProductStatus } from "../../lib/campaigns/product-status";
+import { DEFAULT_CONFIRM_ABOVE_VARIANTS, type BlastRadius } from "../../lib/campaigns/blast-radius";
 
 export interface CampaignInput {
   name: string;
@@ -181,8 +182,21 @@ export interface CampaignPreview {
    * campaign will earn, which needs order data and is a separate, approval-gated thing.
    */
   margin: MarginPreview | null;
-  /** Campaigns over this size need typed confirmation (A-3.11). */
+  /**
+   * Applying this needs "apply" typed first (A-3.11): over the store's variant threshold,
+   * a price moving past its change threshold, or more than a handful taken to zero (#818).
+   */
   blastRadius: boolean;
+  /**
+   * Why, for the dialog to say -- the same object the server's refusal is built from.
+   * Absent where nothing was planned: a blocked plan, or a run writing the campaign.
+   */
+  confirm?: BlastRadius;
+  /**
+   * Set when this campaign cannot be applied as it is stored, saying why and what to do:
+   * a reduction of 100% or more (#818). The run refuses it with the same sentence.
+   */
+  refused?: string;
   /**
    * Of the prices this would write, how many were changed outside the app while no
    * campaign was running on them, so their baselines are out of date (#745).
@@ -276,5 +290,8 @@ export interface LedgerRow {
   failureReason: string | null;
 }
 
-/** Campaigns changing more than this many variants require typed confirmation. */
-export const BLAST_RADIUS_THRESHOLD = 1_000;
+/**
+ * Campaigns changing more than this many variants require typed confirmation, until the
+ * store sets its own number in Settings (#818).
+ */
+export const BLAST_RADIUS_THRESHOLD = DEFAULT_CONFIRM_ABOVE_VARIANTS;

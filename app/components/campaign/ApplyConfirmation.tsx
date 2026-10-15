@@ -1,6 +1,7 @@
 import { alreadyCorrectFacts, overlapSentences } from "../../lib/planning/overlaps";
 import { useRef, type ElementRef } from "react";
 
+import { confirmationReasons } from "../../lib/campaigns/blast-radius";
 import { describeRunDuration } from "../../lib/planning/duration";
 import { formatCount } from "../../lib/format/display";
 import { SPACE } from "../../lib/ui/spacing";
@@ -74,7 +75,7 @@ export function ApplyConfirmation({
    */
   onConfirm: (confirmation: string) => void;
 }) {
-  const { counts, markets, blastRadius, writePath } = preview;
+  const { counts, markets, blastRadius, confirm, writePath } = preview;
 
   // Read at click time rather than held in state. Polaris fields are uncontrolled here
   // (see `docs/polaris-notes.md` on `defaultValue`), and the value is wanted once.
@@ -197,18 +198,31 @@ export function ApplyConfirmation({
           </s-banner>
         ) : null}
 
+        {/* Each reason the word is asked, in the sentences the server refuses with (#818):
+            the size, how many prices move further than the store's change threshold and
+            which moves most, and prices taken to zero. A merchant asked to type a word
+            should know which of the three they are confirming. */}
         {blastRadius ? (
           <s-banner tone="warning">
+            {(confirm ? confirmationReasons(confirm) : [`This campaign writes ${formatCount(counts.planned)} prices.`]).map(
+              (reason) => (
+                <s-paragraph key={reason}>{reason}</s-paragraph>
+              ),
+            )}
+            {confirm?.largest ? (
+              <s-paragraph>
+                Largest change: {confirm.largest.title}, {confirm.largest.before} to {confirm.largest.after}.
+              </s-paragraph>
+            ) : null}
             <s-paragraph>
-              This campaign writes more than 1,000 prices. Type <s-text type="strong">apply</s-text>{" "}
-              to confirm you have read the preview.
+              Type <s-text type="strong">apply</s-text> to confirm you have read the preview.
             </s-paragraph>
             <s-text-field
               ref={confirmation}
               name="confirmation"
               label="Type apply to confirm"
               required
-              details="Only campaigns over a thousand variants ask for this."
+              details="Asked only over the typed-confirmation thresholds in Settings."
             />
           </s-banner>
         ) : null}

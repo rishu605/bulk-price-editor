@@ -1,4 +1,10 @@
+import { useState } from "react";
+
 import { DRAFT_DEFAULTS } from "../lib/campaigns/draft-defaults";
+import { MAX_REDUCTION_PERCENT } from "../lib/campaigns/rule-limits";
+
+/** The largest "Reduce by" the field steps to: just under the whole price (#818). */
+const LARGEST_REDUCTION = MAX_REDUCTION_PERCENT - 0.01;
 
 /**
  * The rule kind that has no amount, because the file carries every price.
@@ -53,6 +59,10 @@ export function RuleValueField({
   /* An exact price is not a change, so it has no direction — a sign on it would be a
      negative price. The spreadsheet path has no rule at all. */
   const directional = kind === DRAFT_DEFAULTS.ruleKind || kind === "fixed-change";
+  /* Held here so the percentage can be capped while it reduces (#818). Read from the
+     select's own change event, which fires for `s-select` (the kind select above relies
+     on it); only a form-level `onChange` is dead under React 18 (#863). */
+  const [direction, setDirection] = useState<"down" | "up">(initial?.direction === "up" ? "up" : "down");
 
   return (
     <>
@@ -106,7 +116,11 @@ export function RuleValueField({
           magnitude as an absolute value, so choosing "Reduce by" and typing a negative
           number still reduces rather than quietly inverting. */}
       {directional ? (
-        <s-select name="ruleDirection" label="Which way">
+        <s-select
+          name="ruleDirection"
+          label="Which way"
+          onChange={(event) => setDirection(event.currentTarget.value === "up" ? "up" : "down")}
+        >
           <s-option value="down" defaultSelected={initial?.direction !== "up"}>
             Reduce by
           </s-option>
@@ -128,11 +142,17 @@ export function RuleValueField({
           }
         />
       ) : (
+        /* Capped below 100 while reducing (#818): Reduce by 100, 150 or 1,000 took every
+           price in scope to the smallest price, from a typo of 10 or 15. `max` stops the
+           stepper there; a typed value past it is refused by name in the preview beside
+           this field and by the save (`ruleInputProblem`), because Polaris lets the
+           keyboard through. Increases are not capped: a 150% rise is a real rule. */
         <s-number-field
           name={name}
           label="Percentage"
           value={initial?.magnitude ?? DRAFT_DEFAULTS.percentMagnitude}
-          details="Of each variant's baseline."
+          max={direction === "down" ? LARGEST_REDUCTION : undefined}
+          details={direction === "down" ? "Of each variant's baseline. Less than 100." : "Of each variant's baseline."}
         />
       )}
     </>

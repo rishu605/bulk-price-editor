@@ -17,6 +17,7 @@ import { money } from "../money/money";
 import type { AdjustmentRule, CompareAtPolicy } from "../pricing/types";
 import type { FilterAst } from "../../services/segments.server";
 import { PRODUCT_STATUS_FIELDS, productStatusesOf, type ProductStatus } from "./product-status";
+import { reductionProblem } from "./rule-limits";
 
 /** Scope fields the editor offers, minus `segment`, which resolves to a whole AST. */
 export const SCOPE_CONDITION_FIELDS = [
@@ -112,10 +113,9 @@ export function ruleInputProblem(read: FieldReader): string | null {
 
   const signed = signedAmount(read);
   if (signed === 0) return `${field} is 0, which would leave every price where it is. Enter the change to make.`;
-  if (kind === "percent-change" && signed <= -100) {
-    return `A ${Math.abs(signed)}% reduction would make every price free or negative. Enter less than 100.`;
-  }
-  return null;
+  // The same limit the run holds a stored campaign to (#818), so the form cannot save a
+  // rule the Apply would then refuse.
+  return kind === "percent-change" ? reductionProblem(signed) : null;
 }
 
 export function ruleFrom(read: FieldReader, currency: string): AdjustmentRule {

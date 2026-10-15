@@ -11,8 +11,14 @@
  * So a save is refused, naming each field and what it accepts, and nothing is written.
  */
 
+import {
+  DEFAULT_CONFIRM_ABOVE_CHANGE_PERCENT,
+  DEFAULT_CONFIRM_ABOVE_VARIANTS,
+} from "../campaigns/blast-radius";
+import { formatCount } from "../format/display";
+
 export interface GuardrailInputProblem {
-  field: "minMarginPercent" | "minPrice" | "approvalThreshold";
+  field: "minMarginPercent" | "minPrice" | "approvalThreshold" | "confirmAboveVariants" | "confirmAboveChangePercent";
   message: string;
 }
 
@@ -39,6 +45,39 @@ export function approvalThresholdFrom(value: FormDataEntryValue | null): number 
   if (!/^[0-9]+$/.test(typed)) return undefined;
   const count = Number(typed);
   return Number.isSafeInteger(count) && count >= 1 ? count : undefined;
+}
+
+/** The typed-confirmation thresholds' labels, shared by the fields and their refusals (#818). */
+export const CONFIRM_VARIANTS_LABEL = "Ask for typed confirmation above (variants)";
+export const CONFIRM_CHANGE_LABEL = "Or when a price moves more than (%)";
+
+/**
+ * A typed variant threshold for the typed confirmation: a whole number, 1 or more.
+ * Undefined when it is anything else, blank included -- the confirmation has no "off".
+ */
+export function confirmVariantsFrom(value: FormDataEntryValue | null): number | undefined {
+  const count = wholeNumber(value);
+  return count !== undefined && count >= 1 ? count : undefined;
+}
+
+/**
+ * A typed change threshold: a whole percentage from 1 to 100. Undefined otherwise.
+ *
+ * At most 100, because a reduction is already capped below it (#696): a threshold above it
+ * could only ever be reached by an increase, and would quietly stop asking about the
+ * reductions that are the reason this exists.
+ */
+export function confirmPercentFrom(value: FormDataEntryValue | null): number | undefined {
+  const percent = wholeNumber(value);
+  return percent !== undefined && percent >= 1 && percent <= 100 ? percent : undefined;
+}
+
+/** Digits only, as `approvalThresholdFrom`: `Number` would take `1e3`, `0x10` and `+5`. */
+function wholeNumber(value: FormDataEntryValue | null): number | undefined {
+  const typed = text(value);
+  if (!/^[0-9]+$/.test(typed)) return undefined;
+  const count = Number(typed);
+  return Number.isSafeInteger(count) ? count : undefined;
 }
 
 type Read = (name: string) => FormDataEntryValue | null;
@@ -83,7 +122,35 @@ export function guardrailInputProblems(read: Read, currency: string): GuardrailI
     });
   }
 
+  // Checked only when the form carries them. Missing is not blank here either: a post
+  // without the field keeps the stored value, and blank is refused, because neither
+  // threshold can be switched off.
+  const variants = read("confirmAboveVariants");
+  if (variants !== null && confirmVariantsFrom(variants) === undefined) {
+    problems.push({
+      field: "confirmAboveVariants",
+      message:
+        `${CONFIRM_VARIANTS_LABEL} must be a whole number of 1 or more, such as the default ` +
+        `${formatCount(DEFAULT_CONFIRM_ABOVE_VARIANTS)}. ${typedOrEmpty(variants)}`,
+    });
+  }
+
+  const change = read("confirmAboveChangePercent");
+  if (change !== null && confirmPercentFrom(change) === undefined) {
+    problems.push({
+      field: "confirmAboveChangePercent",
+      message:
+        `${CONFIRM_CHANGE_LABEL} must be a whole number from 1 to 100, such as the default ` +
+        `${DEFAULT_CONFIRM_ABOVE_CHANGE_PERCENT}. ${typedOrEmpty(change)}`,
+    });
+  }
+
   return problems;
+}
+
+function typedOrEmpty(value: FormDataEntryValue): string {
+  const typed = text(value);
+  return typed === "" ? "It is empty." : `“${typed}” is not.`;
 }
 
 function text(value: FormDataEntryValue | null): string {

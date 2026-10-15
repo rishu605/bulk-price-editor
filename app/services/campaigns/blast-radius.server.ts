@@ -1,7 +1,6 @@
 import prisma from "../../db.server";
 import { previewCampaign } from "./preview.server";
-import { scopeSize } from "./scope-size.server";
-import { BLAST_RADIUS_THRESHOLD } from "./types";
+import { confirmationReasons } from "../../lib/campaigns/blast-radius";
 import { formatCount } from "../../lib/format/display";
 
 /**
@@ -19,6 +18,9 @@ import { formatCount } from "../../lib/format/display";
  * Returns the refusal to show, or null to proceed. It re-previews rather than trusting a
  * count from the form for the obvious reason: the number a merchant was shown is not
  * necessarily the number that would be written now.
+ *
+ * The refusal is the dialog's own sentences (`confirmationReasons`), from the same preview
+ * object, so the reasons a merchant is refused for are the reasons the dialog gave (#818).
  */
 export async function blastRadiusRefusal(
   shopId: string,
@@ -28,18 +30,21 @@ export async function blastRadiusRefusal(
   // Answered without a plan wherever it can be (#803). The Apply POST planned the whole
   // campaign here and then `runCampaign` planned it again: on a 102,132-variant campaign,
   // two full loads of candidates and baselines before a price moved, in the pool the
-  // pages and the run share. The word typed needs no plan to check, and a scope no larger
-  // than the threshold cannot write more than it.
+  // pages and the run share. The word typed needs no plan to check -- and a campaign over
+  // the variant threshold always asks for it, so the large ones are answered here.
+  //
+  // A small scope is planned now, where #803 let it through on a count. How far each price
+  // moves is only known from the plan (#818): 95% off three variants writes three prices
+  // and is exactly the campaign the word is for.
   if (typed.trim().toLowerCase() === "apply") return null;
-  if ((await scopeSize(shopId, campaignId)) <= BLAST_RADIUS_THRESHOLD) return null;
 
   const preview = await previewCampaign(shopId, campaignId);
   if (!preview.blastRadius) return null;
 
-  return (
-    `This campaign writes ${formatCount(preview.counts.planned)} prices. ` +
-    `Type \u201Capply\u201D in the confirmation box to run it.`
-  );
+  const reasons = preview.confirm
+    ? confirmationReasons(preview.confirm)
+    : [`This campaign writes ${formatCount(preview.counts.planned)} prices.`];
+  return `${reasons.join(" ")} Type \u201Capply\u201D in the confirmation box to run it.`;
 }
 
 /**
