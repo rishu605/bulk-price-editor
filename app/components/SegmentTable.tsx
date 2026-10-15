@@ -1,7 +1,9 @@
+import { useEffect, useRef } from "react";
 import type { FetcherWithComponents } from "react-router";
 
 import { formatCount } from "../lib/format/display";
 import { deleteBlockedReason } from "../lib/segments/delete-rule";
+import { focusAfterRemoval } from "../lib/ui/focus-after-removal";
 import { SPACE } from "../lib/ui/spacing";
 import { ActionRow } from "./ActionRow";
 import { Blank } from "./Blank";
@@ -45,8 +47,26 @@ export function SegmentTable({
    */
   confirmingDelete?: string;
 }) {
+  // A deleted segment's row leaves with its focused button; focus goes to the row that took
+  // its place rather than the page body (#796). A refused or confirming delete keeps the row,
+  // so nothing moves.
+  const table = useRef<HTMLElement | null>(null);
+  const deleting = useRef<number | null>(null);
+  const count = useRef(segments.length);
+  useEffect(() => {
+    if (deleting.current !== null && segments.length < count.current) {
+      focusAfterRemoval(table.current, deleting.current, null);
+      deleting.current = null;
+    }
+    count.current = segments.length;
+  }, [segments.length]);
+
   return (
-    <s-table>
+    <s-table
+      ref={(element) => {
+        table.current = element;
+      }}
+    >
       <s-table-header-row>
         <s-table-header listSlot="primary">Name</s-table-header>
         <s-table-header listSlot="inline">Kind</s-table-header>
@@ -57,7 +77,7 @@ export function SegmentTable({
         <s-table-header listSlot="inline">Action</s-table-header>
       </s-table-header-row>
       <s-table-body>
-        {segments.map((segment) => (
+        {segments.map((segment, index) => (
           <s-table-row key={segment.id}>
             <s-table-cell>
               <s-stack gap={SPACE.tight}>
@@ -86,7 +106,7 @@ export function SegmentTable({
             <s-table-cell>
               <ActionRow>
               {/* A link, so the form it opens survives a reload (#742). */}
-              <s-button variant="secondary" icon="edit" href={`?edit=${segment.id}`}>
+              <s-button variant="secondary" icon="edit" href={`?edit=${segment.id}`} accessibilityLabel={`Edit ${segment.name}`}>
                 Edit
               </s-button>
               {deleteBlockedReason(segment.usedBy) ? (
@@ -95,7 +115,7 @@ export function SegmentTable({
                 // campaign and what to do to it (#776).
                 <s-text>{deleteBlockedReason(segment.usedBy)}</s-text>
               ) : (
-                <Form method="post">
+                <Form method="post" onSubmit={() => (deleting.current = index)}>
                   <input type="hidden" name="intent" value="delete" />
                   <input type="hidden" name="segmentId" value={segment.id} />
                   {confirmingDelete === segment.id ? <input type="hidden" name="acknowledged" value="1" /> : null}
@@ -108,6 +128,7 @@ export function SegmentTable({
                     variant="secondary"
                     icon="delete"
                     loading={busy || undefined}
+                    accessibilityLabel={`${confirmingDelete === segment.id ? "Delete anyway" : "Delete"}: ${segment.name}`}
                   >
                     {confirmingDelete === segment.id ? "Delete anyway" : "Delete"}
                   </s-button>

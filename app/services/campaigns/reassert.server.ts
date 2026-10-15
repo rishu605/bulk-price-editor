@@ -113,11 +113,17 @@ export async function reassertDrift(
   const released = await releaseHold(shopId, campaign.id, actor);
   const running = released?.changed ? ` "${campaign.name}" is running again.` : "";
 
+  // The variant by name (#796), so two put-backs in a row are two different sentences.
+  const variant = await prisma.variantIndex.findFirst({
+    where: { shopId, variantGid: event.variantGid },
+    select: { title: true },
+  });
+  const which = variant?.title ? `"${variant.title}"` : "this variant";
   return {
     ok: true,
     message:
       outcome.verified > 0
-        ? `Put back: "${campaign.name}"'s price is on the storefront again, written and read back.${running}`
-        : `"${campaign.name}" has no different price to write for this variant, so nothing was written. The drift is closed.${running}`,
+        ? `Put back: ${which} has "${campaign.name}"'s price on the storefront again, written and read back.${running}`
+        : `"${campaign.name}" has no different price to write for ${which}, so nothing was written. The drift is closed.${running}`,
   };
 }

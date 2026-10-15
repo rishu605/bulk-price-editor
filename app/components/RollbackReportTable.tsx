@@ -99,7 +99,9 @@ export function RollbackReportTable({ rows }: { rows: RollbackRow[] }) {
                 // Named `keep`, and read as a list by the revert action. Unchecked by
                 // default: reverting is what the merchant asked for, and the checkbox
                 // is them making an exception, not confirming the obvious.
-                <s-checkbox name="keep" value={row.variantGid} label="Leave as it is" />
+                // The variant in the label (#796): `s-checkbox` has no accessible name but
+                // its label, and "Leave as it is" read N times could not say which edit.
+                <s-checkbox name="keep" value={row.variantGid} label={`Leave ${row.title} as it is`} />
               ) : (
                 <s-text>—</s-text>
               )}

@@ -98,6 +98,7 @@ export function CampaignLedgerTab({
                         loading={busy || undefined}
                         commandFor={VARIANT_REVERT_MODAL_ID}
                         command="--show"
+                        accessibilityLabel={`Revert ${row.title}`}
                         onClick={() => setTarget(revertTarget(row, rollback, excludedVariantGids))}
                       >
                         Revert this variant

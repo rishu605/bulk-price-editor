@@ -15,7 +15,7 @@ import { ensureShop } from "../services/shop.server";
 import { actorFor } from "../lib/audit/actor";
 import { toAdminClient } from "../services/admin-client.server";
 import { reassertDrift } from "../services/campaigns/reassert.server";
-import { resolveDrift, type DriftResolution, type DriftRow } from "../services/drift.server";
+import { driftTitle, resolveDrift, type DriftResolution, type DriftRow } from "../services/drift.server";
 import { batchStatus, decideDrift, driftQueue } from "../services/drift-queue.server";
 import {
   batchParamFrom,
@@ -29,6 +29,8 @@ import {
   type DriftChoice,
 } from "../lib/drift/batch";
 import { RouteBoundary } from "../components/RouteBoundary";
+import { focusAfterRemoval } from "../lib/ui/focus-after-removal";
+import { choiceName } from "../lib/drift/choice-name";
 import { withGuard } from "../lib/errors/guard.server";
 import { AppError } from "../lib/errors/app-error";
 import { PageShell } from "../components/PageShell";
@@ -108,10 +110,13 @@ export const action = withGuard("/app/prices/drift", async ({ request }: ActionF
       return await reassertDrift(shop.id, eventId, toAdminClient(admin), actor);
     }
 
+    const title = await driftTitle(shop.id, eventId);
     const { released } = await resolveDrift(shop.id, eventId, resolution, actor);
+    // Named (#796): which price the decision was about, and a different sentence for each.
+    const which = title ? `"${title}"` : "That price";
     const wording: Record<typeof resolution, string> = {
-      adopt: "Adopted as the new baseline. Future campaigns compute from this price.",
-      ignore: "Ignored. The price stays as the merchant left it.",
+      adopt: `${which} is the new baseline. Future campaigns compute from this price.`,
+      ignore: `${which} is left as the merchant set it, for now.`,
     };
     return {
       ok: true,
@@ -135,6 +140,18 @@ export default function DriftQueue() {
   const [params, setSearchParams] = useSearchParams();
   const fetcher = useFetcher<ActionData>();
   const busy = fetcher.state !== "idle";
+
+  // After a decision removes its row, focus goes to the row that took its place, or to the
+  // count line when none are left -- not to the page body (#796).
+  const table = useRef<HTMLElement | null>(null);
+  const countLineRef = useRef<HTMLElement | null>(null);
+  const outcomeRef = useRef<HTMLElement | null>(null);
+  const decided = useRef<number | null>(null);
+  useEffect(() => {
+    if (decided.current === null || fetcher.state !== "idle") return;
+    focusAfterRemoval(table.current, decided.current, countLineRef.current ?? outcomeRef.current);
+    decided.current = null;
+  }, [rows, fetcher.state]);
 
   // A decision the worker has: the page follows it through its URL, so a reload keeps
   // following, and asks again every few seconds until it is done.
@@ -179,7 +196,15 @@ export default function DriftQueue() {
           </s-paragraph>
         </s-banner>
       ) : fetcher.data && !handedOff ? (
-        <s-banner tone={fetcher.data.ok ? "success" : "critical"}>
+        <s-banner
+          tone={fetcher.data.ok ? "success" : "critical"}
+          ref={(element) => {
+            // Where focus lands when the last row is gone (#796): the sentence saying what
+            // the decision did, rather than the page body.
+            element?.setAttribute("tabindex", "-1");
+            outcomeRef.current = element;
+          }}
+        >
           <s-paragraph>{fetcher.data.message}</s-paragraph>
         </s-banner>
       ) : null}
@@ -240,7 +265,16 @@ export default function DriftQueue() {
                 {/* The count and the export on one line, because the count is exactly what
                     the export holds and what a decision below covers. */}
                 <ActionRow>
-                  <s-text fontVariantNumeric="tabular-nums">{countLine(filtered, total, isFiltered(filters))}</s-text>
+                  <s-text
+                    fontVariantNumeric="tabular-nums"
+                    ref={(element) => {
+                      // Focusable by script only, as the place focus lands when no row is left.
+                      element?.setAttribute("tabindex", "-1");
+                      countLineRef.current = element;
+                    }}
+                  >
+                    {countLine(filtered, total, isFiltered(filters))}
+                  </s-text>
                   <ExportButton
                     href={`/app/export/drift${exportQuery(params)}`}
                     filename="anchor-price-drift.csv"
@@ -254,7 +288,11 @@ export default function DriftQueue() {
                 <TableBlock
                   pagination={<Pagination page={page} total={filtered} pageSize={ROWS_PER_VIEW} noun="drifted prices" />}
                 >
-                  <s-table>
+                  <s-table
+                    ref={(element) => {
+                      table.current = element;
+                    }}
+                  >
                     <s-table-header-row>
                       <s-table-header listSlot="primary">Variant</s-table-header>
                       <s-table-header listSlot="labeled" format="currency">Campaign set</s-table-header>
@@ -263,8 +301,14 @@ export default function DriftQueue() {
                       <s-table-header listSlot="inline">Resolve</s-table-header>
                     </s-table-header-row>
                     <s-table-body>
-                      {rows.map((event) => (
-                        <DriftDecision key={event.id} event={event} fetcher={fetcher} busy={busy} />
+                      {rows.map((event, index) => (
+                        <DriftDecision
+                          key={event.id}
+                          event={event}
+                          fetcher={fetcher}
+                          busy={busy}
+                          onDecide={() => (decided.current = index)}
+                        />
                       ))}
                     </s-table-body>
                   </s-table>
@@ -361,16 +405,20 @@ function DriftDecision({
   event,
   fetcher,
   busy,
+  onDecide,
 }: {
   event: DriftRow;
   fetcher: FetcherWithComponents<ActionData>;
   busy: boolean;
+  /** Told before the decision posts, so the page knows where focus goes when the row leaves. */
+  onDecide: () => void;
 }) {
   const form = useRef<HTMLFormElement>(null);
   const resolution = useRef<HTMLInputElement>(null);
 
   const resolve = (value: DriftResolution) => {
     if (resolution.current) resolution.current.value = value;
+    onDecide();
     form.current?.requestSubmit();
   };
 
@@ -399,6 +447,10 @@ function DriftDecision({
                 type="button"
                 tone={choice.tone}
                 loading={busy || undefined}
+                // The variant, and for Keep what it does, in the name a screen reader reads
+                // (#796): three identical names a row, and the consequential one told apart
+                // only by colour.
+                accessibilityLabel={choiceName(choice.value, event.title)}
                 onClick={() => resolve(choice.value)}
               >
                 {choice.label}

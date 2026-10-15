@@ -22,6 +22,12 @@ interface Props {
  * it, the page fell back to its first tab, and the merchant who asked for a ledger landed on
  * Overview with nothing saying where the ledger had gone.
  */
+/** Which run's ledger a link opens, for a screen reader moving through the column (#796). */
+export function runLedgerName(run: { kind: string; finishedAt: string | null }, timeZone: string): string {
+  const which = `${humanise(run.kind).toLowerCase()} run`;
+  return run.finishedAt ? `View the ledger of the ${which} that finished ${formatWhen(run.finishedAt, timeZone)}` : `View the ledger of the ${which} still running`;
+}
+
 export function ledgerHref(current: URLSearchParams, runId: string): string {
   const next = new URLSearchParams(current);
   next.set("tab", "ledger");
@@ -44,7 +50,7 @@ export function RunHistoryTable({ runs, selectedRunId, timeZone }: Props) {
         <s-table-header listSlot="labeled" format="numeric">Verified</s-table-header>
         <s-table-header listSlot="labeled" format="numeric">Failed</s-table-header>
         <s-table-header listSlot="kicker">Finished</s-table-header>
-        <s-table-header listSlot="inline"></s-table-header>
+        <s-table-header listSlot="inline">Ledger</s-table-header>
       </s-table-header-row>
       <s-table-body>
         {runs.map((run) => (
@@ -63,7 +69,9 @@ export function RunHistoryTable({ runs, selectedRunId, timeZone }: Props) {
               {run.id === selectedRunId ? (
                 <s-text>Showing</s-text>
               ) : hasLedger(run) ? (
-                <s-link href={ledgerHref(params, run.id)}>View ledger</s-link>
+                <s-link href={ledgerHref(params, run.id)} accessibilityLabel={runLedgerName(run, timeZone)}>
+                  View ledger
+                </s-link>
               ) : (
                 // No rows, so no Ledger tab to open: the page would fall back to Overview.
                 <s-text color="subdued">Nothing written</s-text>
