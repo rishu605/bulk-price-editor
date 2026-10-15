@@ -262,6 +262,8 @@ describe("revert buffer capping", () => {
     );
     expect(warnings.join(" ")).toContain("longer than half the window");
     expect(warnings.join(" ")).toContain("under five minutes");
+    // One minute, in the singular (#759) -- it said "1 minute(s)".
+    expect(warnings.join(" ")).toContain("capped at 1 minute.");
   });
 
   it("warns when the end is not after the start", () => {

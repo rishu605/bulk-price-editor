@@ -203,7 +203,7 @@ export function scheduleWarnings(schedule: Schedule): string[] {
         warnings.push(
           `The revert buffer is longer than half the window, so there would be almost ` +
             `no time to apply prices before reverting them. It has been capped at ` +
-            `${Math.max(1, Math.round(duration / 2 / 60_000))} minute(s).`,
+            `${countOf(Math.max(1, Math.round(duration / 2 / 60_000)), "minute")}.`,
         );
       }
       if (duration < 5 * 60_000) {

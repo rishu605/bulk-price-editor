@@ -13,6 +13,7 @@
 import prisma from "../db.server";
 import { asAuditMoney, auditMoney, describeAuditMoney } from "../lib/audit/money";
 import { dayRange } from "../lib/scheduling/day-range";
+import { countOf } from "../lib/format/display";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import type { ActivityEntry } from "../lib/reporting/activity-csv";
 
@@ -261,7 +262,7 @@ function render(value: unknown): string {
   const price = asAuditMoney(value);
   if (price) return describeAuditMoney(price);
   if (typeof value === "string") return value.length > 60 ? `${value.slice(0, 57)}…` : value;
-  if (Array.isArray(value)) return value.length === 0 ? "none" : `${value.length} item(s)`;
+  if (Array.isArray(value)) return value.length === 0 ? "none" : countOf(value.length, "item");
   if (typeof value === "object") return JSON.stringify(value).slice(0, 60);
   return String(value);
 }

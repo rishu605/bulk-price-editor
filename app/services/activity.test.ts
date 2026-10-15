@@ -53,7 +53,7 @@ describe("summarise", () => {
     // A frozen segment's variant list is thousands of gids. Rendering it would make
     // the row unreadable and the page enormous.
     expect(summarise("segment.update", null, { variantGids: ["a", "b", "c"] })).toBe(
-      "variantGids: 3 item(s)",
+      "variantGids: 3 items",
     );
     expect(summarise("segment.update", null, { variantGids: [] })).toBe("variantGids: none");
   });

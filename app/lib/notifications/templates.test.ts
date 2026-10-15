@@ -135,6 +135,24 @@ describe("compose", () => {
     expect(email.text).toContain("has not overwritten them");
   });
 
+  it("counts in the singular for one and groups large counts, subject and body (#759)", () => {
+    const one = compose({ kind: "run-completed", campaignId: "c1", campaignName: "Summer", counts: counts({ verified: 1 }) });
+    expect(one.subject).toBe('"Summer" finished — 1 variant updated');
+
+    const partial = compose({ kind: "run-partial", campaignId: "c1", campaignName: "Summer", counts: counts({ failed: 1 }) });
+    expect(partial.subject).toBe('"Summer" finished partially — 1 row needs attention');
+
+    const big = compose({ kind: "run-partial", campaignId: "c1", campaignName: "Summer", counts: counts({ verified: 3669, unverified: 1200 }) });
+    expect(big.subject).toContain("1,200 rows need attention");
+    expect(big.text).toContain("Variants updated and verified: 3,669");
+
+    const drift = compose({ kind: "drift-hold", campaignId: "c1", campaignName: "Summer", driftedCount: 1 });
+    expect(drift.subject).toBe('"Summer" — 1 price changed outside the app');
+
+    const digest = compose({ kind: "weekly-digest", shopName: "DartMode", campaignsRun: 1, variantsChanged: 123_456, driftOpen: 0, partialRuns: 0 });
+    expect(digest.text).toContain("Variants changed: 123,456");
+  });
+
   it("says plainly when a digest needs nothing from the merchant", () => {
     const quiet = compose({
       kind: "weekly-digest",
