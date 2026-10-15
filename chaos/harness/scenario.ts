@@ -96,6 +96,7 @@ export async function withChaos(
 
   const client = chaosAdminClient(server.endpoint());
   let passed = false;
+  fixtureDomain = fixture.domain;
 
   const context: ChaosContext = {
     fixture,
@@ -158,9 +159,28 @@ export async function withChaos(
     await body(context);
     passed = true;
   } finally {
+    fixtureDomain = null;
     await server.stop();
     if (passed) await destroyFixture(fixture.domain);
   }
+}
+
+/** The running scenario's fixture shop, while one runs. */
+let fixtureDomain: string | null = null;
+
+/**
+ * The fake's admin client for the running scenario's own fixture shop, and null for any
+ * other (#881).
+ *
+ * The scheduler's `tick` reads every shop in the database. Locally that includes the dev
+ * stores' real campaigns -- and other scenarios' fixtures, in other processes -- and a mock
+ * that handed the fake client to any domain ran their due transitions against this
+ * scenario's fake server: a real held campaign on boltify-apps was "reverted" to
+ * COMPLETED against a fake that called every variant deleted. Null is what a shop with no
+ * session gets, so the scheduler leaves those campaigns as a lost session leaves them.
+ */
+export function fixtureAdminClient(domain: string, endpoint: string) {
+  return domain === fixtureDomain ? chaosAdminClient(endpoint) : null;
 }
 
 /** The ledger for a run, for scenarios that assert on specific row states. */

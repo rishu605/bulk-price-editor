@@ -12,8 +12,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import prisma from "../../app/db.server";
-import { chaosAdminClient } from "../harness/http-client";
-import { withChaos } from "../harness/scenario";
+import { fixtureAdminClient, withChaos } from "../harness/scenario";
 
 let pending = { shop: "", endpoint: "" };
 
@@ -38,7 +37,7 @@ vi.mock("../../app/shopify.server", () => ({
 
 vi.mock("../../app/services/admin-client.server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../app/services/admin-client.server")>();
-  return { ...actual, adminClientForShop: async () => chaosAdminClient(pending.endpoint) };
+  return { ...actual, adminClientForShop: async (domain: string) => fixtureAdminClient(domain, pending.endpoint) };
 });
 
 async function press(intent: string, campaignId: string) {

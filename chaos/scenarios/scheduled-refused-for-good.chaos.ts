@@ -31,13 +31,12 @@ import { reschedule } from "../../app/services/campaigns/schedule-control.server
 import { tick } from "../../app/services/scheduler.server";
 import { DEFAULT_SETTINGS, writeSettings } from "../../app/services/settings.server";
 import { createSegment } from "../../app/services/segments-crud.server";
-import { chaosAdminClient } from "../harness/http-client";
-import { withChaos, type ChaosContext } from "../harness/scenario";
+import { type ChaosContext, fixtureAdminClient, withChaos } from "../harness/scenario";
 
 let endpoint = "";
 vi.mock("../../app/services/admin-client.server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../app/services/admin-client.server")>();
-  return { ...actual, adminClientForShop: async () => chaosAdminClient(endpoint) };
+  return { ...actual, adminClientForShop: async (domain: string) => fixtureAdminClient(domain, endpoint) };
 });
 
 const sent: Array<{ shopId: string; notification: Notification }> = [];

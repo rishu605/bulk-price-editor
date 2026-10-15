@@ -12,13 +12,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import prisma from "../../app/db.server";
 import { filtersFrom, listCampaigns } from "../../app/services/campaigns/list.server";
-import { chaosAdminClient } from "../harness/http-client";
-import { withChaos } from "../harness/scenario";
+import { fixtureAdminClient, withChaos } from "../harness/scenario";
 
 let endpoint = "";
 vi.mock("../../app/services/admin-client.server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../app/services/admin-client.server")>();
-  return { ...actual, adminClientForShop: async () => chaosAdminClient(endpoint) };
+  return { ...actual, adminClientForShop: async (domain: string) => fixtureAdminClient(domain, endpoint) };
 });
 
 describe("chaos: a scheduled window that can never open", () => {

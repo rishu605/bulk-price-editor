@@ -16,14 +16,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import prisma from "../../app/db.server";
 import { tick } from "../../app/services/scheduler.server";
-import { chaosAdminClient } from "../harness/http-client";
-import { withChaos, type ChaosContext } from "../harness/scenario";
+import { type ChaosContext, fixtureAdminClient, withChaos } from "../harness/scenario";
 
 let endpoint = "";
 
 vi.mock("../../app/services/admin-client.server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../app/services/admin-client.server")>();
-  return { ...actual, adminClientForShop: async () => chaosAdminClient(endpoint) };
+  return { ...actual, adminClientForShop: async (domain: string) => fixtureAdminClient(domain, endpoint) };
 });
 
 /** A window campaign whose start has just passed, still SCHEDULED. */

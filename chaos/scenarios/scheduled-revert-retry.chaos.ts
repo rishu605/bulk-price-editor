@@ -16,14 +16,13 @@ import { describe, expect, it, vi } from "vitest";
 import prisma from "../../app/db.server";
 import { tick } from "../../app/services/scheduler.server";
 import { isVariantWrite } from "../harness/faults";
-import { chaosAdminClient } from "../harness/http-client";
-import { withChaos, type ChaosContext } from "../harness/scenario";
+import { type ChaosContext, fixtureAdminClient, withChaos } from "../harness/scenario";
 
 let endpoint = "";
 
 vi.mock("../../app/services/admin-client.server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../app/services/admin-client.server")>();
-  return { ...actual, adminClientForShop: async () => chaosAdminClient(endpoint) };
+  return { ...actual, adminClientForShop: async (domain: string) => fixtureAdminClient(domain, endpoint) };
 });
 
 /** An applied campaign whose window has closed: its scheduled revert is due now. */

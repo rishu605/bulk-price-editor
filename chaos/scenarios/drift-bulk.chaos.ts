@@ -15,8 +15,7 @@ import prisma from "../../app/db.server";
 import { holdForDrift } from "../../app/services/campaigns/lifecycle.server";
 import type { JobRef, QueueName } from "../../app/worker/queues";
 import { isVariantWrite } from "../harness/faults";
-import { chaosAdminClient } from "../harness/http-client";
-import { withChaos, type ChaosContext } from "../harness/scenario";
+import { type ChaosContext, fixtureAdminClient, withChaos } from "../harness/scenario";
 
 let pending = { shop: "", endpoint: "" };
 const enqueued: Array<{ name: QueueName; ref: JobRef }> = [];
@@ -56,7 +55,7 @@ vi.mock("../../app/worker/web-queue.server", async (importOriginal) => ({
 
 vi.mock("../../app/services/admin-client.server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../app/services/admin-client.server")>();
-  return { ...actual, adminClientForShop: async () => chaosAdminClient(pending.endpoint) };
+  return { ...actual, adminClientForShop: async (domain: string) => fixtureAdminClient(domain, pending.endpoint) };
 });
 
 // Read on every use, so one scenario can sit a fixture of a few prices on the far side

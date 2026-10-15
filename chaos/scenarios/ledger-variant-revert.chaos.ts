@@ -20,7 +20,7 @@ import prisma from "../../app/db.server";
 import { createCampaign } from "../../app/services/campaigns/model.server";
 import { runCampaign } from "../../app/services/campaigns/run.server";
 import { chaosAdminClient } from "../harness/http-client";
-import { withChaos, type ChaosContext } from "../harness/scenario";
+import { type ChaosContext, fixtureAdminClient, withChaos } from "../harness/scenario";
 
 let pending = { shop: "", endpoint: "" };
 
@@ -45,7 +45,7 @@ vi.mock("../../app/shopify.server", () => ({
 
 vi.mock("../../app/services/admin-client.server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../app/services/admin-client.server")>();
-  return { ...actual, adminClientForShop: async () => chaosAdminClient(pending.endpoint) };
+  return { ...actual, adminClientForShop: async (domain: string) => fixtureAdminClient(domain, pending.endpoint) };
 });
 
 type Reply = { ok: boolean; message: string; errorId?: string | null };

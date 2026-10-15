@@ -14,8 +14,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import prisma from "../../app/db.server";
 import { tick } from "../../app/services/scheduler.server";
-import { chaosAdminClient, chaosAdminContext } from "../harness/http-client";
-import { withChaos, type ChaosContext } from "../harness/scenario";
+import { chaosAdminContext } from "../harness/http-client";
+import { type ChaosContext, fixtureAdminClient, withChaos } from "../harness/scenario";
 
 let pending = { shop: "" };
 let endpoint = "";
@@ -29,7 +29,7 @@ vi.mock("../../app/shopify.server", () => ({
 
 vi.mock("../../app/services/admin-client.server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../app/services/admin-client.server")>();
-  return { ...actual, adminClientForShop: async () => chaosAdminClient(endpoint) };
+  return { ...actual, adminClientForShop: async (domain: string) => fixtureAdminClient(domain, endpoint) };
 });
 
 const HOUR = 60 * 60_000;

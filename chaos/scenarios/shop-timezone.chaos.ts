@@ -20,8 +20,8 @@ import prisma from "../../app/db.server";
 import type { ShopifyAdminContext } from "../../app/services/admin-client.server";
 import { formatClock } from "../../app/lib/format/display";
 import { describeSchedule, parseSchedule } from "../../app/lib/scheduling/window";
-import { chaosAdminClient, chaosAdminContext } from "../harness/http-client";
-import { withChaos, type ChaosContext } from "../harness/scenario";
+import { chaosAdminContext } from "../harness/http-client";
+import { type ChaosContext, fixtureAdminClient, withChaos } from "../harness/scenario";
 
 let pending: { shop: string; admin: ShopifyAdminContext | null; endpoint: string } = { shop: "", admin: null, endpoint: "" };
 
@@ -33,7 +33,7 @@ vi.mock("../../app/shopify.server", () => ({
 
 vi.mock("../../app/services/admin-client.server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../app/services/admin-client.server")>();
-  return { ...actual, adminClientForShop: async () => chaosAdminClient(pending.endpoint) };
+  return { ...actual, adminClientForShop: async (domain: string) => fixtureAdminClient(domain, pending.endpoint) };
 });
 
 const NEW_YORK = "America/New_York";
