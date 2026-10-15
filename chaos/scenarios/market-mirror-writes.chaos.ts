@@ -212,9 +212,13 @@ describe("chaos: a campaign's market prices in the mirror and on What's live (#7
       for (const list of [EU, JP]) await expectMirrorIsStore(chaos, list, "after a variant revert");
       expect((await mirrorOf(shopId, EU)).get(victim)).toEqual({ price: 5_000n, compareAt: null });
 
+      // Japan's price follows its percentage again, so it has no fixed price and no row
+      // (#1002): only the hand-set Europe price is a price the list stores.
+      expect(chaos.fake.fixedPricesOn(JP).has(victim), "the variant was pinned on Japan's percentage list").toBe(false);
+
       // What's live shows where it is now, and not "because of" the sale that let it go.
       const page = await whatsLive(chaos, victim);
-      expect(page.rows.map((row) => row.priceListGid).sort()).toEqual(["", EU, JP].sort());
+      expect(page.rows.map((row) => row.priceListGid).sort()).toEqual(["", EU].sort());
       for (const row of page.rows) {
         expect(row.campaignId, `${row.surface} is because of the campaign that let it go`).toBeNull();
         expect(row.drifted).toBe(false);
@@ -298,8 +302,10 @@ describe("chaos: a campaign's market prices in the mirror and on What's live (#7
       chaos.arm([{ fault: "server-error", match: (query) => query.includes("priceListFixedPricesAdd") }]);
       const applied = await chaos.apply();
       chaos.heal();
-      // Not `expectHonest`: a run whose market writes fail still ends Completed, which is
-      // #706's question and not this one's. The run does say so.
+      // Partial, run and campaign, with Resume to finish it (#1001).
+      const verdict = await chaos.expectHonest(applied.runId);
+      expect(verdict.outcome, "an apply whose market prices failed reported clean").toBe("partial");
+      expect((await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } })).status).toBe("PARTIAL");
       expect(applied.messages.join(" ")).toMatch(/Europe \(EUR\): 3 price\(s\) did not apply/);
       expect(chaos.fake.fixedPricesOn(EU).get(variantGids[0])?.amount, "the write landed, so this tests nothing").toBe("50.00");
 

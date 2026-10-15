@@ -33,7 +33,7 @@ import {
   UnconvertedMarketError,
 } from "./market-plan.server";
 import { applyMarketWide, revertMarketWide } from "./market-wide.server";
-import { readDerivedPrices } from "../../lib/execution/market-executor";
+import { readDerivedPrices, readFixedPriceVariants } from "../../lib/execution/market-executor";
 import { parseMoney } from "../../lib/money/money";
 import {
   deleteMarketPrices,
@@ -49,6 +49,8 @@ import { logger } from "../../lib/logging/logger";
 import { metric } from "../../lib/telemetry/metrics";
 import { LANDED } from "../../lib/execution/landed";
 import { inChunks } from "../../lib/db/chunk";
+import { tallyStatuses } from "../../lib/campaigns/run-result";
+import type { PlannedRow } from "../../lib/planning/types";
 import { mirrorMarketDelete, mirrorMarketWrite } from "./mirror.server";
 
 /** Which surfaces a campaign writes to. Stored on the campaign as JSON. */
@@ -233,6 +235,12 @@ export async function applyMarketSurfaces(
      * landed in it, as the base surface leaves its verified rows (#841).
      */
     alreadyLandedIn?: string;
+    /**
+     * A run taking variants out of the campaign: one that nobody prices here any more, and
+     * whose price on the list was not the merchant's own, has its fixed price removed so it
+     * follows the list again, rather than pinned at the price the list derives today (#1002).
+     */
+    letFollow?: boolean;
   } = {},
 ): Promise<MarketSurfaceOutcome[]> {
   const campaign = await prisma.campaign.findUnique({
@@ -364,8 +372,25 @@ export async function applyMarketSurfaces(
       continue;
     }
 
+    // "Revert this variant" wrote the recomputed price as a fixed price (#1002). On a list
+    // priced by a percentage that pins the variant: from then on it ignored the list and
+    // stopped following the store price the way the rest of the list does. A whole revert
+    // deletes the campaign's fixed price instead (#930); this does the same, for the same
+    // variants -- those nobody else prices here, whose price before the campaign the list
+    // derived. A hand-set one is written back below, as the whole revert writes it.
+    const following = options.letFollow ? await followersAmong(shopId, list.priceListGid, outcome.rows) : [];
+    if (following.length > 0) {
+      const freed = await releaseFixedPrices(runId, shopId, list, following, client, options.onProgress);
+      outcomes.push({
+        ...summarise(list, freed),
+        path: "per-product",
+        pathReason: "this market's price follows the store price again",
+      });
+    }
+    const released = new Set(following);
+
     const rows: MarketPriceRow[] = outcome.rows
-      .filter((row) => row.status !== "skipped" && row.intendedPrice)
+      .filter((row) => row.status !== "skipped" && row.intendedPrice && !released.has(row.ref.variantGid))
       .map((row) => ({
         variantGid: row.ref.variantGid,
         price: row.intendedPrice!,
@@ -618,19 +643,7 @@ export async function revertMarketSurfaces(
     // hand: their ¥15,000 came back as whatever the percentage derived. Such a variant is
     // planned without this campaign -- its own baseline, or another campaign's price --
     // and written back, ledgered under the revert like any other write.
-    const handSet =
-      recompute && list
-        ? new Set(
-            (
-              await inChunks(variantGids, (batch) =>
-                prisma.baseline.findMany({
-                  where: { shopId, surfaceKind: "MARKET", priceListGid, supersededAt: null, handSet: true, variantGid: { in: batch } },
-                  select: { variantGid: true },
-                }),
-              )
-            ).map((row) => row.variantGid),
-          )
-        : new Set<string>();
+    const handSet = recompute && list ? await handSetAmong(shopId, priceListGid, variantGids) : new Set<string>();
     const followed = variantGids.filter((gid) => !handSet.has(gid));
 
     const deleted = followed.length > 0 ? await deleteMarketPrices(client, priceListGid, followed, onProgress) : null;
@@ -658,6 +671,126 @@ export async function revertMarketSurfaces(
   }
 
   return [...outcomes, ...wideOutcomes(wideMessages)];
+}
+
+/**
+ * Which of these variants had a price on this list the merchant set by hand before the
+ * campaign, as recorded when their market baseline was captured (#930). A revert writes those
+ * back; every other one followed the list, and goes back to following it.
+ */
+async function handSetAmong(shopId: string, priceListGid: string, variantGids: readonly string[]): Promise<Set<string>> {
+  const rows = await inChunks([...variantGids], (batch) =>
+    prisma.baseline.findMany({
+      where: { shopId, surfaceKind: "MARKET", priceListGid, supersededAt: null, handSet: true, variantGid: { in: batch } },
+      select: { variantGid: true },
+    }),
+  );
+  return new Set(rows.map((row) => row.variantGid));
+}
+
+/**
+ * The variants a run taking them out of the campaign lets follow this list again (#1002).
+ *
+ * Only a planned row nobody prices: one another campaign wins is that campaign's price, and
+ * is written as one. Not a hand-set price, which is written back. And none while a campaign's
+ * percentage is on the whole list: a variant left to follow it would follow the sale, so it
+ * is priced on its own, as it always was.
+ */
+async function followersAmong(shopId: string, priceListGid: string, rows: readonly PlannedRow[]): Promise<string[]> {
+  // Pending only: a row a guardrail clamped is at the guardrail's price, not the list's.
+  const unpriced = rows.filter((row) => row.status === "pending" && row.intendedPrice && !row.campaignId).map((row) => row.ref.variantGid);
+  if (unpriced.length === 0) return [];
+
+  const percentage = await prisma.priceListChange.count({
+    where: { shopId, priceListGid, status: { in: ["APPLIED", "VERIFIED"] } },
+  });
+  if (percentage > 0) return [];
+
+  const handSet = await handSetAmong(shopId, priceListGid, unpriced);
+  return unpriced.filter((gid) => !handSet.has(gid));
+}
+
+/**
+ * Removes fixed prices so these variants follow the list again, and reads the list back to
+ * confirm it (#1002).
+ *
+ * Ledgered first (I4): a delete changes what a shopper pays as surely as a write. The row has
+ * no intended price, because there is none -- the list derives it -- and the run's own ledger
+ * is what says this market was put back, so "Revert this variant" can name it. Verified only
+ * once the list no longer holds a fixed price for the variant (rule 5): the delete's answer is
+ * Shopify accepting the request, and a read is what shows it took.
+ */
+async function releaseFixedPrices(
+  runId: string,
+  shopId: string,
+  list: { priceListGid: string; name: string; currency: string },
+  variantGids: readonly string[],
+  client: AdminClient,
+  onProgress?: () => void | Promise<void>,
+): Promise<MarketWriteResult> {
+  await prisma.variantChange.createMany({
+    data: variantGids.map((variantGid) => ({
+      runId,
+      shopId,
+      variantGid,
+      surfaceKind: "MARKET" as const,
+      priceListGid: list.priceListGid,
+      currency: list.currency,
+      intendedPrice: null,
+      intendedCompareAt: null,
+      intendedCompareAtSet: false,
+      status: "PENDING" as const,
+    })),
+    skipDuplicates: true,
+  });
+
+  const deleted = await deleteMarketPrices(client, list.priceListGid, variantGids, onProgress);
+  const answered = deleted.rows.filter((row) => row.status === "verified").map((row) => row.variantGid);
+
+  let unconfirmed: (gid: string) => string | null = () => null;
+  try {
+    const still = answered.length > 0 ? await readFixedPriceVariants(client, list.priceListGid, answered) : new Set<string>();
+    unconfirmed = (gid) => (still.has(gid) ? "Shopify accepted the delete, but the list still holds a fixed price for this variant." : null);
+  } catch (error) {
+    const reason = `The list could not be read back after the delete (${error instanceof Error ? error.message : String(error)}).`;
+    unconfirmed = () => reason;
+  }
+
+  const rows = deleted.rows.map((row) => {
+    const reason = row.status === "verified" ? unconfirmed(row.variantGid) : null;
+    return reason
+      ? {
+          variantGid: row.variantGid,
+          status: "failed" as const,
+          failureReason: reason,
+          guidance: "This variant may still have the campaign's price in this market. Press Revert this variant again to retry.",
+        }
+      : row;
+  });
+  const verified = rows.filter((row) => row.status === "verified").length;
+  const result: MarketWriteResult = { rows, verified, failed: rows.length - verified, chunks: deleted.chunks, clean: verified === rows.length };
+
+  // The mirror first, then the ledger, as a write does: a run that dies between them leaves
+  // rows the mirror already calls unknown.
+  await mirrorMarketDelete(shopId, list, result);
+  await recordResults(runId, shopId, list.priceListGid, result);
+  return result;
+}
+
+/**
+ * A run's market rows that did not land: refused, or never confirmed (#1001).
+ *
+ * Bucketed by `tallyStatuses`, the one classification the run summary and the Partial banner
+ * use, so the run's status cannot disagree with the page that explains it.
+ */
+export async function outstandingMarketRows(runId: string): Promise<{ failed: number; unverified: number }> {
+  const byStatus = await prisma.variantChange.groupBy({
+    by: ["status"],
+    where: { runId, surfaceKind: { not: "BASE" }, priceListGid: { not: "" } },
+    _count: { _all: true },
+  });
+  const counts = tallyStatuses(byStatus.map((entry) => ({ status: entry.status, count: entry._count._all })));
+  return { failed: counts.failed, unverified: counts.unverified + counts.sent + counts.pending };
 }
 
 /**
