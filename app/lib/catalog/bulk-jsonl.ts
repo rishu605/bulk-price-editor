@@ -19,6 +19,7 @@
  */
 
 import { parseMoney, type Money } from "../money/money";
+import { variantDisplayTitle } from "./variant-title";
 
 /** A product line from the bulk query. */
 export interface ProductLine {
@@ -218,10 +219,7 @@ function toRow(child: ChildLine, product: ProductState, currency: string): Catal
     imageUrl: child.image?.url ?? product.imageUrl,
     // The variant's own title where it has one, falling back to the product's. A bare
     // "Default Title" on its own tells a merchant nothing in a list of ten thousand.
-    title:
-      child.title && child.title !== "Default Title"
-        ? `${product.title ?? ""} · ${child.title}`.trim()
-        : (product.title ?? null),
+    title: variantDisplayTitle(product.title, child.title),
     sku: child.sku ?? null,
     barcode: child.barcode ?? null,
     price: child.price ? parseMoney(child.price, currency) : null,
