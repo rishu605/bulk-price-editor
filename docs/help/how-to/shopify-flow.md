@@ -32,6 +32,15 @@ Where to find each ID is at the end of this page.
 Each action does exactly what the equivalent button does. An action that could start a
 campaign the app would have refused would be a way round every safety feature in it.
 
+**A large or deep campaign has to be confirmed before Flow can start it.** When a campaign
+writes more prices, or moves a price further, than your typed-confirmation settings allow,
+the Apply button asks you to type *apply*. Flow cannot type it, so a start that needs it is
+refused, and Flow's run log says why. Open the campaign's **Overview** tab and, under
+**Scheduled and Flow starts**, type *apply* to confirm the campaign as it is now. Flow can then
+start it for as long as it reaches no further than what you confirmed: no more than a tenth
+more prices, and no price moved further than the largest change you saw. If it grows past
+that, Flow is refused again until you confirm it again.
+
 **Capturing baselines is refused while any campaign's prices may be on your store** —
 running, on hold after a price was edited elsewhere, part-applied, or part-way through
 ending. In the app you have to type a confirmation to do that, because it records sale

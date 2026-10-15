@@ -158,6 +158,11 @@ export interface BlastRadius {
   atMinimum: number;
 }
 
+/** Whether what was typed into a confirmation box is the word: "apply", in any case, spaces aside. */
+export function typedTheWord(typed: string): boolean {
+  return typed.trim().toLowerCase() === "apply";
+}
+
 /** Whether a campaign with this preview has to be confirmed by typing the word. */
 export function asksForConfirmation(radius: BlastRadius): boolean {
   return (

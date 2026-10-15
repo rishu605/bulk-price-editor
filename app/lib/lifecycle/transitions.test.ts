@@ -262,6 +262,29 @@ describe("a scheduled campaign past its start that has not started (#851)", () =
   });
 });
 
+describe("a scheduled campaign whose start needs a confirmation it does not have (#1009)", () => {
+  const reason = "8 prices move more than 50% from their baseline. Nobody has confirmed it by typing “apply”.";
+
+  it("says so before the start, and where to confirm it", () => {
+    const described = describeState("SCHEDULED", { unconfirmedStart: reason });
+    expect(described.label).toBe("Scheduled — needs confirming");
+    expect(described.tone).toBe("warning");
+    expect(described.explanation).toContain(reason);
+    expect(described.explanation).toContain("Confirm it under “Scheduled and Flow starts” on the Overview tab.");
+  });
+
+  it("gives way to a refusal for good and to a window that can never open, and comes before a late start", () => {
+    expect(describeState("SCHEDULED", { unconfirmedStart: reason, startRefused: "It grew." }).label).toBe("Scheduled — couldn't start");
+    expect(describeState("SCHEDULED", { unconfirmedStart: reason, neverStarts: "Its window ended." }).label).toBe(
+      "Scheduled — will never start",
+    );
+    expect(describeState("SCHEDULED", { unconfirmedStart: reason, lateStart: "Waiting for approval." }).label).toBe(
+      "Scheduled — needs confirming",
+    );
+    expect(describeState("SCHEDULED", { unconfirmedStart: null }).label).toBe("Scheduled");
+  });
+});
+
 describe("an active campaign whose scheduled end could not run (#1005)", () => {
   it("says its sale prices are still live past its end, why, and to revert by hand", () => {
     const described = describeState("ACTIVE", { endMissed: "Anchor couldn't reach its database." });

@@ -35,6 +35,8 @@ const overview = (over: Partial<CampaignDetailProps> = {}) =>
     busy: false,
     practice: false,
     campaignId: CAMPAIGN_ID,
+    // Nothing on record and nothing asked (#1009).
+    startConfirmation: { confirmed: null, unconfirmed: null },
     ...over,
   }) as unknown as CampaignDetailProps;
 

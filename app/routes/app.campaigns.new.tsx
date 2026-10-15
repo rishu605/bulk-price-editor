@@ -3,7 +3,7 @@ import { catalogueNotice } from "../lib/catalogue/state";
 import { catalogueState } from "../services/catalogue-state.server";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { Form, redirect, useFetcher, useLoaderData } from "react-router";
+import { Form, redirect, useActionData, useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { actorFor } from "../lib/audit/actor";
@@ -18,6 +18,10 @@ import { confirmShopTimezone, windowInStoreZone } from "../services/shop-timezon
 import { facetDetails } from "../lib/segments/facets";
 import { facets } from "../services/segments.server";
 import { createCampaign } from "../services/campaigns/index.server";
+import { unsavedCampaign } from "../services/campaigns/model.server";
+import { saveStart } from "../services/campaigns/start-confirmation.server";
+import type { CampaignInput } from "../services/campaigns/types";
+import { StartConfirmationAsk } from "../components/campaign/StartConfirmation";
 import { formatScheduleInstant, type Schedule } from "../lib/scheduling/window";
 import { practiceWindowProblem, typedWindow, windowInputProblem } from "../lib/scheduling/window-input";
 import { presetStartFor } from "../lib/scheduling/calendar";
@@ -396,9 +400,7 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
     });
   }
 
-  const campaign = await createCampaign(
-    shop.id,
-    {
+  const input: CampaignInput = {
     name: String(form.get("name") ?? "Untitled campaign").trim() || "Untitled campaign",
     ast: astFrom(readerFor(params)),
     ...(segmentId ? { segmentId } : {}),
@@ -417,9 +419,19 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
       .filter(Boolean),
     priceLists,
     schedule,
-    },
-    { actor },
-  );
+  };
+
+  // A dated campaign is started by the scheduler, which cannot ask for the typed
+  // confirmation, so the save asks for it instead (#1009): the start's own check, over the
+  // campaign as it is about to be stored. Answered as data rather than thrown, so the form
+  // keeps everything typed into it and shows the box beside the button.
+  if (schedule) {
+    const start = await saveStart(shop.id, await unsavedCampaign(shop.id, input), String(form.get("confirmation") ?? ""), actor);
+    if (!start.ok) return { confirm: { unconfirmed: start.unconfirmed, radius: start.radius } };
+    if (start.confirmation) input.startConfirmed = start.confirmation;
+  }
+
+  const campaign = await createCampaign(shop.id, input, { actor });
 
   return redirect(`/app/campaigns/${campaign.id}`);
 });
@@ -453,6 +465,9 @@ export default function NewCampaign() {
     firstPreview,
     baseCurrency,
   } = useLoaderData<typeof loader>();
+
+  // A dated save the start check asked about (#1009): the box that asks sits by the button.
+  const answer = useActionData<typeof action>();
 
   // The live price preview. Debounced, because it plans the whole scope on every call
   // and a merchant typing "-20" would otherwise ask three times on the way there.
@@ -1169,6 +1184,16 @@ export default function NewCampaign() {
           button was reachable before the merchant had read the section that decides
           which products the rule applies to. A form's submit belongs after the last
           thing it is submitting. */}
+      {/* The scheduler starts a dated campaign with nobody there to type the word, so the
+          save asks for it when the start would need it (#1009), in the server's sentence. */}
+      {!fromFile && answer?.confirm ? (
+        <StartConfirmationAsk
+          unconfirmed={answer.confirm.unconfirmed}
+          radius={answer.confirm.radius}
+          label="Type apply to schedule it"
+        />
+      ) : null}
+
       {fromFile ? null : (
         <ActionRow>
           {/* Disabled rather than refused after the fact: telling a merchant afterwards

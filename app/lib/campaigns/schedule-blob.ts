@@ -9,11 +9,15 @@
  * though its source was practice, and lost its rounding (#762).
  */
 
+import { START_CONFIRMED_KEY } from "./start-confirmation";
+
 /**
  * The keys that say when a campaign runs. Everything else in the blob is what it prices.
  *
  * `startRefused` is a start the scheduler was refused for good (#975): it belongs to the
  * dates, so a copy, an unschedule or new dates leave it behind.
+ *
+ * Not `startConfirmed` (#1009), which is about what the campaign writes: see `OWN_KEYS`.
  */
 export const WINDOW_KEYS = ["kind", "startAt", "endAt", "revertBufferMinutes", "clockNotes", "zone", "startRefused", "endMissed"] as const;
 
@@ -27,4 +31,20 @@ export function definitionOf(schedule: unknown): Record<string, unknown> {
 /** The definition, run by hand: what a campaign with no dates stores. */
 export function manualSchedule(schedule: unknown): Record<string, unknown> {
   return { ...definitionOf(schedule), kind: "manual" };
+}
+
+/**
+ * Keys that belong to this campaign's own record rather than to what it prices or when.
+ *
+ * `startConfirmed` is a person's typed confirmation of what this campaign reaches (#1009). It
+ * is not a window key: moving the dates changes nothing the campaign writes, and every start
+ * is checked against it anyway. But a copy is a new campaign that person never confirmed.
+ */
+export const OWN_KEYS = [START_CONFIRMED_KEY] as const;
+
+/** What a copy stores: the definition, run by hand, without the source's own record. */
+export function copiedSchedule(schedule: unknown): Record<string, unknown> {
+  const copy = manualSchedule(schedule);
+  for (const key of OWN_KEYS) delete copy[key];
+  return copy;
 }

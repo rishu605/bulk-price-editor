@@ -11,6 +11,7 @@ import { describeActor } from "../../lib/audit/actor";
 import { ALL_STATES, describeState } from "../../lib/lifecycle/transitions";
 import { humanise } from "../../lib/format/label";
 import { CampaignNote } from "./CampaignNote";
+import { StartConfirmationCard } from "./StartConfirmation";
 import type { CampaignDetailProps } from "./props";
 import { Card } from "../Card";
 import { CopyableId } from "../CopyableId";
@@ -97,6 +98,9 @@ export function CampaignOverviewTab(props: CampaignDetailProps) {
           </s-banner>
         ) : null}
       </Card>
+
+      {/* Whether the scheduler and Flow may start it without anyone typing the word (#1009). */}
+      <StartConfirmationCard {...props} />
 
       {/* What Shopify Flow's Start and End actions ask for (#826). Last on the tab and
           without a heading: it is reference, looked up once when an automation is set

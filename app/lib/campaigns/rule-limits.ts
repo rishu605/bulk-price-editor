@@ -27,24 +27,46 @@ export function reductionProblem(percent: number): string | null {
 }
 
 /**
- * Why a stored campaign's rule cannot be applied, naming the next action, or null.
+ * The reduction, in whole percent, of the first rule row that takes prices to nothing, or null.
  *
  * Every rule row is checked, not only the first: a row that matched no variant in today's
  * catalogue matches one tomorrow.
  */
-export function unappliableRule(ruleRows: unknown): string | null {
+function refusedReduction(ruleRows: unknown): number | null {
   const rows = Array.isArray(ruleRows) ? (ruleRows as Array<{ rule?: AdjustmentRule }>) : [];
 
   for (const { rule } of rows) {
     if (!rule) continue;
     if ((rule.kind === "percent-change" || rule.kind === "percent-of-compare-at") && reducesToNothing(rule.percent)) {
-      return (
-        `This campaign reduces prices by ${Math.abs(rule.percent)}%, which would make every price free or ` +
-        `negative, so it cannot be applied. Create a campaign with a reduction under ${MAX_REDUCTION_PERCENT}% ` +
-        "and archive this one."
-      );
+      return Math.abs(rule.percent);
     }
   }
 
   return null;
+}
+
+/** Why a stored campaign's rule cannot be applied, naming the next action, or null. */
+export function unappliableRule(ruleRows: unknown): string | null {
+  const percent = refusedReduction(ruleRows);
+  if (percent === null) return null;
+  return (
+    `This campaign reduces prices by ${percent}%, which would make every price free or ` +
+    `negative, so it cannot be applied. Create a campaign with a reduction under ${MAX_REDUCTION_PERCENT}% ` +
+    "and archive this one."
+  );
+}
+
+/**
+ * Why a stored campaign cannot be duplicated, naming the rule and the next action, or null
+ * (#1009). The copy would carry the same rule, which every Apply of it refuses: a campaign
+ * made only to be refused is not one to make.
+ */
+export function uncopiableRule(ruleRows: unknown): string | null {
+  const percent = refusedReduction(ruleRows);
+  if (percent === null) return null;
+  return (
+    `This campaign reduces prices by ${percent}%, which would make every price free or negative, so a ` +
+    `copy of it could never be applied, and none was made. Create a new campaign with a reduction under ` +
+    `${MAX_REDUCTION_PERCENT}% instead.`
+  );
 }

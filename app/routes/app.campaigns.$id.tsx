@@ -16,7 +16,8 @@ import {
 import { PAGE_INLINE_BUDGET_MS } from "../lib/execution/inline-budget";
 import { runResponse } from "../lib/campaigns/run-response";
 import { ResultBanner } from "../components/ResultBanner";
-import { describeSchedule, parseSchedule, scheduleWarnings } from "../lib/scheduling/window";
+import { describeSchedule, formatScheduleInstant, parseSchedule, scheduleWarnings } from "../lib/scheduling/window";
+import { startConfirmationView } from "../lib/campaigns/start-confirmation";
 import { scheduledWindow } from "../lib/scheduling/window-input";
 import { zoneShiftOf } from "../lib/scheduling/zone-shift";
 import { scheduleAction } from "../services/campaigns/schedule-control.server";
@@ -91,7 +92,7 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
       : 0;
   const lifecycle = describeState(
     state,
-    await lifecycleContext(shop.id, campaignId, state, record.schedule, shop.timezone, preview.outrankedBy),
+    await lifecycleContext(shop.id, campaignId, state, record.schedule, shop.timezone, preview),
   );
   const history = await transitionHistory(shop.id, campaignId, 8);
 
@@ -154,6 +155,8 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     needsAttention: needsAttention(state),
     heldEdits,
     history,
+    // Whether the scheduler and Flow may start it as it is now (#1009), from this preview.
+    startConfirmation: startConfirmationView(record.schedule, preview.confirm, (at) => formatScheduleInstant(at, shop.timezone)),
   };
 });
 

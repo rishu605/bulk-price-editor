@@ -13,7 +13,8 @@ import { CampaignCalendar } from "../components/campaign/CampaignCalendar";
 import { CampaignListView } from "../components/campaign/CampaignListView";
 import { HelpNote } from "../components/HelpNote";
 import { filtersFrom, listCampaigns } from "../services/campaigns/list.server";
-import { duplicateCampaign } from "../services/campaigns/housekeeping.server";
+import { duplicateOrRefusal } from "../services/campaigns/housekeeping.server";
+import { ResultBanner } from "../components/ResultBanner";
 import { calendarFor, todayIn } from "../services/calendar.server";
 import { addDays, isCalendarDay, weekHeading } from "../lib/scheduling/calendar";
 
@@ -87,7 +88,9 @@ export const action = withGuard("/app/campaigns", async ({ request }: ActionFunc
     return { ok: false, message: "That action is not available from the campaigns list." };
   }
 
-  const copy = await duplicateCampaign(shop.id, String(form.get("campaignId")), actorFor(sessionToken, session.shop));
+  const copy = await duplicateOrRefusal(shop.id, String(form.get("campaignId")), actorFor(sessionToken, session.shop));
+  // A rule every Apply refuses is not copied (#1009): said here, beside the list it was asked from.
+  if ("refused" in copy) return { ok: false, message: copy.refused };
 
   return redirect(`/app/campaigns/${copy.id}?duplicated=1`);
 });
@@ -112,7 +115,7 @@ export default function Campaigns() {
   const { view, filters, list, calendar } = useLoaderData<typeof loader>();
   const [params] = useSearchParams();
   // For the row-level Duplicate. See the note on `CampaignListView`'s `fetcher` prop.
-  const fetcher = useFetcher();
+  const fetcher = useFetcher<typeof action>();
 
   const linkTo = (next: Record<string, string>) => {
     const q = new URLSearchParams(params);
@@ -157,6 +160,9 @@ export default function Campaigns() {
           : { label: "Calendar", icon: "calendar", href: linkTo({ view: "calendar" }) },
       ]}
     >
+      {/* A Duplicate refused, naming the rule (#1009). A copy made redirects instead. */}
+      <ResultBanner result={fetcher.data} />
+
       {/* Counted across the shop rather than the filtered page: a campaign needing a
           decision must not be hidden by an unrelated filter. */}
       {list.attentionCount > 0 ? (

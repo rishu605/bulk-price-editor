@@ -15,6 +15,7 @@
  */
 
 import prisma from "../../db.server";
+import { FLOW_ACTOR } from "../../lib/audit/actor";
 import { toAppError } from "../../lib/errors/app-error";
 import { logger } from "../../lib/logging/logger";
 import type { RunOutcome } from "../campaigns/types";
@@ -36,7 +37,8 @@ export const FLOW_INLINE_ROWS = 2_000;
  */
 export const FLOW_INLINE_BUDGET_MS = 5_000;
 
-export const FLOW_ACTOR = "shopify-flow";
+/** Kept beside the scheduler's, because the run tells the two apart from a person (#1009). */
+export { FLOW_ACTOR };
 
 export interface FlowAnswer {
   status: number;

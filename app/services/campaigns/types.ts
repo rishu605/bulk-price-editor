@@ -14,6 +14,7 @@ import type { Schedule } from "../../lib/scheduling/window";
 import type { FilterAst } from "../segments.server";
 import type { ProductStatus } from "../../lib/campaigns/product-status";
 import { DEFAULT_CONFIRM_ABOVE_VARIANTS, type BlastRadius } from "../../lib/campaigns/blast-radius";
+import type { StartConfirmation } from "../../lib/campaigns/start-confirmation";
 
 export interface CampaignInput {
   name: string;
@@ -77,6 +78,12 @@ export interface CampaignInput {
    * sale reaches is this campaign's decision.
    */
   productStatuses?: readonly ProductStatus[];
+  /**
+   * The typed confirmation given when it was saved with dates (#1009), kept with it so the
+   * scheduler can start it with nobody there to ask. Written with the campaign, in one
+   * statement: a scheduled campaign never exists unconfirmed for a moment it needed it.
+   */
+  startConfirmed?: StartConfirmation;
 }
 
 export interface PreviewRow {

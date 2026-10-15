@@ -24,6 +24,7 @@ import type { AdjustmentRule,
 } from "../../lib/pricing/types";
 import { PRICING_STATES } from "../../lib/lifecycle/transitions";
 import { productStatusesOf, type ProductStatus } from "../../lib/campaigns/product-status";
+import { START_CONFIRMED_KEY } from "../../lib/campaigns/start-confirmation";
 import { astToWhere, segmentToAst, type FilterAst } from "../segments.server";
 import { readSettings } from "../settings.server";
 import type { CampaignInput } from "./types";
@@ -62,6 +63,55 @@ export async function createCampaign(
   input: CampaignInput,
   options: CreatedBy = {},
 ) {
+  const row = await campaignRow(shopId, input);
+
+  const campaign = await prisma.campaign.create({
+    data: {
+      shopId,
+      ...row,
+      // The declarative reference as well as the id in the blob. The rule engine reads
+      // the blob; the delete guard reads the relation, and a segment that could be
+      // deleted out from under a running campaign is the failure that matters.
+      ...(input.segmentId ? { segments: { connect: { id: input.segmentId } } } : {}),
+    },
+  });
+
+  // The log's job is to answer "who decided this", and a campaign appearing out of
+  // nowhere was the largest hole in it: a merchant could make one, and Home's Recent
+  // activity — which is where most of them will ever see the log — would still be
+  // showing whatever the scheduler last did, days earlier. See #614.
+  //
+  // Written after the campaign rather than in the same transaction on purpose. A
+  // campaign that exists with no log row is a gap in the record; a log row for a
+  // campaign that does not exist is a lie about one, and the second is worse.
+  await prisma.auditLogEntry.create({
+    data: {
+      shopId,
+      actor: options.actor ?? null,
+      action: "campaign.created",
+      entity: "Campaign",
+      entityId: campaign.id,
+      after: {
+        name: campaign.name,
+        status: campaign.status,
+        practice: input.practice ?? false,
+        // Who typed the word for its start, and what it covered (#1009).
+        ...(input.startConfirmed ? { startConfirmed: input.startConfirmed } : {}),
+      } as never,
+    },
+  });
+
+  return campaign;
+}
+
+/**
+ * The fields a campaign row is created with, from what the caller asked for.
+ *
+ * Apart from `createCampaign` so that a campaign can be checked as it would be stored before
+ * it is (`unsavedCampaign`): the editor asks for the typed confirmation of a dated campaign at
+ * save (#1009), planned by the same resolver over the same row the scheduler will read.
+ */
+async function campaignRow(shopId: string, input: CampaignInput) {
   // One place for the statuses, beside the filter rather than inside it (#751). A caller
   // may hand them over either way -- the editor as a field, Home inside its constant scope
   // -- and the stored filter keeps only the conditions, so `astOf` has one answer to read.
@@ -81,11 +131,9 @@ export async function createCampaign(
     });
   }
 
-  const campaign = await prisma.campaign.create({
-    data: {
-      shopId,
+  return {
       name: input.name,
-      status: input.schedule?.kind === "window" ? "SCHEDULED" : "DRAFT",
+      status: input.schedule?.kind === "window" ? ("SCHEDULED" as const) : ("DRAFT" as const),
       priority: input.priority ?? 100,
       autoEnroll: input.autoEnroll ?? true,
       tagKit: input.tagKit ?? [],
@@ -114,44 +162,54 @@ export async function createCampaign(
         productStatuses: productStatusesOf(input.productStatuses ?? inAst),
         ...(input.segmentId ? { segmentId: input.segmentId } : {}),
         ...(input.practice ? { practice: true } : {}),
+        ...(input.startConfirmed ? { [START_CONFIRMED_KEY]: input.startConfirmed } : {}),
       } as never,
-      // The declarative reference as well as the id in the blob. The rule engine reads
-      // the blob; the delete guard reads the relation, and a segment that could be
-      // deleted out from under a running campaign is the failure that matters.
-      ...(input.segmentId ? { segments: { connect: { id: input.segmentId } } } : {}),
       ...(input.schedule?.kind === "window"
         ? {
             startAt: new Date(input.schedule.startAt),
             endAt: input.schedule.endAt ? new Date(input.schedule.endAt) : null,
           }
         : {}),
-    },
-  });
+  };
+}
 
-  // The log's job is to answer "who decided this", and a campaign appearing out of
-  // nowhere was the largest hole in it: a merchant could make one, and Home's Recent
-  // activity — which is where most of them will ever see the log — would still be
-  // showing whatever the scheduler last did, days earlier. See #614.
-  //
-  // Written after the campaign rather than in the same transaction on purpose. A
-  // campaign that exists with no log row is a gap in the record; a log row for a
-  // campaign that does not exist is a lie about one, and the second is worse.
-  await prisma.auditLogEntry.create({
-    data: {
-      shopId,
-      actor: options.actor ?? null,
-      action: "campaign.created",
-      entity: "Campaign",
-      entityId: campaign.id,
-      after: {
-        name: campaign.name,
-        status: campaign.status,
-        practice: input.practice ?? false,
-      } as never,
-    },
-  });
+/** What `toResolvable` and `scopeOf` read: a campaign as the resolver plans it, stored or not. */
+export type PlannableCampaign = Pick<
+  Campaign,
+  | "id"
+  | "priority"
+  | "ruleRows"
+  | "compareAtPolicy"
+  | "guardrails"
+  | "guardrailViolationPolicy"
+  | "schedule"
+  | "createdAt"
+  | "excludedVariantGids"
+>;
 
-  return campaign;
+/** Not a cuid, and never persisted: only distinct from every campaign that exists. */
+export const UNSAVED_CAMPAIGN_ID = "unsaved";
+
+/**
+ * The campaign `createCampaign` would store, without storing it (#1009).
+ *
+ * Built from the same fields, so the plan made from it is the plan the scheduler makes from
+ * the stored row: newest of all, as it will be a moment from now, and with nothing excluded.
+ */
+export async function unsavedCampaign(shopId: string, input: CampaignInput): Promise<PlannableCampaign> {
+  const row = await campaignRow(shopId, input);
+  return {
+    id: UNSAVED_CAMPAIGN_ID,
+    priority: row.priority,
+    // The JSON columns exactly as the row writes them: no field of the plan is rebuilt here.
+    ruleRows: row.ruleRows,
+    compareAtPolicy: row.compareAtPolicy,
+    guardrails: row.guardrails,
+    guardrailViolationPolicy: row.guardrailViolationPolicy,
+    schedule: row.schedule,
+    createdAt: new Date(),
+    excludedVariantGids: [],
+  };
 }
 
 /**
@@ -348,10 +406,17 @@ export async function loadCampaignContext(shopId: string, campaignId: string) {
     where: { id: campaignId, shopId },
   });
 
-  const others = await competingCampaigns(shopId, campaignId);
+  return { campaign, ...(await campaignContext(shopId, campaign)) };
+}
+
+/**
+ * The same, for a campaign in hand: stored, or one `unsavedCampaign` describes (#1009), so a
+ * campaign about to be saved is planned against the others exactly as it will be once it is.
+ */
+export async function campaignContext(shopId: string, campaign: PlannableCampaign) {
+  const others = await competingCampaigns(shopId, campaign.id);
 
   return {
-    campaign,
     // The campaign being planned covers its own candidates by construction; every other
     // one is offered only the variants inside its own scope (#752).
     resolvable: [toResolvable(campaign), ...(await withScopes(shopId, others))],

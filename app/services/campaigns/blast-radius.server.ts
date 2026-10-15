@@ -1,6 +1,6 @@
 import prisma from "../../db.server";
 import { previewCampaign } from "./preview.server";
-import { confirmationReasons } from "../../lib/campaigns/blast-radius";
+import { confirmationReasons, typedTheWord } from "../../lib/campaigns/blast-radius";
 import { formatCount } from "../../lib/format/display";
 
 /**
@@ -36,7 +36,7 @@ export async function blastRadiusRefusal(
   // A small scope is planned now, where #803 let it through on a count. How far each price
   // moves is only known from the plan (#818): 95% off three variants writes three prices
   // and is exactly the campaign the word is for.
-  if (typed.trim().toLowerCase() === "apply") return null;
+  if (typedTheWord(typed)) return null;
 
   const preview = await previewCampaign(shopId, campaignId);
   if (!preview.blastRadius) return null;

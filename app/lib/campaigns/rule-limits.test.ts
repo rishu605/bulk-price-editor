@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { money } from "../money/money";
 import { sourceOf } from "../testing/source";
-import { MAX_REDUCTION_PERCENT, reducesToNothing, reductionProblem, unappliableRule } from "./rule-limits";
+import { MAX_REDUCTION_PERCENT, reducesToNothing, reductionProblem, unappliableRule, uncopiableRule } from "./rule-limits";
 
 const rows = (...rules: unknown[]) => rules.map((rule) => ({ segmentIds: [], rule }));
 
@@ -52,6 +52,26 @@ describe("a stored campaign's rule", () => {
     for (const stored of [null, undefined, {}, "x", [{}], [{ rule: null }]]) {
       expect(unappliableRule(stored), JSON.stringify(stored)).toBeNull();
     }
+  });
+});
+
+describe("a copy of a stored campaign's rule (#1009)", () => {
+  it("is refused for a reduction every Apply refuses, naming it and what to do instead", () => {
+    expect(uncopiableRule(rows({ kind: "percent-change", percent: -10 }, { kind: "percent-of-compare-at", percent: -100 }))).toBe(
+      "This campaign reduces prices by 100%, which would make every price free or negative, so a copy of it could " +
+        "never be applied, and none was made. Create a new campaign with a reduction under 100% instead.",
+    );
+  });
+
+  it("is made for every rule an Apply allows", () => {
+    for (const rule of [
+      { kind: "percent-change", percent: -95 },
+      { kind: "fixed-change", amount: money(-50_000, "USD") },
+      { kind: "from-import", importId: "i1" },
+    ]) {
+      expect(uncopiableRule(rows(rule)), JSON.stringify(rule)).toBeNull();
+    }
+    expect(uncopiableRule(null)).toBeNull();
   });
 });
 
