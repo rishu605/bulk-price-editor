@@ -5,6 +5,7 @@ import { endingLateText, startingLateText } from "../../lib/scheduling/ending-la
 import { startRefusal } from "../../lib/scheduling/start-refusal";
 import { neverStarts, parseSchedule, windowEndText } from "../../lib/scheduling/window";
 import type { CampaignState } from "../../lib/lifecycle/transitions";
+import { bulkWaitOf } from "./bulk-wait.server";
 import { lateStart } from "./late-start.server";
 import { isPractice } from "./model.server";
 import { partialProgress } from "./result.server";
@@ -13,7 +14,7 @@ import type { CampaignPreview } from "./types";
 /**
  * Everything the campaign page's Status card needs beyond the state itself: what the state
  * means for this campaign right now. One place, because each fix that made the card tell
- * the truth (#702, #784, #824, #837, #851, #927, #975, #1005, #1009, #829) added a line to the page's
+ * the truth (#702, #784, #824, #837, #851, #927, #975, #1005, #1009, #829, #1054) added a line to the page's
  * loader, and the route has a size it must stay under.
  */
 export async function lifecycleContext(
@@ -32,6 +33,8 @@ export async function lifecycleContext(
     startRefused: state === "SCHEDULED" ? startRefusal(schedule) : null, // #975
     lateStart: state === "SCHEDULED" ? await lateStart(shopId, campaignId, schedule) : null, // #851
     endMissed: state === "ACTIVE" ? endMissed(schedule) : null, // #1005
+    // A run waiting for its turn at Shopify, not writing (#1054).
+    waitingBehind: state === "APPLYING" || state === "REVERTING" ? await bulkWaitOf(shopId, campaignId) : null,
     // From the page's own preview, the reach the start check reads (#1009).
     unconfirmedStart: state === "SCHEDULED" && preview.confirm ? unconfirmedStart(preview.confirm, startConfirmationOf(schedule)) : null,
     endingLate: endingLateText(schedule, state, timeZone, new Date()), // still applying when its revert was due (#829)

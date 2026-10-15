@@ -589,13 +589,15 @@ describe("submission", () => {
 describe("poll fallback (edge case E13)", () => {
   function pollClient(states: BulkOperationState[]) {
     let i = 0;
-    const calls = { count: 0 };
+    const calls = { count: 0, ids: [] as unknown[], queries: [] as string[] };
     const client: AdminClient = {
-      async request<T>() {
+      async request<T>(query: string, variables: Record<string, unknown>) {
         calls.count++;
+        calls.ids.push(variables.id);
+        calls.queries.push(query);
         const state = states[Math.min(i, states.length - 1)];
         i++;
-        return { data: { currentBulkOperation: state } as T };
+        return { data: { bulkOperation: state } as T };
       },
     };
     return { client, calls };
@@ -607,9 +609,26 @@ describe("poll fallback (edge case E13)", () => {
       { id: "1", status: "RUNNING" },
       { id: "1", status: "COMPLETED", url: "https://results" },
     ]);
-    const final = await pollUntilTerminal({ client, sleep: noSleep, intervalMs: 1 });
+    const final = await pollUntilTerminal({ client, id: "1", sleep: noSleep, intervalMs: 1 });
     expect(final?.status).toBe("COMPLETED");
     expect(calls.count).toBe(3);
+  });
+
+  it("follows its own operation by id, never the app's most recent one (#1054)", async () => {
+    // Shopify runs several bulk mutations per app and shop at once from 2026-01, and
+    // `currentBulkOperation` answers with the newest: another campaign's, as often as not.
+    const { client, calls } = pollClient([
+      { id: "gid://shopify/BulkOperation/7", status: "RUNNING" },
+      { id: "gid://shopify/BulkOperation/7", status: "COMPLETED", url: "https://results/7" },
+    ]);
+    const final = await pollUntilTerminal({ client, id: "gid://shopify/BulkOperation/7", sleep: noSleep, intervalMs: 1 });
+
+    expect(final?.url).toBe("https://results/7");
+    expect(calls.ids).toEqual(["gid://shopify/BulkOperation/7", "gid://shopify/BulkOperation/7"]);
+    for (const query of calls.queries) {
+      expect(query).toContain("bulkOperation(id: $id)");
+      expect(query).not.toContain("currentBulkOperation");
+    }
   });
 
   it("returns the last state on timeout rather than throwing", async () => {
@@ -618,6 +637,7 @@ describe("poll fallback (edge case E13)", () => {
     const { client } = pollClient([{ id: "1", status: "RUNNING" }]);
     const final = await pollUntilTerminal({
       client,
+      id: "1",
       sleep: async () => {
         t += 10_000;
       },
@@ -635,6 +655,128 @@ describe("poll fallback (edge case E13)", () => {
     expect(isTerminal("EXPIRED")).toBe(true);
     expect(isTerminal("RUNNING")).toBe(false);
     expect(isTerminal("CREATED")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------- waiting for a turn
+
+describe("a submission past the app's bulk limit waits for a turn (#1054)", () => {
+  const LIMIT = { field: null, message: "Bulk operations limit reached. Please try again later.", code: "LIMIT_REACHED" };
+  const IN_PROGRESS = {
+    field: null,
+    message: "A bulk mutation operation for this app and shop is already in progress.",
+    code: "OPERATION_IN_PROGRESS",
+  };
+
+  /** Refuses the first submissions with these errors, one entry each, then accepts. */
+  function turnClient(refusals: Array<Array<{ field: null; message: string; code?: string }>>) {
+    const seen = { staged: 0, submitted: 0, paths: [] as unknown[] };
+    const client: AdminClient = {
+      async request<T>(query: string, variables: Record<string, unknown>) {
+        if (query.includes("stagedUploadsCreate")) {
+          seen.staged++;
+          return { data: { stagedUploadsCreate: { stagedTargets: [stagedTarget()], userErrors: [] } } as T };
+        }
+        const userErrors = refusals[seen.submitted] ?? [];
+        seen.submitted++;
+        seen.paths.push(variables.stagedUploadPath);
+        return {
+          data: {
+            bulkOperationRunMutation: {
+              bulkOperation: userErrors.length > 0 ? null : { id: "gid://bulk/9", status: "CREATED" },
+              userErrors,
+            },
+          } as T,
+        };
+      },
+    };
+    const uploaded: string[] = [];
+    const upload = async (_t: StagedTarget, body: string) => {
+      uploaded.push(body);
+    };
+    return { client, upload, uploaded, seen };
+  }
+
+  it("asks again after each refusal, with the same upload, and says so each time", async () => {
+    const { client, upload, uploaded, seen } = turnClient([[LIMIT], [IN_PROGRESS]]);
+    const waits: string[] = [];
+    const slept: number[] = [];
+
+    const { operation } = await submitBulkMutation([row()], {
+      client,
+      upload,
+      productOf,
+      sleep: async (ms) => {
+        slept.push(ms);
+      },
+      intervalMs: 5_000,
+      onBusy: async (reason) => {
+        waits.push(reason);
+      },
+    });
+
+    expect(operation.id).toBe("gid://bulk/9");
+    expect(waits).toEqual([LIMIT.message, IN_PROGRESS.message]);
+    expect(slept).toEqual([5_000, 5_000]);
+    // Refused submissions ran nothing: one staging, one upload, three asks for the same path.
+    expect([seen.staged, uploaded.length, seen.submitted]).toEqual([1, 1, 3]);
+    expect(new Set(seen.paths)).toEqual(new Set(["tmp/anchor-bulk.jsonl"]));
+  });
+
+  it("gives up once its wait is over, saying nothing was sent and what to do", async () => {
+    let t = 0;
+    const { client, upload, seen } = turnClient(Array.from({ length: 100 }, () => [LIMIT]));
+    const waits: string[] = [];
+
+    const error = await submitBulkMutation([row()], {
+      client,
+      upload,
+      productOf,
+      now: () => t,
+      sleep: async (ms) => {
+        t += ms;
+      },
+      intervalMs: 5_000,
+      waitMs: 120_000,
+      onBusy: async (reason) => {
+        waits.push(reason);
+      },
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(BulkSubmissionError);
+    const app = toAppError(error);
+    expect(app.userMessage).toMatch(
+      /^Shopify was still running other bulk price updates for this store after this campaign had waited 2 minutes for its turn/,
+    );
+    expect(app.userMessage).toMatch(/No prices were changed\. Run the campaign again once they have finished\.$/);
+    expect(app.retryable).toBe(false);
+    // Twenty-four waits of five seconds fill the two minutes; the next refusal ends it.
+    expect(waits).toHaveLength(24);
+    expect(seen.submitted).toBe(25);
+  });
+
+  it("is a refusal like any other for a caller that cannot wait, or for any other reason", async () => {
+    // No `onBusy`: the caller has not said it can wait, so it is told at once.
+    const busy = turnClient([[LIMIT]]);
+    await expect(submitBulkMutation([row()], { ...busy, productOf, sleep: noSleep })).rejects.toThrow(
+      /Shopify rejected the bulk price update for this campaign: Bulk operations limit reached/,
+    );
+
+    // A refusal that is not about a turn is not waited out, even beside one that is.
+    const invalid = turnClient([[LIMIT, { field: null, message: "The mutation is invalid.", code: "INVALID_MUTATION" }]]);
+    const waits: string[] = [];
+    await expect(
+      submitBulkMutation([row()], {
+        ...invalid,
+        productOf,
+        sleep: noSleep,
+        onBusy: async (reason) => {
+          waits.push(reason);
+        },
+      }),
+    ).rejects.toThrow(/The mutation is invalid/);
+    expect(waits).toEqual([]);
+    expect(invalid.seen.submitted).toBe(1);
   });
 });
 

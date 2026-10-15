@@ -204,6 +204,11 @@ export function describeState(
      * promise a write "until you apply it" under a banner saying nothing ever will be.
      */
     practice?: boolean;
+    /**
+     * Why its run has written nothing yet: Shopify is running as many bulk updates for this
+     * store as it allows, and the run is waiting for a turn (#1054); see `bulkWaitOf`.
+     */
+    waitingBehind?: string | null;
   } = {},
 ): StateDescription {
   // Said over whatever state the refusal left it in, until a later run claims it (#1046): the
@@ -302,6 +307,10 @@ export function describeState(
             "sale's prices stay on your storefront, past its end.",
         };
       }
+      // Not "Writing prices now" while it is not allowed to (#1054).
+      if (context.waitingBehind) {
+        return { label: "Applying — waiting for Shopify", tone: STATE_TONE.APPLYING, explanation: context.waitingBehind };
+      }
       // Its start came a while ago and its prices are still being written (#1056): the sale
       // reaches the storefront product by product, later than the window says.
       if (context.startingLate) {
@@ -354,6 +363,9 @@ export function describeState(
         nextAction: { label: "Review the drift queue", intent: "drift" },
       };
     case "REVERTING":
+      if (context.waitingBehind) {
+        return { label: "Reverting — waiting for Shopify", tone: STATE_TONE.REVERTING, explanation: context.waitingBehind };
+      }
       return {
         label: "Reverting",
         tone: STATE_TONE.REVERTING,

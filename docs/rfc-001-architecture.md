@@ -198,8 +198,9 @@ The mirror is a cache; **Shopify is truth.**
 - It reserves `RATE_LIMIT_HEADROOM` for the merchant's other apps (E17): under contention
   our runs slow down, they never error out.
 - Path choice: sync only when estimated cost fits inside ~60s of restore budget.
-- Concurrency: at most 3 of Shopify's 5 allowed concurrent bulk mutations, leaving a query
-  slot for sync and audits.
+- Concurrency: Shopify runs up to 5 bulk mutations per app and shop at once (API 2026-01+;
+  bulk queries have their own 5). Each run follows its own operation by id, and a run
+  refused past the limit waits for a turn while holding its claim (#1054).
 
 ---
 
@@ -268,13 +269,13 @@ migrations only. Feature flags per epic. Engine changes canary to internal store
 `catalogCreate/Update` · `tagsAdd/Remove`
 
 **Reads** — `bulkOperationRunQuery` · product/variant/priceList/catalog queries ·
-`currentBulkOperation` (poll fallback)
+`bulkOperation(id:)` (poll fallback; `currentBulkOperation` is deprecated and answers with the newest, not yours)
 
 **Webhooks** — `products/create|update|delete` · `bulk_operations/finish` ·
 `app/uninstalled` · `app_subscriptions/update` · the compliance trio
 
 **Limits** — 1,000-pt bucket @ 50pt/s standard (Plus 2,000 @ 100) · single query ≤1,000 pts ·
-bulk ops free and FIFO · 5 concurrent bulk mutations, 1 concurrent query ·
+bulk ops free and FIFO · 5 concurrent bulk mutations and 5 queries per app and shop (2026-01+) ·
 `priceListFixedPricesAdd` ≤250/request · 2,048 variants per product
 
 ### References

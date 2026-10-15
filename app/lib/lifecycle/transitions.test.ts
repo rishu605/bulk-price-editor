@@ -334,3 +334,30 @@ describe("a campaign still applying when its revert was due (#829)", () => {
     expect(describeState("APPLYING").label).toBe("Applying");
   });
 });
+
+describe("a run waiting for its turn at Shopify (#1054)", () => {
+  const waiting = 'Waiting behind "Spring sale", whose bulk price update is still running in Shopify.';
+
+  it("says it is waiting, and behind whom, instead of writing prices now", () => {
+    for (const [state, label] of [
+      ["APPLYING", "Applying — waiting for Shopify"],
+      ["REVERTING", "Reverting — waiting for Shopify"],
+    ] as const) {
+      const described = describeState(state, { waitingBehind: waiting });
+      expect(described.label).toBe(label);
+      expect(described.tone).toBe("info");
+      expect(described.explanation).toBe(waiting);
+    }
+  });
+
+  it("reads as writing when it is not waiting", () => {
+    expect(describeState("APPLYING", { waitingBehind: null }).label).toBe("Applying");
+    expect(describeState("REVERTING", { waitingBehind: null }).label).toBe("Reverting");
+  });
+
+  it("gives way to ending late, which is the warning", () => {
+    expect(describeState("APPLYING", { waitingBehind: waiting, endingLate: "25 Sep 2026, 14:10 (UTC)" }).label).toBe(
+      "Applying — ending late",
+    );
+  });
+});

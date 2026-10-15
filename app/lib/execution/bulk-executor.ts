@@ -10,16 +10,41 @@
  * Completion arrives one of two ways, and the second is not optional:
  *
  *   the `bulk_operations/finish` webhook, or
- *   a poll of `currentBulkOperation` once the expected duration has elapsed.
+ *   a poll of the operation, by its id, once the expected duration has elapsed.
  *
  * Community reports document missed `finish` deliveries. Without the fallback a
  * missed webhook means a run that never completes and a merchant watching a progress
  * bar that never moves (edge case E13).
+ *
+ * ## More than one at a time (#1054)
+ *
+ * Shopify limits how many bulk mutations one app runs in one shop at once. For the API
+ * version this app pins (2026-07) the limit is five: "In API versions 2026-01 and higher,
+ * each app can run up to five bulk mutation operations concurrently per shop"; before
+ * 2026-01 it was one of each type
+ * (https://shopify.dev/docs/api/usage/bulk-operations/imports#manage-concurrent-operations).
+ * Two campaigns going down this path at once -- two sales starting together, an apply
+ * beside another campaign's revert -- is therefore ordinary, and two things follow.
+ *
+ * **Each run follows its own operation, by id** (`bulkOperation(id:)`, added in 2026-01).
+ * It used to poll `currentBulkOperation(type: MUTATION)`, which answers with the app's
+ * *most recent* operation and is deprecated in 2026-07. With two running, the older run
+ * read the newer one's status and result file, and settled its own rows against somebody
+ * else's prices.
+ *
+ * **A submission past the limit waits for a turn.** Shopify answers it with a user error
+ * and runs nothing. The schema's `BulkMutationErrorCode` has two codes for it, and the docs
+ * do not say which the five-at-once limit returns: `LIMIT_REACHED` ("Bulk operations limit
+ * reached. Please try again later.") and `OPERATION_IN_PROGRESS` ("The operation did not
+ * run because another bulk mutation is already running.", the one-at-a-time wording). Either
+ * is read as "not yet". Asking again is the one read of the live state that cannot race: a
+ * slot seen free by a list query can be taken before the submission that follows it.
  */
 
 import { AppError } from "../errors/app-error";
 import type { PlannedRow } from "../planning/types";
 import { isThrottledError, withRetry } from "../shopify/budget";
+import type { AnchorBulkOperationByIdQuery, AnchorBulkOperationRunMutationMutation } from "../../types/admin.generated";
 import type { AdminClient } from "./sync-executor";
 import { buildMutationLines, layoutOf, parseResults, serializeJsonl, streamLines } from "./jsonl";
 import type { LineLayout, VariantOutcome } from "./jsonl";
@@ -31,6 +56,18 @@ export type BulkOperationStatus =
   | "FAILED"
   | "CANCELED"
   | "EXPIRED";
+
+/** Between polls of an operation, and between asks for a turn (#1054). */
+export const BULK_POLL_INTERVAL_MS = 5_000;
+
+/**
+ * How long a run waits on Shopify before it stops: for its operation to finish (#832), or
+ * for a turn to submit one (#1054). Each wait gets the whole of it.
+ */
+export const BULK_WAIT_MS = 30 * 60_000;
+
+/** The refusals that mean "the app is running as many bulk mutations here as it may" (#1054). */
+const NO_TURN_YET: ReadonlySet<string> = new Set(["LIMIT_REACHED", "OPERATION_IN_PROGRESS"]);
 
 export interface BulkOperationState {
   id: string;
@@ -66,15 +103,7 @@ export const BULK_OPERATION_RUN_MUTATION = `#graphql
   mutation AnchorBulkOperationRunMutation($mutation: String!, $stagedUploadPath: String!) {
     bulkOperationRunMutation(mutation: $mutation, stagedUploadPath: $stagedUploadPath) {
       bulkOperation { id status url partialDataUrl objectCount }
-      userErrors { field message }
-    }
-  }
-`;
-
-export const CURRENT_BULK_OPERATION = `#graphql
-  query AnchorCurrentBulkOperation {
-    currentBulkOperation(type: MUTATION) {
-      id status url partialDataUrl objectCount errorCode
+      userErrors { field message code }
     }
   }
 `;
@@ -122,6 +151,16 @@ export interface SubmitOptions {
   mutation?: string;
   sleep?: (ms: number) => Promise<void>;
   maxAttempts?: number;
+  /**
+   * Called each time Shopify refuses the submission because the app already runs as many
+   * bulk mutations in this shop as it may (#1054), with Shopify's reason. Given, the
+   * submission waits `intervalMs` and asks again, the same upload, until `waitMs` has
+   * passed since the first refusal. Absent, that refusal is thrown like any other.
+   */
+  onBusy?: (reason: string) => Promise<void>;
+  intervalMs?: number;
+  waitMs?: number;
+  now?: () => number;
 }
 
 /** An operation Shopify accepted, and what each line of its upload carried. */
@@ -140,7 +179,17 @@ export async function submitBulkMutation(
   rows: Iterable<PlannedRow>,
   options: SubmitOptions,
 ): Promise<BulkSubmission> {
-  const { client, upload, productOf, sleep, maxAttempts = 5 } = options;
+  const {
+    client,
+    upload,
+    productOf,
+    sleep,
+    maxAttempts = 5,
+    onBusy,
+    intervalMs = BULK_POLL_INTERVAL_MS,
+    waitMs = BULK_WAIT_MS,
+    now = () => Date.now(),
+  } = options;
 
   const lines = [...buildMutationLines(rows, productOf)];
   const body = [...serializeJsonl(lines)].join("");
@@ -210,24 +259,42 @@ export async function submitBulkMutation(
     );
   }
 
-  const submitted = await withRetry(
-    () =>
-      client.request<{
-        bulkOperationRunMutation?: {
-          bulkOperation?: BulkOperationState;
-          userErrors?: Array<{ message: string }>;
-        };
-      }>(BULK_OPERATION_RUN_MUTATION, {
-        mutation: options.mutation ?? DEFAULT_BULK_MUTATION,
-        stagedUploadPath: key,
-      }),
-    isThrottledError,
-    { maxAttempts, sleep },
-  );
+  // Asked again while Shopify says the app has no turn (#1054), with the same upload: the
+  // refusal ran nothing, so there is nothing to undo and nothing to send twice.
+  let firstRefused: number | undefined;
+  let payload: AnchorBulkOperationRunMutationMutation["bulkOperationRunMutation"];
+  for (;;) {
+    const submitted = await withRetry(
+      () =>
+        client.request<AnchorBulkOperationRunMutationMutation>(BULK_OPERATION_RUN_MUTATION, {
+          mutation: options.mutation ?? DEFAULT_BULK_MUTATION,
+          stagedUploadPath: key,
+        }),
+      isThrottledError,
+      { maxAttempts, sleep },
+    );
+    payload = submitted.data?.bulkOperationRunMutation;
 
-  const submitErrors = submitted.data?.bulkOperationRunMutation?.userErrors ?? [];
-  if (submitErrors.length > 0) {
+    const submitErrors = payload?.userErrors ?? [];
+    if (submitErrors.length === 0) break;
     const reason = submitErrors.map((e) => e.message).join("; ");
+
+    if (onBusy && submitErrors.every((e) => NO_TURN_YET.has(String(e.code ?? "")))) {
+      firstRefused ??= now();
+      const waited = now() - firstRefused;
+      if (waited < waitMs) {
+        await onBusy(reason);
+        await (sleep ?? realSleep)(intervalMs);
+        continue;
+      }
+      throw new BulkSubmissionError(
+        "Shopify was still running other bulk price updates for this store after this campaign had waited " +
+          `${waited < 60_000 ? "under a minute" : `${Math.round(waited / 60_000)} minutes`} for its turn, so none ` +
+          "of its prices were sent. No prices were changed. Run the campaign again once they have finished.",
+        `bulkOperationRunMutation refused for ${waited} ms: ${reason}`,
+      );
+    }
+
     throw new BulkSubmissionError(
       `Shopify rejected the bulk price update for this campaign: ${reason}. ` +
         "No prices were changed. Run the campaign again once that is resolved.",
@@ -235,7 +302,7 @@ export async function submitBulkMutation(
     );
   }
 
-  const operation = submitted.data?.bulkOperationRunMutation?.bulkOperation;
+  const operation = payload?.bulkOperation as BulkOperationState | null | undefined;
   if (!operation) {
     throw new BulkSubmissionError(
       "Shopify accepted the bulk price update but did not report an operation to " +
@@ -259,23 +326,29 @@ export const DEFAULT_BULK_MUTATION = `
   }
 `;
 
-/** One operation by id: how a resume learns how a run's operation ended (#832). */
+/**
+ * One operation by id: how a run follows its own (#1054), and how a resume learns how a
+ * run's operation ended (#832). `bulkOperation(id:)` is the lookup the 2026-01 docs give for
+ * exactly this; it used to be `node(id:)`, which answers the same.
+ */
 export const BULK_OPERATION_BY_ID = `#graphql
   query AnchorBulkOperationById($id: ID!) {
-    node(id: $id) {
-      ... on BulkOperation { id status url partialDataUrl objectCount errorCode }
-    }
+    bulkOperation(id: $id) { id status url partialDataUrl objectCount errorCode }
   }
 `;
 
 /** That operation's state, or null when Shopify no longer knows it (it expires after a week). */
-export async function bulkOperationById(client: AdminClient, id: string): Promise<BulkOperationState | null> {
+export async function bulkOperationById(
+  client: AdminClient,
+  id: string,
+  retry: { maxAttempts?: number; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<BulkOperationState | null> {
   const response = await withRetry(
-    () => client.request<{ node?: BulkOperationState | null }>(BULK_OPERATION_BY_ID, { id }),
+    () => client.request<AnchorBulkOperationByIdQuery>(BULK_OPERATION_BY_ID, { id }),
     isThrottledError,
+    retry,
   );
-  const node = response.data?.node;
-  return node && "status" in node ? node : null;
+  return (response.data?.bulkOperation as BulkOperationState | null | undefined) ?? null;
 }
 
 /** Terminal states: no further polling will change the outcome. */
@@ -285,6 +358,11 @@ export function isTerminal(status: BulkOperationStatus): boolean {
 
 export interface PollOptions {
   client: AdminClient;
+  /**
+   * The operation to follow: the one this run submitted, never "the app's most recent"
+   * (#1054). Another campaign's may be newer.
+   */
+  id: string;
   /** Time between polls. */
   intervalMs?: number;
   /** Give up after this long and report, rather than polling forever. */
@@ -309,10 +387,11 @@ export async function pollUntilTerminal(
 ): Promise<BulkOperationState | undefined> {
   const {
     client,
-    intervalMs = 5_000,
-    timeoutMs = 30 * 60_000,
+    id,
+    intervalMs = BULK_POLL_INTERVAL_MS,
+    timeoutMs = BULK_WAIT_MS,
     now = () => Date.now(),
-    sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms)),
+    sleep = realSleep,
     maxAttempts = 5,
     onPoll,
   } = options;
@@ -321,22 +400,17 @@ export async function pollUntilTerminal(
   let last: BulkOperationState | undefined;
 
   for (;;) {
-    const response = await withRetry(
-      () => client.request<{ currentBulkOperation?: BulkOperationState | null }>(
-        CURRENT_BULK_OPERATION,
-        {},
-      ),
-      isThrottledError,
-      { maxAttempts, sleep },
-    );
-
-    last = response.data?.currentBulkOperation ?? last;
+    last = (await bulkOperationById(client, id, { maxAttempts, sleep })) ?? last;
     if (last) await onPoll?.(last);
     if (last && isTerminal(last.status)) return last;
     if (now() >= deadline) return last;
 
     await sleep(intervalMs);
   }
+}
+
+function realSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export interface ReconcileResult {

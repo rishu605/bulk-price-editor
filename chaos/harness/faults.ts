@@ -39,8 +39,9 @@ export const isVariantWrite = (query: string) => query.includes("productVariants
 /** Matches the read-back verification query. */
 export const isReadBack = (query: string) => query.includes("nodes(");
 
-/** Matches a bulk-operation status poll. */
-export const isBulkPoll = (query: string) => query.includes("currentBulkOperation");
+/** Matches a bulk-operation status poll, by id (#1054) or the deprecated "most recent". */
+export const isBulkPoll = (query: string) =>
+  query.includes("bulkOperation(id:") || query.includes("currentBulkOperation");
 
 export interface FaultResponse {
   /** HTTP status to answer with. */
