@@ -22,6 +22,7 @@ import { Blank } from "../components/Blank";
 import { MoneyCell } from "../components/MoneyCell";
 import { formatCount, formatWhen } from "../lib/format/display";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { useEffect, useRef } from "react";
 import { useFetcher, useLoaderData, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
@@ -55,6 +56,9 @@ import { FullRow } from "../components/FieldGrid";
 
 const FILTER_FIELDS = ["q", "vendor", "source", "diverged", "variant"] as const;
 
+/** The baseline history dialog, opened by a row's History button (#753). */
+const HISTORY_MODAL_ID = "baseline-history";
+
 export const loader = withGuard("/app/prices/baselines", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
@@ -71,9 +75,11 @@ export const loader = withGuard("/app/prices/baselines", async ({ request }: Loa
   const variantGid = url.searchParams.get("variant");
   const history = variantGid ? await baselineHistory(shop.id, variantGid) : [];
   // By its title, not its gid (#796): the card named the variant `gid://shopify/…`.
-  const historyTitle = variantGid
-    ? ((await prisma.variantIndex.findFirst({ where: { shopId: shop.id, variantGid }, select: { title: true } }))?.title ?? null)
+  const named = variantGid
+    ? await prisma.variantIndex.findFirst({ where: { shopId: shop.id, variantGid }, select: { title: true, sku: true } })
     : null;
+  // The name the merchant clicked, and its SKU (#753), not `gid://shopify/…`.
+  const historyTitle = named ? (named.sku ? `${named.title} (SKU ${named.sku})` : named.title) : null;
 
   return { ...result, page, filters, variantGid, history, historyTitle, timeZone: shop.timezone };
 });
@@ -133,6 +139,28 @@ export default function Baselines() {
   const { rows, total, vendors, sources, page, filters, variantGid, history, historyTitle, timeZone } =
     useLoaderData<typeof loader>();
   const [params, setSearchParams] = useSearchParams();
+
+  // Shown when History is pressed, and the `variant` param dropped when it closes, so the
+  // URL says what is on screen and Back does not reopen it (#753).
+  const historyModal = useRef<(HTMLElement & { showOverlay?: () => void }) | null>(null);
+  useEffect(() => {
+    if (variantGid) historyModal.current?.showOverlay?.();
+  }, [variantGid]);
+  useEffect(() => {
+    const element = historyModal.current;
+    if (!element) return;
+    const closed = () =>
+      setSearchParams(
+        (next) => {
+          next.delete("variant");
+          return next;
+        },
+        { replace: true, preventScrollReset: true },
+      );
+    // Heard natively: React 18 does not deliver a custom element's events through props (#863).
+    element.addEventListener("hide", closed);
+    return () => element.removeEventListener("hide", closed);
+  }, [variantGid, setSearchParams]);
   const fetcher = useFetcher<ActionData>();
   const busy = fetcher.state !== "idle";
   const data = fetcher.data;
@@ -256,10 +284,19 @@ export default function Baselines() {
         </s-stack>
       </s-section>
 
-      {/* Named by title (#796), and said either way: with no baselines the History button
-          used to do nothing anyone could see or hear. */}
+      {/* In a dialog, opened by History (#753): the card rendered under the table and its
+          pagination, off screen, and the admin scrolls the page around this iframe, so
+          nothing the page did could bring it into view. Named by title (#796), and said
+          either way: with no baselines the button used to do nothing anyone could see. */}
       {variantGid ? (
-        <Card heading={`Baseline history of ${historyTitle ?? "this variant"}`}>
+        <s-modal
+          id={HISTORY_MODAL_ID}
+          heading={`Baseline history of ${historyTitle ?? "this variant"}`}
+          size="large"
+          ref={(element) => {
+            historyModal.current = element;
+          }}
+        >
           {history.length === 0 ? (
             <EmptyState
               title="No baselines recorded yet"
@@ -302,7 +339,10 @@ export default function Baselines() {
             </s-table-body>
           </s-table>
           )}
-        </Card>
+          <s-button slot="primary-action" variant="primary" commandFor={HISTORY_MODAL_ID} command="--hide">
+            Done
+          </s-button>
+        </s-modal>
       ) : null}
 
       <ImportForm
