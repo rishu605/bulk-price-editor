@@ -9,7 +9,7 @@
  * themselves.
  */
 
-import type { BulkOperationState } from "../../lib/execution/bulk-executor";
+import { BulkSubmissionError, type BulkOperationState } from "../../lib/execution/bulk-executor";
 
 import prisma from "../../db.server";
 import { formatAgo, formatCount } from "../../lib/format/display";
@@ -52,6 +52,7 @@ import {
 } from "./market-surfaces.server";
 import { notify } from "../notifications.server";
 import { settleMirror } from "./mirror.server";
+import { noteBulkWait } from "./bulk-wait.server";
 import { HEARTBEAT_EVERY_MS } from "./reaper.server";
 import { metric } from "../../lib/telemetry/metrics";
 import { addLogContext, withLogContext } from "../../lib/logging/context.server";
@@ -235,8 +236,14 @@ export async function runCampaign(
     // process behind it. #649 found it on the bulk path, where a refused submission
     // throws straight past the terminal update, but the gap was never specific to that
     // path — every `await` after the row is created had it.
-    const failed = await failRun(started.runId, error, started.writing === true);
-    if (failed?.ended) await notifyRunFailed(shopId, campaignId, options, failed, error, started.writing === true);
+    //
+    // A bulk submission Shopify refused sent nothing, however far the run had got (#1054):
+    // a run that waited its whole wait for a turn, or any other refusal. Nothing went before
+    // it -- on the bulk path it is the first write -- so the run did not stop part-way, and
+    // "This apply stopped part-way. Some prices may have changed" over it was untrue.
+    const writing = started.writing === true && !(error instanceof BulkSubmissionError);
+    const failed = await failRun(started.runId, error, writing);
+    if (failed?.ended) await notifyRunFailed(shopId, campaignId, options, failed, error, writing);
 
     // It wrote, then threw (#802). Handing the campaign back to where it started -- Draft,
     // for a manual apply -- told the merchant "nothing has been written to your storefront"
@@ -245,7 +252,7 @@ export async function runCampaign(
     // says prices changed. Only when this throw ended the run: one after it completed --
     // the mirror refresh, a notification -- leaves the finished run's state alone. A run
     // over named variants never held the campaign, so it has no state to move.
-    if (failed?.ended && started.writing && !options.variantGids) {
+    if (failed?.ended && writing && !options.variantGids) {
       try {
         await transitionCampaign(shopId, campaignId, "PARTIAL", {
           reason:
@@ -1077,6 +1084,10 @@ async function executeCampaignRun(
         data: { ...bulkProgress(operation), lastPolledAt: new Date() },
       });
     },
+    // Shopify is running as many bulk mutations for this app in the shop as it allows, and
+    // refused this one (#1054). The run waits for a turn still holding its occurrence (rule
+    // 2), and says behind whom in the campaign's history and on its Status card.
+    onBulkWait: () => noteBulkWait(shopId, campaignId, { id: run.id, actor: options.actor, prices: writable.length }),
   });
 
   const messages = await recordResults(run.id, shopId, result.rows);

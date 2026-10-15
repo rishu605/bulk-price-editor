@@ -253,8 +253,16 @@ export async function releaseClaim(
  * because the store revoked Anchor's access -- the campaign stays where it is, and the
  * only other trace was a line in a tick log nobody reads (#707). Written once per reason,
  * however many ticks hit the same wall.
+ *
+ * Also a run that is waiting rather than moving (#1054): its actor and run id, when given,
+ * are the run's, so the entry says whose run it is and which one.
  */
-export async function noteCampaign(shopId: string, campaignId: string, reason: string): Promise<void> {
+export async function noteCampaign(
+  shopId: string,
+  campaignId: string,
+  reason: string,
+  by: { actor?: string; runId?: string } = {},
+): Promise<void> {
   if ((await lastTransitionReason(shopId, campaignId)) === reason) return;
   const campaign = await prisma.campaign.findFirst({
     where: { id: campaignId, shopId },
@@ -262,8 +270,8 @@ export async function noteCampaign(shopId: string, campaignId: string, reason: s
   });
   if (!campaign) return;
   const status = campaign.status as CampaignState;
-  // Only the scheduler notes a campaign it could not move (#707).
-  await recordTransition(shopId, campaignId, status, status, { reason, actor: SCHEDULER_ACTOR });
+  // The scheduler, when it notes a campaign it could not move (#707).
+  await recordTransition(shopId, campaignId, status, status, { reason, actor: by.actor ?? SCHEDULER_ACTOR, runId: by.runId });
 }
 
 /** The reason on this campaign's most recent recorded transition. */

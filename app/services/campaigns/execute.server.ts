@@ -75,7 +75,13 @@ export interface ExecuteContext {
   onSubmitted?: (operation: BulkOperationState) => Promise<void>;
   /** Each poll of that operation, and its final state. */
   onPoll?: (operation: BulkOperationState) => void | Promise<void>;
-  /** How long to wait for that operation before giving up on watching it. Tests only. */
+  /**
+   * Shopify refused the operation because the app already runs as many bulk mutations in
+   * this shop as it may (#1054): called on each refusal while the run waits for a turn,
+   * with Shopify's reason. Without it, the refusal fails the run.
+   */
+  onBulkWait?: (reason: string) => Promise<void>;
+  /** How long to wait for that operation, or for a turn to submit it, before giving up. Tests only. */
   bulkWaitMs?: number;
   /**
    * Told which path the rows will take, before any is written (#1055), so a run that dies
@@ -152,27 +158,38 @@ async function executeBulk(
     .filter((row) => row.status === "skipped" || !row.intendedPrice)
     .map((row) => ({ row, status: "verified" as const }));
 
+  // The heartbeat rides on every wait. A bulk run is almost entirely waiting -- for a turn,
+  // then for Shopify to finish -- so this is the only place a long one can prove it is still
+  // alive. Without it the reaper would mistake every large run for a dead process.
+  const wait = async (ms: number) => {
+    await context.onProgress?.(0, writable.length);
+    await new Promise<void>((resolve) => setTimeout(resolve, ms));
+  };
+
+  // Past the app's limit of bulk mutations running in this shop, Shopify refuses this one
+  // and runs nothing; it is asked again until it has a turn (#1054). The run keeps its
+  // claim, its ledger and its heartbeat the whole time: it is still the writer.
   const { operation, layout } = await submitBulkMutation(writable, {
     client: context.client,
     upload: uploadToStagedTarget,
     productOf: context.productOf,
+    onBusy: context.onBulkWait,
+    waitMs: context.bulkWaitMs,
+    sleep: wait,
   });
   await context.onSubmitted?.(operation);
 
   // The finish webhook is faster when it arrives, but it is documented to go
   // missing; polling is the fallback that stops a run hanging forever (E13).
   //
-  // The heartbeat rides on the poll interval. A bulk operation is almost entirely
-  // waiting, so this is the only place a long one can prove it is still alive --
-  // without it the reaper would mistake every large run for a dead process.
+  // By the id Shopify gave this run, never "the app's most recent operation": another
+  // campaign's may be newer, and its result file is not this run's (#1054).
   const finished = await pollUntilTerminal({
     client: context.client,
+    id: operation.id,
     onPoll: context.onPoll,
     timeoutMs: context.bulkWaitMs,
-    sleep: async (ms) => {
-      await context.onProgress?.(0, writable.length);
-      await new Promise<void>((resolve) => setTimeout(resolve, ms));
-    },
+    sleep: wait,
   });
   const finalState = finished ?? operation;
 

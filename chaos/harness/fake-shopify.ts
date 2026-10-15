@@ -18,11 +18,16 @@
  *   A bulk operation does not finish on submission. It stays RUNNING for a few polls,
  *   which is what makes the missed-`finish`-webhook fallback a real test (E13).
  *
+ *   Bulk mutations run side by side, each with its own upload and result file, up to the
+ *   limit Shopify sets per app and shop; one past it is refused with Shopify's
+ *   `LIMIT_REACHED` user error (#1054). This used to hold one operation and let a second
+ *   submission replace the first, so two campaigns' bulk runs could never be tested.
+ *
  * State is public on purpose: scenarios assert against `variants` to answer "what
  * does the store actually say now", which is the only question that matters.
  */
 
-import type { BulkOperationState } from "../../app/lib/execution/bulk-executor";
+import { isTerminal, type BulkOperationState } from "../../app/lib/execution/bulk-executor";
 import type { QueryCost, ThrottleStatus } from "../../app/lib/shopify/budget";
 import type { BulkResultLine } from "../../app/lib/execution/jsonl";
 import { minorUnitsPerMajor } from "../../app/lib/money/currency";
@@ -83,6 +88,21 @@ export interface FakeOptions {
   /** Polls a submitted bulk operation stays RUNNING before it completes. */
   pollsBeforeComplete?: number;
   throttle?: ThrottleStatus;
+}
+
+/** One bulk mutation, from its submission to its result file. */
+interface FakeBulkOperation {
+  state: BulkOperationState;
+  /** The JSONL it was given. */
+  body: string;
+  /** The mutation it applies to each line, for its flags (#1020). */
+  mutation: string;
+  /** Polls it has been through. */
+  polls: number;
+  /** `bulkFailsAfterLines` as it stood when this operation was submitted. */
+  failsAfterLines?: number;
+  /** `bulkRefusesLines` likewise. */
+  refusesLines: Set<number>;
 }
 
 const DEFAULT_THROTTLE: ThrottleStatus = {
@@ -169,11 +189,31 @@ export class FakeShopify {
   /** When the bucket was last recomputed, so it restores with the clock. */
   private throttleAt = Date.now();
 
-  private bulk?: BulkOperationState;
-  private bulkBody?: string;
-  /** The mutation the running bulk operation applies to each line, for its flags (#1020). */
-  private bulkMutation?: string;
-  private bulkPolls = 0;
+  /**
+   * How many bulk mutations the app may have running in this shop at once (#1054).
+   *
+   * Five is Shopify's documented limit from API version 2026-01, the one this app pins
+   * (2026-07); earlier versions allowed one. "In API versions 2026-01 and higher, each app
+   * can run up to five bulk mutation operations concurrently per shop":
+   * https://shopify.dev/docs/api/usage/bulk-operations/imports#manage-concurrent-operations
+   *
+   * A scenario lowers it to reach the refusal with two campaigns rather than six.
+   */
+  bulkMutationLimit = 5;
+
+  /** Submissions refused because `bulkMutationLimit` operations were already running. */
+  bulkRefusals = 0;
+
+  /** Every bulk mutation submitted, by id, in the order they were created. */
+  private readonly bulkOps = new Map<string, FakeBulkOperation>();
+
+  /**
+   * The last operation id this fake gave out. Not from 1: the suite shares one Postgres
+   * with every other process running it, and `bulk_operations.shopifyGid` is unique across
+   * shops, so two fakes both numbering from 1 took over each other's records mid-run --
+   * one run's operation vanished, and its rows read as never sent.
+   */
+  private bulkSeq = Date.now() * 1_000 + Math.floor(Math.random() * 1_000);
 
   /**
    * Fault injection: the next bulk operation applies only its first N lines, then ends
@@ -288,8 +328,12 @@ export class FakeShopify {
     if (query.includes("currentBulkOperation")) {
       return this.currentBulkOperation() as { data?: T; extensions?: { cost?: QueryCost } };
     }
+    // By id, both ways Shopify answers it: `bulkOperation(id:)` from 2026-01, and `node(id:)`.
+    if (query.includes("bulkOperation(id:")) {
+      return this.bulkOperationById(variables, "bulkOperation") as { data?: T; extensions?: { cost?: QueryCost } };
+    }
     if (query.includes("on BulkOperation")) {
-      return this.bulkOperationById(variables) as { data?: T; extensions?: { cost?: QueryCost } };
+      return this.bulkOperationById(variables, "node") as { data?: T; extensions?: { cost?: QueryCost } };
     }
     if (query.includes("priceListUpdate")) {
       return this.priceListUpdate(variables) as { data?: T; extensions?: { cost?: QueryCost } };
@@ -1172,54 +1216,92 @@ export class FakeShopify {
         data: {
           bulkOperationRunMutation: {
             bulkOperation: null,
-            userErrors: [{ field: null, message: "Staged upload path not found." }],
+            userErrors: [{ field: null, message: "Staged upload path not found.", code: "NO_SUCH_FILE" }],
           },
         },
         extensions: this.cost(10),
       };
     }
 
-    this.bulkBody = body;
-    this.bulkMutation = String(variables.mutation ?? "");
-    this.bulkPolls = 0;
-    this.bulk = { id: `gid://shopify/BulkOperation/${this.stagedSeq}`, status: "CREATED" };
+    // Shopify's refusal past the limit: a user error under HTTP 200, no operation, nothing
+    // run. The code is the 2026-07 schema's `BulkMutationErrorCode.LIMIT_REACHED` and the
+    // message its documented description; the docs show no live example of either, so the
+    // executor reads the code, and `OPERATION_IN_PROGRESS` the same way.
+    const running = [...this.bulkOps.values()].filter((op) => !isTerminal(op.state.status)).length;
+    if (running >= this.bulkMutationLimit) {
+      this.bulkRefusals++;
+      return {
+        data: {
+          bulkOperationRunMutation: {
+            bulkOperation: null,
+            userErrors: [{ field: null, message: "Bulk operations limit reached. Please try again later.", code: "LIMIT_REACHED" }],
+          },
+        },
+        extensions: this.cost(10),
+      };
+    }
+
+    const id = `gid://shopify/BulkOperation/${++this.bulkSeq}`;
+    const operation: FakeBulkOperation = {
+      state: { id, status: "CREATED" },
+      body,
+      mutation: String(variables.mutation ?? ""),
+      polls: 0,
+      // The faults armed for "the next bulk operation" are this one's.
+      failsAfterLines: this.bulkFailsAfterLines,
+      refusesLines: new Set(this.bulkRefusesLines ?? []),
+    };
+    this.bulkFailsAfterLines = undefined;
+    this.bulkRefusesLines = undefined;
+    this.bulkOps.set(id, operation);
 
     return {
-      data: { bulkOperationRunMutation: { bulkOperation: this.bulk, userErrors: [] } },
+      data: { bulkOperationRunMutation: { bulkOperation: operation.state, userErrors: [] } },
       extensions: this.cost(10),
     };
   }
 
   /**
-   * The poll endpoint, and the only place a bulk operation ever finishes.
+   * Every status poll is a tick of the clock, and the only place a bulk operation finishes.
    *
    * Deliberately not instant: a fake that completed on submission would let the poll
    * fallback pass without ever polling, which is the exact code path E13 is about.
+   *
+   * A tick moves every running operation, not only the one asked about. Shopify works
+   * through each on its own clock, whoever is watching; an operation that moved only when
+   * asked about would never finish under a run that was reading somebody else's.
    */
-  private currentBulkOperation() {
-    if (!this.bulk) {
-      return { data: { currentBulkOperation: null }, extensions: this.cost(1) };
-    }
-
+  private tick(): void {
     this.polls++;
-
-    if (this.bulk.status === "CREATED" || this.bulk.status === "RUNNING") {
-      this.bulkPolls++;
-      this.bulk = { ...this.bulk, status: "RUNNING" };
-      if (this.bulkPolls > this.pollsBeforeComplete) this.bulk = this.finishBulk();
+    for (const operation of this.bulkOps.values()) {
+      if (isTerminal(operation.state.status)) continue;
+      operation.polls++;
+      operation.state = { ...operation.state, status: "RUNNING" };
+      if (operation.polls > this.pollsBeforeComplete) operation.state = this.finishBulk(operation);
     }
-
-    return { data: { currentBulkOperation: this.bulk }, extensions: this.cost(1) };
   }
 
   /**
-   * One operation by id, as a resume asks for it (#832). The same clock as polling: each
-   * lookup is a poll, so an operation finishes after the same number of looks either way.
+   * The app's most recent bulk mutation, as the deprecated `currentBulkOperation` answers:
+   * the newest, whichever run submitted it. With two running it is not the older one's
+   * (#1054).
    */
-  private bulkOperationById(variables: Record<string, unknown>) {
-    if (!this.bulk || this.bulk.id !== variables.id) return { data: { node: null }, extensions: this.cost(1) };
-    const { data } = this.currentBulkOperation();
-    return { data: { node: data.currentBulkOperation }, extensions: this.cost(1) };
+  private currentBulkOperation() {
+    const latest = [...this.bulkOps.values()].at(-1);
+    if (!latest) return { data: { currentBulkOperation: null }, extensions: this.cost(1) };
+    this.tick();
+    return { data: { currentBulkOperation: latest.state }, extensions: this.cost(1) };
+  }
+
+  /**
+   * One operation by id: how a run follows its own (#1054), and how a resume asks how one
+   * ended (#832). A lookup is a poll, on the same clock.
+   */
+  private bulkOperationById(variables: Record<string, unknown>, field: "bulkOperation" | "node") {
+    const operation = this.bulkOps.get(String(variables.id ?? ""));
+    if (!operation) return { data: { [field]: null }, extensions: this.cost(1) };
+    this.tick();
+    return { data: { [field]: operation.state }, extensions: this.cost(1) };
   }
 
   /** Lets an operation held running by a large `pollsBeforeComplete` finish on its next poll. */
@@ -1227,14 +1309,12 @@ export class FakeShopify {
     this.pollsBeforeComplete = 0;
   }
 
-  /** Applies the uploaded JSONL and publishes a Shopify-shaped result file. */
-  private finishBulk(): BulkOperationState {
-    const all = (this.bulkBody ?? "").split("\n").filter((line) => line.trim().length > 0);
-    const failAfter = this.bulkFailsAfterLines;
-    this.bulkFailsAfterLines = undefined;
+  /** Applies an operation's JSONL and publishes a Shopify-shaped result file for it. */
+  private finishBulk(operation: FakeBulkOperation): BulkOperationState {
+    const all = operation.body.split("\n").filter((line) => line.trim().length > 0);
+    const failAfter = operation.failsAfterLines;
     const lines = failAfter === undefined ? all : all.slice(0, failAfter);
-    const refused = new Set(this.bulkRefusesLines ?? []);
-    this.bulkRefusesLines = undefined;
+    const refused = operation.refusesLines;
     const results: string[] = [];
 
     lines.forEach((raw, index) => {
@@ -1269,7 +1349,7 @@ export class FakeShopify {
         return;
       }
 
-      const payload = this.applyVariantInputs(parsed.variants, allowsPartial(this.bulkMutation ?? ""));
+      const payload = this.applyVariantInputs(parsed.variants, allowsPartial(operation.mutation));
       const line: BulkResultLine = {
         __lineNumber: index,
         data: { productVariantsBulkUpdate: payload },
@@ -1277,10 +1357,12 @@ export class FakeShopify {
       results.push(JSON.stringify(line));
     });
 
-    const url = this.blobs.put(`results/${this.stagedSeq}`, `${results.join("\n")}\n`);
+    // Its own file, named for it: two operations finishing must not share one.
+    const { id } = operation.state;
+    const url = this.blobs.put(`results/${id.split("/").at(-1)}`, `${results.join("\n")}\n`);
     if (failAfter !== undefined) {
       return {
-        id: this.bulk!.id,
+        id,
         status: "FAILED",
         errorCode: "INTERNAL_SERVER_ERROR",
         url: null,
@@ -1289,7 +1371,7 @@ export class FakeShopify {
       };
     }
     return {
-      id: this.bulk!.id,
+      id,
       status: "COMPLETED",
       url,
       objectCount: String(lines.length),
