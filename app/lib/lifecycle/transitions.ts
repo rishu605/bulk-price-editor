@@ -185,6 +185,11 @@ export function describeState(
      * (#1009); see `unconfirmedStart`. The scheduler will refuse it when it comes.
      */
     unconfirmedStart?: string | null;
+    /**
+     * When the window ends, for a campaign still applying past the moment its revert was due
+     * (#829); see `endingLateText`.
+     */
+    endingLate?: string | null;
   } = {},
 ): StateDescription {
   switch (state) {
@@ -249,6 +254,19 @@ export function describeState(
           "Waiting for its start time. Prices change automatically when the window opens.",
       };
     case "APPLYING":
+      // Its end came while it was still applying (#829). The revert cannot start under a
+      // running apply, so the sale outlives its window; said, rather than "Applying" as if
+      // nothing were wrong.
+      if (context.endingLate) {
+        return {
+          label: "Applying — ending late",
+          tone: "warning",
+          explanation:
+            `It is still applying its prices, and its revert was due to begin so they would be back by ${context.endingLate}. ` +
+            "One run writes a campaign's prices at a time, so the revert begins as soon as the apply finishes. Until then the " +
+            "sale's prices stay on your storefront, past its end.",
+        };
+      }
       return {
         label: "Applying",
         tone: STATE_TONE.APPLYING,

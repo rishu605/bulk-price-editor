@@ -98,6 +98,75 @@ export async function transitionCampaign(
 /** The two states that mean "a run has claimed this campaign and may be writing". */
 const CLAIM_STATES: ReadonlySet<CampaignState> = new Set<CampaignState>(["APPLYING", "REVERTING"]);
 
+/** What `releaseClaim` writes before its reason, so a release can be told from any other move. */
+export const RELEASED = "claim released without running: ";
+
+/** Where each scheduled transition takes a campaign from, and the claim it moves it to. */
+const SCHEDULED_CLAIMS = {
+  apply: { from: ["SCHEDULED"], to: "APPLYING", reason: "scheduled start" },
+  revert: { from: ["ACTIVE", "PARTIAL", "HELD"], to: "REVERTING", reason: "scheduled end" },
+} as const satisfies Record<string, { from: readonly CampaignState[]; to: CampaignState; reason: string }>;
+
+export interface ScheduledClaim {
+  from: CampaignState;
+  to: CampaignState;
+  /** The history's reason for it: "scheduled start", or "scheduled end, tried again". */
+  reason: string;
+  /** False for a retry, whose claim is recorded once its run is under way: see `recordClaim`. */
+  recorded: boolean;
+}
+
+/**
+ * Takes a campaign for the transition its schedule owes, and records it (#829).
+ *
+ * The claim used to be a bare conditional update in the scheduler, so the history never
+ * said the scheduler had taken a campaign: at 100k variants it read "APPLYING → SCHEDULED,
+ * claim released" at 17:40 and nothing more for an hour, while a second attempt was
+ * applying the sale. The update is still conditional on the exact state that was read --
+ * the claim two overlapping ticks race for -- so whoever loses changes nothing and records
+ * nothing.
+ *
+ * A retry is recorded later, not here. A start or end that keeps being refused -- waiting
+ * for approval, Shopify unreachable -- is claimed and given back every thirty seconds, and
+ * its one release entry says why (`quietIfRepeated`); a claim entry before each would bury
+ * it. So a claim whose last attempt was given back is recorded by the run once it is under
+ * way (`recordClaim`), and one refused again leaves the history as it was.
+ */
+export async function claimForSchedule(
+  shopId: string,
+  campaignId: string,
+  transition: keyof typeof SCHEDULED_CLAIMS,
+  actor: string,
+): Promise<ScheduledClaim | null> {
+  const { from: claimable, to, reason } = SCHEDULED_CLAIMS[transition];
+  const campaign = await prisma.campaign.findFirst({ where: { id: campaignId, shopId }, select: { status: true } });
+  const from = campaign?.status as CampaignState | undefined;
+  if (!from || !(claimable as readonly CampaignState[]).includes(from)) return null;
+
+  const claimed = await prisma.campaign.updateMany({
+    where: { id: campaignId, shopId, status: from },
+    data: { status: to },
+  });
+  if (claimed.count === 0) return null; // someone else took it
+
+  const last = await lastTransition(shopId, campaignId);
+  const retry = last?.from === to && last.to === from && last.reason.startsWith(RELEASED);
+  if (retry) return { from, to, reason: `${reason}, tried again`, recorded: false };
+
+  await recordTransition(shopId, campaignId, from, to, { reason, actor });
+  return { from, to, reason, recorded: true };
+}
+
+/** Records a scheduler's claim that `claimForSchedule` left for its run to record. */
+export async function recordClaim(
+  shopId: string,
+  campaignId: string,
+  claim: Pick<ScheduledClaim, "from" | "to" | "reason">,
+  options: { actor: string; runId: string },
+): Promise<void> {
+  await recordTransition(shopId, campaignId, claim.from, claim.to, { reason: claim.reason, ...options });
+}
+
 /**
  * Puts a campaign back where it was when a run claimed it and then never started.
  *
@@ -169,7 +238,7 @@ export async function releaseClaim(
 
   if (updated.count === 0) return { changed: false, from, to };
 
-  const reason = `claim released without running: ${options.reason}`;
+  const reason = `${RELEASED}${options.reason}`;
   if (!(options.quietIfRepeated && (await lastTransitionReason(shopId, campaignId)) === reason)) {
     await recordTransition(shopId, campaignId, from, to, { ...options, reason });
   }
@@ -199,12 +268,23 @@ export async function noteCampaign(shopId: string, campaignId: string, reason: s
 
 /** The reason on this campaign's most recent recorded transition. */
 async function lastTransitionReason(shopId: string, campaignId: string): Promise<string | undefined> {
+  return (await lastTransition(shopId, campaignId))?.reason;
+}
+
+/** This campaign's most recent recorded transition: from, to and why. */
+async function lastTransition(
+  shopId: string,
+  campaignId: string,
+): Promise<{ from?: string; to?: string; reason: string } | null> {
   const last = await prisma.auditLogEntry.findFirst({
     where: { shopId, entity: "Campaign", entityId: campaignId, action: "campaign.transition" },
     orderBy: { createdAt: "desc" },
-    select: { after: true },
+    select: { before: true, after: true },
   });
-  return (last?.after as { reason?: string } | null)?.reason;
+  if (!last) return null;
+  const before = last.before as { status?: string } | null;
+  const after = last.after as { status?: string; reason?: string } | null;
+  return { from: before?.status, to: after?.status, reason: after?.reason ?? "" };
 }
 
 /**

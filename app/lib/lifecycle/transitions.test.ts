@@ -298,3 +298,22 @@ describe("an active campaign whose scheduled end could not run (#1005)", () => {
     expect(describeState("ACTIVE", { endMissed: null }).label).toBe("Active");
   });
 });
+
+describe("a campaign still applying when its revert was due (#829)", () => {
+  it("says it is ending late, when its window ends, why the revert waits, and when it begins", () => {
+    const described = describeState("APPLYING", { endingLate: "25 Sep 2026, 14:10 (America/New_York)" });
+    expect(described.label).toBe("Applying — ending late");
+    expect(described.tone).toBe("warning");
+    expect(described.explanation).toMatch(/back by 25 Sep 2026, 14:10 \(America\/New_York\)\./);
+    expect(described.explanation).toMatch(/One run writes a campaign's prices at a time/);
+    expect(described.explanation).toMatch(/the revert begins as soon as the apply finishes/);
+    expect(described.explanation).toMatch(/stay on your storefront, past its end/);
+    // A revert cannot start under a running apply, so the card offers none.
+    expect(described.nextAction).toBeUndefined();
+  });
+
+  it("reads as applying while it is on time", () => {
+    expect(describeState("APPLYING", { endingLate: null }).label).toBe("Applying");
+    expect(describeState("APPLYING").label).toBe("Applying");
+  });
+});

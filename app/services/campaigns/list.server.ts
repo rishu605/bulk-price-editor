@@ -9,6 +9,8 @@
 
 import { neverStarts, parseSchedule } from "../../lib/scheduling/window";
 import { startRefusal } from "../../lib/scheduling/start-refusal";
+import { endingLateText } from "../../lib/scheduling/ending-late";
+import type { RunKind } from "@prisma/client";
 import prisma from "../../db.server";
 import { describeCampaign } from "../../lib/campaigns/describe";
 import { astOf, ruleOf, segmentNameOf } from "./model.server";
@@ -123,6 +125,7 @@ export async function listCampaigns(shopId: string, filters: CampaignFilters) {
     }),
   ]);
 
+  const now = new Date();
   const rows = campaigns.map((c) => {
     const state = c.status as CampaignState;
     return {
@@ -134,6 +137,7 @@ export async function listCampaigns(shopId: string, filters: CampaignFilters) {
       lifecycle: describeState(state, {
         neverStarts: state === "SCHEDULED" ? neverStarts(parseSchedule(c.schedule), new Date(), "UTC") : null,
         startRefused: state === "SCHEDULED" ? startRefusal(c.schedule) : null, // #975
+        endingLate: endingLateText(c.schedule, state, "UTC", now), // #829
       }),
       attention: needsAttention(state),
       priority: c.priority,
@@ -144,26 +148,7 @@ export async function listCampaigns(shopId: string, filters: CampaignFilters) {
       note: c.note,
       archived: c.archivedAt !== null,
       createdAt: c.createdAt.toISOString(),
-      lastRun: c.runs[0]
-        ? {
-            kind: c.runs[0].kind,
-            status: c.runs[0].status,
-            verified: c.runs[0].verifiedRows,
-            failed: c.runs[0].failedRows,
-            // The rows the run sent in a bulk operation and has not read back. Its own counts
-            // stay at zero until the results are read, and "0 verified" over an hour of
-            // prices going live read as nothing happening (#832). `live` is whether a
-            // process is still polling it -- only then is Shopify's count current.
-            atShopify:
-              c.runs[0].bulkOps[0] && c.runs[0]._count.changes > 0
-                ? {
-                    done: Number(c.runs[0].bulkOps[0].objectCount ?? 0),
-                    of: c.runs[0]._count.changes,
-                    live: ["PLANNING", "QUEUED", "EXECUTING", "VERIFYING"].includes(c.runs[0].status),
-                  }
-                : null,
-          }
-        : null,
+      lastRun: lastRunOf(state, c.runs[0]),
     };
   });
 
@@ -177,5 +162,59 @@ export async function listCampaigns(shopId: string, filters: CampaignFilters) {
     attentionCount,
     page: filters.page,
     pages: Math.max(1, Math.ceil(total / PAGE_SIZE)),
+  };
+}
+
+/** Run states with a process still behind them. */
+const LIVE_RUN: readonly string[] = ["PLANNING", "QUEUED", "EXECUTING", "VERIFYING"];
+
+/** A campaign's newest run, as `listCampaigns` includes it. */
+interface NewestRun {
+  kind: RunKind;
+  status: string;
+  verifiedRows: number;
+  failedRows: number;
+  plannedRows: number;
+  bulkOps: Array<{ objectCount: bigint | null }>;
+  _count: { changes: number };
+}
+
+/**
+ * What the list says about a campaign's latest run.
+ *
+ * A run still going says so (#829), and so does a claimed campaign whose run has no row
+ * yet: being planned, which takes minutes at catalogue scale, or waiting for the worker. At
+ * 102,132 variants the list read "Apply · Failed · 0 verified" beside Applying through a
+ * whole second attempt, because the first attempt's row was the newest there was.
+ */
+function lastRunOf(state: CampaignState, run: NewestRun | undefined) {
+  const live = run !== undefined && LIVE_RUN.includes(run.status);
+  if ((state === "APPLYING" || state === "REVERTING") && !live) {
+    return {
+      kind: (state === "APPLYING" ? "APPLY" : "REVERT") as RunKind,
+      status: "PLANNING",
+      inProgress: true,
+      verified: 0,
+      failed: 0,
+      planned: 0,
+      atShopify: null,
+    };
+  }
+  if (!run) return null;
+  return {
+    kind: run.kind,
+    status: run.status,
+    inProgress: live,
+    verified: run.verifiedRows,
+    failed: run.failedRows,
+    planned: run.plannedRows,
+    // The rows the run sent in a bulk operation and has not read back. Its own counts stay at
+    // zero until the results are read, and "0 verified" over an hour of prices going live
+    // read as nothing happening (#832). `live` is whether a process is still polling it --
+    // only then is Shopify's count current.
+    atShopify:
+      run.bulkOps[0] && run._count.changes > 0
+        ? { done: Number(run.bulkOps[0].objectCount ?? 0), of: run._count.changes, live }
+        : null,
   };
 }
