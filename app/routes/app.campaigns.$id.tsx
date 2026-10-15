@@ -295,7 +295,7 @@ export default function CampaignDetail() {
   const unappliable = Boolean(preview.blocked || preview.refused);
   const canApply = !practice && !unappliable && canTransition(state, "APPLYING") && !IN_FLIGHT.has(state);
 
-  const tabs = tabsFor({ runs, rollback, ledger });
+  const tabs = tabsFor({ runs, rollback, ledger, ledgerTotal: data.ledgerTotal });
   const { keepers, pending: keepersPending } = useKeepers(rollback);
   useRunPolling(data.campaignId, state); // a run in the worker, followed to its end (#790)
   const [params] = useSearchParams();

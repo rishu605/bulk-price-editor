@@ -128,3 +128,29 @@ describe("saying it in a sentence", () => {
     expect(describeImpact(impact, null)).toContain("rises");
   });
 });
+
+describe("the margin sentence counts variants, and says so (#795)", () => {
+  // Two variants of one product, and one variant with no cost: three variants, one product.
+  const impact = marginImpact(
+    [
+      row({ variantGid: "gid://shopify/ProductVariant/1", title: "Chair · Red" }),
+      row({ variantGid: "gid://shopify/ProductVariant/2", title: "Chair · Blue" }),
+      row({ variantGid: "gid://shopify/ProductVariant/3", title: "Chair · Green", cost: undefined }),
+    ],
+    null,
+  );
+
+  it("averages per variant, and names the variants it covers and the ones it could not", () => {
+    const sentence = describeImpact(impact, null);
+    expect(sentence).toMatch(/^Average margin per variant drops about/);
+    expect(sentence).toContain("Averaged over the 2 variants that have a cost; 1 do not and are not included.");
+    expect(sentence).not.toMatch(/products/);
+  });
+
+  it("says variants when none has a cost, and counts one in the singular", () => {
+    const none = marginImpact([row({ cost: undefined })], null);
+    expect(describeImpact(none, null)).toMatch(/^None of these variants has a cost recorded/);
+    const oneBelow = marginImpact([row({ after: money(4_000, "USD") })], null);
+    expect(describeImpact(oneBelow, null)).toContain("1 variant would sell at or below cost.");
+  });
+});

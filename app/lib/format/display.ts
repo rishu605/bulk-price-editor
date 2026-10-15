@@ -34,6 +34,14 @@ export function formatCount(value: number): string {
 }
 
 /**
+ * A count with its noun, singular for one: "1 variant", "3,669 variants" (#728). The plural
+ * is given when it is not the singular plus "s" -- "1 entry", "2 entries".
+ */
+export function countOf(value: number, singular: string, plural = `${singular}s`): string {
+  return `${formatCount(value)} ${value === 1 ? singular : plural}`;
+}
+
+/**
  * Month abbreviations, spelled by us rather than by the runtime.
  *
  * `07/09/2026` is 7 September to a reader in London and 9 July to one in New York, and

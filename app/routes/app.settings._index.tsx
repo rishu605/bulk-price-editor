@@ -48,7 +48,9 @@ export const loader = withGuard("/app/settings", async ({ request }: LoaderFunct
     await Promise.all([
       readSettings(shop.id),
       shopCurrency(shop.id),
-      prisma.variantIndex.count({ where: { shopId: shop.id, cost: { not: null } } }),
+      // Deleted variants out of both counts (#728): counted in this one only, coverage read
+      // over 100% and switched off the warning beneath it.
+      prisma.variantIndex.count({ where: { shopId: shop.id, deletedAt: null, cost: { not: null } } }),
       prisma.variantIndex.count({ where: { shopId: shop.id, deletedAt: null } }),
       readPreferences(shop.id),
       prisma.priceListRecord.findMany({

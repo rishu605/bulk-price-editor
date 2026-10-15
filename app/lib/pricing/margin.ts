@@ -16,6 +16,7 @@
  * products" is less satisfying and considerably more useful.
  */
 
+import { countOf, formatCount } from "../format/display";
 import type { Money } from "../money/money";
 
 export interface MarginInput {
@@ -122,14 +123,14 @@ export function marginImpact(
 export function describeImpact(impact: MarginImpact, currencyTarget: number | null): string {
   if (impact.covered === 0) {
     return (
-      "None of these products has a cost recorded, so nothing can be said about margin. " +
+      "None of these variants has a cost recorded, so nothing can be said about margin. " +
       "Import your costs and this will fill in."
     );
   }
 
   const coverage =
     impact.unknown > 0
-      ? ` Based on the ${impact.covered} products that have a cost; ${impact.unknown} do not and are not included.`
+      ? ` Averaged over the ${countOf(impact.covered, "variant")} that have a cost; ${formatCount(impact.unknown)} do not and are not included.`
       : "";
 
   const direction =
@@ -140,16 +141,18 @@ export function describeImpact(impact: MarginImpact, currencyTarget: number | nu
   const warnings: string[] = [];
   if (impact.belowCost.length > 0) {
     warnings.push(
-      `${impact.belowCost.length} would sell at or below cost.`,
+      `${countOf(impact.belowCost.length, "variant")} would sell at or below cost.`,
     );
   }
   if (currencyTarget !== null && impact.belowTarget.length > 0) {
     warnings.push(
-      `${impact.belowTarget.length} would fall below your ${currencyTarget}% target.`,
+      `${countOf(impact.belowTarget.length, "variant")} would fall below your ${currencyTarget}% target.`,
     );
   }
 
-  return `Average margin ${direction}.${coverage}${warnings.length ? ` ${warnings.join(" ")}` : ""}`;
+  // Per variant, and said so (#795): the counts are variants, and an unweighted mean over
+  // them counts a product with 2,048 variants 2,048 times -- not an average "across products".
+  return `Average margin per variant ${direction}.${coverage}${warnings.length ? ` ${warnings.join(" ")}` : ""}`;
 }
 
 function mean(values: readonly number[]): number {
