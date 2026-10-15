@@ -49,7 +49,7 @@ export const PAGES: Record<string, { Component: ComponentType; data?: unknown }>
     Component: () => (
       <CampaignPage>
         <Card heading="Preview">
-          <PreviewTable rows={fixtures.previewRows} markets={fixtures.markets} total={fixtures.previewRows.length} />
+          <PreviewTable rows={fixtures.previewRows} markets={fixtures.markets} total={fixtures.previewRows.length} alreadyCorrect={0} />
         </Card>
       </CampaignPage>
     ),

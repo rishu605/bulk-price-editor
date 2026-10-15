@@ -249,6 +249,7 @@ export async function previewCampaign(
     })),
     writePath: decision.path,
     writePathReason: decision.reason,
+    tagKit: campaign.tagKit,
     blastRadius: asksForConfirmation(confirm),
     confirm,
     // A stored rule the run refuses (#818), said here so the page offers no Apply the run

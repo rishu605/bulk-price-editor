@@ -371,8 +371,14 @@ export async function holdForDrift(
   // raise an alarm about a price nobody is maintaining any more.
   if (campaign.status !== "ACTIVE" && campaign.status !== "PARTIAL") return null;
 
+  // The variant by name, as the campaign's history shows it (#759): the reason printed the
+  // raw Admin GID, which names nothing a merchant can find.
+  const variant = await prisma.variantIndex.findFirst({
+    where: { shopId, variantGid },
+    select: { title: true },
+  });
   const result = await transitionCampaign(shopId, campaignId, "HELD", {
-    reason: `price edited outside Anchor on ${variantGid}`,
+    reason: `price edited outside Anchor on ${variant?.title ?? "a variant it prices"}`,
     actor: "drift-detector",
   });
 

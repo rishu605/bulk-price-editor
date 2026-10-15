@@ -41,6 +41,10 @@ describe("a report whose problems were listed only in part", () => {
     expect(report(listed, 800)).toContain("Showing the first 500 of 800 rows that need attention.");
   });
 
+  it("groups a large count, as the tiles above it do (#759)", () => {
+    expect(report(listed, 12_400)).toContain("Showing the first 500 of 12,400 rows that need attention.");
+  });
+
   it("says nothing of the kind when every problem is listed", () => {
     expect(report(listed, 500)).not.toContain("rows that need attention");
     expect(report(listed)).not.toContain("rows that need attention");

@@ -17,6 +17,8 @@
  *   time; typing the word is not.
  */
 
+import { countOf, formatCount } from "../format/display";
+
 export interface ActiveOverlap {
   campaignId: string;
   campaignName: string;
@@ -56,7 +58,7 @@ export function assessRecapture(scope: number, overlaps: readonly ActiveOverlap[
   }
 
   const total = affected.reduce((sum, overlap) => sum + overlap.variants, 0);
-  const names = affected.map((overlap) => `"${overlap.campaignName}" (${overlap.variants})`);
+  const names = affected.map((overlap) => `"${overlap.campaignName}" (${formatCount(overlap.variants)})`);
 
   return {
     risk: "overlaps-active-campaign",
@@ -64,12 +66,39 @@ export function assessRecapture(scope: number, overlaps: readonly ActiveOverlap[
     overlaps: affected,
     confirmationPhrase: DANGEROUS_PHRASE,
     warning:
-      `${total} of these ${scope} variants are on sale right now under ` +
+      `${formatCount(total)} of these ${formatCount(scope)} variants ${total === 1 ? "is" : "are"} on sale right now under ` +
       `${names.join(", ")}. Recapturing would make the sale price their new normal ` +
       `price, permanently — every future campaign would compute its discount from the ` +
       `discounted price. Revert those campaigns first unless that is genuinely what you ` +
       `want.`,
   };
+}
+
+/** The scope's size, under the Scope field: "3,669 variants in scope." (#759). */
+export function scopeSentence(scope: number): string {
+  return `${countOf(scope, "variant")} in scope.`;
+}
+
+/** The button, with the count it replaces: "Replace 3,669 baselines" (#759). */
+export function replaceLabel(scope: number): string {
+  return `Replace ${countOf(scope, "baseline")}`;
+}
+
+/** What a recapture did, in grouped counts that agree with one (#759). */
+export function recapturedMessage(result: {
+  captured: number;
+  scope: number;
+  superseded: number;
+  alreadyCurrent: number;
+}): string {
+  return (
+    `Recaptured ${countOf(result.captured, "baseline")} across ${countOf(result.scope, "variant")}` +
+    (result.superseded > 0 ? `, superseding ${formatCount(result.superseded)}` : "") +
+    (result.alreadyCurrent > 0
+      ? `. ${formatCount(result.alreadyCurrent)} ${result.alreadyCurrent === 1 ? "was" : "were"} already correct`
+      : "") +
+    "."
+  );
 }
 
 /**

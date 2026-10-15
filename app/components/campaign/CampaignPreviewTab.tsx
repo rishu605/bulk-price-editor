@@ -1,6 +1,6 @@
 /**
- * What this campaign would do: counts, write path, approval, margins, markets and the
- * per-row preview.
+ * What this campaign would do: counts, how long the run takes, approval, margins, markets
+ * and the per-row preview.
  *
  * The largest of the tab bodies by a wide margin, which is most of why the page was 690
  * lines and every other section was below the fold.
@@ -23,8 +23,9 @@
  */
 
 import { OverlapPanel } from "../OverlapPanel";
-import { countOf } from "../../lib/format/display";
+import { countOf, formatCount } from "../../lib/format/display";
 import { confirmationReasons } from "../../lib/campaigns/blast-radius";
+import { describeRunDuration } from "../../lib/planning/duration";
 import { CountsRow } from "../../components/CountsRow";
 import { PreviewTable } from "../../components/PreviewTable";
 import { filenameSlug } from "../../lib/reporting/csv";
@@ -102,11 +103,17 @@ export function CampaignPreviewTab({ preview, approval, fetcher, busy }: Campaig
           ]}
         />
 
-        <s-paragraph>
-          <s-text>
-            Write path: {preview.writePath} — {preview.writePathReason}
-          </s-text>
-        </s-paragraph>
+        {/* How long, and whether it carries on without them: the Apply dialog's own
+            sentence. This printed the planner's reasoning -- "Write path: sync — 2 rows is
+            under the 1000-row threshold and fits the available rate-limit budget" (#759).
+            Nothing at all for a blocked plan, which is not going to run. */}
+        {preview.blocked ? null : (
+          <s-paragraph>
+            <s-text>
+              {describeRunDuration(preview.writePath === "bulk" ? "bulk" : "sync", preview.counts.planned)}
+            </s-text>
+          </s-paragraph>
+        )}
 
         {/* Before Apply: these rows are discounted from, and reverted to, a price the
             merchant has since changed outside the app (#745). */}
@@ -138,6 +145,8 @@ export function CampaignPreviewTab({ preview, approval, fetcher, busy }: Campaig
           rows={preview.rows}
           markets={preview.markets}
           total={preview.counts.planned}
+          alreadyCorrect={preview.counts.noop}
+          blocked={Boolean(preview.blocked)}
         />
 
         <ActionRow>
@@ -167,7 +176,7 @@ export function CampaignPreviewTab({ preview, approval, fetcher, busy }: Campaig
           {preview.margin.belowCost.length > 0 ? (
             <s-banner tone="critical">
               <s-paragraph>
-                {preview.margin.belowCost.length} of these would sell at or below cost:
+                {formatCount(preview.margin.belowCost.length)} of these would sell at or below cost:
               </s-paragraph>
               <s-unordered-list>
                 {preview.margin.belowCost.map((row) => (
@@ -182,7 +191,7 @@ export function CampaignPreviewTab({ preview, approval, fetcher, busy }: Campaig
           {preview.margin.belowTarget.length > 0 ? (
             <s-banner tone="warning">
               <s-paragraph>
-                {preview.margin.belowTarget.length} would fall below your target margin,
+                {formatCount(preview.margin.belowTarget.length)} would fall below your target margin,
                 worst first:
               </s-paragraph>
               <s-unordered-list>

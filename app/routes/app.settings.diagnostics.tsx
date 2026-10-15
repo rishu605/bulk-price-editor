@@ -26,6 +26,7 @@ import { HelpNote } from "../components/HelpNote";
 import { SPACE } from "../lib/ui/spacing";
 import { Secondary } from "../components/Type";
 import { Card } from "../components/Card";
+import { countOf, formatWhen } from "../lib/format/display";
 
 export const loader = withGuard("/app/settings/diagnostics", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -48,7 +49,7 @@ export const loader = withGuard("/app/settings/diagnostics", async ({ request }:
     match: match
       ? {
           ...match,
-          createdAt: match.createdAt.toISOString(),
+          createdAt: formatWhen(match.createdAt, shop.timezone),
           context: JSON.stringify(match.context, null, 2),
         }
       : null,
@@ -58,7 +59,9 @@ export const loader = withGuard("/app/settings/diagnostics", async ({ request }:
       message: row.message,
       route: row.route,
       retryable: row.retryable,
-      createdAt: row.createdAt.toISOString(),
+      // In the shop's zone, as every other table writes a time: it printed the raw UTC
+      // ISO string (#759). Formatted here, so the server and the browser render one text.
+      createdAt: formatWhen(row.createdAt, shop.timezone),
     })),
     byCode: [...counts.entries()].sort((a, b) => b[1] - a[1]),
   };
@@ -82,7 +85,7 @@ function tilesFor(byCode: Array<[string, number]>) {
   return [
     ...top,
     {
-      label: `${rest.length} other codes`,
+      label: countOf(rest.length, "other code"),
       value: rest.reduce((total, [, count]) => total + count, 0),
     },
   ];

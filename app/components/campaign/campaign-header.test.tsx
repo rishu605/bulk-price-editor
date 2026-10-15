@@ -788,11 +788,41 @@ describe("a sale a higher-priority one has taken variants from", () => {
       />,
     );
 
-    expect(html).toContain("1 of 3 variants have been changed since this campaign set them");
+    expect(html).toContain("1 of 3 variants has been changed since this campaign set it");
     expect(html).toContain("Already there");
     expect(html.match(/label="Leave [^"]* as it is"/g), "a checkbox on a row that is not an edit").toHaveLength(1);
     expect(html).toContain(`value="${editedByHand.variantGid}"`);
     expect(html).not.toContain(`value="${takenOver.variantGid}"`);
+  });
+
+  it("offers ticked edits on the Revert tab only when there are edits to tick (#759)", () => {
+    const edited = render(
+      <CampaignRevertTab
+        {...withRollback({
+          straightforward: false,
+          rows: [editedByHand, own],
+          counts: { total: 2, clean: 1, drifted: 1, deleted: 0, unaffected: 0 },
+        })}
+      />,
+    );
+    expect(edited).toContain("Revert, keeping the ticked edits");
+
+    // Nothing drifted: no checkbox to tick, so no button that talks about them. The same
+    // confirmation the header's Revert opens, rather than a second, unconfirmed revert.
+    const clean = render(
+      <CampaignRevertTab {...withRollback({ rows: [own], counts: { total: 1, clean: 1, drifted: 0, deleted: 0, unaffected: 0 } })} />,
+    );
+    expect(clean).not.toContain("ticked edits");
+    expect(clean).not.toMatch(/label="Leave [^"]* as it is"/);
+    expect(clean).toMatch(/<s-button[^>]*commandFor="revert-confirmation"[^>]*command="--show"[^>]*>Revert<\/s-button>/);
+  });
+
+  it("says how reverting works once, not twice in a row (#759)", () => {
+    const html = render(
+      <CampaignRevertTab {...withRollback({ rows: [own], counts: { total: 1, clean: 1, drifted: 0, deleted: 0, unaffected: 0 } })} />,
+    );
+
+    expect(html.match(/Reverting recomputes/g)).toHaveLength(1);
   });
 
   it("does not tell the Revert tab the taken-over variant is still at this campaign's price", () => {
@@ -802,6 +832,18 @@ describe("a sale a higher-priority one has taken variants from", () => {
 
     expect(html).not.toContain("still at the price this campaign set");
     expect(html).toContain("already shows the price reverting gives it");
+  });
+
+  it("lists the storefront tags Apply adds, and says nothing of tags when there are none (#759)", () => {
+    const tagged = modalOf(
+      render(<CampaignHeader {...props({ preview: preview({ tagKit: ["Sale", "summer-26"] }) } as never)} />),
+      "apply-confirmation",
+    ).replace(/&quot;/g, '"');
+    expect(tagged).toContain("Storefront tags");
+    expect(tagged).toContain('Adds "Sale" and "summer-26" to each product it prices.');
+
+    const untagged = modalOf(render(<CampaignHeader {...props()} />), "apply-confirmation");
+    expect(untagged).not.toContain("Storefront tags");
   });
 
   it("names the higher sale in the Apply dialog instead of calling its variants this campaign's (#837)", () => {

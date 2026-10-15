@@ -17,6 +17,7 @@
  * its currency is refused; a stray column, a header, or a blank line is not.
  */
 
+import { exponentOf, isKnownCurrency } from "../money/currency";
 import { parseMoney, type Money } from "../money/money";
 import { VARIANT_ID_HEADERS } from "../segments/csv-import";
 
@@ -148,6 +149,29 @@ export function inAnotherCurrency(rowCurrency: string, shopCurrency: string, wha
 }
 
 /**
+ * Why an amount would not parse, by the cause that is actually there (#759).
+ *
+ * `parseMoney` refuses two different things -- a value that is not a plain number, and
+ * one with more decimals than its currency has -- and both came back as "not a plain
+ * number. Remove currency symbols and thousands separators", so 12.345 in a USD store sent
+ * the merchant looking for a dollar sign it did not have.
+ */
+export function amountRefusal(label: string, value: string, currency: string, example: string): string {
+  const shown = value.trim();
+  const decimals = /^-?\d+\.(\d+)$/.exec(shown)?.[1].replace(/0+$/, "").length;
+  if (decimals !== undefined && isKnownCurrency(currency)) {
+    const allowed = exponentOf(currency);
+    if (decimals > allowed) {
+      return allowed === 0
+        ? `${label} ${shown} has decimal places, and ${currency} has none. Round it to a whole number and import the file again.`
+        : `${label} ${shown} has more decimal places than ${currency} allows, which is ${allowed}. ` +
+            `Round it to ${allowed} decimal places and import the file again.`;
+    }
+  }
+  return `${label} is not a plain number. Remove currency symbols and thousands separators — ${example}.`;
+}
+
+/**
  * Validates one row.
  *
  * Prices are in the shop's currency. A currency column is accepted only when it agrees
@@ -170,7 +194,7 @@ export function validateRow(row: RawRow, shopCurrency: string): ValidRow | Inval
   try {
     parsedPrice = parseMoney(row.price.trim(), currency);
   } catch {
-    return fail("price-unparseable");
+    return { ...fail("price-unparseable"), reason: amountRefusal("Price", row.price, currency, "1299.00, not $1,299.00") };
   }
 
   // Zero is refused as firmly as negative. A zero baseline is not merely odd: every
@@ -183,7 +207,10 @@ export function validateRow(row: RawRow, shopCurrency: string): ValidRow | Inval
     try {
       parsedCompareAt = parseMoney(row.compareAt.trim(), currency);
     } catch {
-      return fail("compare-at-unparseable");
+      return {
+        ...fail("compare-at-unparseable"),
+        reason: amountRefusal("Compare-at price", row.compareAt, currency, "1499.00, not $1,499.00"),
+      };
     }
     if (parsedCompareAt.amount <= parsedPrice.amount) return fail("compare-at-not-above-price");
   }

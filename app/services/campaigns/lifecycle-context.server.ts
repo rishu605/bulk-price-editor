@@ -6,6 +6,7 @@ import { startRefusal } from "../../lib/scheduling/start-refusal";
 import { neverStarts, parseSchedule, windowEndText } from "../../lib/scheduling/window";
 import type { CampaignState } from "../../lib/lifecycle/transitions";
 import { lateStart } from "./late-start.server";
+import { isPractice } from "./model.server";
 import { partialProgress } from "./result.server";
 import type { CampaignPreview } from "./types";
 
@@ -36,5 +37,6 @@ export async function lifecycleContext(
     endingLate: endingLateText(schedule, state, timeZone, new Date()), // still applying when its revert was due (#829)
     startingLate: startingLateText(schedule, state, timeZone, new Date()), // still applying well after its start (#1056)
     queuedRefused: queuedRefusal(schedule), // a run the worker was handed and could not run (#1046)
+    practice: isPractice({ schedule } as Parameters<typeof isPractice>[0]), // never applied, so never "until you apply it" (#759)
   };
 }

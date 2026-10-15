@@ -59,7 +59,7 @@ describe("chaos: previewing a campaign that refuses one of its markets", () => {
       expect(preview.rows.length).toBeGreaterThan(0);
 
       const table = renderToStaticMarkup(
-        createElement(PreviewTable, { rows: preview.rows, markets: preview.markets, total: preview.counts.planned }),
+        createElement(PreviewTable, { rows: preview.rows, markets: preview.markets, total: preview.counts.planned, alreadyCorrect: preview.counts.noop }),
       );
       expect(table, "the refused market has a column of its own").not.toContain("Refused Europe");
       expect(table, "products sold in the refused market read as not sold there").not.toContain("Not sold here");

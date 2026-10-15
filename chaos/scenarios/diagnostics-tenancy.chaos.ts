@@ -51,7 +51,7 @@ async function diagnostics(shop: string, id = "") {
     request: new Request(`https://example.invalid/app/settings/diagnostics${id ? `?id=${id}` : ""}`),
     params: {},
     context: {},
-  } as never)) as { match: { errorId: string } | null; recent: Array<{ errorId: string }> };
+  } as never)) as { match: { errorId: string; createdAt: string } | null; recent: Array<{ errorId: string; createdAt: string }> };
 }
 
 describe("chaos: Diagnostics shows a shop only its own errors", () => {
@@ -90,6 +90,19 @@ describe("chaos: Diagnostics shows a shop only its own errors", () => {
         expect((await diagnostics(a.domain, errorOfB)).match, "shop A read shop B's error by its id").toBeNull();
         expect((await diagnostics(b.domain, errorOfA)).match).toBeNull();
         expect((await diagnostics(a.domain, orphan.errorId)).match).toBeNull();
+
+        // In the shop's zone, the way every other table writes a time -- not the raw UTC
+        // ISO string the list and the detail printed (#759).
+        await prisma.shop.update({ where: { id: b.id }, data: { timezone: "Asia/Tokyo" } });
+        const stamped = await prisma.errorEvent.update({
+          where: { errorId: errorOfB },
+          data: { createdAt: new Date("2026-09-22T16:26:59.852Z") },
+        });
+        const listed = (await diagnostics(b.domain)).recent.find((row) => row.errorId === stamped.errorId);
+        expect(listed?.createdAt, "the list printed a raw ISO timestamp").toBe("23 Sep 2026, 01:26");
+        expect((await diagnostics(b.domain, errorOfB)).match?.createdAt, "the detail printed a raw ISO timestamp").toBe(
+          "23 Sep 2026, 01:26",
+        );
       } finally {
         await prisma.errorEvent.deleteMany({ where: { OR: [{ shopId: b.id }, { errorId: `ANC-DIAG-${chaos.seed}` }] } });
         await prisma.shop.delete({ where: { id: b.id } });

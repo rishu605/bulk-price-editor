@@ -60,7 +60,8 @@ export function RunResultSection({ result }: { result: CampaignResult }) {
               Average margin per variant went from {margin.averageBefore.toFixed(1)}% to{" "}
               {margin.averageAfter.toFixed(1)}%
               {margin.unknown > 0
-                ? `, across the ${countOf(margin.covered, "variant")} that have a cost recorded. ${formatCount(margin.unknown)} do not, and are not included.`
+                ? `, across the ${countOf(margin.covered, "variant")} that ${margin.covered === 1 ? "has" : "have"} a cost recorded. ` +
+                  `${formatCount(margin.unknown)} ${margin.unknown === 1 ? "does not, and is" : "do not, and are"} not included.`
                 : `, across all ${countOf(margin.covered, "variant")}.`}
             </s-text>
           </s-paragraph>
@@ -68,7 +69,8 @@ export function RunResultSection({ result }: { result: CampaignResult }) {
           {margin.belowCost.length > 0 ? (
             <s-banner tone="critical">
               <s-paragraph>
-                {margin.belowCost.length} of these are now selling at or below cost:
+                {formatCount(margin.belowCost.length)} of these{" "}
+                {margin.belowCost.length === 1 ? "is" : "are"} now selling at or below cost:
               </s-paragraph>
               <s-unordered-list>
                 {margin.belowCost.map((row) => (

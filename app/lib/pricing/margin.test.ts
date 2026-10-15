@@ -118,7 +118,20 @@ describe("saying it in a sentence", () => {
   it("leads with the coverage caveat when costs are missing", () => {
     const impact = marginImpact([row(), row({ variantGid: "v2", cost: undefined })], null);
 
-    expect(describeImpact(impact, null)).toContain("1 do not and are not included");
+    expect(describeImpact(impact, null)).toContain("1 does not and is not included");
+  });
+
+  it("agrees with one on both sides of the caveat (#759)", () => {
+    // "Based on the 1 products that have a cost; 1 do not and are not included" was live.
+    const impact = marginImpact([row(), row({ variantGid: "v2", cost: undefined })], null);
+
+    expect(describeImpact(impact, null)).toContain("Averaged over the 1 variant that has a cost; 1 does not and is not included.");
+  });
+
+  it("groups a large uncovered count", () => {
+    const impact = { ...marginImpact([row()], null), unknown: 2702 };
+
+    expect(describeImpact(impact, null)).toContain("2,702 do not and are not included");
   });
 
   it("says plainly when it knows nothing at all", () => {
@@ -154,7 +167,7 @@ describe("the margin sentence counts variants, and says so (#795)", () => {
   it("averages per variant, and names the variants it covers and the ones it could not", () => {
     const sentence = describeImpact(impact, null);
     expect(sentence).toMatch(/^Average margin per variant drops about/);
-    expect(sentence).toContain("Averaged over the 2 variants that have a cost; 1 do not and are not included.");
+    expect(sentence).toContain("Averaged over the 2 variants that have a cost; 1 does not and is not included.");
     expect(sentence).not.toMatch(/products/);
   });
 

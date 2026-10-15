@@ -98,7 +98,24 @@ describe("what the Revert tab says about the rows (#836)", () => {
   });
 
   it("asks about the drifted rows, and only those", () => {
-    expect(rollbackSummary(counts({ total: 3, clean: 1, drifted: 1, unaffected: 1 }))).toContain("1 of 3 variants have been changed");
+    expect(rollbackSummary(counts({ total: 3, clean: 1, drifted: 1, unaffected: 1 }))).toContain("1 of 3 variants has been changed");
+    expect(rollbackSummary(counts({ total: 3, clean: 1, drifted: 2 }))).toContain("2 of 3 variants have been changed");
+  });
+
+  it("groups its counts, and agrees with one (#759)", () => {
+    expect(rollbackSummary(counts({ total: 3669, clean: 3669 }))).toContain("All 3,669 variants");
+    expect(rollbackSummary(counts({ total: 3669, clean: 1200 }))).toContain("1,200 of 3,669 variants are still");
+    expect(rollbackSummary(counts({ total: 3669, clean: 1 }))).toContain("1 of 3,669 variants is still");
+    expect(rollbackSummary(counts({ total: 3669, drifted: 1200 }))).toContain("1,200 of 3,669 variants have been changed");
+  });
+
+  it("leaves how reverting works to the paragraph under it, rather than saying it twice (#759)", () => {
+    // The tab's next paragraph is "Reverting recomputes each price without this campaign",
+    // so a summary ending "Reverting recomputes each one without it" read the same thing
+    // twice in a row.
+    for (const over of [{ total: 3, clean: 3 }, { total: 1, clean: 1 }, { total: 3, clean: 2 }, { total: 3, clean: 1 }]) {
+      expect(rollbackSummary(counts(over))).not.toMatch(/recomputes/i);
+    }
   });
 
   it("explains the rows reverting leaves where they are, and says nothing when there are none", () => {

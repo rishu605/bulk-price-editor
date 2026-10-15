@@ -9,6 +9,7 @@ import { EmptyState } from "../AsyncState";
 import { CsvDropZone } from "./CsvDropZone";
 import { UnsavedChanges } from "../UnsavedChanges";
 import { downloadCsv } from "../../lib/reporting/csv";
+import { formatCount } from "../../lib/format/display";
 import { commitReady, rowsOf } from "../../lib/imports/checked-rows";
 import { SPACE } from "../../lib/ui/spacing";
 import { Secondary } from "../Type";
@@ -314,7 +315,7 @@ export function ImportReport({
             <s-text>
               These rows were left out. Everything else is unaffected — one bad row never
               fails the file.
-              {unlisted > 0 ? ` Showing the first ${problems.length} of ${problemCount} rows that need attention.` : ""}
+              {unlisted > 0 ? ` Showing the first ${formatCount(problems.length)} of ${formatCount(problemCount ?? 0)} rows that need attention.` : ""}
             </s-text>
           </s-paragraph>
 
@@ -327,7 +328,7 @@ export function ImportReport({
                 onClick={() => downloadCsv(download.filename, download.csv())}
               >
                 {/* "All" only when it is (#989): past the cap the file holds the rows listed. */}
-                {unlisted > 0 ? `Download the first ${problems.length} (CSV)` : `Download all ${problems.length} (CSV)`}
+                {unlisted > 0 ? `Download the first ${formatCount(problems.length)} (CSV)` : `Download all ${formatCount(problems.length)} (CSV)`}
               </s-button>
             </ActionRow>
           ) : null}

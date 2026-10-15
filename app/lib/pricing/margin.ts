@@ -135,9 +135,11 @@ export function describeImpact(impact: MarginImpact, currencyTarget: number | nu
     );
   }
 
+  // Agreeing with one on both sides (#759): "the 1 variant that have a cost; 1 do not".
   const coverage =
     impact.unknown > 0
-      ? ` Averaged over the ${countOf(impact.covered, "variant")} that have a cost; ${formatCount(impact.unknown)} do not and are not included.`
+      ? ` Averaged over the ${countOf(impact.covered, "variant")} that ${impact.covered === 1 ? "has" : "have"} a cost; ` +
+        `${formatCount(impact.unknown)} ${impact.unknown === 1 ? "does not and is" : "do not and are"} not included.`
       : "";
 
   const direction =

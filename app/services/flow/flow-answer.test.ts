@@ -76,3 +76,20 @@ describe("a throw's answer", () => {
     expect(error("VALIDATION").message).toBe('"Autumn sale" was not applied: VALIDATION happened.');
   });
 });
+
+describe("the counts Flow's run log reads (#759)", () => {
+  it("says variant for one and groups a large count", () => {
+    expect(answerForRun({ ...ran, verified: 1 }, "Autumn sale", "applied").message).toBe(
+      '"Autumn sale" applied: 1 variant, all verified.',
+    );
+    expect(answerForRun({ ...ran, verified: 3669 }, "Autumn sale", "ended").message).toBe(
+      '"Autumn sale" ended: 3,669 variants, all verified.',
+    );
+  });
+
+  it("groups a partial run's counts", () => {
+    expect(answerForRun({ ...ran, clean: false, failed: 1, unverified: 1200 }, "Autumn sale", "applied").message).toContain(
+      "1 failed and 1,200 unverified",
+    );
+  });
+});

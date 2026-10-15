@@ -43,6 +43,8 @@ import { ImportForm, ImportReport, type ImportProblem } from "../components/impo
 import { importCosts, type CostImportResult } from "../services/cost-import.server";
 import { costErrorCsv } from "../lib/reporting/cost-errors";
 import { linesOf } from "../lib/reporting/lines";
+import { importCheckMessage, importedMessage, importLabel } from "../lib/imports/messages";
+import { countOf, formatCount } from "../lib/format/display";
 import { isCommit } from "../lib/imports/intent";
 import { importCheckKey, uncheckedCommit } from "../lib/imports/check-key.server";
 import { reportError } from "../services/error-report.server";
@@ -148,11 +150,8 @@ export const action = withGuard("/app/prices/costs", async ({ request }: ActionF
         // The rows a commit may write; a commit's answer has none, so it spends the check.
         checkKey: dryRun ? importCheckKey(csv) : undefined,
         message: imported.dryRun
-          ? `${imported.ready} of ${imported.total} rows would be imported. Nothing has been written.`
-          : `Imported ${imported.written} costs.` +
-            (imported.unchanged > 0
-              ? ` ${imported.unchanged} already matched and were left alone.`
-              : ""),
+          ? importCheckMessage(imported.ready, imported.total)
+          : importedMessage(imported.written, "cost", imported.unchanged),
       };
     } catch (error) {
       const reported = await reportError(error, {
@@ -304,7 +303,8 @@ export default function Costs() {
 
       <Card heading="What your cost floors can protect">    <s-paragraph>
           <s-text>
-            {withCost} of {variants} variants have a cost ({coverage}%). Cost-based
+            {formatCount(withCost)} of {countOf(variants, "variant")} {withCost === 1 ? "has" : "have"} a
+            cost ({coverage}%). Cost-based
             guardrails skip the rest entirely, so a low number here means &ldquo;never
             price below cost&rdquo; is doing less than it looks.
           </s-text>
@@ -433,7 +433,7 @@ export default function Costs() {
         ready={imported?.ready ?? null}
         checkKey={importAnswer?.checkKey}
         checkLabel="Check the file"
-        commitLabel={(ready) => `Import ${ready} costs`}
+        commitLabel={(ready) => importLabel(ready, "cost")}
         placeholder={"Variant SKU,Variant Cost\nCH-1,12.50\nCH-2,14.00"}
         description={
           <s-paragraph>

@@ -179,6 +179,11 @@ export interface CampaignPreview {
   blocked?: { reason: string; variantGid: string };
   writePath: string;
   writePathReason: string;
+  /**
+   * The storefront tags Apply adds to each product it prices, as the campaign stores them
+   * -- for the Apply dialog to name before it does (#759). Absent where nothing is planned.
+   */
+  tagKit?: string[];
   /** One entry per market this campaign also prices. Empty for base-only campaigns. */
   markets: MarketPreview[];
   /**

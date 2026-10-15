@@ -15,6 +15,8 @@
  * these functions take counts and names, and are never handed a Money.
  */
 
+import { countOf, formatCount } from "../format/display";
+
 export type NotificationKind =
   | "run-completed"
   | "run-partial"
@@ -122,7 +124,7 @@ export function compose(notification: Notification): Email {
 
 function runCompleted(n: RunNotification): Email {
   return {
-    subject: `"${n.campaignName}" finished — ${n.counts.verified} variants updated`,
+    subject: `"${n.campaignName}" finished — ${countOf(n.counts.verified, "variant")} updated`,
     text: [
       `"${n.campaignName}" has finished and every row was read back and confirmed.`,
       "",
@@ -143,8 +145,8 @@ function runPartial(n: RunNotification): Email {
   const attention = n.counts.failed + n.counts.unverified;
   return {
     subject: n.revert
-      ? `"${n.campaignName}" finished reverting partially — ${attention} rows need attention`
-      : `"${n.campaignName}" finished partially — ${attention} rows need attention`,
+      ? `"${n.campaignName}" finished reverting partially — ${needAttention(attention)}`
+      : `"${n.campaignName}" finished partially — ${needAttention(attention)}`,
     text: [
       n.revert
         ? `"${n.campaignName}" has been reverted part of the way: not every price went back, so parts of the sale may still be live.`
@@ -271,10 +273,12 @@ function revertCompleted(n: RunNotification): Email {
 
 function driftHold(n: DriftNotification): Email {
   return {
-    subject: `"${n.campaignName}" — ${n.driftedCount} prices changed outside the app`,
+    subject: `"${n.campaignName}" — ${countOf(n.driftedCount, "price")} changed outside the app`,
     text: [
-      `${n.driftedCount} product${n.driftedCount === 1 ? "" : "s"} covered by`,
-      `"${n.campaignName}" ${n.driftedCount === 1 ? "has" : "have"} been repriced somewhere other than this app.`,
+      // Prices, as the subject says: the count is of prices, and the body called them
+      // products (#759).
+      `${countOf(n.driftedCount, "price")} covered by`,
+      `"${n.campaignName}" ${n.driftedCount === 1 ? "has" : "have"} been changed somewhere other than this app.`,
       "",
       "Those edits were made on purpose by someone, so the app has not overwritten them.",
       "Each one is waiting for a decision: keep the new price as the new normal, put the",
@@ -288,14 +292,14 @@ function driftHold(n: DriftNotification): Email {
 
 function digest(n: DigestNotification): Email {
   return {
-    subject: `${n.shopName}: ${n.campaignsRun} campaign${n.campaignsRun === 1 ? "" : "s"} this week`,
+    subject: `${n.shopName}: ${countOf(n.campaignsRun, "campaign")} this week`,
     text: [
       `A week of pricing on ${n.shopName}.`,
       "",
-      `Campaigns run: ${n.campaignsRun}`,
-      `Variants changed: ${n.variantsChanged}`,
-      `Runs finished partially: ${n.partialRuns}`,
-      `Drift waiting on a decision: ${n.driftOpen}`,
+      `Campaigns run: ${formatCount(n.campaignsRun)}`,
+      `Variants changed: ${formatCount(n.variantsChanged)}`,
+      `Runs finished partially: ${formatCount(n.partialRuns)}`,
+      `Drift waiting on a decision: ${formatCount(n.driftOpen)}`,
       "",
       n.partialRuns > 0 || n.driftOpen > 0
         ? "Anything above zero on the last two lines is waiting for you."
@@ -311,12 +315,17 @@ function digest(n: DigestNotification): Email {
  * lines of noise that makes the one number that matters harder to find.
  */
 function countLines(counts: RunCounts): string[] {
-  const lines = [`Variants updated and verified: ${counts.verified}`];
-  if (counts.failed > 0) lines.push(`Failed: ${counts.failed}`);
-  if (counts.unverified > 0) lines.push(`Applied but not confirmed: ${counts.unverified}`);
-  if (counts.skipped > 0) lines.push(`Skipped: ${counts.skipped}`);
-  if (counts.clamped > 0) lines.push(`Raised to a floor instead of the rule's price: ${counts.clamped}`);
+  const lines = [`Variants updated and verified: ${formatCount(counts.verified)}`];
+  if (counts.failed > 0) lines.push(`Failed: ${formatCount(counts.failed)}`);
+  if (counts.unverified > 0) lines.push(`Applied but not confirmed: ${formatCount(counts.unverified)}`);
+  if (counts.skipped > 0) lines.push(`Skipped: ${formatCount(counts.skipped)}`);
+  if (counts.clamped > 0) lines.push(`Raised to a floor instead of the rule's price: ${formatCount(counts.clamped)}`);
   return lines;
+}
+
+/** "1 row needs attention", "1,200 rows need attention" (#759). */
+function needAttention(count: number): string {
+  return `${countOf(count, "row")} ${count === 1 ? "needs" : "need"} attention`;
 }
 
 function reasonLines(reasons?: string[]): string[] {

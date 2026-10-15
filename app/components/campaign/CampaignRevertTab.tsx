@@ -13,6 +13,8 @@ import { downloadCsv, filenameSlug } from "../../lib/reporting/csv";
 import { rollbackReportCsv, rollbackSummary, unaffectedSentence } from "../../lib/reporting/rollback";
 import type { CampaignDetailProps } from "./props";
 import { Card } from "../Card";
+import { countOf } from "../../lib/format/display";
+import { REVERT_MODAL_ID } from "./RevertConfirmation";
 
 export function CampaignRevertTab({ rollback, preview, fetcher, busy }: CampaignDetailProps) {
   return (
@@ -45,8 +47,8 @@ export function CampaignRevertTab({ rollback, preview, fetcher, busy }: Campaign
           {rollback.counts.deleted > 0 ? (
             <s-paragraph>
               <s-text>
-                {rollback.counts.deleted} variant
-                {rollback.counts.deleted === 1 ? " was" : "s were"} deleted in Shopify.
+                {countOf(rollback.counts.deleted, "variant")}{" "}
+                {rollback.counts.deleted === 1 ? "was" : "were"} deleted in Shopify.
                 Nothing is written for {rollback.counts.deleted === 1 ? "it" : "them"}.
               </s-text>
             </s-paragraph>
@@ -56,9 +58,24 @@ export function CampaignRevertTab({ rollback, preview, fetcher, busy }: Campaign
             <input type="hidden" name="intent" value="revert" />
             <RollbackReportTable rows={rollback.rows} />
             <ActionRow>
-              <s-button type="submit" tone="critical" loading={busy || undefined}>
-                Revert, keeping the ticked edits
-              </s-button>
+              {/* "Keeping the ticked edits" only where there is a box to tick (#759). With
+                  none, the same confirmation the header's Revert opens: a second revert
+                  that skipped it would be the one unconfirmed way to end a sale. */}
+              {rollback.straightforward ? (
+                <s-button
+                  type="button"
+                  tone="critical"
+                  loading={busy || undefined}
+                  commandFor={REVERT_MODAL_ID}
+                  command="--show"
+                >
+                  Revert
+                </s-button>
+              ) : (
+                <s-button type="submit" tone="critical" loading={busy || undefined}>
+                  Revert, keeping the ticked edits
+                </s-button>
+              )}
               <s-button
                 type="button"
                 variant="tertiary"

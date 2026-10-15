@@ -1,4 +1,4 @@
-import { formatCount } from "../format/display";
+import { countOf } from "../format/display";
 import type { WritePath } from "./types";
 
 /**
@@ -24,6 +24,12 @@ import type { WritePath } from "./types";
  * The row count is included because it is the number a merchant is actually checking:
  * "3,669 variants" beside "a minute" is a claim they can sanity-check, and a duration on
  * its own is not.
+ *
+ * In the merchant's words, not the engine's (#759). The Preview tab printed the planner's
+ * own reasoning -- "Write path: sync — 2 rows is under the 1000-row threshold and fits the
+ * available rate-limit budget" -- and now says this sentence instead, so "sync", "bulk"
+ * and "bulk operation" are said as what they mean to the person waiting: written while
+ * they wait, or handed to Shopify to finish in the background.
  */
 export function describeRunDuration(
   path: WritePath | "none",
@@ -33,18 +39,18 @@ export function describeRunDuration(
 ): string {
   if (rowCount === 0) return "Nothing would be written.";
 
-  const variants = `${formatCount(rowCount)} ${rowCount === 1 ? "variant" : "variants"}`;
+  const variants = countOf(rowCount, "variant");
 
   if (path === "bulk") {
     return (
-      `${variants}, sent as one bulk operation. Shopify queues these, so it usually ` +
-      `finishes within minutes — but the queue is shared with every other app on your ` +
+      `${variants}, handed to Shopify to write in the background. Shopify queues these, so it ` +
+      `usually finishes within minutes — but the queue is shared with every other app on your ` +
       `store, and we cannot see how busy it is. You can leave this page; it keeps going.`
     );
   }
 
   return (
-    `${variants}, written directly. Runs of this size are kept under ` +
-    `${maxSyncSeconds} seconds — anything larger is sent as a bulk operation instead.`
+    `${variants}, written while you wait. A run this size is kept under ` +
+    `${maxSyncSeconds} seconds — a larger one is handed to Shopify to finish in the background.`
   );
 }

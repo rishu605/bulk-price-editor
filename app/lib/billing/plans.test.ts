@@ -153,3 +153,14 @@ describe("reading a stored plan", () => {
     expect(planFor(null).id).toBe("free");
   });
 });
+
+describe("a plan's price on the plan page (#759)", () => {
+  it("carries its currency, so 14.90 is not a bare number", () => {
+    expect(plans.planPrice(PLANS.growth)).toBe("$14.90");
+    expect(plans.planPrice(PLANS.wholesale)).toBe("$69.90");
+  });
+
+  it("says Free rather than $0.00", () => {
+    expect(plans.planPrice(PLANS.free)).toBe("Free");
+  });
+});

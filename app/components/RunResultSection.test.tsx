@@ -155,5 +155,21 @@ describe("naming the products that went wrong", () => {
     expect(html).toContain("Whiteout Jacket");
     expect(html).toContain("-5.0% margin");
     expect(html).toMatch(/<s-banner[^>]*tone="critical"/);
+    // One of them, so "is" (#759).
+    expect(html).toContain("1 of these is now selling at or below cost");
+  });
+});
+
+describe("the margin sentence agrees with one (#759)", () => {
+  it("says has and does for one variant each side of the caveat", () => {
+    const html = render(result({ margin: { ...result().margin, covered: 1, unknown: 1 } }));
+
+    expect(html).toContain("1 variant that has a cost recorded. 1 does not, and is not included.");
+  });
+
+  it("groups the variants it could not price", () => {
+    const html = render(result({ margin: { ...result().margin, covered: 967, unknown: 2702 } }));
+
+    expect(html).toContain("2,702 do not, and are not included.");
   });
 });

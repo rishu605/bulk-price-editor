@@ -219,6 +219,25 @@ describe("chaos: resolving price drift from the queue", () => {
     });
   });
 
+  it("names the edited variant in the campaign's history, not its Admin GID (#759)", async () => {
+    await withChaos("drift-hold-reason-names-variant", CATALOG, async (chaos) => {
+      const { shopId, campaignId, variantGids } = chaos.fixture;
+      await applied(chaos);
+      await prisma.variantIndex.updateMany({ where: { shopId, variantGid: variantGids[0] }, data: { title: "Cascade Gloves 44 · M" } });
+
+      await holdForDrift(shopId, campaignId, variantGids[0]);
+
+      // What "How it got here" prints: the transition's reason.
+      const held = await prisma.auditLogEntry.findFirstOrThrow({
+        where: { shopId, entityId: campaignId, action: "campaign.transition" },
+        orderBy: { createdAt: "desc" },
+      });
+      const reason = (held.after as { reason?: string }).reason ?? "";
+      expect(reason).toBe("price edited outside Anchor on Cascade Gloves 44 · M");
+      expect(reason, "the history printed a raw Admin GID").not.toContain("gid://");
+    });
+  });
+
   it("still ends a held sale on its scheduled end date, leaving the held edit for the merchant", async () => {
     await withChaos("drift-held-scheduled-end", CATALOG, async (chaos) => {
       const { shopId, campaignId, variantGids, baseline } = chaos.fixture;

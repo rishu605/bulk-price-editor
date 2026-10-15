@@ -37,6 +37,40 @@ export function normaliseTag(tag: string): string {
 }
 
 /**
+ * The tags a kit adds: trimmed, blanks dropped, and each once.
+ *
+ * A kit listing the same tag twice must not add it twice, or the ledger would claim
+ * ownership of one copy of something that only exists once -- and "Sale" and "sale" are
+ * the same tag to Shopify. One function for the run and for the Apply dialog that names
+ * them beforehand (#759), so the two cannot list different tags.
+ */
+export function tagKitTags(tagKit: readonly string[]): string[] {
+  const tags: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of tagKit) {
+    const tag = raw.trim();
+    if (!tag || seen.has(normaliseTag(tag))) continue;
+    seen.add(normaliseTag(tag));
+    tags.push(tag);
+  }
+  return tags;
+}
+
+/**
+ * What Apply does to the storefront's tags, in a sentence, or null when it adds none.
+ *
+ * The Apply dialog listed the rule, the scope, the counts, the schedule and who is emailed
+ * -- and not the tags it was about to put on every product it prices (#759), the one
+ * change it makes that a shopper can see besides the price.
+ */
+export function describeTagKit(tagKit: readonly string[]): string | null {
+  const tags = tagKitTags(tagKit).map((tag) => `"${tag}"`);
+  if (tags.length === 0) return null;
+  const listed = tags.length === 1 ? tags[0] : `${tags.slice(0, -1).join(", ")} and ${tags[tags.length - 1]}`;
+  return `Adds ${listed} to each product it prices. Reverting removes only the tags it added.`;
+}
+
+/**
  * Splits a campaign's tag kit against what a product already carries.
  *
  * Comparison is case-insensitive because Shopify treats "Sale" and "sale" as the same
@@ -59,18 +93,9 @@ export function planTagsFor(
   const toAdd: string[] = [];
   const shared: string[] = [];
   const alreadyPresent: string[] = [];
-  const seen = new Set<string>();
 
-  for (const raw of tagKit) {
-    const tag = raw.trim();
-    if (!tag) continue;
-
+  for (const tag of tagKitTags(tagKit)) {
     const key = normaliseTag(tag);
-    // A kit listing the same tag twice must not add it twice, or the ledger would
-    // claim ownership of one copy of something that only exists once.
-    if (seen.has(key)) continue;
-    seen.add(key);
-
     if (!current.has(key)) toAdd.push(tag);
     else if (claimedByOthers.has(key)) shared.push(tag);
     else alreadyPresent.push(tag);

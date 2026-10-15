@@ -111,3 +111,23 @@ describe("a run that actually ran", () => {
     expect(partial.details).toEqual(["Variant 9: throttled"]);
   });
 });
+
+describe("the counts read as a sentence (#759)", () => {
+  it("says variant, not variants, for one", () => {
+    const one = runResponse({ clean: true, verified: 1, failed: 0, unverified: 0, messages: [] }, "Applied");
+
+    expect(one.message).toBe("Applied 1 variant, all verified.");
+  });
+
+  it("groups a large count the way the rest of the app does", () => {
+    const many = runResponse({ clean: true, verified: 3669, failed: 0, unverified: 0, messages: [] }, "Reverted");
+
+    expect(many.message).toBe("Reverted 3,669 variants, all verified.");
+  });
+
+  it("says failure, not failures, for one, and groups both counts", () => {
+    const partial = runResponse({ clean: false, verified: 0, failed: 1, unverified: 1200, messages: [] }, "Applied");
+
+    expect(partial.message).toContain("1 failure and 1,200 unverified");
+  });
+});

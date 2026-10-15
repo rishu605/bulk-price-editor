@@ -48,6 +48,32 @@ describe("validateRow", () => {
     expect((result as InvalidRow).reason).toContain("1299.00");
   });
 
+  it("names too many decimals as the cause, not the number's shape (#759)", () => {
+    // Live: 12.345 in a USD store was refused as "not a plain number. Remove currency
+    // symbols and thousands separators" -- it has neither, and the merchant was sent
+    // looking for them.
+    const usd = check({ price: "12.345" }) as InvalidRow;
+    expect(usd.problem).toBe("price-unparseable");
+    expect(usd.reason).toBe(
+      "Price 12.345 has more decimal places than USD allows, which is 2. Round it to 2 decimal places and import the file again.",
+    );
+    expect(usd.reason).not.toMatch(/plain number|currency symbols|thousands/);
+
+    const yen = check({ price: "1200.50" }, "JPY") as InvalidRow;
+    expect(yen.reason).toBe("Price 1200.50 has decimal places, and JPY has none. Round it to a whole number and import the file again.");
+
+    const compareAt = check({ compareAt: "29.999" }) as InvalidRow;
+    expect(compareAt.problem).toBe("compare-at-unparseable");
+    expect(compareAt.reason).toContain("Compare-at price 29.999 has more decimal places than USD allows");
+  });
+
+  it("still says how to write a plain number when that is the cause", () => {
+    const compareAt = check({ compareAt: "$29.99" }) as InvalidRow;
+    expect(compareAt.problem).toBe("compare-at-unparseable");
+    // It said only "Compare-at price is not a plain number." -- a cause with no next action.
+    expect(compareAt.reason).toContain("Remove currency symbols and thousands separators");
+  });
+
   it("refuses zero as firmly as negative", () => {
     // Not merely odd: every percentage campaign computed from a zero baseline resolves
     // to zero, so one bad row would put a product on sale for nothing.

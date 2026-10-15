@@ -28,6 +28,8 @@ import prisma from "../db.server";
 import { ensureShop } from "../services/shop.server";
 import { planRecapture, recapture } from "../services/recapture.server";
 import { recaptureScopeFrom, STALE_SCOPE } from "../lib/baselines/recapture-scope";
+import { recapturedMessage, replaceLabel, scopeSentence } from "../lib/baselines/recapture";
+import { formatCount } from "../lib/format/display";
 import { actorFor } from "../lib/audit/actor";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
@@ -91,14 +93,7 @@ export const action = withGuard("/app/prices/baselines/recapture", async ({ requ
       expectedScope: Number(shown),
     });
 
-    return {
-      ok: true,
-      message:
-        `Recaptured ${result.captured} baselines across ${result.scope} variants` +
-        (result.superseded > 0 ? `, superseding ${result.superseded}` : "") +
-        (result.alreadyCurrent > 0 ? `. ${result.alreadyCurrent} were already correct` : "") +
-        ".",
-    };
+    return { ok: true, message: recapturedMessage(result) };
   } catch (error) {
     const reported = await reportError(error, {
       shopId: shop.id,
@@ -197,9 +192,7 @@ export default function Recapture() {
         </Form>
 
         <s-paragraph>
-          <s-text>
-            {assessment.scope} variant{assessment.scope === 1 ? "" : "s"} in scope.
-          </s-text>
+          <s-text>{scopeSentence(assessment.scope)}</s-text>
         </s-paragraph>
       </Card>
 
@@ -219,7 +212,7 @@ export default function Recapture() {
               {assessment.overlaps.map((overlap) => (
                 <s-table-row key={overlap.campaignId}>
                   <s-table-cell>{overlap.campaignName}</s-table-cell>
-                  <s-table-cell>{overlap.variants}</s-table-cell>
+                  <s-table-cell>{formatCount(overlap.variants)}</s-table-cell>
                 </s-table-row>
               ))}
             </s-table-body>
@@ -258,7 +251,7 @@ export default function Recapture() {
               loading={busy || undefined}
               disabled={assessment.scope === 0 || unchecked || undefined}
             >
-              Replace {assessment.scope} baseline{assessment.scope === 1 ? "" : "s"}
+              {replaceLabel(assessment.scope)}
             </s-button>
           </s-stack>
         </fetcher.Form>

@@ -1,6 +1,6 @@
 import { ExportButton } from "../components/ExportButton";
 import { exportQuery, reconciliationFiltersFrom } from "../lib/reporting/export-filters";
-import { formatCount } from "../lib/format/display";
+import { countOf, formatCount } from "../lib/format/display";
 import { ActionRow } from "../components/ActionRow";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useFetcher, useLoaderData, useSearchParams } from "react-router";
@@ -104,14 +104,14 @@ export default function Reconciliation() {
         <s-paragraph>
           <s-text>
             Every price on every surface, next to the baseline it was computed from and
-            the campaign that put it there. {formatCount(total)} rows.
+            the campaign that put it there. {countOf(total, "row")}.
           </s-text>
         </s-paragraph>
 
         {counts.drifted > 0 ? (
           <s-banner tone="warning">
             <s-paragraph>
-              {counts.drifted} {counts.drifted === 1 ? "price is" : "prices are"} not what
+              {formatCount(counts.drifted)} {counts.drifted === 1 ? "price is" : "prices are"} not what
               we wrote. Something changed them outside this app.
             </s-paragraph>
           </s-banner>

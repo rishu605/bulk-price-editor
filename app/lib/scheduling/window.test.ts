@@ -196,6 +196,12 @@ describe("describeSchedule", () => {
       .toContain("until you revert it");
   });
 
+  it("counts the early revert in the singular for one minute (#759)", () => {
+    // Live: "Reverting begins 1 minutes early…".
+    expect(describeSchedule(window({ revertBufferMinutes: 1 }), "UTC")).toContain("Reverting begins 1 minute early");
+    expect(describeSchedule(window({ revertBufferMinutes: 5 }), "UTC")).toContain("Reverting begins 5 minutes early");
+  });
+
   it("explains manual scheduling plainly", () => {
     expect(describeSchedule({ kind: "manual" }, "UTC")).toContain("by hand");
   });
@@ -256,6 +262,8 @@ describe("revert buffer capping", () => {
     );
     expect(warnings.join(" ")).toContain("longer than half the window");
     expect(warnings.join(" ")).toContain("under five minutes");
+    // One minute, in the singular (#759) -- it said "1 minute(s)".
+    expect(warnings.join(" ")).toContain("capped at 1 minute.");
   });
 
   it("warns when the end is not after the start", () => {

@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { assessRecapture, confirmationMatches, DANGEROUS_PHRASE } from "./recapture";
+import { assessRecapture, confirmationMatches, DANGEROUS_PHRASE, recapturedMessage, replaceLabel, scopeSentence } from "./recapture";
 
 describe("assessRecapture", () => {
   it("asks for nothing extra when no campaign is running", () => {
@@ -32,7 +32,17 @@ describe("assessRecapture", () => {
     expect(assessment.warning).toContain("Summer Sale");
     expect(assessment.warning).toContain("412");
     expect(assessment.warning).toContain("Clearance");
-    expect(assessment.warning).toContain("500 of these 1000");
+    expect(assessment.warning).toContain("500 of these 1,000");
+  });
+
+  it("groups its counts and agrees with one (#759)", () => {
+    // Live: "1 of these 3669 variants are on sale right now".
+    const one = assessRecapture(3_669, [{ campaignId: "c1", campaignName: "Summer Sale", variants: 1 }]);
+    expect(one.warning).toContain("1 of these 3,669 variants is on sale right now");
+
+    const many = assessRecapture(120_000, [{ campaignId: "c1", campaignName: "Summer Sale", variants: 4_200 }]);
+    expect(many.warning).toContain("4,200 of these 120,000 variants are on sale right now");
+    expect(many.warning).toContain('"Summer Sale" (4,200)');
   });
 
   it("says what actually goes wrong, not that it is dangerous", () => {
@@ -53,6 +63,31 @@ describe("assessRecapture", () => {
     ]);
     expect(assessment.risk).toBe("safe");
     expect(assessment.overlaps).toEqual([]);
+  });
+});
+
+describe("the page's counts (#759)", () => {
+  it("says how many variants are in scope, grouped and singular for one", () => {
+    expect(scopeSentence(3_669)).toBe("3,669 variants in scope.");
+    expect(scopeSentence(1)).toBe("1 variant in scope.");
+  });
+
+  it("labels the button with the grouped count", () => {
+    // Live: "Replace 3669 baselines".
+    expect(replaceLabel(3_669)).toBe("Replace 3,669 baselines");
+    expect(replaceLabel(1)).toBe("Replace 1 baseline");
+  });
+
+  it("reports what it did in grouped counts that agree with one", () => {
+    expect(recapturedMessage({ captured: 3_669, scope: 3_669, superseded: 1_200, alreadyCurrent: 0 })).toBe(
+      "Recaptured 3,669 baselines across 3,669 variants, superseding 1,200.",
+    );
+    expect(recapturedMessage({ captured: 1, scope: 2, superseded: 0, alreadyCurrent: 1 })).toBe(
+      "Recaptured 1 baseline across 2 variants. 1 was already correct.",
+    );
+    expect(recapturedMessage({ captured: 0, scope: 2_000, superseded: 0, alreadyCurrent: 2_000 })).toContain(
+      "2,000 were already correct.",
+    );
   });
 });
 

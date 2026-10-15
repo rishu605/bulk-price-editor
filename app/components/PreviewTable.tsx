@@ -1,4 +1,5 @@
 import { humanise } from "../lib/format/label";
+import { formatCount } from "../lib/format/display";
 import { pricedMarkets } from "../lib/markets/preview-columns";
 import { reasonForRow } from "../lib/planning/reasons";
 import { MoneyCell } from "./MoneyCell";
@@ -8,6 +9,23 @@ import { ShowingSome } from "./Pagination";
 import type { MarketPreview, PreviewRow } from "../services/campaigns/index.server";
 import { PREVIEW_TONE, toneFor } from "./tone";
 import { TableBlock } from "./TableBlock";
+
+/** Why the table is empty: the one reason that is true, with what to do about it (#759). */
+function nothingToChange(alreadyCorrect: number, blocked: boolean): string {
+  if (blocked) {
+    return "A guardrail blocks this campaign, so no price is planned. The banner at the top of the page names the variant and why.";
+  }
+  if (alreadyCorrect === 1) {
+    return "The 1 variant in scope is already at the price it would get, so there is nothing to write.";
+  }
+  if (alreadyCorrect > 1) {
+    return `All ${formatCount(alreadyCorrect)} variants in scope are already at the price they would get, so there is nothing to write.`;
+  }
+  return (
+    "The scope matched no variants that have a baseline to compute from, so there is nothing to price. " +
+    "Check the campaign's scope covers the products you meant."
+  );
+}
 
 /**
  * Before/after for each variant a campaign would change, one column per surface.
@@ -20,8 +38,20 @@ export function PreviewTable({
   rows,
   markets: allMarkets = [],
   total,
+  alreadyCorrect,
+  blocked = false,
 }: {
   rows: PreviewRow[];
+  /**
+   * Variants in scope already at the price they would get -- the plan's no-op count.
+   *
+   * What an empty table says depends on it (#759). It said "Either every variant already
+   * shows the price… or the scope matched no variants…" under a tile counting exactly
+   * which of the two it was.
+   */
+  alreadyCorrect: number;
+  /** A guardrail blocked the plan, so no row was planned whatever the scope holds. */
+  blocked?: boolean;
   markets?: MarketPreview[];
   /**
    * Every row the campaign would change, not just the ones that fit.
@@ -37,10 +67,7 @@ export function PreviewTable({
 
   if (rows.length === 0) {
     return (
-      <EmptyState
-        title="Nothing to change"
-        description="Either every variant in scope already shows the price this rule computes, or the scope matched no variants that have a baseline to compute from."
-      />
+      <EmptyState title="Nothing to change" description={nothingToChange(alreadyCorrect, blocked)} />
     );
   }
 
