@@ -7,6 +7,7 @@
  * somebody clicked Export, with nothing at build time to warn about it.
  */
 
+import { formatCount } from "../format/display";
 import { toCsv } from "./csv";
 
 export type RollbackRowKind =
@@ -86,19 +87,27 @@ export function classifyRollbackRow(input: {
  * nothing was drifted -- including a variant a higher-priority campaign had taken over,
  * whose live price is that campaign's (#836). Only the clean rows are at this campaign's
  * price, so only they are counted as such.
+ *
+ * What reverting does is the tab's next paragraph, so it is not said here as well: the
+ * two sentences in a row read the same thing twice (#759). The counts are grouped and
+ * agree with one, because "1 of 3 variants have been changed" was this sentence too.
  */
 export function rollbackSummary(counts: RollbackReport["counts"]): string {
   const { total, clean, drifted } = counts;
+  const of = (part: number) => `${formatCount(part)} of ${formatCount(total)} variants`;
   if (drifted > 0) {
-    return `${drifted} of ${total} variants have been changed since this campaign set them. Someone edited those on purpose — tick any you want left alone, then revert.`;
+    return (
+      `${of(drifted)} ${drifted === 1 ? "has" : "have"} been changed since this campaign set ${drifted === 1 ? "it" : "them"}. ` +
+      `Someone edited ${drifted === 1 ? "it" : "those"} on purpose — tick any you want left alone, then revert.`
+    );
   }
   if (clean === total) {
     return total === 1
-      ? "The 1 variant is still at the price this campaign set. Reverting recomputes its price without this campaign."
-      : `All ${total} variants are still at the price this campaign set. Reverting recomputes each one without it.`;
+      ? "The 1 variant is still at the price this campaign set."
+      : `All ${formatCount(total)} variants are still at the price this campaign set.`;
   }
   if (clean === 0) return "None of these variants shows this campaign's price now.";
-  return `${clean} of ${total} variants ${clean === 1 ? "is" : "are"} still at the price this campaign set. Reverting recomputes ${clean === 1 ? "it" : "each one"} without this campaign.`;
+  return `${of(clean)} ${clean === 1 ? "is" : "are"} still at the price this campaign set.`;
 }
 
 /**
@@ -109,7 +118,7 @@ export function unaffectedSentence(unaffected: number): string | null {
   if (unaffected === 0) return null;
   const one = unaffected === 1;
   return (
-    `${unaffected} ${one ? "variant already shows" : "variants already show"} the price reverting gives ` +
+    `${formatCount(unaffected)} ${one ? "variant already shows" : "variants already show"} the price reverting gives ` +
     `${one ? "it" : "them"} — another campaign's, or the normal price — so there is nothing to decide about ${one ? "it" : "them"}.`
   );
 }

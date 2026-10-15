@@ -788,11 +788,41 @@ describe("a sale a higher-priority one has taken variants from", () => {
       />,
     );
 
-    expect(html).toContain("1 of 3 variants have been changed since this campaign set them");
+    expect(html).toContain("1 of 3 variants has been changed since this campaign set it");
     expect(html).toContain("Already there");
     expect(html.match(/label="Leave [^"]* as it is"/g), "a checkbox on a row that is not an edit").toHaveLength(1);
     expect(html).toContain(`value="${editedByHand.variantGid}"`);
     expect(html).not.toContain(`value="${takenOver.variantGid}"`);
+  });
+
+  it("offers ticked edits on the Revert tab only when there are edits to tick (#759)", () => {
+    const edited = render(
+      <CampaignRevertTab
+        {...withRollback({
+          straightforward: false,
+          rows: [editedByHand, own],
+          counts: { total: 2, clean: 1, drifted: 1, deleted: 0, unaffected: 0 },
+        })}
+      />,
+    );
+    expect(edited).toContain("Revert, keeping the ticked edits");
+
+    // Nothing drifted: no checkbox to tick, so no button that talks about them. The same
+    // confirmation the header's Revert opens, rather than a second, unconfirmed revert.
+    const clean = render(
+      <CampaignRevertTab {...withRollback({ rows: [own], counts: { total: 1, clean: 1, drifted: 0, deleted: 0, unaffected: 0 } })} />,
+    );
+    expect(clean).not.toContain("ticked edits");
+    expect(clean).not.toMatch(/label="Leave [^"]* as it is"/);
+    expect(clean).toMatch(/<s-button[^>]*commandFor="revert-confirmation"[^>]*command="--show"[^>]*>Revert<\/s-button>/);
+  });
+
+  it("says how reverting works once, not twice in a row (#759)", () => {
+    const html = render(
+      <CampaignRevertTab {...withRollback({ rows: [own], counts: { total: 1, clean: 1, drifted: 0, deleted: 0, unaffected: 0 } })} />,
+    );
+
+    expect(html.match(/Reverting recomputes/g)).toHaveLength(1);
   });
 
   it("does not tell the Revert tab the taken-over variant is still at this campaign's price", () => {
