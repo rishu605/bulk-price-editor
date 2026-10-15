@@ -110,9 +110,44 @@ describe("ladders that would embarrass a merchant", () => {
     expect(result.refusal).toContain("12");
   });
 
-  it("refuses an inversion the floor itself created", () => {
-    // The subtle one: both tiers are fine on paper, and clamping the larger one to the
-    // floor lifts it above the smaller. Checking before clamping would miss this.
+  it("names the tier whose discount is smaller than the one below it, not the floor (#690)", () => {
+    // No cost and missing costs allowed: there is no floor at all, so nothing but the tiers
+    // themselves can have inverted this ladder.
+    const result = resolveBreaks(
+      forVariant(),
+      [
+        { minimumQuantity: 1, discountBps: 0 },
+        { minimumQuantity: 12, discountBps: 2000 },
+        { minimumQuantity: 48, discountBps: 1000 },
+      ],
+      permissive,
+    );
+
+    expect(result.breaks).toHaveLength(0);
+    expect(result.refusal).toBe(
+      "The 48+ tier takes 10% off, less than the 20% off the 12+ tier below it, so ordering " +
+        "48 or more would cost more per unit than ordering 12. Give larger quantities an " +
+        "equal or larger discount.",
+    );
+    expect(result.refusal).not.toMatch(/floor/i);
+  });
+
+  it("names a fractional discount as the merchant typed it", () => {
+    const result = resolveBreaks(
+      forVariant(),
+      [
+        { minimumQuantity: 6, discountBps: 1250 },
+        { minimumQuantity: 24, discountBps: 0 },
+      ],
+      permissive,
+    );
+
+    expect(result.refusal).toMatch(/^The 24\+ tier takes 0% off, less than the 12\.5% off the 6\+ tier below it/);
+  });
+
+  it("lets the floor make two tiers equal, which is not an inversion", () => {
+    // The floor is one price for every tier, and max(floor, x) never reverses an order:
+    // clamping can make a larger tier equal to a smaller one, never dearer.
     const result = resolveBreaks(
       forVariant({ baseline: gbp(4000), cost: gbp(3000) }),
       [
