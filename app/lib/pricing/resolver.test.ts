@@ -475,6 +475,44 @@ describe("rule engine", () => {
     }, 30_000);
   });
 
+  describe("a percentage or multiplier lands on the exact half-even cent (#1051)", () => {
+    const priced = (rule: AdjustmentRule, over: Partial<Baseline>) =>
+      resolve({
+        baseline: { price: usd(10_000), ...over },
+        surface: USD,
+        campaigns: [campaign({ ruleRows: [{ segmentIds: [], rule }] })],
+      }).price;
+
+    it("writes 9.00 for 12.85 at 30% off, with no rounding profile to hide the cent", () => {
+      // Exactly 8.995. The float factor 0.7 made it 899.4999999999999, so 8.99 was written.
+      expect(priced({ kind: "percent-change", percent: -30 }, { price: usd(1_285) })).toEqual(usd(900));
+      expect(priced({ kind: "percent-change", percent: 14 }, { price: usd(25) })).toEqual(usd(28));
+      expect(
+        priced({ kind: "percent-of-compare-at", percent: -30 }, { price: usd(2_000), compareAtPrice: usd(1_285) }),
+      ).toEqual(usd(900));
+    });
+
+    it("prices cost × a multiplier exactly", () => {
+      // 0.50 × 1.15 is exactly 0.575 and 0.15 × 4.1 exactly 0.615: both ties, both odd below.
+      expect(priced({ kind: "from-cost-multiplier", factor: 1.15 }, { cost: usd(50) })).toEqual(usd(58));
+      expect(priced({ kind: "from-cost-multiplier", factor: 4.1 }, { cost: usd(15) })).toEqual(usd(62));
+    });
+
+    it("is the nearest cent, ties to even, for every cent to 20.00 at every whole percent", () => {
+      const failures: string[] = [];
+      for (let amount = 1; amount <= 2_000; amount += 1) {
+        for (let percent = -99; percent <= 200; percent += 1) {
+          const price = applyRule({ kind: "percent-change", percent }, { price: usd(amount) }).amount;
+          const twiceOff = 2 * Math.abs(price * 100 - amount * (100 + percent));
+          if (!(twiceOff < 100 || (twiceOff === 100 && price % 2 === 0))) {
+            failures.push(`${amount} at ${percent}% → ${price}`);
+          }
+        }
+      }
+      expect({ count: failures.length, first: failures.slice(0, 5) }).toEqual({ count: 0, first: [] });
+    }, 30_000);
+  });
+
   it("last matching rule row wins (edge case E16)", () => {
     const rows = [
       { segmentIds: [], rule: { kind: "percent-change", percent: -10 } as AdjustmentRule },

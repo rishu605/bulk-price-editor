@@ -84,6 +84,66 @@ describe("setting a cost outright", () => {
   });
 });
 
+describe("a percentage of a cost is exact, half a cent rounding up (#1051)", () => {
+  const set = (rule: Parameters<typeof applyCostRule>[0], cost: number, basePrice = 10_000) =>
+    applyCostRule(rule, { cost: money(cost, "USD"), basePrice: money(basePrice, "USD") });
+
+  it("rounds an exact half cent up, not by float error", () => {
+    // 12.85 lowered 30% is exactly 8.995. `12.85 × (1 − 0.3)` in floats was
+    // 899.4999999999999, which Math.round took down to 8.99.
+    expect(set({ kind: "percent-change", percent: -30 }, 1_285)).toEqual({
+      kind: "set",
+      cost: money(900, "USD"),
+    });
+    expect(set({ kind: "percent-change", percent: -34 }, 25)).toEqual({
+      kind: "set",
+      cost: money(17, "USD"),
+    });
+    // 9.2% of 3.75 is exactly 0.345; the float product was a hair under it.
+    expect(set({ kind: "share-of-price", percent: 9.2 }, 0, 375)).toEqual({
+      kind: "set",
+      cost: money(35, "USD"),
+    });
+  });
+
+  it("skips an exact half cent below zero as negative, rather than storing a cost of nothing", () => {
+    // 0.01 lowered 150% is exactly −0.005. `Math.round` made that −0, stored as a cost of 0;
+    // half-up is symmetric about zero, so it is −0.01 and refused like any negative cost.
+    expect(set({ kind: "percent-change", percent: -150 }, 1)).toEqual({
+      kind: "skipped",
+      reason: "not-positive",
+    });
+  });
+
+  it("is exact half-up for every cent to 50.00 at every whole percent from −99 to +200", () => {
+    const failures: string[] = [];
+    for (let cost = 1; cost <= 5_000; cost += 1) {
+      for (let percent = -99; percent <= 200; percent += 1) {
+        const outcome = set({ kind: "percent-change", percent }, cost);
+        const got = outcome.kind === "set" ? outcome.cost.amount : Number.NaN;
+        const exact = cost * (100 + percent);
+        // Half up: the largest whole cent at or below exact/100 + 1/2.
+        const want = Math.floor((2 * exact + 100) / 200);
+        if (got !== want) failures.push(`${cost} at ${percent}% → ${got}, not ${want}`);
+      }
+    }
+    expect({ count: failures.length, first: failures.slice(0, 5) }).toEqual({ count: 0, first: [] });
+  }, 30_000);
+
+  it("is exact half-up for a share of every price to 20.00 at every tenth of a percent", () => {
+    const failures: string[] = [];
+    for (let price = 1; price <= 2_000; price += 1) {
+      for (let tenths = 1; tenths <= 1_000; tenths += 1) {
+        const outcome = set({ kind: "share-of-price", percent: tenths / 10 }, 0, price);
+        const got = outcome.kind === "set" ? outcome.cost.amount : Number.NaN;
+        const want = Math.floor((2 * price * tenths + 1_000) / 2_000);
+        if (got !== want) failures.push(`${tenths / 10}% of ${price} → ${got}, not ${want}`);
+      }
+    }
+    expect({ count: failures.length, first: failures.slice(0, 5) }).toEqual({ count: 0, first: [] });
+  }, 30_000);
+});
+
 describe("describing a rule", () => {
   it("says which direction a percentage goes", () => {
     expect(describeCostRule({ kind: "percent-change", percent: 4 })).toContain("Raise");
