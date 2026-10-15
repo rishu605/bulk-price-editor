@@ -30,9 +30,8 @@ import { fetchShopBasics } from "../services/catalog-sync.server";
 import { billingPlanName, planReturnUrl, trialDaysFor } from "../lib/billing/billing-api";
 import { paysOn } from "../lib/billing/subscription-payload";
 import { ActionRow } from "../components/ActionRow";
-import { isPlanId, PLAN_ORDER, PLANS, planFor, type PlanId } from "../lib/billing/plans";
+import { isPlanId, PLAN_ORDER, PLANS, planFor, planPrice, type PlanId } from "../lib/billing/plans";
 import { logger } from "../lib/logging/logger";
-import { formatMinorUnits } from "../lib/money/format";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
@@ -100,7 +99,7 @@ export const loader = withGuard("/app/settings/plan", async ({ request }: Loader
         // "Free" then aligned on the "h" of month rather than on the decimal, so the
         // one column a merchant compares down did not line up. The unit is a fact
         // about the column, so it is said once, in the header.
-        price: plan.priceMinor === 0 ? "Free" : formatMinorUnits(BigInt(plan.priceMinor), "USD"),
+        price: planPrice(plan),
         variantLimit: plan.variantLimit,
         markets: plan.markets,
         b2b: plan.b2b,

@@ -1,4 +1,5 @@
 import { formatCount } from "../format/display";
+import { formatPrice } from "../money/format";
 /**
  * What each plan includes, and — more importantly — what it never gates.
  *
@@ -81,6 +82,17 @@ export const PLAN_ORDER: PlanId[] = ["free", "growth", "markets", "wholesale"];
 
 export function isPlanId(value: unknown): value is PlanId {
   return typeof value === "string" && value in PLANS;
+}
+
+/**
+ * A plan's monthly price as the plan page shows it: "$14.90", or "Free".
+ *
+ * Through the money formatter, so it carries its currency (#759). The page printed
+ * "14.90 / 34.90 / 69.90" -- the only prices in the app with no symbol -- and the charge
+ * is in USD whatever the store sells in.
+ */
+export function planPrice(plan: Plan): string {
+  return plan.priceMinor === 0 ? "Free" : formatPrice(plan.priceMinor, "USD");
 }
 
 /** The plan a shop is on, defaulting to free rather than to an error. */
