@@ -25,6 +25,7 @@ import { ensureShop } from "../services/shop.server";
 import { billingFor } from "../services/billing.server";
 import { sendSupportRequest, supportEmailConfigured } from "../services/support.server";
 import { SUPPORT_ADDRESS, supportMailto } from "../lib/support/contact";
+import { replyToProblem } from "../lib/support/reply-to";
 import { CONTEXT_FIELDS, CONTEXT_LABELS, supportContext } from "../lib/support/context";
 import { PageShell } from "../components/PageShell";
 import { Field } from "../components/FieldGrid";
@@ -81,9 +82,8 @@ export const action = withGuard("/app/support", async ({ request }: ActionFuncti
   if (!body) {
     return { ok: false, message: "Tell us what happened first — even one line helps." };
   }
-  if (!replyTo.includes("@")) {
-    return { ok: false, message: "We need an address to reply to." };
-  }
+  const badAddress = replyToProblem(replyTo);
+  if (badAddress) return { ok: false, message: badAddress };
 
   // Rebuilt from the request rather than read from the form. The form shows the merchant
   // what will be attached; it does not get to decide it, or a posted field could name
