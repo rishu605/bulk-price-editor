@@ -12,7 +12,7 @@
  * merchant is told once, and the revert begins as soon as the apply finishes.
  */
 
-import { parseSchedule, revertMoment, windowEndText, type Schedule } from "./window";
+import { formatScheduleInstant, parseSchedule, revertMoment, windowEndText, type Schedule } from "./window";
 
 /** Where the telling is kept, in the campaign's `schedule` JSON beside the end it is about. */
 export const ENDING_LATE_KEY = "endingLate";
@@ -58,3 +58,23 @@ export function toldEndingLate(schedule: unknown): boolean {
 /** The campaign's history entry for it, said once, by the scheduler. */
 export const ENDING_LATE_ENTRY =
   "still applying when its revert was due, so the sale ends late: it reverts as soon as the apply finishes";
+
+/**
+ * How long past its start a scheduled apply may still be writing before it reads as late
+ * (#1056). The scheduler ticks every thirty seconds, so every scheduled apply begins a little
+ * after its start, and a small one finishes in seconds; neither is late.
+ */
+export const STARTING_LATE_GRACE_MS = 2 * 60_000;
+
+/**
+ * When the window opened, as the page writes it, for a campaign still applying more than
+ * `STARTING_LATE_GRACE_MS` after it (#1056) -- its sale reaching the storefront late -- or null.
+ * Null once it is ending late, which says more.
+ */
+export function startingLateText(raw: unknown, status: string, timeZone: string, now: Date): string | null {
+  const schedule = parseSchedule(raw);
+  if (status !== "APPLYING" || schedule.kind !== "window" || isEndingLate(schedule, status, now)) return null;
+  if (now.getTime() < Date.parse(schedule.startAt) + STARTING_LATE_GRACE_MS) return null;
+  return `${formatScheduleInstant(schedule.startAt, timeZone)} (${timeZone})`;
+}
+

@@ -117,6 +117,24 @@ async function statusCard(campaignId: string) {
   return page.lifecycle;
 }
 
+async function scheduleCard(campaignId: string) {
+  const { loader } = await import("../../app/routes/app.campaigns.$id");
+  const page = (await loader({
+    request: new Request(`https://example.invalid/app/campaigns/${campaignId}`),
+    params: { id: campaignId },
+    context: {},
+  } as never)) as { scheduleText: string };
+  return page.scheduleText;
+}
+
+/** The campaign's badge on today's calendar. */
+async function onCalendar(shopId: string, campaignId: string) {
+  const { calendarFor } = await import("../../app/services/calendar.server");
+  const view = await calendarFor(shopId, "UTC");
+  const entry = view.days.flatMap((day) => day.entries).find((candidate) => candidate.campaignId === campaignId);
+  return entry?.lifecycle;
+}
+
 const endingLateEmails = (campaignId: string) =>
   sent.filter(({ notification }) => "campaignId" in notification && notification.campaignId === campaignId && "endingLate" in notification && notification.endingLate);
 
@@ -173,6 +191,13 @@ describe("chaos: a scheduled sale whose apply outlasts its window", () => {
       expect(card.tone).toBe("warning");
       expect(card.explanation).toMatch(/the revert begins as soon as the apply finishes/);
       expect((await rowInList(shopId, campaignId)).lifecycle.label).toBe("Applying — ending late");
+      // The calendar says what the list says (#1056), and the Schedule card no longer
+      // promises a revert that begins early.
+      expect(await onCalendar(shopId, campaignId), "the calendar read Applying as if nothing were wrong").toEqual({
+        label: "Applying — ending late",
+        tone: "warning",
+      });
+      expect(await scheduleCard(campaignId)).toMatch(/It is still applying, so its revert waits for that to finish and begins as soon as it does\.$/);
 
       // A second worker ticking meanwhile neither reverts under the apply nor tells again.
       await tick(new Date());

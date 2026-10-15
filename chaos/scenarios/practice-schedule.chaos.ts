@@ -143,7 +143,12 @@ describe("chaos: a practice campaign is never scheduled", () => {
       // Once, by the scheduler, saying why -- not once per tick.
       const written = (await entries()).slice(before);
       expect(written.map((entry) => entry.action)).toContain("campaign.unschedule");
-      expect(new Set(written.map((entry) => entry.actor))).toEqual(new Set(["scheduler"]));
+      // Each entry named in the failure: CI has twice found one with no actor here, which no
+      // local run reproduces, and the bare sets did not say what wrote it.
+      expect(
+        new Set(written.map((entry) => entry.actor)),
+        JSON.stringify(written.map(({ action, actor, entity, before, after, createdAt }) => ({ action, actor, entity, before, after, createdAt }))),
+      ).toEqual(new Set(["scheduler"]));
       expect(JSON.stringify(written)).toContain("practice campaigns never run on a schedule");
       const afterFirst = written.length;
       await tick(new Date());

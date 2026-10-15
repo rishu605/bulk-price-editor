@@ -18,6 +18,11 @@ export interface Scheduled {
   id: string;
   name: string;
   status: string;
+  /**
+   * Its state as the campaigns list shows it (#1056), from `lifecycleOf`: "Applying — ending
+   * late" rather than the bare state. Absent, the bare state.
+   */
+  lifecycle?: { label: string; tone: string };
   startAt: string | null;
   endAt: string | null;
 }
@@ -26,6 +31,11 @@ export interface NextMoment {
   id: string;
   name: string;
   status: string;
+  /**
+   * Its state as the campaigns list shows it (#1056), from `lifecycleOf`: "Applying — ending
+   * late" rather than the bare state. Absent, the bare state.
+   */
+  lifecycle?: { label: string; tone: string };
   /** What the moment does to prices. */
   kind: "starts" | "ends";
   at: string;
@@ -63,5 +73,10 @@ export function nextMoments(campaigns: Scheduled[], now: string, limit = 4): Nex
 }
 
 function moment(campaign: Scheduled) {
-  return { id: campaign.id, name: campaign.name, status: campaign.status };
+  return {
+    id: campaign.id,
+    name: campaign.name,
+    status: campaign.status,
+    ...(campaign.lifecycle ? { lifecycle: campaign.lifecycle } : {}),
+  };
 }

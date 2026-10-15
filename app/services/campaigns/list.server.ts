@@ -7,9 +7,7 @@
  * both views read, which means it cannot live inside either one.
  */
 
-import { neverStarts, parseSchedule } from "../../lib/scheduling/window";
-import { startRefusal } from "../../lib/scheduling/start-refusal";
-import { endingLateText } from "../../lib/scheduling/ending-late";
+import { lifecycleOf } from "../../lib/campaigns/lifecycle-of";
 import type { RunKind } from "@prisma/client";
 import prisma from "../../db.server";
 import { describeCampaign } from "../../lib/campaigns/describe";
@@ -18,7 +16,6 @@ import { ROWS_PER_VIEW } from "../../lib/ui/table-budget";
 import { ATTENTION_STATES, campaignFilterWhere, type StatusFilter } from "../../lib/campaigns/list-filters";
 import {
   ALL_STATES,
-  describeState,
   needsAttention,
   type CampaignState,
 } from "../../lib/lifecycle/transitions";
@@ -132,13 +129,9 @@ export async function listCampaigns(shopId: string, filters: CampaignFilters) {
       id: c.id,
       name: c.name,
       state,
-      // A scheduled campaign whose window can never open reads as one (#824). The row
-      // shows the label, not the reason, so the zone the reason is written in does not matter.
-      lifecycle: describeState(state, {
-        neverStarts: state === "SCHEDULED" ? neverStarts(parseSchedule(c.schedule), new Date(), "UTC") : null,
-        startRefused: state === "SCHEDULED" ? startRefusal(c.schedule) : null, // #975
-        endingLate: endingLateText(c.schedule, state, "UTC", now), // #829
-      }),
+      // As Home and the calendar show it (#1056): a window that can never open (#824), a
+      // start refused for good (#975), a sale applying past its start or its end (#829).
+      lifecycle: lifecycleOf(state, c.schedule, now),
       attention: needsAttention(state),
       priority: c.priority,
       // What it does and what to, as sentences, through the one formatter every surface

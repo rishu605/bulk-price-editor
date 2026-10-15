@@ -1,6 +1,6 @@
 import { startConfirmationOf, unconfirmedStart } from "../../lib/campaigns/start-confirmation";
 import { endMissed } from "../../lib/scheduling/end-missed";
-import { endingLateText } from "../../lib/scheduling/ending-late";
+import { endingLateText, startingLateText } from "../../lib/scheduling/ending-late";
 import { startRefusal } from "../../lib/scheduling/start-refusal";
 import { neverStarts, parseSchedule, windowEndText } from "../../lib/scheduling/window";
 import type { CampaignState } from "../../lib/lifecycle/transitions";
@@ -33,5 +33,6 @@ export async function lifecycleContext(
     // From the page's own preview, the reach the start check reads (#1009).
     unconfirmedStart: state === "SCHEDULED" && preview.confirm ? unconfirmedStart(preview.confirm, startConfirmationOf(schedule)) : null,
     endingLate: endingLateText(schedule, state, timeZone, new Date()), // still applying when its revert was due (#829)
+    startingLate: startingLateText(schedule, state, timeZone, new Date()), // still applying well after its start (#1056)
   };
 }

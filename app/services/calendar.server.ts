@@ -26,6 +26,7 @@ import {
   type CalendarDay,
   type CampaignRunFact,
 } from "../lib/scheduling/calendar";
+import { lifecycleBadge } from "../lib/campaigns/lifecycle-of";
 import { campaignFilterWhere, type StatusFilter } from "../lib/campaigns/list-filters";
 import { PRICING_STATES, type CampaignState } from "../lib/lifecycle/transitions";
 import { overlapEnded, type Overlap, type OverlapSide } from "../lib/scheduling/overlap-card";
@@ -116,7 +117,7 @@ export async function calendarFor(
 
   const records = await prisma.campaign.findMany({
     where: { shopId, AND: [{ status: { in: [...SHOWN] } }, filtered] },
-    select: { id: true, name: true, status: true, startAt: true, endAt: true },
+    select: { id: true, name: true, status: true, startAt: true, endAt: true, schedule: true },
   });
 
   // What each campaign that has gone live actually did, so it is drawn where it ran rather
@@ -159,6 +160,8 @@ export async function calendarFor(
           id: record.id,
           name: record.name,
           status: record.status,
+          // As the campaigns list labels it, ending or starting late included (#1056).
+          lifecycle: lifecycleBadge(record.status as CampaignState, record.schedule, new Date(now)),
           startAt: record.startAt?.toISOString() ?? null,
           endAt: record.endAt?.toISOString() ?? null,
         },

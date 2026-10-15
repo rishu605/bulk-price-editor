@@ -4,7 +4,7 @@ import { formatAgo } from "../lib/format/display";
 import { humanise } from "../lib/format/label";
 import type { NextMoment } from "../lib/scheduling/upcoming";
 import { SPACE } from "../lib/ui/spacing";
-import { CAMPAIGN_TONE, toneFor } from "./tone";
+import { CAMPAIGN_TONE, toneFor, type Tone } from "./tone";
 
 /**
  * The next few things that will change a price, in the order they will happen.
@@ -49,8 +49,8 @@ export function UpcomingCampaigns({
     <s-grid gridTemplateColumns="auto 1fr" gap={SPACE.item} alignItems="center">
       {moments.map((moment) => (
         <Fragment key={`${moment.id}-${moment.kind}`}>
-          <s-badge tone={toneFor(CAMPAIGN_TONE, moment.status)}>
-            {humanise(moment.status)}
+          <s-badge tone={(moment.lifecycle?.tone as Tone | undefined) ?? toneFor(CAMPAIGN_TONE, moment.status)}>
+            {moment.lifecycle?.label ?? humanise(moment.status)}
           </s-badge>
 
           <s-link href={`/app/campaigns/${moment.id}`}>{moment.name}</s-link>

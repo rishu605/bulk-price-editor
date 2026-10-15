@@ -2,7 +2,7 @@
 import { SPACE } from "../lib/ui/spacing";
 
 import { dayLinkLabel, entryLabel, runLine, type CalendarDay } from "../lib/scheduling/calendar";
-import { CAMPAIGN_TONE, RUN_TONE, toneFor } from "./tone";
+import { CAMPAIGN_TONE, RUN_TONE, toneFor, type Tone } from "./tone";
 
 /**
  * The grid itself.
@@ -90,7 +90,7 @@ export function CalendarGrid({ days, today }: { days: CalendarDay[]; today: stri
                     // reads off the badge's colour and the row (#797).
                     accessibilityLabel={entryLabel(entry)}
                   >
-                    <s-badge tone={toneFor(CAMPAIGN_TONE, entry.status)}>
+                    <s-badge tone={(entry.lifecycle?.tone as Tone | undefined) ?? toneFor(CAMPAIGN_TONE, entry.status)}>
                       {/* The name where it starts and at the start of every week row it
                           runs on into (#768), so no row is a line of dots with nothing to
                           say whose they are. Not on every day: repeating it across a
