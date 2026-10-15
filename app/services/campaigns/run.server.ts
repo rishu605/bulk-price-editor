@@ -986,6 +986,10 @@ async function executeCampaignRun(
     forcePath: options.forcePath,
     bulkWaitMs: options.bulkWaitMs,
     onProgress: beat,
+    // On the run row, where an estimate of how long the next one takes reads it from (#1055).
+    onPath: async (path) => {
+      await prisma.campaignRun.update({ where: { id: run.id }, data: { writePath: path === "bulk" ? "BULK" : "SYNC" } });
+    },
     // A bulk operation, once accepted, applies its prices whatever happens to this
     // process. Its rows say "sent to Shopify" from that moment, in the same step that
     // records which operation holds them (#832). Until now they stayed Pending -- "Nothing
