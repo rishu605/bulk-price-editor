@@ -22,6 +22,8 @@
  * from before anything here lays it out.
  */
 
+import { formatDay } from "../format/display";
+import { humanise } from "../format/label";
 import { PRICES_MAY_BE_LIVE, type CampaignState } from "../lifecycle/transitions";
 
 export interface CalendarCampaign {
@@ -71,6 +73,15 @@ export interface CalendarEntry {
    * same words -- so the name opens each row and the dots after it read as "the same".
    */
   named: boolean;
+  /**
+   * Which day of the campaign this is, counting its first drawn day as 1, and how many it
+   * has: `null` while it has no end (#797). Counted from where the campaign starts, not
+   * from the edge of the view, so a sale that began last month is not on "day 1" on the
+   * 1st. A screen reader is the reader: it cannot see that a dot sits in the same row as
+   * the name.
+   */
+  day: number;
+  days: number | null;
 }
 
 /**
@@ -88,9 +99,108 @@ export interface CalendarRun {
   runId: string;
   campaignId: string;
   name: string;
-  /** APPLY or REVERT. */
+  /** APPLY or REVERT, or REASSERT or ENROLL on an older row. */
   kind: string;
   status: string;
+  /** What the run did, which the kind alone does not say (#979). See `runActionOf`. */
+  action: RunAction;
+}
+
+/** A run as `layOut` takes it: what the database knows, before it is described. */
+export interface CalendarRunInput extends Omit<CalendarRun, "action"> {
+  /** ISO 8601 UTC. */
+  startedAt: string;
+  /** `VARIANT-…` for a run over named variants rather than the whole campaign. */
+  occurrenceKey?: string | null;
+}
+
+/**
+ * What a run did to its campaign's prices (#979).
+ *
+ * Every run on the calendar read "Applied", because most of what the engine does is an
+ * APPLY: a drift reassert, an auto-enrolment and one variant reinstated are all applies
+ * over a few named variants. Drawn as "Applied Summer sale", each read as the whole sale
+ * going live again on a day it did not. The occurrence key says which, since each scoped
+ * run is started under its own `VARIANT-<ACTION>-` prefix.
+ */
+export type RunAction =
+  | "applied"
+  | "reverted"
+  | "reasserted"
+  | "enrolled"
+  | "reverted-variant"
+  | "reinstated-variant"
+  | "variants";
+
+export function runActionOf(kind: string, occurrenceKey: string | null | undefined): RunAction {
+  const key = occurrenceKey ?? "";
+  if (kind === "REASSERT" || key.startsWith("VARIANT-REASSERT")) return "reasserted";
+  if (kind === "ENROLL" || key.startsWith("VARIANT-ENROLL")) return "enrolled";
+  if (key.startsWith("VARIANT-REVERT")) return "reverted-variant";
+  if (key.startsWith("VARIANT-REINSTATE")) return "reinstated-variant";
+  // A scoped run from a path with no prefix of its own. Not "applied": whatever it did,
+  // it did to some variants, not to the campaign.
+  if (key.startsWith("VARIANT-")) return "variants";
+  return kind === "REVERT" ? "reverted" : "applied";
+}
+
+/** Run states with the run still going: not a failure, and not drawn as one (#979). */
+export const RUN_IN_FLIGHT: ReadonlySet<string> = new Set(["PLANNING", "QUEUED", "EXECUTING", "VERIFYING"]);
+
+/** Each action as a finished run and as one still going. The campaign's name follows. */
+const RUN_WORDS: Record<RunAction, { done: string; going: string }> = {
+  applied: { done: "Applied", going: "Applying" },
+  reverted: { done: "Reverted", going: "Reverting" },
+  reasserted: { done: "Reasserted one price in", going: "Reasserting one price in" },
+  enrolled: { done: "Enrolled new variants in", going: "Enrolling new variants in" },
+  "reverted-variant": { done: "Reverted one variant of", going: "Reverting one variant of" },
+  "reinstated-variant": { done: "Reinstated one variant in", going: "Reinstating one variant in" },
+  variants: { done: "Repriced some variants in", going: "Repricing some variants in" },
+};
+
+/**
+ * A run's line on the calendar: what it did, to which campaign, and how it ended.
+ *
+ * A run still going says so with its verb, "Applying". It used to read "Applied …
+ * (executing)", which claimed a finished apply and then contradicted itself. A finished
+ * run that did not finish cleanly says how in brackets, apart from a campaign name that
+ * may have its own dots. A clean one says nothing more: "Applied Summer sale" is all of it.
+ */
+export function runLine(run: Pick<CalendarRun, "action" | "status" | "name">): string {
+  const words = RUN_WORDS[run.action];
+  if (RUN_IN_FLIGHT.has(run.status)) return `${words.going} ${run.name}`;
+  const outcome = run.status === "COMPLETED" ? "" : ` (${run.status.toLowerCase()})`;
+  return `${words.done} ${run.name}${outcome}`;
+}
+
+const WEEKDAY_WORDS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+/**
+ * A day square's accessible name: where its link goes, and which day it is (#797).
+ *
+ * The link was named by its contents, the day number: "5", with no month, no weekday and
+ * nothing to say that following it starts a new campaign. The weekday is spelt out
+ * because the header naming it is a separate grid that no screen reader connects to the
+ * square. "Today" is said because the eye gets it from a fill.
+ */
+export function dayLinkLabel(date: string, today: string): string {
+  // `formatDay` in UTC, because `date` is already the store's day: a `YYYY-MM-DD` parses
+  // as UTC midnight, and any other zone could print the day before.
+  const when = `${WEEKDAY_WORDS[weekdayOf(date)]} ${formatDay(date, "UTC")}`;
+  return `Create a campaign starting ${date === today ? `today, ${when}` : when}`;
+}
+
+/**
+ * A campaign's accessible name on one square: "Black Friday, scheduled, day 3 of 5"
+ * (#797).
+ *
+ * Its visible text is the name at the start of a row and "·" or "→" on every other day,
+ * and its status is the badge's colour. Neither reached a screen reader, which listed a
+ * two-week sale as fourteen arrows.
+ */
+export function entryLabel(entry: Pick<CalendarEntry, "name" | "status" | "day" | "days">): string {
+  const span = entry.days === null ? `day ${entry.day}, no end date` : `day ${entry.day} of ${entry.days}`;
+  return `${entry.name}, ${humanise(entry.status).toLowerCase()}, ${span}`;
 }
 
 export interface CalendarDay {
@@ -314,7 +424,7 @@ export function layOut(
   range: CalendarRange,
   timeZone: string,
   focusMonth?: { year: number; month: number },
-  runs: readonly (CalendarRun & { startedAt: string })[] = [],
+  runs: readonly CalendarRunInput[] = [],
 ): CalendarDay[] {
   const days: CalendarDay[] = [];
 
@@ -336,6 +446,7 @@ export function layOut(
       name: run.name,
       kind: run.kind,
       status: run.status,
+      action: runActionOf(run.kind, run.occurrenceKey),
     });
   }
 
@@ -349,6 +460,8 @@ export function layOut(
 
     // Entirely outside the visible range.
     if (end < range.from || start > range.to) continue;
+
+    const length = campaign.endAt ? daysFrom(start, end) + 1 : null;
 
     days.forEach((day, index) => {
       if (day.date < start || day.date > end) return;
@@ -367,11 +480,18 @@ export function layOut(
         // The grid lays the range out seven days to a row from its first day, so a day at
         // a multiple of seven from the start is the first square of a row.
         named: starts || index % 7 === 0,
+        day: daysFrom(start, day.date) + 1,
+        days: length,
       });
     });
   }
 
   return days;
+}
+
+/** Whole days from one `YYYY-MM-DD` to another. */
+function daysFrom(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 }
 
 export interface OverlapPair {

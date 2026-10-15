@@ -32,15 +32,26 @@ const UNPAINTED: CSSProperties = {
 export function PlainLink({
   to,
   preventScrollReset,
+  current,
   children,
 }: {
   to: string;
   /** See `TabBar` — set when the link swaps a panel rather than changing page. */
   preventScrollReset?: boolean;
+  /**
+   * Marks the link to the page being shown, as `aria-current="page"`. See `TabBar`: the
+   * current tab stays a link, so the one a keyboard user just pressed keeps focus.
+   */
+  current?: boolean;
   children: ReactNode;
 }) {
   return (
-    <Link to={to} preventScrollReset={preventScrollReset} style={UNPAINTED}>
+    <Link
+      to={to}
+      preventScrollReset={preventScrollReset}
+      aria-current={current ? "page" : undefined}
+      style={UNPAINTED}
+    >
       {children}
     </Link>
   );

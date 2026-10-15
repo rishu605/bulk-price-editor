@@ -176,6 +176,68 @@ describe("the bar itself", () => {
   });
 });
 
+/**
+ * Switching tabs keeps keyboard focus on the tab that was pressed (#797).
+ *
+ * The current tab was an `s-box` and every other tab a link. The tab a keyboard user
+ * presses is the one that becomes current, so React unmounted the anchor holding focus,
+ * mounted a box in its place, and focus fell to `<body>`: the next Tab started from the
+ * top of the admin again, and a screen reader announced nothing.
+ *
+ * This suite runs in Node with no DOM, so it cannot read `document.activeElement`. It
+ * asserts the two things that decide it instead. React keeps a DOM node when the element
+ * at its place in the tree has the same type and key on the next render, so: the pressed
+ * tab is the same element before and after the switch, and its key does not move. What
+ * this cannot see -- a route that remounts the whole bar -- is a live keyboard check.
+ */
+describe("switching tabs keeps focus on the tab that was pressed (#797)", () => {
+  // Before: List is current, and a keyboard user presses Calendar. After: Calendar is.
+  const tabs = (current: "List" | "Calendar"): Tab[] => [
+    { label: "List", href: "?view=list", current: current === "List" },
+    { label: "Calendar", href: "?view=calendar", current: current === "Calendar" },
+  ];
+  const before = render(tabs("List"));
+  const after = render(tabs("Calendar"));
+
+  /** Every opening and closing tag, in order: the shape React reconciles. */
+  const skeleton = (html: string) => [...html.matchAll(/<\/?[a-z][a-z0-9-]*/g)].map((match) => match[0]);
+
+  /** The anchor wrapping one tab's label. */
+  const anchorOf = (html: string, label: string) =>
+    [...html.matchAll(/<a [^>]*>[\s\S]*?<\/a>/g)].map((match) => match[0]).find((anchor) => anchor.includes(`>${label}<`));
+
+  it("renders the same elements before and after, so the pressed tab's anchor is kept", () => {
+    expect(skeleton(after)).toEqual(skeleton(before));
+  });
+
+  it("leaves the tab you are on focusable, and marks it as the current page", () => {
+    // Every tab is an anchor with somewhere to go, the current one included.
+    expect(occurrences(after, "<a ")).toBe(2);
+    expect(anchorOf(after, "Calendar")).toMatch(/href="\/app\/campaigns\?view=calendar"/);
+    expect(anchorOf(after, "Calendar")).toMatch(/aria-current="page"/);
+    expect(anchorOf(after, "List")).not.toMatch(/aria-current/);
+    expect(anchorOf(before, "List")).toMatch(/aria-current="page"/);
+  });
+
+  it("says it once, rather than with a hidden suffix nothing focusable carried", () => {
+    expect(after).not.toContain("(current)");
+  });
+
+  it("keys each tab by a label a switch does not change, not by an href rebuilt from the query", () => {
+    // The section and status tabs build their hrefs from the query string. A key that
+    // moved with it would remount every anchor on the render after a switch.
+    expect(bar).toMatch(/<TabItem key=\{tab\.label\}/);
+  });
+
+  it("renders one element for a tab in either state, with no branch on whether it is current", () => {
+    // The host tags above can match while React still remounts: a current tab rendered
+    // as a bare `Link` beside `PlainLink`s is a different component at the same place.
+    const item = bar.slice(bar.indexOf("function TabItem"));
+    expect(item.match(/<PlainLink\b/g)).toHaveLength(1);
+    expect(item).not.toMatch(/tab\.current \?\s*\(/);
+  });
+});
+
 describe("the rule under the row", () => {
   it("is one divider, not a guess at Polaris' border shorthand", () => {
     // The bar used to draw its rule with `borderWidth="none none base none"`. Polaris

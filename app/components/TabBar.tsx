@@ -4,7 +4,7 @@ import { PlainLink } from "./PlainLink";
 import { PAD, SPACE } from "../lib/ui/spacing";
 
 export interface Tab {
-  /** Where this tab goes. Not rendered as a link when the tab is current. */
+  /** Where this tab goes. The current tab is a link too, marked as the current page. */
   href: string;
   label: string;
   /** Shown beside the label. Zero is not shown — an empty count is noise. */
@@ -102,8 +102,11 @@ export function TabBar({
     // rather than as spaced-out words -- and it buys back the width that had the campaigns
     // index's six status tabs wrapping.
     <s-stack direction="inline" alignItems="end">
+      {/* Keyed by label, not href (#797). A tab's link may be rebuilt from the query
+          string on every render, and a key that changed with it would remount the anchor
+          a keyboard user had just pressed, dropping focus to the page. */}
       {tabs.map((tab) => (
-        <TabItem key={tab.href} tab={tab} preventScrollReset={preventScrollReset} />
+        <TabItem key={tab.label} tab={tab} preventScrollReset={preventScrollReset} />
       ))}
     </s-stack>
   );
@@ -179,13 +182,10 @@ function TabItem({
             <s-icon type={tab.icon} size="small" color={tab.current ? "base" : "subdued"} />
           ) : null}
           {/* Weight is the *supporting* signal here, not the whole of it. The indicator
-              below is what actually answers "which one am I on". */}
+              below is what actually answers "which one am I on". A screen reader hears it
+              from the link's `aria-current`, which replaced a visually hidden
+              " (current)" that nothing focusable carried, so nobody heard it (#797). */}
           <s-text type={tab.current ? "strong" : "generic"}>{text}</s-text>
-          {tab.current ? (
-            // The indicator says it to everyone who can see it and nothing to anyone who
-            // cannot.
-            <s-text accessibilityVisibility="exclusive"> (current)</s-text>
-          ) : null}
         </s-stack>
       </s-box>
 
@@ -211,12 +211,21 @@ function TabItem({
     </>
   );
 
-  return tab.current ? (
-    // Not a link: the current tab has nowhere to go, and a link to the page you are on is
-    // a control that does nothing.
-    <s-box>{content}</s-box>
-  ) : (
-    <PlainLink to={tab.href} preventScrollReset={preventScrollReset}>
+  // The current tab is a link too, marked `aria-current="page"` (#797).
+  //
+  // It used to be an `s-box`, on the reasoning that a link to the page you are on goes
+  // nowhere. But the tab a keyboard user presses is the one that becomes current, and
+  // swapping its anchor for a box unmounted the element holding focus: focus fell to
+  // `<body>`, and they had to Tab back through the admin's chrome and the page header to
+  // reach the tabs or the panel they had just opened. Rendered as the same element in
+  // both states, React keeps that anchor and only changes its attributes, so focus stays
+  // on the tab, and the tab is a focusable thing that can say it is current.
+  //
+  // Pressing it again reloads the tab it is on, which is what a link to the current page
+  // does everywhere else on the web. On a page beneath a tab (Baselines' recapture) it is
+  // also the way back up, which the box never was.
+  return (
+    <PlainLink to={tab.href} preventScrollReset={preventScrollReset} current={tab.current}>
       {content}
     </PlainLink>
   );

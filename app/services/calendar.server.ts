@@ -46,12 +46,28 @@ const SHOWN = [
   "HELD",
 ] as const;
 
+/**
+ * A campaign in an overlap, and whether it has finished.
+ *
+ * Finished is said so the card can put a pair that both ended in the past tense (#979).
+ * "Spring sale and Clearance run together" over two campaigns completed in March reads
+ * as a collision on the storefront now.
+ */
+export interface OverlapSide {
+  id: string;
+  name: string;
+  finished: boolean;
+}
+
 export interface Overlap {
-  a: { id: string; name: string };
-  b: { id: string; name: string };
+  a: OverlapSide;
+  b: OverlapSide;
   /** Variants in both campaigns' scopes. Zero means they share a week, not a product. */
   sharedVariants: number;
 }
+
+/** States a campaign does not come back from. Of those on the calendar, Completed. */
+const FINISHED: ReadonlySet<string> = new Set(["COMPLETED", "CANCELLED"]);
 
 export interface CalendarView {
   days: CalendarDay[];
@@ -76,6 +92,15 @@ export interface CalendarOptions {
    * first few and says so.
    */
   maxOverlapChecks?: number;
+  /**
+   * The campaigns list's archive filter (#979): archived campaigns only when it is on,
+   * and none when it is off.
+   *
+   * The calendar drew every campaign in the shop, so one filed away showed up here and
+   * nowhere in the list it was switched from. The where clause is the list's own, so the
+   * two views of the index cannot disagree about which campaigns there are.
+   */
+  archived?: boolean;
 }
 
 export async function calendarFor(
@@ -88,9 +113,10 @@ export async function calendarFor(
   const [year, month] = anchor.split("-").map(Number);
 
   const range = view === "week" ? weekRange(anchor) : monthRange(year, month);
+  const archivedAt = options.archived ? { not: null } : null;
 
   const records = await prisma.campaign.findMany({
-    where: { shopId, status: { in: [...SHOWN] } },
+    where: { shopId, status: { in: [...SHOWN] }, archivedAt },
     select: { id: true, name: true, status: true, startAt: true, endAt: true },
   });
 
@@ -150,6 +176,11 @@ export async function calendarFor(
   // Runs that started inside the visible range. Bounded generously in UTC and bucketed
   // by the store's day afterwards, because a day in the store's zone is not a day in
   // UTC and querying by the latter would drop the edges.
+  //
+  // Scoped runs too, a reassert or an enrolment: they did happen that day. The occurrence
+  // key is read so each is described as what it was rather than as an apply (#979). Under
+  // the same archive filter as the campaigns, or a campaign left off would still be named
+  // under the days it ran.
   const runs = await prisma.campaignRun.findMany({
     where: {
       shopId,
@@ -157,12 +188,14 @@ export async function calendarFor(
         gte: new Date(`${addDays(range.from, -1)}T00:00:00.000Z`),
         lte: new Date(`${addDays(range.to, 1)}T23:59:59.999Z`),
       },
+      campaign: { archivedAt },
     },
     select: {
       id: true,
       kind: true,
       status: true,
       startedAt: true,
+      occurrenceKey: true,
       campaignId: true,
       campaign: { select: { name: true } },
     },
@@ -183,6 +216,7 @@ export async function calendarFor(
         kind: run.kind,
         status: run.status,
         startedAt: run.startedAt!.toISOString(),
+        occurrenceKey: run.occurrenceKey,
       })),
   );
 
@@ -242,9 +276,15 @@ async function sharedScopes(
     const b = scopes.get(pair.b);
     if (!a || !b) continue;
 
+    const side = (id: string): OverlapSide => ({
+      id,
+      name: byId.get(id)?.name ?? id,
+      finished: FINISHED.has(byId.get(id)?.status ?? ""),
+    });
+
     overlaps.push({
-      a: { id: pair.a, name: byId.get(pair.a)?.name ?? pair.a },
-      b: { id: pair.b, name: byId.get(pair.b)?.name ?? pair.b },
+      a: side(pair.a),
+      b: side(pair.b),
       sharedVariants: await prisma.variantIndex.count({
         where: { shopId, deletedAt: null, AND: [a, b] },
       }),
