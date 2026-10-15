@@ -51,7 +51,7 @@ describe("chaos: a bulk run whose process stops after Shopify accepted the opera
       // The reaper, finding the same run an hour after its process died, says what it knows.
       await prisma.campaignRun.update({ where: { id: run.id }, data: { status: "EXECUTING" } });
       await prisma.campaign.update({ where: { id: campaignId }, data: { status: "APPLYING" } });
-      const reaped = await reclaimStaleRuns(new Date(Date.now() + 3_600_000), 60_000);
+      const reaped = await reclaimStaleRuns(new Date(Date.now() + 3_600_000), 60_000, { shopId });
       expect(reaped.runIds).toContain(run.id);
       expect((await prisma.variantChange.findMany({ where: { runId: run.id } })).every((row) => row.status === "WRITING")).toBe(true);
       const reason = (
@@ -145,7 +145,7 @@ describe("chaos: a bulk run whose process stops after Shopify accepted the opera
       // The reaper, finding it in that state from a dead process, keeps the rows sent.
       await prisma.campaignRun.update({ where: { id: run.id }, data: { status: "EXECUTING" } });
       await prisma.campaign.update({ where: { id: campaignId }, data: { status: "APPLYING" } });
-      expect((await reclaimStaleRuns(new Date(Date.now() + 3_600_000), 60_000)).runIds).toContain(run.id);
+      expect((await reclaimStaleRuns(new Date(Date.now() + 3_600_000), 60_000, { shopId })).runIds).toContain(run.id);
       expect(await prisma.variantChange.count({ where: { runId: run.id, status: "WRITING" } })).toBe(variantGids.length);
       const reason = (
         await prisma.auditLogEntry.findFirstOrThrow({
