@@ -9,6 +9,7 @@
 
 import prisma from "../../db.server";
 import { logger } from "../../lib/logging/logger";
+import { endMissed, withEndMissed } from "../../lib/scheduling/end-missed";
 import { withStartRefused } from "../../lib/scheduling/start-refusal";
 import { notify } from "../notifications.server";
 
@@ -54,6 +55,50 @@ export async function recordStartRefused(
     }
   } catch (error) {
     logger.warn("could not record a refused scheduled start", {
+      campaignId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
+ * Records that a scheduled end could not run, and tells the merchant once (#1005).
+ *
+ * Unlike a refused start, the scheduler keeps trying: the sale's prices are live past its
+ * window. This only makes the miss visible. Marked once per end, so a revert that fails on
+ * every tick sends one email and leaves one sentence on the page, not one a tick. Does not
+ * throw, for the reason `recordStartRefused` gives.
+ */
+export async function recordEndMissed(
+  shopId: string,
+  campaignId: string,
+  reason: string,
+  options: { tell: boolean },
+): Promise<void> {
+  try {
+    const campaign = await prisma.campaign.findFirst({
+      where: { id: campaignId, shopId },
+      select: { name: true, schedule: true },
+    });
+    if (!campaign || endMissed(campaign.schedule) !== null) return;
+
+    await prisma.campaign.update({
+      where: { id: campaignId },
+      data: { schedule: withEndMissed(campaign.schedule, reason, new Date()) as never },
+    });
+
+    if (options.tell) {
+      void notify(shopId, {
+        kind: "run-failed",
+        notEnded: true,
+        campaignId,
+        campaignName: campaign.name,
+        counts: { verified: 0, failed: 0, unverified: 0, skipped: 0, clamped: 0 },
+        reasons: [reason],
+      });
+    }
+  } catch (error) {
+    logger.warn("could not record a missed scheduled end", {
       campaignId,
       error: error instanceof Error ? error.message : String(error),
     });
