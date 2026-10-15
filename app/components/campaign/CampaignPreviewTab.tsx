@@ -23,7 +23,7 @@
  */
 
 import { OverlapPanel } from "../OverlapPanel";
-import { countOf } from "../../lib/format/display";
+import { countOf, formatCount } from "../../lib/format/display";
 import { confirmationReasons } from "../../lib/campaigns/blast-radius";
 import { CountsRow } from "../../components/CountsRow";
 import { PreviewTable } from "../../components/PreviewTable";
@@ -167,7 +167,7 @@ export function CampaignPreviewTab({ preview, approval, fetcher, busy }: Campaig
           {preview.margin.belowCost.length > 0 ? (
             <s-banner tone="critical">
               <s-paragraph>
-                {preview.margin.belowCost.length} of these would sell at or below cost:
+                {formatCount(preview.margin.belowCost.length)} of these would sell at or below cost:
               </s-paragraph>
               <s-unordered-list>
                 {preview.margin.belowCost.map((row) => (
@@ -182,7 +182,7 @@ export function CampaignPreviewTab({ preview, approval, fetcher, busy }: Campaig
           {preview.margin.belowTarget.length > 0 ? (
             <s-banner tone="warning">
               <s-paragraph>
-                {preview.margin.belowTarget.length} would fall below your target margin,
+                {formatCount(preview.margin.belowTarget.length)} would fall below your target margin,
                 worst first:
               </s-paragraph>
               <s-unordered-list>
