@@ -15,11 +15,14 @@ import type { LedgerRow } from "../../services/campaigns/types";
 import { toCsv } from "./csv";
 
 export function ledgerCsv(rows: readonly LedgerRow[]): string {
-  const header = ["Variant", "Title", "Before", "We wrote", "Status", "Why not"];
+  // Which price each row is, and its currency (#887): a market's row is in its own.
+  const header = ["Variant", "Title", "Surface", "Currency", "Before", "We wrote", "Status", "Why not"];
 
   const body = rows.map((row) => [
     row.variantGid,
     row.title,
+    row.surface,
+    row.currency,
     row.before ?? "",
     row.intended ?? "",
     row.status,

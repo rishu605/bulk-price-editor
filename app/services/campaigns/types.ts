@@ -284,6 +284,15 @@ export interface RunSummary {
 export interface LedgerRow {
   variantGid: string;
   title: string;
+  /**
+   * Which price this row is (#887): "Base price", or the market's or price list's name. A
+   * campaign pricing markets writes a row per surface, and two rows of one variant read as
+   * duplicates when nothing said which was which.
+   */
+  surface: string;
+  /** The currency of this row's amounts, which differs from the shop's on a market's row. */
+  currency: string;
+  priceListGid: string;
   before: string | null;
   intended: string | null;
   status: string;

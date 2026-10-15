@@ -20,6 +20,9 @@ import { ledgerCsv } from "./ledger-csv";
 const row = (over: Partial<LedgerRow> = {}): LedgerRow => ({
   variantGid: "gid://shopify/ProductVariant/1",
   title: "Alpine Jacket / L",
+  surface: "Base price",
+  currency: "USD",
+  priceListGid: "",
   before: "19.99",
   intended: "15.99",
   status: "VERIFIED",
@@ -32,7 +35,7 @@ const lines = (csv: string) => csv.trimEnd().split("\n");
 describe("what the ledger export contains", () => {
   it("has a header naming every column", () => {
     expect(lines(ledgerCsv([]))[0]).toBe(
-      '"Variant","Title","Before","We wrote","Status","Why not"',
+      '"Variant","Title","Surface","Currency","Before","We wrote","Status","Why not"',
     );
   });
 
@@ -95,7 +98,7 @@ describe("rows with nothing to report in a column", () => {
 
     expect(csv).not.toContain("null");
     expect(lines(csv)[1]).toBe(
-      '"gid://shopify/ProductVariant/1","Alpine Jacket / L","","","VERIFIED",""',
+      '"gid://shopify/ProductVariant/1","Alpine Jacket / L","Base price","USD","","","VERIFIED",""',
     );
   });
 
@@ -111,5 +114,16 @@ describe("rows with nothing to report in a column", () => {
     // A campaign that planned nothing is a legitimate outcome, and a file with no header
     // is one a merchant cannot tell from a failed download.
     expect(lines(ledgerCsv([]))).toHaveLength(1);
+  });
+});
+
+describe("a ledger row's surface (#887)", () => {
+  it("says which price each row is, and its currency", () => {
+    const csv = ledgerCsv([
+      row(),
+      row({ surface: "Anchor EUR", currency: "EUR", priceListGid: "gid://shopify/PriceList/2", before: null, intended: "14.70" }),
+    ]);
+    expect(lines(csv)[1]).toContain('"Base price","USD"');
+    expect(lines(csv)[2]).toContain('"Anchor EUR","EUR"');
   });
 });
