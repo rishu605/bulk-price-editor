@@ -28,6 +28,7 @@ import prisma from "../../db.server";
 import { AppError } from "../../lib/errors/app-error";
 import type { AdminClient } from "../../lib/execution/sync-executor";
 import { labelled, priceListLabel } from "../../lib/markets/display-name";
+import { pressedRunKey } from "./pressed-run.server";
 import { runCampaign } from "./run.server";
 import type { RunOutcome } from "./types";
 import { isLanded, LANDED } from "../../lib/execution/landed";
@@ -118,7 +119,8 @@ export async function revertVariant(
     revert: true,
     variantGids: [variantGid],
     verifySampleRate: 1,
-    occurrenceKey: `VARIANT-REVERT-${variantGid}-${Date.now()}`,
+    // From the variant, not the clock: a second press stands down to the first (#1012).
+    occurrenceKey: await pressedRunKey(campaignId, `VARIANT-REVERT-${variantGid}`),
   });
 
   return {
@@ -247,7 +249,7 @@ export async function reinstateVariant(
     actor: options.actor,
     variantGids: [variantGid],
     verifySampleRate: 1,
-    occurrenceKey: `VARIANT-REINSTATE-${variantGid}-${Date.now()}`,
+    occurrenceKey: await pressedRunKey(campaignId, `VARIANT-REINSTATE-${variantGid}`),
   });
 
   return {

@@ -41,3 +41,23 @@ export function nextAttemptKey(base: string, runs: readonly OccurrenceRun[]): st
   if (attempts.length >= MAX_ATTEMPTS) return null;
   return `${base}#${attempts.length + 1}`;
 }
+
+/**
+ * The key for a run a person asked for -- a drift "Put it back", "Revert this variant" --
+ * derived from what it acts on rather than the clock (#1012).
+ *
+ * Those keys were `…-${Date.now()}`, and the one-live-run index skips scoped runs, so two
+ * quick presses, or a resent request, started two writers for one variant: rule 2 broken
+ * by a double click. Now a press while an attempt is running gets that attempt's key, and
+ * the unique index stands it down; a press after attempts that finished gets the next one,
+ * so a person can always try again. No cap, unlike the scheduler's: each press is a
+ * decision somebody made after reading the last outcome.
+ */
+export function pressedKey(base: string, runs: readonly OccurrenceRun[]): string {
+  const attempts = runs.filter(
+    (run) => run.occurrenceKey === base || run.occurrenceKey?.startsWith(`${base}#`),
+  );
+  const live = attempts.find((run) => LIVE.has(run.status));
+  if (live?.occurrenceKey) return live.occurrenceKey;
+  return attempts.length === 0 ? base : `${base}#${attempts.length + 1}`;
+}
