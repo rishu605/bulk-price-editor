@@ -21,8 +21,8 @@ import { AppError } from "../errors/app-error";
 import type { PlannedRow } from "../planning/types";
 import { isThrottledError, withRetry } from "../shopify/budget";
 import type { AdminClient } from "./sync-executor";
-import { buildMutationLines, parseResults, serializeJsonl, streamLines } from "./jsonl";
-import type { VariantOutcome } from "./jsonl";
+import { buildMutationLines, layoutOf, parseResults, serializeJsonl, streamLines } from "./jsonl";
+import type { LineLayout, VariantOutcome } from "./jsonl";
 
 export type BulkOperationStatus =
   | "CREATED"
@@ -124,14 +124,26 @@ export interface SubmitOptions {
   maxAttempts?: number;
 }
 
+/** An operation Shopify accepted, and what each line of its upload carried. */
+export interface BulkSubmission {
+  operation: BulkOperationState;
+  /**
+   * The upload's lines, as variant ids: what its result file is read against (#985).
+   * Returned rather than rebuilt from the rows, so the results are matched against the
+   * lines that were sent and not against a second build that has to agree with them.
+   */
+  layout: string[][];
+}
+
 /** Builds the payload, stages it, uploads it and submits the operation. */
 export async function submitBulkMutation(
   rows: Iterable<PlannedRow>,
   options: SubmitOptions,
-): Promise<BulkOperationState> {
+): Promise<BulkSubmission> {
   const { client, upload, productOf, sleep, maxAttempts = 5 } = options;
 
-  const body = [...serializeJsonl(buildMutationLines(rows, productOf))].join("");
+  const lines = [...buildMutationLines(rows, productOf)];
+  const body = [...serializeJsonl(lines)].join("");
   if (body.length === 0) {
     // Not a `BulkSubmissionError`, and not a sentence any merchant should ever read:
     // Shopify has not refused anything here, because nothing has been sent. It is
@@ -233,7 +245,7 @@ export async function submitBulkMutation(
     );
   }
 
-  return operation;
+  return { operation, layout: layoutOf(lines) };
 }
 
 export const DEFAULT_BULK_MUTATION = `
@@ -343,11 +355,15 @@ export interface ReconcileResult {
  *
  * `partialDataUrl` is used when the operation failed or was cancelled part-way,
  * so whatever did complete is still reconciled rather than discarded.
+ *
+ * `layout` is the submission's: with it, each result line's errors land on the variants
+ * that line sent (#985). See `parseResults` for a reconcile without it.
  */
 export async function reconcileResults(
   operation: BulkOperationState,
   submittedVariantGids: Iterable<string>,
   fetchResults: ResultFetcher,
+  layout?: LineLayout,
 ): Promise<ReconcileResult> {
   const outcomes = new Map<string, VariantOutcome>();
   const malformedLines: Array<{ malformed: string; reason: string }> = [];
@@ -355,7 +371,7 @@ export async function reconcileResults(
   const url = operation.url ?? operation.partialDataUrl ?? undefined;
 
   if (url) {
-    for await (const item of parseResults(streamLines(fetchResults(url)))) {
+    for await (const item of parseResults(streamLines(fetchResults(url)), layout)) {
       if ("malformed" in item) malformedLines.push(item);
       else outcomes.set(item.variantGid, item);
     }

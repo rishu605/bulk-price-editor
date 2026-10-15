@@ -8,8 +8,9 @@
  * the category's "the app freezes" reviews.
  */
 
+import { chunk } from "../db/chunk";
 import type { PlannedRow } from "../planning/types";
-import { toVariantInput } from "./sync-executor";
+import { INPUT_ARRAY_MAX, toVariantInput } from "./sync-executor";
 
 /** One line of the upload: the variables for a single `productVariantsBulkUpdate`. */
 export interface BulkMutationLine {
@@ -18,11 +19,19 @@ export interface BulkMutationLine {
 }
 
 /**
- * Groups rows by product and yields one JSONL line per product.
+ * Groups rows by product and yields one JSONL line per product -- or several, for a
+ * product with more than `INPUT_ARRAY_MAX` variants in scope.
  *
- * Line order is irrelevant to correctness — results are matched back by variant id,
- * not by position — but it is deterministic anyway, which makes failures
- * reproducible.
+ * Each line is one `productVariantsBulkUpdate`, and that mutation refuses an input array
+ * over 250. A product can have 2,048 variants. One line per product put all of a large
+ * product's variants in a single array: Shopify would refuse the line, every variant on it
+ * would fail, and a resume would build the same line and fail the same way (#985, the
+ * bulk half of #847). So a product is split at the cap here, as the sync path splits its
+ * requests, and each line is its own unit of success or failure.
+ *
+ * Line order is irrelevant to correctness -- results are matched back by `__lineNumber`
+ * against `layoutOf`, never by position in the file -- but it is deterministic anyway,
+ * which makes failures reproducible.
  */
 export function* buildMutationLines(
   rows: Iterable<PlannedRow>,
@@ -39,8 +48,27 @@ export function* buildMutationLines(
   }
 
   for (const [productId, group] of byProduct) {
-    yield { productId, variants: group.map(toVariantInput) };
+    for (const part of chunk(group, INPUT_ARRAY_MAX)) {
+      yield { productId, variants: part.map(toVariantInput) };
+    }
   }
+}
+
+/**
+ * What each line of an upload carried: its variants' ids, in the order the line sent
+ * them. `layout[n]` is the line Shopify's result file calls `"__lineNumber": n`, counted
+ * from zero as Shopify counts them.
+ *
+ * A userError's field path (`["variants", "3", "price"]`) indexes the array of the line
+ * it came from. Once a product spans several lines that is not the product's own order,
+ * and the result line's `productVariants` cannot stand in for it either: it may leave out
+ * the variant that failed, and then every index after it names the next variant along.
+ * Only what was sent can say whose error it is (#985).
+ */
+export type LineLayout = ReadonlyArray<ReadonlyArray<string>>;
+
+export function layoutOf(lines: Iterable<BulkMutationLine>): string[][] {
+  return [...lines].map((line) => line.variants.map((input) => String(input.id)));
 }
 
 /** Serialises lines to JSONL text. Yields strings so the caller can stream them. */
@@ -57,16 +85,29 @@ export function* serializeJsonl(lines: Iterable<BulkMutationLine>): Generator<st
  * mutation payload and a `__lineNumber` pointing back at the request line.
  */
 export interface BulkResultLine {
+  /** The upload line this answers, counted from zero. */
   __lineNumber?: number;
   data?: {
     productVariantsBulkUpdate?: {
       product?: { updatedAt?: string | null } | null;
-      productVariants?: Array<{ id: string; price?: string; compareAtPrice?: string | null }>;
-      userErrors?: Array<{ field?: string[] | null; message: string; code?: string | null }>;
+      productVariants?: ReportedVariant[] | null;
+      userErrors?: ResultUserError[];
     };
   };
   /** Present when the whole line failed rather than an individual field. */
   errors?: unknown;
+}
+
+interface ReportedVariant {
+  id: string;
+  price?: string;
+  compareAtPrice?: string | null;
+}
+
+interface ResultUserError {
+  field?: string[] | null;
+  message: string;
+  code?: string | null;
 }
 
 export interface VariantOutcome {
@@ -108,9 +149,17 @@ export async function* streamLines(
  * A malformed line is reported rather than thrown: one unparseable line must not
  * discard the results for every other row in a 150K-row run. The affected rows stay
  * unverified and get retried, which is the safe direction.
+ *
+ * With the upload's `layout`, a line's errors are read against the variants that line
+ * sent: a userError names the variant at its index in that line, and an error for the
+ * whole line fails exactly the variants it carried -- never another line's, and never the
+ * neighbour of the one that failed (#985). Without it -- settling an operation another
+ * process submitted, which never held the layout -- a line can only be read against the
+ * variants it reports, as before.
  */
 export async function* parseResults(
   lines: AsyncIterable<string>,
+  layout?: LineLayout,
 ): AsyncGenerator<VariantOutcome | { malformed: string; reason: string }> {
   for await (const raw of lines) {
     let parsed: BulkResultLine;
@@ -125,18 +174,31 @@ export async function* parseResults(
     }
 
     const payload = parsed.data?.productVariantsBulkUpdate;
+    const sent = sentOn(parsed, layout);
 
     if (parsed.errors) {
-      yield {
-        malformed: raw.slice(0, 200),
-        reason: `Line-level error: ${JSON.stringify(parsed.errors).slice(0, 200)}`,
-      };
+      const reason = `Line-level error: ${JSON.stringify(parsed.errors).slice(0, 200)}`;
+      // Shopify ran nothing on this line. Knowing what it carried, that is a failure of
+      // exactly those variants, with Shopify's reason. Not knowing, it is reported, and
+      // its variants stay unreported: unverified, retried by a resume.
+      if (sent) {
+        for (const variantGid of sent) yield { variantGid, ok: false, failureReason: reason };
+      } else {
+        yield { malformed: raw.slice(0, 200), reason };
+      }
       continue;
     }
 
     if (!payload) continue;
 
     const userErrors = payload.userErrors ?? [];
+    const variants = payload.productVariants ?? [];
+    const remoteUpdatedAt = payload.product?.updatedAt ?? undefined;
+
+    if (sent && reportsOnly(variants, sent)) {
+      yield* outcomesFor(sent, variants, userErrors, remoteUpdatedAt);
+      continue;
+    }
 
     // Positional field paths identify which variant in the line failed; an error
     // with no index applies to every variant the line touched.
@@ -144,12 +206,10 @@ export async function* parseResults(
     let lineWideError: string | undefined;
     for (const error of userErrors) {
       const index = positionalIndex(error.field);
-      const text = error.code ? `${error.code}: ${error.message}` : error.message;
+      const text = errorText(error);
       if (index === undefined) lineWideError = text;
       else errorsByIndex.set(index, text);
     }
-
-    const variants = payload.productVariants ?? [];
 
     // A line-wide failure returns no variants, so there is nothing to key outcomes
     // on. The caller reconciles by absence: any row it sent but never heard about
@@ -164,7 +224,7 @@ export async function* parseResults(
         price: variant.price,
         compareAtPrice: variant.compareAtPrice,
         failureReason: reason,
-        remoteUpdatedAt: payload.product?.updatedAt ?? undefined,
+        remoteUpdatedAt,
       };
     }
 
@@ -172,6 +232,69 @@ export async function* parseResults(
       yield { malformed: raw.slice(0, 200), reason: lineWideError };
     }
   }
+}
+
+/** The variants a result line's own upload line carried, when the layout can say. */
+function sentOn(parsed: BulkResultLine, layout: LineLayout | undefined): ReadonlyArray<string> | undefined {
+  const line = parsed.__lineNumber;
+  if (!layout || typeof line !== "number" || !Number.isInteger(line) || line < 0) return undefined;
+  return layout[line];
+}
+
+/**
+ * Whether the result line reports only variants its upload line sent.
+ *
+ * A check on the layout as much as on Shopify: if `__lineNumber` were counted from one
+ * rather than zero, or the layout were built from rows in another order, a line's errors
+ * would land on a different line's variants. A line that reports a variant it never sent
+ * is read the old way instead, against the variants it reports.
+ */
+function reportsOnly(variants: ReportedVariant[], sent: ReadonlyArray<string>): boolean {
+  if (variants.length === 0) return true;
+  const carried = new Set(sent);
+  return variants.every((variant) => carried.has(variant.id));
+}
+
+/**
+ * One outcome per variant the line sent, Shopify's word on it where there is one.
+ *
+ * A userError names the variant at its index in this line. One with no index, or an index
+ * the line did not have, is the whole line's. A variant with neither an error nor a place
+ * in `productVariants` yields nothing, and the caller reconciles it by absence: written or
+ * not, nobody said, so it stays unverified rather than being assumed either way.
+ */
+function* outcomesFor(
+  sent: ReadonlyArray<string>,
+  variants: ReportedVariant[],
+  userErrors: ResultUserError[],
+  remoteUpdatedAt: string | undefined,
+): Generator<VariantOutcome> {
+  const errorsByIndex = new Map<number, string>();
+  let lineWideError: string | undefined;
+  for (const error of userErrors) {
+    const index = positionalIndex(error.field);
+    if (index === undefined || index >= sent.length) lineWideError = errorText(error);
+    else errorsByIndex.set(index, errorText(error));
+  }
+
+  const reported = new Map(variants.map((variant) => [variant.id, variant]));
+  for (const [index, variantGid] of sent.entries()) {
+    const reason = errorsByIndex.get(index) ?? lineWideError;
+    const variant = reported.get(variantGid);
+    if (!reason && !variant) continue;
+    yield {
+      variantGid,
+      ok: !reason,
+      price: variant?.price,
+      compareAtPrice: variant?.compareAtPrice,
+      failureReason: reason,
+      remoteUpdatedAt,
+    };
+  }
+}
+
+function errorText(error: ResultUserError): string {
+  return error.code ? `${error.code}: ${error.message}` : error.message;
 }
 
 function positionalIndex(field?: string[] | null): number | undefined {

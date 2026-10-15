@@ -145,7 +145,7 @@ async function executeBulk(
     .filter((row) => row.status === "skipped" || !row.intendedPrice)
     .map((row) => ({ row, status: "verified" as const }));
 
-  const operation = await submitBulkMutation(writable, {
+  const { operation, layout } = await submitBulkMutation(writable, {
     client: context.client,
     upload: uploadToStagedTarget,
     productOf: context.productOf,
@@ -185,11 +185,14 @@ async function executeBulk(
     });
   }
 
+  // Read against the lines that were sent. A product over 250 variants spans several, and a
+  // userError's index is its place in one of them, not in the product (#985).
   const submittedGids = writable.map((row) => row.ref.variantGid);
   const { outcomes, unreported } = await reconcileResults(
     finalState,
     submittedGids,
     fetchResultFile,
+    layout,
   );
 
   const unreportedSet = new Set(unreported);
@@ -314,6 +317,10 @@ export async function settleSubmittedBulk(
   });
   // Shopify no longer knows the operation: nothing can be read from it, so the rows are
   // what they were -- written, not read back -- and the resume writes them again.
+  //
+  // Read without the upload's layout, which died with the process that sent it: each line
+  // is matched against the variants it reports. An error Shopify gives no variant for
+  // leaves that row written-not-read-back, and the resume sends it again (#985).
   const finalState: BulkOperationState = state ?? { id: record.shopifyGid, status: "EXPIRED" };
   const { outcomes, unreported } = state
     ? await reconcileResults(finalState, rows.map((row) => row.variantGid), fetchResultFile)

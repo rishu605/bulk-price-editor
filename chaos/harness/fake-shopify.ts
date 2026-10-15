@@ -172,6 +172,20 @@ export class FakeShopify {
    * past N were never written, and the result file does not mention them (#699).
    */
   bulkFailsAfterLines?: number;
+
+  /**
+   * Fault injection: the next bulk operation refuses these lines, counted from zero. Each
+   * comes back as Shopify reports a line it could not run -- an `errors` entry under its
+   * `__lineNumber`, nothing on the line written -- and the rest of the operation runs.
+   */
+  bulkRefusesLines?: number[];
+
+  /**
+   * Every line a bulk operation has run, in order, refused ones included: the product and
+   * the variants it carried. So a scenario can say no line went over the cap, rather than
+   * merely that none was refused, and can name the variants of a line it refused (#985).
+   */
+  readonly bulkLines: Array<{ productId: string; variantGids: string[] }> = [];
   private stagedSeq = 0;
 
   constructor(options: FakeOptions) {
@@ -1191,6 +1205,8 @@ export class FakeShopify {
     const failAfter = this.bulkFailsAfterLines;
     this.bulkFailsAfterLines = undefined;
     const lines = failAfter === undefined ? all : all.slice(0, failAfter);
+    const refused = new Set(this.bulkRefusesLines ?? []);
+    this.bulkRefusesLines = undefined;
     const results: string[] = [];
 
     lines.forEach((raw, index) => {
@@ -1198,9 +1214,36 @@ export class FakeShopify {
         productId: string;
         variants: Array<Record<string, unknown>>;
       };
+      this.bulkLines.push({ productId: parsed.productId, variantGids: parsed.variants.map((input) => String(input.id)) });
+
+      // Counted from zero, as Shopify counts them: its first result line is
+      // `"__lineNumber":0`. This used to count from one, which nothing noticed while
+      // results were matched by variant id alone (#985).
+      const refuse = (message: string, code: string) => {
+        const line: BulkResultLine = { __lineNumber: index, errors: [{ message, extensions: { code } }] };
+        results.push(JSON.stringify(line));
+      };
+
+      // The cap `productVariantsBulkUpdate` enforces when called directly (#847), on the
+      // same terms: the line refused whole, nothing on it written, the rest of the
+      // operation carrying on. Whether Shopify enforces it per line inside a bulk
+      // operation is unconfirmed; it is the safe assumption, and without it the fake took
+      // a 600-variant line and the suite could not see that Shopify may not (#985).
+      if (parsed.variants.length > 250) {
+        refuse(
+          `The input array size of ${parsed.variants.length} is greater than the maximum allowed of 250.`,
+          "MAX_INPUT_SIZE_EXCEEDED",
+        );
+        return;
+      }
+      if (refused.has(index)) {
+        refuse("Internal error. Looks like something went wrong on our end.", "INTERNAL_SERVER_ERROR");
+        return;
+      }
+
       const payload = this.applyVariantInputs(parsed.variants);
       const line: BulkResultLine = {
-        __lineNumber: index + 1,
+        __lineNumber: index,
         data: { productVariantsBulkUpdate: payload },
       };
       results.push(JSON.stringify(line));
