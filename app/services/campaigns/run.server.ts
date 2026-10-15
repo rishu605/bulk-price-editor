@@ -33,7 +33,8 @@ import { guardrailsFor } from "../settings.server";
 import type { RunOutcome } from "./types";
 import { chunk, inChunksCounting } from "../../lib/db/chunk";
 import { overBudget, refuseInline, type InlineWork } from "../../lib/execution/inline-budget";
-import { releaseClaim, transitionCampaign } from "./lifecycle.server";
+import { recordClaim, releaseClaim, transitionCampaign } from "./lifecycle.server";
+import { endingLateWatch } from "./ending-late.server";
 import { recordEndMissed, recordStartRefused } from "./start-refusal.server";
 import { refuseUnconfirmedStart } from "./start-confirmation.server";
 import { startsUnattended } from "../../lib/audit/actor";
@@ -74,6 +75,13 @@ export interface RunOptions {
    * `runCampaign` reads it.
    */
   claimedFrom?: CampaignState;
+  /**
+   * The history's reason for the scheduler's claim, when taking it went unrecorded because
+   * it retried an attempt that gave the claim back (#829); see `claimForSchedule`. Recorded
+   * once this run holds its occurrence, so the history reads claim, run, finish in order,
+   * and a retry refused again adds nothing to it.
+   */
+  claimUnrecorded?: string;
   /**
    * How long this caller can wait for the writing, in milliseconds. A run estimated to
    * take longer -- or one that goes to Shopify's bulk queue, which has no estimate -- is
@@ -879,6 +887,16 @@ async function executeCampaignRun(
     };
   }
 
+  // The scheduler's retried claim, now that this run holds its occurrence (#829).
+  if (options.claimUnrecorded && options.claimedFrom && !options.variantGids) {
+    await recordClaim(
+      shopId,
+      campaignId,
+      { from: options.claimedFrom, to: options.revert ? "REVERTING" : "APPLYING", reason: options.claimUnrecorded },
+      { actor: options.actor, runId: run.id },
+    );
+  }
+
   // The other half of the check above (#763): this run's row exists, so a full run
   // claiming the campaign from now on will see it. One that claimed first is seen here.
   if (options.variantGids) {
@@ -973,7 +991,19 @@ async function executeCampaignRun(
   // Prices alone used to stamp it, so a run tagging a few thousand products one call at a
   // time went quiet for minutes and the reaper took it for dead while it was still
   // writing -- Partial, with a Resume button that would have started a second writer (#791).
-  const beat = heartbeat(run.id);
+  //
+  // A whole-campaign apply also watches for its own end on that beat (#829): still writing
+  // when its revert was due, it tells the merchant the sale is ending late, once. Asked once
+  // before writing too, for a revert moment that passed while this run was being planned.
+  const pulse = heartbeat(run.id);
+  const lateWatch = !options.revert && !options.variantGids ? endingLateWatch(shopId, campaignId, campaignRecord.schedule) : null;
+  const beat = lateWatch
+    ? async () => {
+        await pulse();
+        await lateWatch();
+      }
+    : pulse;
+  await lateWatch?.();
 
   // From here a failure may have changed the storefront (#802).
   started.writing = true;

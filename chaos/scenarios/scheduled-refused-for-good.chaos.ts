@@ -101,7 +101,7 @@ const historyOf = (shopId: string, campaignId: string) =>
   prisma.auditLogEntry
     .findMany({
       where: { shopId, entityId: campaignId, action: "campaign.transition" },
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: { actor: true, before: true, after: true },
     })
     .then((rows) =>
@@ -115,6 +115,9 @@ const historyOf = (shopId: string, campaignId: string) =>
 
 const emailsAbout = (campaignId: string) =>
   sent.filter(({ notification }) => "campaignId" in notification && notification.campaignId === campaignId);
+
+/** The scheduler taking the campaign at its start, which its history records first (#829). */
+const CLAIMED = { actor: SCHEDULER_ACTOR, from: "SCHEDULED", to: "APPLYING", reason: "scheduled start" };
 
 const failuresOf = (result: Awaited<ReturnType<typeof tick>>, campaignId: string) =>
   result.failures.filter((failure) => failure.campaignId === campaignId);
@@ -141,11 +144,13 @@ describe("chaos: a scheduled start refused for good", () => {
 
       const after = await campaignOf(campaignId);
       expect(after.status, "left claimed, or moved somewhere the merchant cannot act from").toBe("SCHEDULED");
+      // Taken (#829), then given back with why: once.
       const history = await historyOf(shopId, campaignId);
-      expect(history, "said more than once, or not at all").toHaveLength(1);
-      expect(history[0].actor).toBe(SCHEDULER_ACTOR);
-      expect(history[0].reason).toMatch(/couldn't start on schedule, and the schedule won't try this start again/);
-      expect(history[0].reason).toMatch(/segment was deleted.*Duplicate it/);
+      expect(history, "said more than once, or not at all").toHaveLength(2);
+      expect(history[0]).toEqual(CLAIMED);
+      expect(history[1].actor).toBe(SCHEDULER_ACTOR);
+      expect(history[1].reason).toMatch(/couldn't start on schedule, and the schedule won't try this start again/);
+      expect(history[1].reason).toMatch(/segment was deleted.*Duplicate it/);
 
       const emails = emailsAbout(campaignId);
       expect(emails, "the merchant who asked to hear about failures heard nothing").toHaveLength(1);
@@ -164,7 +169,7 @@ describe("chaos: a scheduled start refused for good", () => {
       const settled = await campaignOf(campaignId);
       expect(settled.status).toBe("SCHEDULED");
       expect(settled.updatedAt.getTime(), "a later tick claimed it again").toBe(after.updatedAt.getTime());
-      expect(await historyOf(shopId, campaignId), "a later tick wrote to its history").toHaveLength(1);
+      expect(await historyOf(shopId, campaignId), "a later tick wrote to its history").toHaveLength(2);
       expect(emailsAbout(campaignId), "a later tick emailed again").toHaveLength(1);
 
       expect(await prisma.campaignRun.count({ where: { campaignId } })).toBe(0);
@@ -187,10 +192,11 @@ describe("chaos: a scheduled start refused for good", () => {
         expect(failuresOf(result, campaignId), `tick ${i}`).toEqual([]);
       }
       const history = await historyOf(shopId, campaignId);
-      expect(history).toHaveLength(1);
-      expect(history[0].actor).toBe(SCHEDULER_ACTOR);
-      expect(history[0].reason).toMatch(/A guardrail stopped this run before anything was written/);
-      expect(history[0].reason, "the log's sentence, gid and all, reached the merchant").not.toMatch(/gid:\/\//);
+      expect(history).toHaveLength(2);
+      expect(history[0]).toEqual(CLAIMED);
+      expect(history[1].actor).toBe(SCHEDULER_ACTOR);
+      expect(history[1].reason).toMatch(/A guardrail stopped this run before anything was written/);
+      expect(history[1].reason, "the log's sentence, gid and all, reached the merchant").not.toMatch(/gid:\/\//);
       expect(emailsAbout(campaignId)).toHaveLength(1);
       expect((await campaignOf(campaignId)).status).toBe("SCHEDULED");
       expect(chaos.fake.writeLog).toHaveLength(0);
@@ -235,11 +241,13 @@ describe("chaos: a scheduled start that hits a blip", () => {
         databaseDown = false;
       }
 
+      // The first claim and its release (#829); the retries add nothing.
       const history = await historyOf(shopId, campaignId);
-      expect(history, "every retry wrote to the history").toHaveLength(1);
-      expect(history[0]).toMatchObject({ actor: SCHEDULER_ACTOR, from: "APPLYING", to: "SCHEDULED" });
-      expect(history[0].reason).toMatch(/claim released without running/);
-      expect(history[0].reason, "a blip was taken for a refusal").not.toMatch(/won't try this start again/);
+      expect(history, "every retry wrote to the history").toHaveLength(2);
+      expect(history[0]).toEqual(CLAIMED);
+      expect(history[1]).toMatchObject({ actor: SCHEDULER_ACTOR, from: "APPLYING", to: "SCHEDULED" });
+      expect(history[1].reason).toMatch(/claim released without running/);
+      expect(history[1].reason, "a blip was taken for a refusal").not.toMatch(/won't try this start again/);
       expect(emailsAbout(campaignId), "a blip emailed the merchant").toHaveLength(0);
       const row = await rowInList(shopId, campaignId);
       expect(row?.lifecycle.label, "a blip was shown as a refusal").toBe("Scheduled");
@@ -252,9 +260,15 @@ describe("chaos: a scheduled start that hits a blip", () => {
         expect(chaos.fake.priceOf(gid)).toBe((Math.round(baseline.get(gid)! * 0.8) / 100).toFixed(2));
       }
 
-      // Every move named the scheduler, the release and the start alike (#746).
+      // Every move named the scheduler, the claims, the release and the start alike (#746),
+      // and the claim that ran is recorded as a retry, in order (#829).
       const moves = await historyOf(shopId, campaignId);
-      expect(moves.map((move) => move.to)).toEqual(["SCHEDULED", "ACTIVE"]);
+      expect(moves.map((move) => `${move.to} · ${move.reason}`)).toEqual([
+        "APPLYING · scheduled start",
+        expect.stringMatching(/^SCHEDULED · claim released without running/),
+        "APPLYING · scheduled start, tried again",
+        expect.stringMatching(/^ACTIVE · apply finished/),
+      ]);
       for (const move of moves) expect(move.actor, `${move.from} → ${move.to}`).toBe(SCHEDULER_ACTOR);
     });
   });

@@ -20,6 +20,11 @@ type LastRun = NonNullable<List["campaigns"][number]["lastRun"]>;
  * read as nothing happening (#832). So it says how far Shopify has got while a run is
  * polling, and how many were sent once nothing is -- a count nobody is updating would
  * read "0 of 4" long after Shopify finished.
+ *
+ * A run still going reads "In progress" (#829), with what it can say so far: how far
+ * Shopify has got, how many prices it is writing, or that it is still being prepared. Its
+ * own counts are filled in when it finishes, so "Executing · 0 verified" read as nothing
+ * happening, and before its row existed the list showed the last attempt's failure instead.
  */
 function describeLastRun(run: LastRun): string {
   const sent = run.atShopify;
@@ -27,8 +32,12 @@ function describeLastRun(run: LastRun): string {
     ? sent.live
       ? `${formatCount(sent.done)} of ${formatCount(sent.of)} at Shopify`
       : `${formatCount(sent.of)} sent to Shopify`
-    : `${run.verified} verified${run.failed > 0 ? `, ${run.failed} failed` : ""}`;
-  return `${humanise(run.kind)} · ${humanise(run.status)} · ${counts}`;
+    : run.inProgress
+      ? run.planned > 0
+        ? `${formatCount(run.planned)} ${run.planned === 1 ? "price" : "prices"} to write`
+        : "preparing"
+      : `${run.verified} verified${run.failed > 0 ? `, ${run.failed} failed` : ""}`;
+  return `${humanise(run.kind)} · ${run.inProgress ? "In progress" : humanise(run.status)} · ${counts}`;
 }
 
 /** The status filters. "Needs a decision" is not a status — it spans several. */

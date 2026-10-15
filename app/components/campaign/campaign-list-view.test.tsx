@@ -183,7 +183,7 @@ describe("a run Shopify is still applying in bulk", () => {
         campaigns: [
           campaign({
             state: "APPLYING" as never,
-            lastRun: { kind: "APPLY", status: "EXECUTING", verified: 0, failed: 0, atShopify: { done: 40_000, of: 100_139, live: true } },
+            lastRun: { kind: "APPLY", status: "EXECUTING", inProgress: true, verified: 0, failed: 0, planned: 100_139, atShopify: { done: 40_000, of: 100_139, live: true } },
           }),
         ],
       }),
@@ -199,7 +199,7 @@ describe("a run Shopify is still applying in bulk", () => {
         campaigns: [
           campaign({
             state: "PARTIAL" as never,
-            lastRun: { kind: "APPLY", status: "PARTIAL", verified: 0, failed: 0, atShopify: { done: 0, of: 4, live: false } },
+            lastRun: { kind: "APPLY", status: "PARTIAL", inProgress: false, verified: 0, failed: 0, planned: 4, atShopify: { done: 0, of: 4, live: false } },
           }),
         ],
       }),
@@ -212,11 +212,43 @@ describe("a run Shopify is still applying in bulk", () => {
   it("goes back to the verified count once the operation is done", () => {
     const html = render({
       list: list({
-        campaigns: [campaign({ lastRun: { kind: "APPLY", status: "COMPLETED", verified: 4, failed: 0, atShopify: null } })],
+        campaigns: [campaign({ lastRun: { kind: "APPLY", status: "COMPLETED", inProgress: false, verified: 4, failed: 0, planned: 4, atShopify: null } })],
       }),
     });
 
     expect(html).toContain("4 verified");
     expect(html).not.toContain("at Shopify");
+  });
+});
+
+describe("a run still going (#829)", () => {
+  const lastRunCell = (lastRun: NonNullable<Props["list"]["campaigns"][number]["lastRun"]>) =>
+    render({ list: list({ campaigns: [campaign({ state: "APPLYING" as never, lastRun })] }) });
+
+  it("reads as in progress, not as the last attempt that finished", () => {
+    // At 102,132 variants the list said "Apply · Failed · 0 verified" beside Applying for the
+    // whole of a second attempt, whose run had no row yet.
+    const html = lastRunCell({ kind: "APPLY", status: "PLANNING", inProgress: true, verified: 0, failed: 0, planned: 0, atShopify: null });
+    expect(html).toContain("Apply · In progress · preparing");
+    expect(html).not.toMatch(/Failed|0 verified/);
+  });
+
+  it("says how many prices a running sync run is writing, rather than 0 verified", () => {
+    const html = lastRunCell({ kind: "REVERT", status: "EXECUTING", inProgress: true, verified: 0, failed: 0, planned: 1_234, atShopify: null });
+    expect(html).toContain("Revert · In progress · 1,234 prices to write");
+    expect(html).not.toContain("Executing");
+  });
+
+  it("still says how far Shopify has got with a bulk run", () => {
+    const html = lastRunCell({
+      kind: "APPLY",
+      status: "EXECUTING",
+      inProgress: true,
+      verified: 0,
+      failed: 0,
+      planned: 100_139,
+      atShopify: { done: 40_000, of: 100_139, live: true },
+    });
+    expect(html).toContain("Apply · In progress · 40,000 of 100,139 at Shopify");
   });
 });

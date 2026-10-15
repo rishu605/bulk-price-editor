@@ -81,6 +81,19 @@ describe("compose", () => {
     expect(email.text).not.toMatch(/Variants updated and verified/);
   });
 
+  it("says a sale still applying at its end is ending late, why, and that it reverts when the apply finishes (#829)", () => {
+    const email = compose({ kind: "run-failed", endingLate: true, campaignId: "c1", campaignName: "Summer", counts: counts() });
+    expect(email.subject).toBe('"Summer" is ending late');
+    expect(email.text).toMatch(/still applying its prices, and its revert was due to begin/);
+    expect(email.text).toMatch(/the revert begins as soon as the apply finishes/);
+    expect(email.text).toMatch(/stay on your storefront, past its end/);
+    expect(email.text).toMatch(/you will not get another email about this end/);
+    // Nothing failed and nothing is to be resumed: not the stopped-part-way wording.
+    expect(email.subject).not.toMatch(/could not/);
+    expect(email.text).not.toMatch(/resum|Variants updated and verified/i);
+    expect(email.text).not.toMatch(/[$£€¥]|\b\d+\.\d{2}\b/);
+  });
+
   it("says a partial run is partial, and how to finish it", () => {
     const email = compose({
       kind: "run-partial",

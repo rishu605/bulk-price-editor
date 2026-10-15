@@ -62,6 +62,11 @@ export interface RunNotification {
    * its window, and the schedule keeps trying -- so the merchant hears it once, not never.
    */
   notEnded?: boolean;
+  /**
+   * Its end came while it was still applying (#829). Nothing failed, but the sale outlives
+   * its window until the apply finishes, so the merchant hears it once rather than never.
+   */
+  endingLate?: boolean;
   /** Merchant-facing reasons, already through the error taxonomy. Never raw errors. */
   reasons?: string[];
   /** Deep link back into the app, filled in by `notify` — see `campaign-link.ts`. */
@@ -158,6 +163,22 @@ function runPartial(n: RunNotification): Email {
 }
 
 function runFailed(n: RunNotification): Email {
+  if (n.endingLate) {
+    return {
+      subject: `"${n.campaignName}" is ending late`,
+      text: [
+        `"${n.campaignName}" is still applying its prices, and its revert was due to begin. One run writes a`,
+        "campaign's prices at a time, so the revert begins as soon as the apply finishes. Until then the sale's",
+        "prices stay on your storefront, past its end.",
+        "",
+        "There is nothing you need to do, and you will not get another email about this end. A sale this size",
+        "needs a longer window: next time, leave more time between its start and its end.",
+        link(n.campaignUrl, "Open the campaign"),
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    };
+  }
   if (n.notEnded) {
     return {
       subject: `"${n.campaignName}" did not end on schedule`,

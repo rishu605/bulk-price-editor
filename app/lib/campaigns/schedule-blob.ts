@@ -15,11 +15,22 @@ import { START_CONFIRMED_KEY } from "./start-confirmation";
  * The keys that say when a campaign runs. Everything else in the blob is what it prices.
  *
  * `startRefused` is a start the scheduler was refused for good (#975): it belongs to the
- * dates, so a copy, an unschedule or new dates leave it behind.
+ * dates, so a copy, an unschedule or new dates leave it behind. So do `endMissed` (#1005)
+ * and `endingLate` (#829), which are about one end.
  *
  * Not `startConfirmed` (#1009), which is about what the campaign writes: see `OWN_KEYS`.
  */
-export const WINDOW_KEYS = ["kind", "startAt", "endAt", "revertBufferMinutes", "clockNotes", "zone", "startRefused", "endMissed"] as const;
+export const WINDOW_KEYS = [
+  "kind",
+  "startAt",
+  "endAt",
+  "revertBufferMinutes",
+  "clockNotes",
+  "zone",
+  "startRefused",
+  "endMissed",
+  "endingLate",
+] as const;
 
 /** The blob without its window: the campaign's definition, which a copy keeps. */
 export function definitionOf(schedule: unknown): Record<string, unknown> {

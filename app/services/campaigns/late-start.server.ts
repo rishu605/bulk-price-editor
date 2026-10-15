@@ -1,7 +1,6 @@
 import prisma from "../../db.server";
 import { parseSchedule } from "../../lib/scheduling/window";
-
-const RELEASED = "claim released without running: ";
+import { RELEASED } from "./lifecycle.server";
 
 /** How long past its start a campaign may sit before the page stops calling it waiting. */
 const GRACE_MS = 2 * 60_000;

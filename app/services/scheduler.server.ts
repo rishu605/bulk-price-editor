@@ -21,11 +21,12 @@ import { runCampaign } from "./campaigns/run.server";
 import type { RunOutcome } from "./campaigns/types";
 import { nextAttemptKey } from "../lib/scheduling/attempts";
 import { refusedForGood, startRefusal } from "../lib/scheduling/start-refusal";
-import type { CampaignState } from "../lib/lifecycle/transitions";
+import { isEndingLate, toldEndingLate } from "../lib/scheduling/ending-late";
 import { adminClientForShop } from "./admin-client.server";
 import { claimEnrollment, endingSinceLastApply, pendingEnrollments } from "./auto-enroll.server";
 import { reclaimStaleRuns } from "./campaigns/reaper.server";
-import { noteCampaign } from "./campaigns/lifecycle.server";
+import { claimForSchedule, noteCampaign } from "./campaigns/lifecycle.server";
+import { recordEndingLate } from "./campaigns/ending-late.server";
 import { beat } from "./scheduler-heartbeat.server";
 import { checkAlerts } from "./alerting.server";
 import { sendDueDigests } from "./digest.server";
@@ -61,6 +62,8 @@ export interface TickResult {
  * `dueTransition` so there is one place that knows the rules.
  */
 export async function tick(now: Date = new Date()): Promise<TickResult> {
+  // The real clock, so `now` can be moved on by the time a run inside this tick took.
+  const tickStartedAt = Date.now();
   const result: TickResult = {
     examined: 0,
     applied: 0,
@@ -90,6 +93,9 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
   // every time — which is four minutes of a sale running past its end.
   const alerts = await checkAlerts(now);
   result.alerts = alerts.sent;
+
+  // Before the work below, which can hold this tick for as long as one apply takes.
+  await noteEndingLate(now);
 
   // HELD too: a held campaign's prices are still live, and its window still ends. Leaving
   // it out meant a sale that took one price edit never reverted on its end date (#756).
@@ -138,63 +144,18 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
     // to its history again, every thirty seconds.
     if (transition === "apply" && startRefusal(campaign.schedule)) continue;
 
-    // Which attempt at this occurrence, if any. Null when one is still running or every
-    // attempt has been used; a finished attempt never blocks the next one (#700).
-    const base = occurrenceKeyFor(parseSchedule(campaign.schedule), transition, now);
-    const attempts = await prisma.campaignRun.findMany({
-      where: {
-        campaignId: campaign.id,
-        kind: transition === "apply" ? "APPLY" : "REVERT",
-        occurrenceKey: { startsWith: base },
-      },
-      select: { occurrenceKey: true, status: true },
-    });
-    const occurrenceKey = nextAttemptKey(base, attempts);
-    if (!occurrenceKey) continue;
+    await runDue(campaign, transition, now, result, transitioned);
+    if (transition !== "apply") continue;
 
-    // Beaten again per campaign, not only at the top of the tick. `runTransition` below
-    // can spend minutes on a large catalogue, and a heartbeat that only fires between
-    // ticks would go stale during precisely the work that proves the scheduler is
-    // alive — turning a busy scheduler into a stopped one. One upsert per due campaign
-    // is nothing next to the run it precedes.
-    await beat(new Date());
-
-    try {
-      const outcome = await runTransition(
-        campaign.shop.id,
-        campaign.shop.domain,
-        campaign.id,
-        transition,
-        // The occurrence this tick is acting on, not the instant it happened to run.
-        // Two ticks that both find this window due produce the same key, and the unique
-        // index turns the second into a no-op rather than a second apply.
-        occurrenceKey,
-      );
-      // Refused before it started, and released back to SCHEDULED: nothing was applied,
-      // and counting it as applied made a stuck campaign look like a working tick.
-      if (outcome?.refused) {
-        result.refused++;
-      } else if (transition === "apply") {
-        result.applied++;
-        transitioned.add(campaign.id);
-      } else {
-        result.reverted++;
-        transitioned.add(campaign.id);
-      }
-    } catch (error) {
-      // Refused for good (#975): `runCampaign` has recorded it on the campaign, and the
-      // merchant has been told. A refusal like the ones returned early, not a failure of
-      // ours, and not one the worker log should repeat.
-      if (transition === "apply" && refusedForGood(error)) {
-        result.refused++;
-        continue;
-      }
-      // One campaign failing must not stop the tick: the others are still due, and
-      // a scheduler that gives up on the first error leaves sales unstarted.
-      result.failures.push({
-        campaignId: campaign.id,
-        error: error instanceof Error ? error.message : String(error),
-      });
+    // An apply that outlasted its window ends now, not a tick later (#829). This tick has
+    // been inside the apply all along -- at 102,132 variants, past the end of a 30-minute
+    // sale -- and the rest of its list could hold it longer still. The clock is the tick's,
+    // moved on by the time spent, and the revert takes its own claim and occurrence like any
+    // other: the apply's run has finished, so it is the only writer (rule 2).
+    const later = new Date(now.getTime() + (Date.now() - tickStartedAt));
+    const after = await prisma.campaign.findUnique({ where: { id: campaign.id }, select: { status: true, schedule: true } });
+    if (after && dueTransition({ schedule: parseSchedule(after.schedule), status: after.status }, later) === "revert") {
+      await runDue({ ...campaign, ...after }, "revert", later, result, transitioned);
     }
   }
 
@@ -243,6 +204,106 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
   }
 
   return result;
+}
+
+/** A campaign the tick acts on, as its candidates query reads it. */
+interface Candidate {
+  id: string;
+  schedule: unknown;
+  shop: { id: string; domain: string };
+}
+
+/**
+ * Runs one due transition for one campaign: picks the attempt, claims, runs, and counts the
+ * outcome on `result`. Never throws; a failure is counted, and the tick goes on.
+ */
+async function runDue(
+  campaign: Candidate,
+  transition: Transition,
+  now: Date,
+  result: TickResult,
+  transitioned: Set<string>,
+): Promise<void> {
+  // Which attempt at this occurrence, if any. Null when one is still running or every
+  // attempt has been used; a finished attempt never blocks the next one (#700).
+  const base = occurrenceKeyFor(parseSchedule(campaign.schedule), transition, now);
+  const attempts = await prisma.campaignRun.findMany({
+    where: {
+      campaignId: campaign.id,
+      kind: transition === "apply" ? "APPLY" : "REVERT",
+      occurrenceKey: { startsWith: base },
+    },
+    select: { occurrenceKey: true, status: true },
+  });
+  const occurrenceKey = nextAttemptKey(base, attempts);
+  if (!occurrenceKey) return;
+
+  // Beaten again per campaign, not only at the top of the tick. `runTransition` below
+  // can spend minutes on a large catalogue, and a heartbeat that only fires between
+  // ticks would go stale during precisely the work that proves the scheduler is
+  // alive — turning a busy scheduler into a stopped one. One upsert per due campaign
+  // is nothing next to the run it precedes.
+  await beat(new Date());
+
+  try {
+    const outcome = await runTransition(
+      campaign.shop.id,
+      campaign.shop.domain,
+      campaign.id,
+      transition,
+      // The occurrence this tick is acting on, not the instant it happened to run.
+      // Two ticks that both find this window due produce the same key, and the unique
+      // index turns the second into a no-op rather than a second apply.
+      occurrenceKey,
+    );
+    // Refused before it started, and released back to SCHEDULED: nothing was applied,
+    // and counting it as applied made a stuck campaign look like a working tick.
+    if (outcome?.refused) {
+      result.refused++;
+    } else if (transition === "apply") {
+      result.applied++;
+      transitioned.add(campaign.id);
+    } else {
+      result.reverted++;
+      transitioned.add(campaign.id);
+    }
+  } catch (error) {
+    // Refused for good (#975): `runCampaign` has recorded it on the campaign, and the
+    // merchant has been told. A refusal like the ones returned early, not a failure of
+    // ours, and not one the worker log should repeat.
+    if (transition === "apply" && refusedForGood(error)) {
+      result.refused++;
+      return;
+    }
+    // One campaign failing must not stop the tick: the others are still due, and
+    // a scheduler that gives up on the first error leaves sales unstarted.
+    result.failures.push({
+      campaignId: campaign.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
+ * Tells the merchant about every campaign still applying past the moment its revert was
+ * due (#829), once each. The apply watches for this itself; this is for the time before it
+ * starts watching -- a run being planned, or waiting in the worker's queue -- and for an
+ * apply this tick is not running. `recordEndingLate` says each end once, whoever asks.
+ */
+async function noteEndingLate(now: Date): Promise<void> {
+  try {
+    const applying = await prisma.campaign.findMany({
+      where: { status: "APPLYING", shop: { uninstalledAt: null } },
+      select: { id: true, shopId: true, status: true, schedule: true },
+    });
+    for (const campaign of applying) {
+      if (!isEndingLate(parseSchedule(campaign.schedule), campaign.status, now) || toldEndingLate(campaign.schedule)) continue;
+      await recordEndingLate(campaign.shopId, campaign.id, now);
+    }
+  } catch (error) {
+    // A courtesy to the merchant, never a reason for the tick not to start or end a sale.
+    logger.warn("could not look for campaigns ending late", { error: error instanceof Error ? error.message : String(error) });
+  }
 }
 
 /**
@@ -391,31 +452,18 @@ async function runTransition(
 
   // Claim the campaign before running. Two ticks overlapping — a slow run, a second
   // worker that briefly held the lock — would otherwise both start the same
-  // transition. The status change is the claim.
-  // Read the state we are about to take it out of, so a run that fails before it
-  // starts can be put back there. `updateMany` reports how many rows it changed, not
-  // what they were.
-  const before = await prisma.campaign.findUnique({
-    where: { id: campaignId },
-    select: { status: true },
-  });
-
-  const claimed = await prisma.campaign.updateMany({
-    where: {
-      id: campaignId,
-      status: transition === "apply" ? "SCHEDULED" : { in: ["ACTIVE", "PARTIAL", "HELD"] },
-    },
-    data: { status: transition === "apply" ? "APPLYING" : "REVERTING" },
-  });
-
-  if (claimed.count === 0) return null; // someone else took it
+  // transition. The status change is the claim, taken from the exact state that was read,
+  // so a run that fails before it starts can be put back there, and recorded as the
+  // scheduler's (#829).
+  const claim = await claimForSchedule(shopId, campaignId, transition, SCHEDULER_ACTOR);
+  if (!claim) return null; // someone else took it
 
   // A held campaign's end still comes (#756), but the prices that held it were edited by
   // somebody on purpose and are waiting for a decision in the drift queue. Ending the sale
   // reverts everything else on time and leaves those as edited (#784): overwriting them
   // unasked is the one thing the hold exists to prevent.
   const edited =
-    transition === "revert" && before?.status === "HELD"
+    transition === "revert" && claim.from === "HELD"
       ? (
           await prisma.driftEvent.findMany({
             where: { shopId, campaignId, resolution: "PENDING", surfaceKind: "BASE" },
@@ -428,7 +476,8 @@ async function runTransition(
     actor: SCHEDULER_ACTOR,
     revert: transition === "revert",
     occurrenceKey,
-    claimedFrom: before?.status as CampaignState | undefined,
+    claimedFrom: claim.from,
+    ...(claim.recorded ? {} : { claimUnrecorded: claim.reason }),
     ...(edited.length > 0
       ? {
           skipVariantGids: edited,

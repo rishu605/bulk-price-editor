@@ -109,8 +109,7 @@ export function dueTransition(state: ScheduleState, now: Date): Transition | nul
   if (schedule.kind !== "window") return null;
 
   const start = Date.parse(schedule.startAt);
-  const end = schedule.endAt ? Date.parse(schedule.endAt) : null;
-  const revertAt = end === null ? null : end - effectiveBufferMs(schedule);
+  const revertAt = revertMoment(schedule);
   const millis = now.getTime();
 
   const pastRevert = revertAt !== null && millis >= revertAt;
@@ -130,6 +129,15 @@ export function dueTransition(state: ScheduleState, now: Date): Transition | nul
   }
 
   return null;
+}
+
+/**
+ * When reverting is due to begin, in epoch milliseconds: the window's end less its buffer.
+ * Null for a manual campaign or a window with no end, which nothing reverts on its own.
+ */
+export function revertMoment(schedule: Schedule): number | null {
+  if (schedule.kind !== "window" || !schedule.endAt) return null;
+  return Date.parse(schedule.endAt) - effectiveBufferMs(schedule);
 }
 
 /**
