@@ -7,6 +7,7 @@ import { actorFor } from "../lib/audit/actor";
 import { toAdminClient } from "../services/admin-client.server";
 import { refreshShopTimezone } from "../services/shop-timezone.server";
 import { AppBridgeNavigation } from "../components/AppBridgeNavigation";
+import { ScreenMemory } from "../components/ScreenMemory";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { RouteProgress } from "../components/RouteProgress";
 
@@ -31,6 +32,7 @@ export default function App() {
     <>
       <AppBridgeNavigation />
       <RouteProgress />
+      <ScreenMemory />
       <s-app-nav>
         {/* `rel="home"` rather than a plain link. The admin sidebar already renders the
             app's name as the link to its home route, so an item that also goes there is

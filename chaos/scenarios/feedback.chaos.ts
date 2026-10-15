@@ -114,4 +114,16 @@ describe("chaos: feedback from inside the app", () => {
       },
     );
   });
+
+  it("answers each kind in its own words (#743)", async () => {
+    await withChaos("feedback-kinds", { catalog: { products: 1, variantsPerProduct: 1 } }, async (chaos) => {
+      const { recordFeedback } = await import("../../app/services/feedback.server");
+      const { shopId } = chaos.fixture;
+      const problem = await recordFeedback(shopId, "The preview is slow", "problem");
+      const idea = await recordFeedback(shopId, "Schedule by week", "idea");
+      expect(problem.message, "a problem report was promised a ship notice").not.toMatch(/ships/);
+      expect(problem.message).toMatch(/look into it/);
+      expect(idea.message).toMatch(/tell you if this ships/);
+    });
+  });
 });

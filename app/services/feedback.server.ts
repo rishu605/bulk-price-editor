@@ -69,10 +69,14 @@ export async function recordFeedback(
 
   return {
     ok: true,
+    // One answer per kind (#743): "we will tell you if this ships" answers an idea, not a
+    // report that something is broken.
     message:
       sentiment === "praise"
         ? "Thank you — that genuinely helps."
-        : "Got it. We read every one of these, and we will tell you if this ships.",
+        : sentiment === "idea"
+          ? "Got it. We read every one of these, and we will tell you if this ships."
+          : "Got it. We will look into it, and what happens to it shows under What you have sent.",
   };
 }
 

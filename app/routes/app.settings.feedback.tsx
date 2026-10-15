@@ -16,6 +16,7 @@ import { ensureShop } from "../services/shop.server";
 import { feedbackFor, isSentiment, recordFeedback } from "../services/feedback.server";
 import { actorFor } from "../lib/audit/actor";
 import { FeedbackForm } from "../components/FeedbackForm";
+import { kindLabel } from "../lib/feedback/feedback-ui";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
@@ -63,7 +64,7 @@ export default function FeedbackPage() {
 
   return (
     <PageShell heading="Feedback">
-      <FeedbackForm route="/app/settings/feedback" />
+      <FeedbackForm />
 
       {sent.length > 0 ? (
         <Card heading="What you have sent">      <s-table>
@@ -79,7 +80,8 @@ export default function FeedbackPage() {
                   <s-table-cell>
                     {formatDay(entry.createdAt, timeZone)}
                   </s-table-cell>
-                  <s-table-cell>{entry.sentiment}</s-table-cell>
+                  {/* The select's words, not the stored value (#743). */}
+                  <s-table-cell>{kindLabel(entry.sentiment)}</s-table-cell>
                   <s-table-cell>
                     {entry.message.length > 120
                       ? `${entry.message.slice(0, 117)}…`

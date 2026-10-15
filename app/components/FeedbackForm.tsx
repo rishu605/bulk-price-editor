@@ -1,4 +1,7 @@
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { useFetcher } from "react-router";
+
+import { KIND_LABELS, lastScreen } from "../lib/feedback/feedback-ui";
 import { Field } from "./FieldGrid";
 import { SPACE } from "../lib/ui/spacing";
 import { Card } from "./Card";
@@ -17,9 +20,24 @@ import { Card } from "./Card";
  * to share their screen so they can report a typo is a worse trade than not having the
  * screenshot, so the route is recorded instead and the message field does the rest.
  */
-export function FeedbackForm({ route }: { route: string }) {
+export function FeedbackForm() {
   const fetcher = useFetcher<{ ok: boolean; message: string }>();
   const busy = fetcher.state !== "idle";
+
+  // The screen the merchant came from (#743). Storage is the browser's, so the server
+  // renders without it and the client reads it once hydrated.
+  const route = useSyncExternalStore(noSubscription, lastScreen, () => null);
+
+  // A fresh form once a message is in (#743): the text stayed with Send enabled, and a
+  // second press filed it twice. The text area is cleared by its property as well as by
+  // the reset, which a custom element may not take.
+  const form = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (fetcher.state !== "idle" || !fetcher.data?.ok || !form.current) return;
+    form.current.reset();
+    const area = form.current.querySelector("s-text-area") as (HTMLElement & { value?: string }) | null;
+    if (area) area.value = "";
+  }, [fetcher.state, fetcher.data]);
 
   return (
     <Card heading="Tell us how this is going">  {fetcher.data ? (
@@ -28,18 +46,18 @@ export function FeedbackForm({ route }: { route: string }) {
         </s-banner>
       ) : null}
 
-      <fetcher.Form method="post" action="/app/settings/feedback">
-        <input type="hidden" name="route" value={route} />
+      <fetcher.Form ref={form} method="post" action="/app/settings/feedback">
+        <input type="hidden" name="route" value={route ?? ""} />
         <s-stack gap={SPACE.section}>
           {/* Three options and a sentence. Unbounded these filled a 970px card, which
               asks for an essay and offers a dropdown the width of the screen. */}
           <Field width="medium">
             <s-select name="sentiment" label="What kind of thing is this?">
               <s-option value="problem" defaultSelected>
-                Something is wrong
+                {KIND_LABELS.problem}
               </s-option>
-              <s-option value="idea">An idea</s-option>
-              <s-option value="praise">Something worked well</s-option>
+              <s-option value="idea">{KIND_LABELS.idea}</s-option>
+              <s-option value="praise">{KIND_LABELS.praise}</s-option>
             </s-select>
           </Field>
 
@@ -49,7 +67,12 @@ export function FeedbackForm({ route }: { route: string }) {
               label="What happened?"
               rows={4}
               placeholder="A sentence is enough."
-              details="We can see which screen you are on and what your store looks like, so you do not need to explain that part."
+              // Only claims the screen when it has one (#743).
+              details={
+                route
+                  ? `We will see that you came here from ${route}, and what your store looks like, so you do not need to explain that part.`
+                  : "Say which screen it happened on. We can see what your store looks like, so you do not need to explain that part."
+              }
             />
           </Field>
 
@@ -60,4 +83,9 @@ export function FeedbackForm({ route }: { route: string }) {
       </fetcher.Form>
     </Card>
   );
+}
+
+/** The remembered screen does not change while this page is open. */
+function noSubscription() {
+  return () => {};
 }
