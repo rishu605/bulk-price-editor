@@ -271,8 +271,11 @@ export async function previewCampaign(
  *
  * Over the base prices the plan writes, against each one's baseline and cost -- the values
  * the resolver priced from, so the depth a merchant is warned about is the depth written.
+ *
+ * The one reading of a plan's reach: the Apply dialog's, and the start check's at save and at
+ * start (#1009), which reads the run's own plan.
  */
-async function blastRadiusOf(
+export async function blastRadiusOf(
   shopId: string,
   rows: readonly PlannedRow[],
   counts: { planned: number; clampedToMinimum: number },

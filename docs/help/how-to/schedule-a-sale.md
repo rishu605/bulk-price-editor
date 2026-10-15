@@ -16,6 +16,21 @@ a sale set for 9:00 may now fall at a different time on your new clock. Home lis
 campaign that does, and its page lets you choose: keep the time you set, now on your new
 clock, or keep the new time.
 
+## Large or deep sales are confirmed when you schedule them
+
+When a campaign writes more prices, or moves a price further, than your typed-confirmation
+settings allow (**Settings**, 1,000 prices and 50% unless you changed them), the Apply button
+asks you to type *apply*. The scheduler starts a sale with nobody there to ask, so the
+question comes when you save the dates instead, and again when you change them if the sale
+has grown since. Your
+confirmation is kept with the campaign: who gave it, when, and what the sale reached then.
+
+When the start comes, the sale runs if it still reaches no further than that: no more than a
+tenth more prices, and no price moved further than the largest change you confirmed. A sale
+whose scope has grown past that, because its segment was edited or products were added, is
+not started. The campaign reads **Scheduled — couldn't start**, says what grew, and you get one
+email. Move its dates and type *apply* when asked, or apply it by hand.
+
 ## The revert buffer
 
 A sale ending at midnight starts reverting slightly *before* midnight — five minutes by

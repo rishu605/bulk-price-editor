@@ -157,6 +157,11 @@ export function describeState(
     lateStart?: string | null;
     /** Why its scheduled end has not run, while the scheduler keeps trying (#1005); see `endMissed`. */
     endMissed?: string | null;
+    /**
+     * Why its start, as the campaign is now, needs a typed confirmation it does not have
+     * (#1009); see `unconfirmedStart`. The scheduler will refuse it when it comes.
+     */
+    unconfirmedStart?: string | null;
   } = {},
 ): StateDescription {
   switch (state) {
@@ -189,6 +194,18 @@ export function describeState(
           label: "Scheduled — will never start",
           tone: "warning",
           explanation: `${context.neverStarts} Move its dates, or unschedule it, under Schedule.`,
+        };
+      }
+      // Said before its start comes, not only after the scheduler refuses it (#1009): a sale
+      // scheduled before the start check existed, or one that has grown since it was
+      // confirmed, is refused at its start unless somebody confirms it first.
+      if (context.unconfirmedStart) {
+        return {
+          label: "Scheduled — needs confirming",
+          tone: "warning",
+          explanation:
+            `${context.unconfirmedStart} The schedule starts it with nobody there to type “apply”, so it will not ` +
+            "start it until it is confirmed. Confirm it under “Scheduled and Flow starts” on the Overview tab.",
         };
       }
       // Past its start and not started (#851): not "waiting for its start time", which has

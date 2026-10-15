@@ -14,12 +14,14 @@
 import prisma from "../../db.server";
 import { AppError } from "../../lib/errors/app-error";
 import { definitionOf, manualSchedule } from "../../lib/campaigns/schedule-blob";
+import { START_CONFIRMED_KEY, type StartConfirmation } from "../../lib/campaigns/start-confirmation";
 import { describeState, type CampaignState } from "../../lib/lifecycle/transitions";
 import type { AdminClient } from "../../lib/execution/sync-executor";
 import { formatScheduleInstant } from "../../lib/scheduling/window";
 import { windowInputProblem } from "../../lib/scheduling/window-input";
 import { windowInStoreZone } from "../shop-timezone.server";
 import { transitionCampaign } from "./lifecycle.server";
+import { confirmStart, saveStart } from "./start-confirmation.server";
 import { keepShownTimes, keepTypedTimes } from "./zone-shift.server";
 
 async function scheduled(shopId: string, campaignId: string) {
@@ -96,13 +98,16 @@ export async function unschedule(
 
 /**
  * New dates for a campaign that has not started. The caller has already checked them
- * with `windowInputProblem`, future start included.
+ * with `windowInputProblem`, future start included, and its start with `saveStart`:
+ * `confirmation` is the typed confirmation that check asked for, when it asked (#1009).
+ * One it did not ask for again stays, since moving the dates changes nothing it writes.
  */
 export async function reschedule(
   shopId: string,
   campaignId: string,
   window: { startUtc: string; endUtc: string | null; clockNotes: string[]; zone: string },
   actor: string,
+  confirmation?: StartConfirmation,
 ): Promise<string> {
   const campaign = await scheduled(shopId, campaignId);
   const previous = (campaign.schedule ?? {}) as Record<string, unknown>;
@@ -121,6 +126,7 @@ export async function reschedule(
         ...(window.clockNotes.length > 0 ? { clockNotes: window.clockNotes } : {}),
         // The zone the new dates were typed in (#799).
         zone: window.zone,
+        ...(confirmation ? { [START_CONFIRMED_KEY]: confirmation } : {}),
       } as never,
       startAt: new Date(window.startUtc),
       endAt: window.endUtc ? new Date(window.endUtc) : null,
@@ -139,7 +145,7 @@ export async function reschedule(
       entity: "Campaign",
       entityId: campaignId,
       before: { startAt: campaign.startAt?.toISOString() ?? null, endAt: campaign.endAt?.toISOString() ?? null } as never,
-      after: { startAt: window.startUtc, endAt: window.endUtc } as never,
+      after: { startAt: window.startUtc, endAt: window.endUtc, ...(confirmation ? { startConfirmed: confirmation } : {}) } as never,
     },
   });
 
@@ -150,7 +156,8 @@ const SCHEDULE_INTENTS = new Set(["cancel-schedule", "unschedule", "reschedule",
 
 /**
  * The campaign page's schedule intents, answered before any of the machinery that prices,
- * the way `housekeepingAction` answers its own. Null for any other intent.
+ * the way `housekeepingAction` answers its own. Null for any other intent. With them, the
+ * confirmation that lets the scheduler and Flow start it (#1009), which writes no price either.
  *
  * A refusal -- the campaign started a moment ago, or the dates cannot run -- comes back as
  * a message on the page rather than an error screen: the merchant can act on it there.
@@ -167,6 +174,7 @@ export async function scheduleAction(
   client: AdminClient,
   actor: string,
 ): Promise<{ ok: boolean; message: string } | null> {
+  if (intent === "confirm-start") return confirmStart(shopId, campaignId, String(form.get("confirmation") ?? ""), actor);
   if (!SCHEDULE_INTENTS.has(intent)) return null;
 
   try {
@@ -200,7 +208,15 @@ export async function scheduleAction(
     });
     if (problem) return { ok: false, message: `${problem} The dates were not changed.` };
 
-    const message = await reschedule(shopId, campaignId, { ...window, startUtc: window.startUtc, zone }, actor);
+    // New dates are a save of its start, which the scheduler makes with nobody there to type
+    // the word (#1009): asked here when the start would be refused without it.
+    const stored = await prisma.campaign.findFirst({ where: { id: campaignId, shopId } });
+    const start = stored ? await saveStart(shopId, stored, field("confirmation"), actor) : { ok: true as const };
+    if (!start.ok) {
+      return { ok: false, message: `${start.unconfirmed} Type “apply” in the box to confirm it as it is now. The dates were not changed.` };
+    }
+
+    const message = await reschedule(shopId, campaignId, { ...window, startUtc: window.startUtc, zone }, actor, start.confirmation);
     return { ok: true, message: [message, ...window.clockNotes].join(" ") };
   } catch (error) {
     if (error instanceof AppError && error.code === "VALIDATION") return { ok: false, message: error.userMessage };

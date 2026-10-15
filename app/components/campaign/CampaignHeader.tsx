@@ -66,6 +66,7 @@ export function CampaignHeader({
   runs,
   timeZone,
   zoneShift,
+  startConfirmation,
 }: CampaignDetailProps) {
   return (
     <>
@@ -277,6 +278,11 @@ export function CampaignHeader({
         <ScheduleModals
           campaignName={preview.name}
           window={window}
+          confirm={
+            startConfirmation.unconfirmed
+              ? { unconfirmed: startConfirmation.unconfirmed, radius: preview.confirm ?? null }
+              : null
+          }
           busy={busy}
           onSave={(fields) => fetcher.submit({ intent: "reschedule", ...fields }, { method: "post" })}
           onUnschedule={() => fetcher.submit({ intent: "unschedule" }, { method: "post" })}

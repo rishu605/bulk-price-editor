@@ -12,7 +12,9 @@ import { Prisma } from "@prisma/client";
 
 import prisma from "../../db.server";
 import { copyName } from "../../lib/campaigns/copy-name";
-import { manualSchedule } from "../../lib/campaigns/schedule-blob";
+import { uncopiableRule } from "../../lib/campaigns/rule-limits";
+import { copiedSchedule } from "../../lib/campaigns/schedule-blob";
+import { AppError } from "../../lib/errors/app-error";
 import { logger } from "../../lib/logging/logger";
 
 /**
@@ -63,6 +65,11 @@ export async function duplicateCampaign(
     select: { ...COPIED, schedule: true, segments: { select: { id: true } } },
   });
 
+  // A rule every Apply refuses -- a reduction of 100% or more (#818) -- is not copied into a
+  // new campaign that would be refused the same way (#1009). Named, with what to do instead.
+  const refused = uncopiableRule(source.ruleRows);
+  if (refused) throw new AppError({ code: "VALIDATION", userMessage: refused, context: { campaignId } });
+
   // Every name in the shop, not just the unarchived ones. A copy that collides with an
   // archived campaign's name makes the archive unreadable later, and reading a few
   // thousand short strings is cheaper than the query that would avoid it.
@@ -87,7 +94,9 @@ export async function duplicateCampaign(
       status: "DRAFT",
       // What it prices, run by hand: the same scope, rounding and practice flag, and no
       // dates. A draft, so `manual` -- the window is what is deliberately left behind.
-      schedule: manualSchedule(schedule) as Prisma.InputJsonValue,
+      // Without the source's typed confirmation too (#1009): that was a person's decision
+      // about the source, and the copy's start is asked about afresh.
+      schedule: copiedSchedule(schedule) as Prisma.InputJsonValue,
       createdBy: actor,
       // Connected, not copied. A segment is a saved definition shared across campaigns;
       // duplicating the rows would give the copy a segment that stops tracking the
@@ -110,6 +119,23 @@ export async function duplicateCampaign(
 
   logger.info("campaign duplicated", { shopId, from: campaignId, to: copy.id });
   return copy;
+}
+
+/**
+ * A duplicate, or the sentence it was refused with (#1009), for a page to show beside the
+ * button rather than as an error screen. Anything else that goes wrong still throws.
+ */
+export async function duplicateOrRefusal(
+  shopId: string,
+  campaignId: string,
+  actor: string | null,
+): Promise<{ id: string; name: string } | { refused: string }> {
+  try {
+    return await duplicateCampaign(shopId, campaignId, actor);
+  } catch (error) {
+    if (error instanceof AppError && error.code === "VALIDATION") return { refused: error.userMessage };
+    throw error;
+  }
 }
 
 /**
@@ -210,11 +236,12 @@ export async function housekeepingAction(
   campaignId: string,
   actor: string | null,
   form: { get(name: string): FormDataEntryValue | null },
-): Promise<{ ok: true; message: string; redirectTo?: string } | null> {
+): Promise<{ ok: boolean; message: string; redirectTo?: string } | null> {
   const intent = String(form.get("intent") ?? "");
 
   if (intent === "duplicate") {
-    const copy = await duplicateCampaign(shopId, campaignId, actor);
+    const copy = await duplicateOrRefusal(shopId, campaignId, actor);
+    if ("refused" in copy) return { ok: false, message: copy.refused };
     return {
       ok: true,
       message: `Copied to “${copy.name}”.`,

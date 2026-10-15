@@ -54,10 +54,13 @@ describe("the status line hears who outranks this campaign (#837)", () => {
   it("passes the preview's answer to describeState", () => {
     // The context field is optional, so dropping it compiles and the status line goes back
     // to "Your storefront shows the campaign price" under a sale that outranks it everywhere.
-    // The context is built by `lifecycleContext` (#1005), which the page hands the preview's answer.
+    // The context is built by `lifecycleContext` (#1005), which the page hands its preview:
+    // who outranks it, and since #1009 the reach its scheduled start is checked against.
     expect(route, "describeState is no longer given the page's context").toMatch(
-      /describeState\(\s*state,\s*await lifecycleContext\([^)]*preview\.outrankedBy\)/,
+      /describeState\(\s*state,\s*await lifecycleContext\([^)]*,\s*preview\)/,
     );
-    expect(sourceOf("app/services/campaigns/lifecycle-context.server.ts")).toContain("outrankedBy, //");
+    const context = sourceOf("app/services/campaigns/lifecycle-context.server.ts");
+    expect(context).toContain("outrankedBy: preview.outrankedBy, //");
+    expect(context).toContain("unconfirmedStart(preview.confirm, startConfirmationOf(schedule))");
   });
 });

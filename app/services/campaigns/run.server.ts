@@ -34,6 +34,8 @@ import { chunk, inChunksCounting } from "../../lib/db/chunk";
 import { overBudget, refuseInline, type InlineWork } from "../../lib/execution/inline-budget";
 import { releaseClaim, transitionCampaign } from "./lifecycle.server";
 import { recordEndMissed, recordStartRefused } from "./start-refusal.server";
+import { refuseUnconfirmedStart } from "./start-confirmation.server";
+import { startsUnattended } from "../../lib/audit/actor";
 import { refusedForGood, startRefusedEntry } from "../../lib/scheduling/start-refusal";
 import type { CampaignState } from "../../lib/lifecycle/transitions";
 import { SKIP_REASON_GROUP } from "../../lib/planning/reasons";
@@ -616,6 +618,13 @@ async function executeCampaignRun(
   // (#772, #790), after the approval and plan gates have had their say, and before the
   // claim below, because handing it over takes the claim itself.
   const tooLongHere = work ? overBudget(work, options.inlineBudgetMs!) : null;
+  // Whether nobody is there to type the typed confirmation (#1009): checked below on the
+  // run's own plan, and here first for a Flow start handed to the worker, which would
+  // otherwise answer Flow "queued" and be refused where Flow never hears it.
+  const unattendedStart = !options.revert && !options.variantGids && startsUnattended(options.actor);
+  if (tooLongHere && unattendedStart) {
+    await refuseUnconfirmedStart(shopId, await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } }), options.actor);
+  }
   if (tooLongHere) {
     const { queueRun } = await import("./queued-run.server");
     const queued = await queueRun(shopId, campaignId, tooLongHere, {
@@ -726,6 +735,14 @@ async function executeCampaignRun(
       `Campaign blocked by a guardrail on ${outcome.ref.variantGid}: ${outcome.reason}. ` +
         `No prices were changed -- a blocking guardrail stops the whole run.`,
     );
+  }
+
+  // A start nobody is there to confirm (#1009): the scheduler's, or Flow's. Over the store's
+  // typed-confirmation thresholds the Apply button asks for the word; these cannot, so the
+  // campaign must carry a confirmation that covers what this plan writes. Checked on this
+  // plan, before the run row, so a refusal writes nothing and is a refusal for good.
+  if (unattendedStart) {
+    await refuseUnconfirmedStart(shopId, campaignRecord, options.actor, { ...outcome, candidates });
   }
 
   const kind = options.revert ? "REVERT" : "APPLY";

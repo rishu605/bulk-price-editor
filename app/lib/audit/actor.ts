@@ -25,6 +25,18 @@ import type { JwtPayload } from "@shopify/shopify-api";
 /** What an unattended action is attributed to. */
 export const SCHEDULER_ACTOR = "scheduler";
 
+/** What Shopify Flow's actions are attributed to. */
+export const FLOW_ACTOR = "shopify-flow";
+
+/**
+ * Whether a run asked for by this actor starts with nobody there to type a confirmation
+ * (#1009): the scheduler's and Flow's. A person's run comes from the campaign page, which
+ * asks them itself, and is carried to the worker with their actor when it is queued.
+ */
+export function startsUnattended(actor: string): boolean {
+  return actor === SCHEDULER_ACTOR || actor === FLOW_ACTOR;
+}
+
 /**
  * The actor for an admin request.
  *

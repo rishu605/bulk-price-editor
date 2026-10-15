@@ -78,6 +78,8 @@ const props = (over: Partial<CampaignDetailProps> = {}) =>
     keepers: null,
     keepersPending: false,
     heldEdits: 0,
+    // Nothing on record and nothing asked (#1009).
+    startConfirmation: { confirmed: null, unconfirmed: null },
     ...over,
   }) as unknown as CampaignDetailProps;
 

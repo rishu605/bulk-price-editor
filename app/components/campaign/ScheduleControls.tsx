@@ -1,8 +1,10 @@
 import { useRef, type ElementRef } from "react";
 
+import type { BlastRadius } from "../../lib/campaigns/blast-radius";
 import { SPACE } from "../../lib/ui/spacing";
 import { FieldGrid } from "../FieldGrid";
 import { Secondary } from "../Type";
+import { StartConfirmationAsk } from "./StartConfirmation";
 
 /**
  * Literal ids, for the reason `RevertConfirmation` gives: `commandFor` is typed
@@ -55,6 +57,7 @@ export function ScheduleButtons({ busy }: { busy?: boolean }) {
 export function ScheduleModals({
   campaignName,
   window,
+  confirm,
   busy,
   onSave,
   onUnschedule,
@@ -62,8 +65,13 @@ export function ScheduleModals({
 }: {
   campaignName: string;
   window: ScheduledWindow;
+  /**
+   * Why its start needs the typed word, when it does (#1009): new dates are a save of its
+   * start, and the server asks for the word with the same sentence.
+   */
+  confirm?: { unconfirmed: string; radius: BlastRadius | null } | null;
   busy?: boolean;
-  onSave: (fields: { startDate: string; startTime: string; endDate: string; endTime: string }) => void;
+  onSave: (fields: { startDate: string; startTime: string; endDate: string; endTime: string; confirmation: string }) => void;
   onUnschedule: () => void;
   onCancel: () => void;
 }) {
@@ -75,6 +83,7 @@ export function ScheduleModals({
   const startTime = useRef<ElementRef<"s-text-field">>(null);
   const endDate = useRef<ElementRef<"s-date-field">>(null);
   const endTime = useRef<ElementRef<"s-text-field">>(null);
+  const confirmation = useRef<ElementRef<"s-text-field">>(null);
   const read = (field: { value?: string } | null) => String(field?.value ?? "").trim();
 
   return (
@@ -105,6 +114,14 @@ export function ScheduleModals({
               details="Defaults to the end of that day."
             />
           </FieldGrid>
+          {confirm ? (
+            <StartConfirmationAsk
+              unconfirmed={confirm.unconfirmed}
+              radius={confirm.radius}
+              label="Type apply to confirm its start"
+              fieldRef={confirmation}
+            />
+          ) : null}
         </s-stack>
 
         <s-button slot="secondary-actions" commandFor={EDIT_DATES_MODAL_ID} command="--hide">
@@ -122,6 +139,7 @@ export function ScheduleModals({
               startTime: read(startTime.current),
               endDate: read(endDate.current),
               endTime: read(endTime.current),
+              confirmation: read(confirmation.current),
             })
           }
         >
