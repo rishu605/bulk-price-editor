@@ -20,6 +20,7 @@ import { unschedule } from "./campaigns/schedule-control.server";
 import { runCampaign } from "./campaigns/run.server";
 import type { RunOutcome } from "./campaigns/types";
 import { nextAttemptKey } from "../lib/scheduling/attempts";
+import { refusedForGood, startRefusal } from "../lib/scheduling/start-refusal";
 import type { CampaignState } from "../lib/lifecycle/transitions";
 import { adminClientForShop } from "./admin-client.server";
 import { claimEnrollment, endingSinceLastApply, pendingEnrollments } from "./auto-enroll.server";
@@ -48,7 +49,7 @@ export interface TickResult {
   audited: number;
   /** Operator alerts delivered this tick. Not merchant notifications. */
   alerts: number;
-  /** Due transitions refused before they started: awaiting approval, over a limit. */
+  /** Due transitions refused before they started: awaiting approval, over a limit, refused for good (#975). */
   refused: number;
   failures: Array<{ campaignId: string; error: string }>;
 }
@@ -131,6 +132,12 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
     );
     if (!transition) continue;
 
+    // A start refused for a reason no retry changes is left alone until its dates move
+    // (#975). Before the claim, so a tick neither touches it nor says anything about it: the
+    // campaign says why once, on its page, and every claim after that wrote the same release
+    // to its history again, every thirty seconds.
+    if (transition === "apply" && startRefusal(campaign.schedule)) continue;
+
     // Which attempt at this occurrence, if any. Null when one is still running or every
     // attempt has been used; a finished attempt never blocks the next one (#700).
     const base = occurrenceKeyFor(parseSchedule(campaign.schedule), transition, now);
@@ -175,6 +182,13 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
         transitioned.add(campaign.id);
       }
     } catch (error) {
+      // Refused for good (#975): `runCampaign` has recorded it on the campaign, and the
+      // merchant has been told. A refusal like the ones returned early, not a failure of
+      // ours, and not one the worker log should repeat.
+      if (transition === "apply" && refusedForGood(error)) {
+        result.refused++;
+        continue;
+      }
       // One campaign failing must not stop the tick: the others are still due, and
       // a scheduler that gives up on the first error leaves sales unstarted.
       result.failures.push({

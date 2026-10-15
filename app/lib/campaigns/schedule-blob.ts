@@ -9,8 +9,13 @@
  * though its source was practice, and lost its rounding (#762).
  */
 
-/** The keys that say when a campaign runs. Everything else in the blob is what it prices. */
-export const WINDOW_KEYS = ["kind", "startAt", "endAt", "revertBufferMinutes", "clockNotes", "zone"] as const;
+/**
+ * The keys that say when a campaign runs. Everything else in the blob is what it prices.
+ *
+ * `startRefused` is a start the scheduler was refused for good (#975): it belongs to the
+ * dates, so a copy, an unschedule or new dates leave it behind.
+ */
+export const WINDOW_KEYS = ["kind", "startAt", "endAt", "revertBufferMinutes", "clockNotes", "zone", "startRefused"] as const;
 
 /** The blob without its window: the campaign's definition, which a copy keeps. */
 export function definitionOf(schedule: unknown): Record<string, unknown> {

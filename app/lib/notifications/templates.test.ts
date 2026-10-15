@@ -63,6 +63,24 @@ describe("compose", () => {
     expect(email.subject).toBe('"Summer" could not finish reverting');
   });
 
+  it("says a scheduled start that was refused never started, wrote nothing, and won't be retried (#975)", () => {
+    const email = compose({
+      kind: "run-failed",
+      notStarted: true,
+      campaignId: "c1",
+      campaignName: "Summer",
+      counts: counts(),
+      reasons: ["This campaign's segment was deleted, so it has no products to price."],
+    });
+    expect(email.subject).toBe('"Summer" did not start on schedule');
+    expect(email.text).toMatch(/Nothing was written to your storefront/);
+    expect(email.text).toContain("segment was deleted");
+    expect(email.text).toMatch(/will not try this start again/);
+    // Not the stopped-part-way wording: there is nothing to resume.
+    expect(email.text).not.toMatch(/resum/i);
+    expect(email.text).not.toMatch(/Variants updated and verified/);
+  });
+
   it("says a partial run is partial, and how to finish it", () => {
     const email = compose({
       kind: "run-partial",

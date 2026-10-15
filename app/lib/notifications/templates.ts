@@ -51,6 +51,12 @@ export interface RunNotification {
    * merchant who hears only about problems used to get, or nothing at all.
    */
   revert?: boolean;
+  /**
+   * A scheduled start refused before anything ran, for a reason no retry changes (#975).
+   * "Stopped before it could finish … resuming picks up where it stopped" is wrong twice
+   * over for a sale that never began and that the schedule will not try again.
+   */
+  notStarted?: boolean;
   /** Merchant-facing reasons, already through the error taxonomy. Never raw errors. */
   reasons?: string[];
   /** Deep link back into the app, filled in by `notify` — see `campaign-link.ts`. */
@@ -147,6 +153,21 @@ function runPartial(n: RunNotification): Email {
 }
 
 function runFailed(n: RunNotification): Email {
+  if (n.notStarted) {
+    return {
+      subject: `"${n.campaignName}" did not start on schedule`,
+      text: [
+        `"${n.campaignName}" was due to start, and it could not be run. Nothing was written to your storefront.`,
+        ...reasonLines(n.reasons),
+        "",
+        "The schedule will not try this start again on its own. Once the cause is fixed, apply",
+        "the campaign by hand, or move its dates.",
+        link(n.campaignUrl, "Open the campaign"),
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    };
+  }
   return {
     subject: n.revert ? `"${n.campaignName}" could not finish reverting` : `"${n.campaignName}" could not run`,
     text: [

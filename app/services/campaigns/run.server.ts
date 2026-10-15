@@ -33,6 +33,8 @@ import type { RunOutcome } from "./types";
 import { chunk, inChunksCounting } from "../../lib/db/chunk";
 import { overBudget, refuseInline, type InlineWork } from "../../lib/execution/inline-budget";
 import { releaseClaim, transitionCampaign } from "./lifecycle.server";
+import { recordStartRefused } from "./start-refusal.server";
+import { refusedForGood, startRefusedEntry } from "../../lib/scheduling/start-refusal";
 import type { CampaignState } from "../../lib/lifecycle/transitions";
 import { SKIP_REASON_GROUP } from "../../lib/planning/reasons";
 import { planResume, type LedgerState } from "../../lib/execution/resume";
@@ -245,9 +247,19 @@ export async function runCampaign(
     // APPLYING when this was called -- a resume, a second worker -- has nowhere to be
     // put back to, and `releaseClaim` additionally refuses while any run is still live.
     if (releaseTo && releaseTo !== "APPLYING" && releaseTo !== "REVERTING") {
+      // A scheduled start refused for a reason no retry changes -- its segment deleted, a
+      // blocking guardrail (#975). Put back to SCHEDULED as before, the claim being the
+      // scheduler's to give back, but marked first: the next tick claimed it again, was
+      // refused again, and wrote both to its history every thirty seconds while its window
+      // stayed open. Marked before the release, so no tick sees it SCHEDULED and unmarked.
+      const forGood = options.claimedFrom === "SCHEDULED" ? refusedForGood(error) : null;
+      if (forGood) await recordStartRefused(shopId, campaignId, forGood.userMessage, { tell: !failed?.ended });
       await releaseClaim(shopId, campaignId, releaseTo, {
-        reason: error instanceof Error ? error.message : String(error),
+        reason: forGood ? startRefusedEntry(forGood.userMessage) : error instanceof Error ? error.message : String(error),
         actor: options.actor,
+        // A blip is retried every tick while it lasts, as an early refusal is: one entry says
+        // why, and a new one every thirty seconds would bury it.
+        quietIfRepeated: options.claimedFrom !== undefined,
       });
     }
     throw error;
