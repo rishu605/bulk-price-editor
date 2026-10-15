@@ -50,6 +50,7 @@ import { DEFAULT_THRESHOLD } from "../lib/planning/write-path";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { enqueueWithin, webQueue } from "../worker/web-queue.server";
 import { releaseHold } from "./campaigns/lifecycle.server";
+import { notPricedBy } from "./campaigns/not-priced.server";
 import { driftRowsFor, type DriftRow } from "./drift.server";
 
 /** States a campaign can be put back from: running, and not mid-run. The single put-back's. */
@@ -315,7 +316,7 @@ export async function decideDrift(
 
   const summary = await executeDriftBatch(shopId, batch, actor, client);
   if (!summary) return { ok: false, message: "Nothing was resolved. Reload the page to see what is still waiting." };
-  return { ok: !summary.stopped && !summary.notConfirmed, message: describeBatch(summary) };
+  return { ok: !summary.stopped && !summary.notConfirmed && !summary.notPriced, message: describeBatch(summary) };
 }
 
 /**
@@ -405,6 +406,7 @@ export async function executeDriftBatch(
     ...(outcome.notKept ? { notKept: outcome.notKept } : {}),
     ...(outcome.notConfirmed ? { notConfirmed: outcome.notConfirmed } : {}),
     ...(outcome.unchanged ? { unchanged: outcome.unchanged } : {}),
+    ...(outcome.notPriced ? { notPriced: outcome.notPriced } : {}),
     ...(outcome.stopped ? { stopped: outcome.stopped } : {}),
     stillWaiting,
     released,
@@ -433,6 +435,7 @@ export async function executeDriftBatch(
           ...(summary.notKept ? { notKept: summary.notKept } : {}),
           ...(summary.notConfirmed ? { notConfirmed: summary.notConfirmed } : {}),
           ...(summary.unchanged ? { unchanged: summary.unchanged } : {}),
+          ...(summary.notPriced ? { notPriced: summary.notPriced } : {}),
           ...(summary.stopped ? { stopped: summary.stopped } : {}),
           stillWaiting,
           released,
@@ -452,6 +455,7 @@ interface Done {
   notKept?: number;
   notConfirmed?: number;
   unchanged?: number;
+  notPriced?: number;
   stopped?: string;
   runId?: string;
   /** Another copy of this decision is writing it; this one did nothing. */
@@ -542,15 +546,29 @@ async function putBackAll(
     };
   }
 
+  // Variants the campaign no longer prices plan nothing, as ones already at its price do,
+  // and were closed as put back with the edit still live (#1042). Left out of the run, and
+  // left waiting.
+  const record = await prisma.campaign.findUniqueOrThrow({
+    where: { id: campaign.id },
+    select: { schedule: true, excludedVariantGids: true },
+  });
+  const variants = [...new Set(events.map((event) => event.variantGid))];
+  const notPriced = await notPricedBy(shopId, record, variants);
+  const priced = variants.filter((gid) => !notPriced.has(gid));
+  const unpriced = events.filter((event) => notPriced.has(event.variantGid)).length;
+  if (priced.length === 0) return { resolved: [], notPriced: unpriced };
+
   const { runCampaign } = await import("./campaigns/run.server");
   const outcome = await runCampaign(shopId, campaign.id, client, {
-    variantGids: [...new Set(events.map((event) => event.variantGid))],
+    variantGids: priced,
     verifySampleRate: 1,
     occurrenceKey: runKey(key),
     actor,
   });
   if (outcome.deferredTo) return { resolved: [], twin: true, stopped: outcome.messages[0] };
   if (outcome.refused) return { resolved: [], stopped: outcome.refused };
+  const alreadyThere = new Set(outcome.unchanged ?? []);
 
   const ledger = await prisma.variantChange.findMany({
     where: { runId: outcome.runId, surfaceKind: "BASE", priceListGid: "" },
@@ -568,21 +586,25 @@ async function putBackAll(
   ).flat();
   const closedByRun = after.filter((event) => event.resolution === "REASSERTED").map((event) => event.variantGid);
   const open = new Set(after.filter((event) => event.resolution === "PENDING").map((event) => event.id));
-  const waiting = events.filter((event) => open.has(event.id));
+  const waiting = events.filter((event) => open.has(event.id) && !notPriced.has(event.variantGid));
 
   // Written and read back, but left open -- a clamped price the run does not count as its
-  // own -- or nothing to write. Either way the campaign's price is what the storefront shows.
-  const answered = waiting.filter((event) => landed.has(event.variantGid) || !sent.has(event.variantGid));
+  // own -- or found already at the campaign's price. Either way the campaign's price is
+  // what the storefront shows. Not one the plan skipped: that edit is still live (#1042).
+  const answered = waiting.filter((event) => landed.has(event.variantGid) || alreadyThere.has(event.variantGid));
   const closed: string[] = [];
   for (const part of chunk(answered, CLAIM_CHUNK)) {
     closed.push(...(await claim(prisma, part, "REASSERTED", actor)).map((row) => row.variantGid));
   }
   const unchanged = answered.filter((event) => !sent.has(event.variantGid)).length;
+  const unanswered = waiting.filter((event) => !answered.includes(event));
+  const leftAlone = unanswered.filter((event) => !sent.has(event.variantGid)).length;
 
   return {
     resolved: [...closedByRun, ...closed],
     unchanged,
-    notConfirmed: waiting.length - answered.length,
+    notConfirmed: unanswered.length - leftAlone,
+    notPriced: unpriced + leftAlone,
     runId: outcome.runId,
   };
 }
@@ -622,6 +644,7 @@ async function recordedSummary(key: string): Promise<BatchSummary | null> {
     notKept: count("notKept"),
     notConfirmed: count("notConfirmed"),
     unchanged: count("unchanged"),
+    notPriced: count("notPriced"),
     stopped: typeof after.stopped === "string" ? after.stopped : undefined,
     stillWaiting: count("stillWaiting") ?? 0,
     released: after.released === true,

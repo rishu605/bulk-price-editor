@@ -1162,7 +1162,11 @@ async function executeCampaignRun(
   if (result.unverified > 0) {
     metric("run.rows", result.unverified, { shopId, campaignId, outcome: "unverified" });
   }
-    return scopedOutcome(run.id, outcome.counts.planned, { ...result, failed: failedRows, unverified: unverifiedRows }, messages);
+    const unchanged = outcome.kind === "ok" ? outcome.unchanged.filter(({ ref }) => ref.priceListGid === "").map(({ ref }) => ref.variantGid) : [];
+    return {
+      ...scopedOutcome(run.id, outcome.counts.planned, { ...result, failed: failedRows, unverified: unverifiedRows }, messages),
+      unchanged,
+    };
   }
 
   // Through the state machine, not a direct write: it enforces which moves are legal

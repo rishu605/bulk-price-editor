@@ -274,6 +274,12 @@ export interface RunOutcome {
    * Flow, which resends a 5xx) should; nothing about the campaign needs changing (#773).
    */
   transient?: boolean;
+  /**
+   * For a run over named variants: those whose base price the plan found already at the
+   * campaign's price, so nothing was written for them (#1042). A variant the plan skipped,
+   * or never had in scope, is not here; a put-back closes a drift only for these.
+   */
+  unchanged?: string[];
 }
 
 export interface RunSummary {

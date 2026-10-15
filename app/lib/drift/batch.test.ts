@@ -82,6 +82,14 @@ describe("what a decision did, in sentences", () => {
     expect(text).toContain("Shopify did not confirm 1 price, so it is still waiting.");
   });
 
+  it("says which prices the campaign has no price for, that they still wait, and where to see why (#1042)", () => {
+    const text = describeBatch({ ...base, resolution: "reassert", resolved: 1, notPriced: 2, stillWaiting: 2 });
+    expect(text).toContain('Put back 1 price for "Sale"');
+    expect(text).toContain(`2 prices weren't put back: "Sale" has no price it can write for them`);
+    expect(text).toContain("so they are still waiting. Put it back on each one says why");
+    expect(describeBatch({ ...base, resolution: "reassert", notPriced: 1, stillWaiting: 1 })).toMatch(/^1 price wasn't put back/);
+  });
+
   it("says the campaign runs again when nothing is left", () => {
     expect(describeBatch({ ...base, resolution: "ignore", resolved: 1, released: true })).toBe(
       'Left 1 price for "Sale" as they are, and closed their alerts. Nothing else was waiting, so "Sale" is running again.',
