@@ -25,7 +25,7 @@ import { withChaos, type ChaosContext } from "../harness/scenario";
 const JP = "gid://shopify/PriceList/jp-variant-follows";
 const CATALOG = { catalog: { products: 3, variantsPerProduct: 1 }, percent: -20 } as const;
 
-async function withJapan(chaos: ChaosContext, handSet: Record<string, string> = {}) {
+async function withJapan(chaos: ChaosContext, handSet: Record<string, string> = {}, handSetCompareAt: Record<string, string> = {}) {
   const { shopId, campaignId } = chaos.fixture;
   chaos.fake.addPriceList({
     id: JP,
@@ -34,7 +34,12 @@ async function withJapan(chaos: ChaosContext, handSet: Record<string, string> = 
     country: "JP",
     adjustment: { type: "PERCENTAGE_INCREASE", value: 20 },
     catalog: { id: `${JP}/catalog`, title: "JP", __typename: "MarketCatalog" },
-    prices: Object.entries(handSet).map(([variantGid, amount]) => ({ variantGid, amount, compareAt: null, originType: "FIXED" as const })),
+    prices: Object.entries(handSet).map(([variantGid, amount]) => ({
+      variantGid,
+      amount,
+      compareAt: handSetCompareAt[variantGid] ?? null,
+      originType: "FIXED" as const,
+    })),
   });
   await syncMarkets(chaosAdminClient(chaos.server.endpoint()), shopId);
   await prisma.campaign.update({
@@ -114,6 +119,22 @@ describe("chaos: reverting one variant on a list priced by a percentage (#1002)"
       await chaos.expectHonest((await revertVariant(shopId, campaignId, derived, client, { actor: "chaos" })).outcome!.runId);
       expect(chaos.fake.fixedPricesOn(JP).has(derived)).toBe(false);
       expect(chaos.fake.priceOf(derived, JP)).toBe(before);
+    });
+  });
+
+  it("writes back the strike-through the merchant had set on that hand-set price (#1039)", async () => {
+    await withChaos("variant-revert-hand-set-compare-at", CATALOG, async (chaos) => {
+      const { shopId, campaignId, variantGids } = chaos.fixture;
+      const client = chaosAdminClient(chaos.server.endpoint());
+      const [handSet] = variantGids;
+      await withJapan(chaos, { [handSet]: "1500" }, { [handSet]: "1800" });
+
+      await chaos.expectHonest((await chaos.apply()).runId);
+      expect(chaos.fake.fixedPricesOn(JP).get(handSet), "the sale never replaced the strike-through").toEqual({ amount: "1200", compareAt: "1500" });
+
+      const kept = await revertVariant(shopId, campaignId, handSet, client, { actor: "chaos" });
+      await chaos.expectHonest(kept.outcome!.runId);
+      expect(chaos.fake.fixedPricesOn(JP).get(handSet), "the merchant's strike-through was cleared").toEqual({ amount: "1500", compareAt: "1800" });
     });
   });
 
