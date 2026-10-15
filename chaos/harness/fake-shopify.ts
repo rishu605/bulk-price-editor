@@ -171,6 +171,8 @@ export class FakeShopify {
 
   private bulk?: BulkOperationState;
   private bulkBody?: string;
+  /** The mutation the running bulk operation applies to each line, for its flags (#1020). */
+  private bulkMutation?: string;
   private bulkPolls = 0;
 
   /**
@@ -275,7 +277,7 @@ export class FakeShopify {
     variables: Record<string, unknown> = {},
   ): Promise<{ data?: T; extensions?: { cost?: QueryCost } }> {
     if (query.includes("productVariantsBulkUpdate")) {
-      return this.bulkUpdate(variables) as { data?: T; extensions?: { cost?: QueryCost } };
+      return this.bulkUpdate(variables, allowsPartial(query)) as { data?: T; extensions?: { cost?: QueryCost } };
     }
     if (query.includes("stagedUploadsCreate")) {
       return this.stagedUploadsCreate() as { data?: T; extensions?: { cost?: QueryCost } };
@@ -377,9 +379,26 @@ export class FakeShopify {
     };
   }
 
-  private applyVariantInputs(inputs: Array<Record<string, unknown>>) {
+  /**
+   * Writes a call's variants, as `productVariantsBulkUpdate` does.
+   *
+   * Without `allowPartialUpdates` Shopify writes none of them if any is refused (#1020), so
+   * the fake does the same: a call that forgot the flag fails whole here too, and the
+   * scenarios that delete one variant see it.
+   */
+  private applyVariantInputs(inputs: Array<Record<string, unknown>>, allowPartial: boolean) {
     const productVariants: Array<{ id: string; price: string; compareAtPrice: string | null }> = [];
     const userErrors: Array<{ field: string[]; message: string; code?: string }> = [];
+
+    if (!allowPartial) {
+      inputs.forEach((input, index) => {
+        const variant = this.variants.get(String(input.id));
+        if (!variant || variant.deleted) {
+          userErrors.push({ field: ["variants", String(index), "id"], message: `Variant ${String(input.id)} does not exist.`, code: "NOT_FOUND" });
+        }
+      });
+      if (userErrors.length > 0) return { product: null, productVariants: null, userErrors };
+    }
 
     inputs.forEach((input, index) => {
       const id = String(input.id);
@@ -438,7 +457,7 @@ export class FakeShopify {
    */
   readonly variantWriteSizes: number[] = [];
 
-  private bulkUpdate(variables: Record<string, unknown>) {
+  private bulkUpdate(variables: Record<string, unknown>, allowPartial: boolean) {
     const inputs = (variables.variants ?? []) as Array<Record<string, unknown>>;
     this.variantWriteSizes.push(inputs.length);
 
@@ -456,7 +475,7 @@ export class FakeShopify {
       };
     }
 
-    const payload = this.applyVariantInputs(inputs);
+    const payload = this.applyVariantInputs(inputs, allowPartial);
     return {
       data: { productVariantsBulkUpdate: payload },
       extensions: this.cost(10 * Math.max(1, inputs.length)),
@@ -1161,6 +1180,7 @@ export class FakeShopify {
     }
 
     this.bulkBody = body;
+    this.bulkMutation = String(variables.mutation ?? "");
     this.bulkPolls = 0;
     this.bulk = { id: `gid://shopify/BulkOperation/${this.stagedSeq}`, status: "CREATED" };
 
@@ -1249,7 +1269,7 @@ export class FakeShopify {
         return;
       }
 
-      const payload = this.applyVariantInputs(parsed.variants);
+      const payload = this.applyVariantInputs(parsed.variants, allowsPartial(this.bulkMutation ?? ""));
       const line: BulkResultLine = {
         __lineNumber: index,
         data: { productVariantsBulkUpdate: payload },
@@ -1275,4 +1295,9 @@ export class FakeShopify {
       objectCount: String(lines.length),
     };
   }
+}
+
+/** Whether a `productVariantsBulkUpdate` document asks for partial updates (#1020). */
+function allowsPartial(document: string): boolean {
+  return /allowPartialUpdates:\s*true/.test(document);
 }

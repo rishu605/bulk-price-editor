@@ -30,6 +30,7 @@ import { chunk } from "../../lib/db/chunk";
 import { money } from "../../lib/money/money";
 import { executeSync, type AdminClient, type ExecutedRow } from "../../lib/execution/sync-executor";
 import { readBackRowVerdict } from "../../lib/execution/read-back";
+import { classifyFailure } from "../../lib/execution/classify";
 import type { PlannedRow } from "../../lib/planning/types";
 import { selectWritePath } from "../../lib/planning/write-path";
 import { RateLimitBudget } from "../../lib/shopify/budget";
@@ -211,7 +212,14 @@ async function executeBulk(
 
     const outcome = outcomes.get(gid);
     if (!outcome || !outcome.ok) {
-      return { row, status: "failed", failureReason: outcome?.failureReason ?? "Unknown failure" };
+      const reason = outcome?.failureReason ?? "Unknown failure";
+      // A variant the merchant deleted while the run was in flight is skipped, as on the
+      // sync path (E4, #1020): the same event reported two ways by two paths.
+      const classified = classifyFailure(reason);
+      if (outcome && classified.reason === "variant-deleted") {
+        return { row, status: "skipped-deleted", failureReason: reason, guidance: classified.message };
+      }
+      return { row, status: "failed", failureReason: reason };
     }
 
     // The result file carries the price Shopify stored, and this used to throw it away —
@@ -350,6 +358,7 @@ export async function settleSubmittedBulk(
   const landed: string[] = [];
   const unverified: string[] = [];
   const failed: Array<{ id: string; reason: string; observed?: bigint }> = [];
+  const deleted: Array<{ id: string; reason: string }> = [];
   // Shopify's own timestamp for each landed write, for the mirror, as a live run records it (#932).
   const stamps = new Map<string, string[]>();
   for (const row of rows) {
@@ -369,6 +378,11 @@ export async function settleSubmittedBulk(
       (isClampReason(row.failureReason) ? clamped : verified).push(row.id);
       landed.push(row.variantGid);
       if (outcome?.remoteUpdatedAt) stamps.set(outcome.remoteUpdatedAt, [...(stamps.get(outcome.remoteUpdatedAt) ?? []), row.id]);
+      continue;
+    }
+    // Deleted while the run was in flight: skipped, as the live paths record it (E4, #1020).
+    if (outcome && !outcome.ok && classifyFailure(outcome.failureReason ?? "").reason === "variant-deleted") {
+      deleted.push({ id: row.id, reason: outcome.failureReason ?? "" });
       continue;
     }
     failed.push(
@@ -391,6 +405,9 @@ export async function settleSubmittedBulk(
       appliedAt: now,
       failureReason: `Not present in the bulk result file (operation ${finalState.status}). Left unverified rather than assumed successful.`,
     }),
+    ...deleted.map((row) =>
+      prisma.variantChange.update({ where: { id: row.id }, data: { status: "SKIPPED", appliedAt: null, failureReason: row.reason } }),
+    ),
     ...failed.map((row) =>
       prisma.variantChange.update({
         where: { id: row.id },

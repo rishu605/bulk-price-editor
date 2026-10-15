@@ -131,7 +131,8 @@ describe("chaos: a bulk run over products with more than 250 variants in scope",
         expect(chaos.fake.bulkLines.map((line) => line.variantGids.length)).toEqual([250, 250, 100]);
 
         const ledger = await ledgerOf(applied.runId);
-        const failed = ledger.filter((row) => row.status === "FAILED");
+        // Skipped, not failed: deleted while the run was in flight, as on the sync path (E4, #1020).
+        const failed = ledger.filter((row) => row.status === "SKIPPED");
         expect(new Set(failed.map((row) => row.variantGid)), "a userError landed on another variant").toEqual(
           new Set(deleted),
         );
@@ -143,7 +144,9 @@ describe("chaos: a bulk run over products with more than 250 variants in scope",
           expect(row.status).toBe("VERIFIED");
           expect(chaos.fake.priceOf(row.variantGid)).toBe(sale(row.variantGid));
         }
-        expect(applied.clean).toBe(false);
+        // Clean, as a sync run with a deleted variant is: the merchant deleted it, and a
+        // skipped row is not a failure (E4, #1020).
+        expect(applied.clean).toBe(true);
       },
     );
   });
