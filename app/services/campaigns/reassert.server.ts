@@ -17,6 +17,7 @@ import prisma from "../../db.server";
 import { AppError } from "../../lib/errors/app-error";
 import type { AdminClient } from "../../lib/execution/sync-executor";
 import { releaseHold } from "./lifecycle.server";
+import { pressedRunKey } from "./pressed-run.server";
 import { runCampaign } from "./run.server";
 
 /** States a campaign can be put back from: running, and not mid-run. */
@@ -63,7 +64,8 @@ export async function reassertDrift(
   const outcome = await runCampaign(shopId, campaign.id, client, {
     variantGids: [event.variantGid],
     verifySampleRate: 1,
-    occurrenceKey: `VARIANT-REASSERT-${event.variantGid}-${Date.now()}`,
+    // From the event, not the clock: a second press stands down to the first (#1012).
+    occurrenceKey: await pressedRunKey(campaign.id, `VARIANT-REASSERT-${event.id}`),
     actor,
   });
 
