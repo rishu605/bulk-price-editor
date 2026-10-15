@@ -44,6 +44,7 @@ import { importCosts, type CostImportResult } from "../services/cost-import.serv
 import { costErrorCsv } from "../lib/reporting/cost-errors";
 import { linesOf } from "../lib/reporting/lines";
 import { isCommit } from "../lib/imports/intent";
+import { importCheckKey, uncheckedCommit } from "../lib/imports/check-key.server";
 import { reportError } from "../services/error-report.server";
 import { SPACE } from "../lib/ui/spacing";
 import { Card } from "../components/Card";
@@ -91,7 +92,11 @@ type ActionData = {
   result?: CostEditResult;
   /** What a dry run of the bulk editor counted. Absent after a commit, which spends it. */
   check?: CostCheck;
+  /** Set on every answer to the import, so its banner shows by the import, not the editor. */
+  from?: "import";
   imported?: CostImportResult;
+  /** The key of the rows the import checked, posted back with its commit (#1059). */
+  checkKey?: string;
   errorId?: string | null;
 };
 
@@ -118,20 +123,30 @@ export const action = withGuard("/app/prices/costs", async ({ request }: ActionF
   const intent = form.get("intent");
 
   if (intent === IMPORT_INTENT.check || intent === IMPORT_INTENT.commit) {
+    const dryRun = !isCommit(intent, IMPORT_INTENT.commit);
+    const csv = String(form.get("csv") ?? "");
+
+    // A commit of rows nobody checked is refused before anything is read (#1059).
+    const unchecked = dryRun
+      ? null
+      : uncheckedCommit(form.get("checked"), csv, {
+          outcome: "no costs were written",
+          next: "import what the check shows",
+        });
+    if (unchecked) return { ...unchecked, from: "import" as const };
+
     try {
-      const imported = await importCosts(
-        shop.id,
-        linesOf(String(form.get("csv") ?? "")),
-        currency,
-        {
-          dryRun: !isCommit(intent, IMPORT_INTENT.commit),
-          actor: actorFor(sessionToken, session.shop),
-        },
-      );
+      const imported = await importCosts(shop.id, linesOf(csv), currency, {
+        dryRun,
+        actor: actorFor(sessionToken, session.shop),
+      });
 
       return {
         ok: true,
+        from: "import" as const,
         imported,
+        // The rows a commit may write; a commit's answer has none, so it spends the check.
+        checkKey: dryRun ? importCheckKey(csv) : undefined,
         message: imported.dryRun
           ? `${imported.ready} of ${imported.total} rows would be imported. Nothing has been written.`
           : `Imported ${imported.written} costs.` +
@@ -145,7 +160,7 @@ export const action = withGuard("/app/prices/costs", async ({ request }: ActionF
         shop: session.shop,
         route: "/app/prices/costs",
       });
-      return { ok: false, message: reported.userMessage, errorId: reported.errorId };
+      return { ok: false, from: "import" as const, message: reported.userMessage, errorId: reported.errorId };
     }
   }
 
@@ -245,7 +260,10 @@ export default function Costs() {
   const stale = check !== null && current !== check.key;
 
   const coverage = variants === 0 ? 0 : Math.round((withCost / variants) * 100);
-  const imported = fetcher.data?.imported;
+  // One fetcher, two forms: each answer is said beside the form that asked (#1059).
+  const editorAnswer = fetcher.data?.from === "import" ? undefined : fetcher.data;
+  const importAnswer = fetcher.data?.from === "import" ? fetcher.data : undefined;
+  const imported = importAnswer?.imported;
 
   const problems: ImportProblem[] = imported
     ? [
@@ -293,9 +311,9 @@ export default function Costs() {
         </s-paragraph>
       </Card>
 
-      <Card heading="Change costs in bulk">    {fetcher.data ? (
-          <s-banner tone={fetcher.data.ok ? "success" : "critical"}>
-            <s-paragraph>{fetcher.data.message}</s-paragraph>
+      <Card heading="Change costs in bulk">    {editorAnswer ? (
+          <s-banner tone={editorAnswer.ok ? "success" : "critical"}>
+            <s-paragraph>{editorAnswer.message}</s-paragraph>
           </s-banner>
         ) : null}
 
@@ -413,6 +431,7 @@ export default function Costs() {
         busy={busy}
         intent={IMPORT_INTENT}
         ready={imported?.ready ?? null}
+        checkKey={importAnswer?.checkKey}
         checkLabel="Check the file"
         commitLabel={(ready) => `Import ${ready} costs`}
         placeholder={"Variant SKU,Variant Cost\nCH-1,12.50\nCH-2,14.00"}
@@ -427,6 +446,15 @@ export default function Costs() {
           </s-paragraph>
         }
       />
+
+      {/* Here, not in the editor's card: a refused commit has no report, and a banner up
+          there was off screen from the button that caused it. */}
+      {importAnswer ? (
+        <s-banner tone={importAnswer.ok ? "success" : "critical"}>
+          <s-paragraph>{importAnswer.message}</s-paragraph>
+          {importAnswer.errorId ? <s-paragraph>Reference {importAnswer.errorId}</s-paragraph> : null}
+        </s-banner>
+      ) : null}
 
       {imported ? (
         <ImportReport

@@ -30,7 +30,7 @@ import { linesOf } from "../lib/reporting/lines";
 import { actorFor } from "../lib/audit/actor";
 import { EVERY_STATUS } from "../lib/campaigns/product-status";
 import { withGuard } from "../lib/errors/guard.server";
-import { importCheckKey } from "../lib/imports/check-key.server";
+import { importCheckKey, uncheckedCommit } from "../lib/imports/check-key.server";
 import { isCommit } from "../lib/imports/intent";
 import { importSegmentName } from "../lib/imports/segment-name";
 
@@ -49,13 +49,13 @@ export const action = withGuard("/app/price-import", async ({ request }: ActionF
   const csv = String(form.get("csv") ?? "");
 
   // A commit of rows nobody checked is refused before anything is read (#989).
-  if (!dryRun && form.get("checked") !== importCheckKey(csv)) {
-    return {
-      ok: false,
-      message:
-        "These rows are not the ones that were checked, so no campaign was created. Check the file again, then create the campaign from what the check shows.",
-    };
-  }
+  const unchecked = dryRun
+    ? null
+    : uncheckedCommit(form.get("checked"), csv, {
+        outcome: "no campaign was created",
+        next: "create the campaign from what the check shows",
+      });
+  if (unchecked) return unchecked;
 
   const result = await importPrices(
     shop.id,
