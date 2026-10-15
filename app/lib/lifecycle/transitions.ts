@@ -153,6 +153,8 @@ export function describeState(
     outrankedBy?: readonly string[];
     /** Why its start was refused for good, so the schedule left it (#975); see `startRefusal`. */
     startRefused?: string | null;
+    /** Why a scheduled campaign past its start has not started yet (#851); see `lateStart`. */
+    lateStart?: string | null;
   } = {},
 ): StateDescription {
   switch (state) {
@@ -185,6 +187,17 @@ export function describeState(
           label: "Scheduled — will never start",
           tone: "warning",
           explanation: `${context.neverStarts} Move its dates, or unschedule it, under Schedule.`,
+        };
+      }
+      // Past its start and not started (#851): not "waiting for its start time", which has
+      // come. The reason is the scheduler's own, and it carries what to do about it.
+      if (context.lateStart) {
+        return {
+          label: "Scheduled — not started yet",
+          tone: "warning",
+          explanation:
+            `Its start time has passed, and it has not started: ${context.lateStart} ` +
+            "The scheduler tries again every 30 seconds, so it starts on its own once that is resolved.",
         };
       }
       return {
