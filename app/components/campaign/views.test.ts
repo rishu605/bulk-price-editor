@@ -53,6 +53,14 @@ describe("both views read the same filters", () => {
       "the list must load before the early return, or the calendar loses the filters",
     ).toBe(true);
   });
+
+  it("hands the calendar the list's status and search, not only its archive (#1016)", () => {
+    // It passed `archived` alone, so "Needs a decision" in the list was every campaign in
+    // the shop on the calendar beside it.
+    expect(route).toContain("const listFilters = { q: filters.q, status: filters.status, archived: filters.archived }");
+    expect(route).toContain("calendarFor(shop.id, shop.timezone, { view: period, on, ...listFilters })");
+    expect(route).toMatch(/filters: listFilters,/);
+  });
 });
 
 describe("the page header is a header, not a card", () => {

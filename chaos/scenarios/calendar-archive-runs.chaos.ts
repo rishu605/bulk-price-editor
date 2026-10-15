@@ -11,6 +11,9 @@
  *   so a reassert of one price read as the whole sale going live again.
  * - **Past overlaps read as present.** Nothing said whether either campaign had finished.
  *
+ * And #1016's half of it: the list's status and search, which the calendar ignored, and
+ * an overlap that is history once the first of its two campaigns has ended.
+ *
  * Driven through the real run path, so each scoped run carries the occurrence key the
  * engine gives it: `revertVariant` for the one-variant revert, and `runCampaign` called
  * exactly as the drift reassert and the scheduler's enrolment call it.
@@ -109,12 +112,30 @@ describe("chaos: what the calendar shows and how it names it (#979)", () => {
         const scopedRevert = runsOf(live, sale).find((r) => r.action === "reverted-variant")!;
         expect(scopedRevert.kind).toBe("REVERT");
 
-        // One of the two has finished, so the overlap is not yet history.
+        // The weekend sale has finished, so the two are no longer on together: the overlap is
+        // history although the sale is still up (#1016). The sale is the one still pricing.
         const overlapNow = live.overlaps.find((o) => [o.a.id, o.b.id].sort().join() === [sale, weekend.id].sort().join());
         expect(overlapNow, "the sale and the weekend sale overlap").toBeDefined();
         expect(overlapNow!.sharedVariants).toBeGreaterThan(0);
-        const finishedNow = Object.fromEntries([overlapNow!.a, overlapNow!.b].map((side) => [side.id, side.finished]));
-        expect(finishedNow).toEqual({ [sale]: false, [weekend.id]: true });
+        expect(overlapNow!.ended).toBe(true);
+        const pricingNow = Object.fromEntries([overlapNow!.a, overlapNow!.b].map((side) => [side.id, side.pricing]));
+        expect(pricingNow).toEqual({ [sale]: true, [weekend.id]: false });
+
+        // --- The list's status and search, which the calendar ignored (#1016) ---
+        const filtered = (options: { q?: string; status?: "ACTIVE" | "COMPLETED" | "attention" }) =>
+          calendarFor(shopId, shop.timezone, { view: "week", on: todayIn(shop.timezone), ...options });
+
+        const searched = await filtered({ q: "weekend" });
+        expect(campaignsOn(searched), "a search finds the campaign by name, in any case").toEqual([weekend.id]);
+        expect(runsOf(searched).every((r) => r.campaignId === weekend.id), "and only its runs are named").toBe(true);
+
+        const completed = await filtered({ status: "COMPLETED" });
+        expect(campaignsOn(completed)).toEqual([weekend.id]);
+        const active = await filtered({ status: "ACTIVE" });
+        expect(campaignsOn(active)).toEqual([sale]);
+        expect(runsOf(active).length).toBe(4);
+        // Nothing here needs a decision, so a calendar filtered to them is empty.
+        expect(campaignsOn(await filtered({ status: "attention" }))).toEqual([]);
 
         // --- The archive, asked for ---
         const archive = await week(true);
@@ -130,7 +151,8 @@ describe("chaos: what the calendar shows and how it names it (#979)", () => {
         );
         const overlapThen = over.overlaps.find((o) => [o.a.id, o.b.id].sort().join() === [sale, weekend.id].sort().join());
         expect(overlapThen, "they still overlapped, in the past").toBeDefined();
-        expect([overlapThen!.a.finished, overlapThen!.b.finished]).toEqual([true, true]);
+        expect(overlapThen!.ended).toBe(true);
+        expect([overlapThen!.a.pricing, overlapThen!.b.pricing], "neither prices anything now").toEqual([false, false]);
       },
     );
   });

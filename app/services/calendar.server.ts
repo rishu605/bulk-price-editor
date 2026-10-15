@@ -26,7 +26,10 @@ import {
   type CalendarDay,
   type CampaignRunFact,
 } from "../lib/scheduling/calendar";
-import { astOf, scopeOf } from "./campaigns/model.server";
+import { campaignFilterWhere, type StatusFilter } from "../lib/campaigns/list-filters";
+import { PRICING_STATES, type CampaignState } from "../lib/lifecycle/transitions";
+import { overlapEnded, type Overlap, type OverlapSide } from "../lib/scheduling/overlap-card";
+import { astOf, endingAmong, scopeOf } from "./campaigns/model.server";
 import { astToWhere } from "./segments.server";
 
 /**
@@ -47,27 +50,10 @@ const SHOWN = [
 ] as const;
 
 /**
- * A campaign in an overlap, and whether it has finished.
- *
- * Finished is said so the card can put a pair that both ended in the past tense (#979).
- * "Spring sale and Clearance run together" over two campaigns completed in March reads
- * as a collision on the storefront now.
+ * A pair on the calendar at once, said so the card can put one that has ended in the past
+ * tense (#979, #1016) and link only to a page that compares them. See `overlap-card.ts`.
  */
-export interface OverlapSide {
-  id: string;
-  name: string;
-  finished: boolean;
-}
-
-export interface Overlap {
-  a: OverlapSide;
-  b: OverlapSide;
-  /** Variants in both campaigns' scopes. Zero means they share a week, not a product. */
-  sharedVariants: number;
-}
-
-/** States a campaign does not come back from. Of those on the calendar, Completed. */
-const FINISHED: ReadonlySet<string> = new Set(["COMPLETED", "CANCELLED"]);
+export type { Overlap, OverlapSide };
 
 export interface CalendarView {
   days: CalendarDay[];
@@ -101,6 +87,13 @@ export interface CalendarOptions {
    * two views of the index cannot disagree about which campaigns there are.
    */
   archived?: boolean;
+  /**
+   * The list's search and status filter (#1016), read the same way. The calendar took
+   * the archive alone, so a merchant who filtered to "Needs a decision" and switched views
+   * saw every campaign in the shop.
+   */
+  q?: string;
+  status?: StatusFilter;
 }
 
 export async function calendarFor(
@@ -113,10 +106,16 @@ export async function calendarFor(
   const [year, month] = anchor.split("-").map(Number);
 
   const range = view === "week" ? weekRange(anchor) : monthRange(year, month);
-  const archivedAt = options.archived ? { not: null } : null;
+  // The list's own clause, ANDed with the statuses a calendar draws: a status filter for
+  // one it does not, Draft, is a calendar with nothing on it, as the list would say.
+  const filtered = campaignFilterWhere({
+    q: options.q ?? "",
+    status: options.status ?? "",
+    archived: options.archived ?? false,
+  });
 
   const records = await prisma.campaign.findMany({
-    where: { shopId, status: { in: [...SHOWN] }, archivedAt },
+    where: { shopId, AND: [{ status: { in: [...SHOWN] } }, filtered] },
     select: { id: true, name: true, status: true, startAt: true, endAt: true },
   });
 
@@ -179,8 +178,8 @@ export async function calendarFor(
   //
   // Scoped runs too, a reassert or an enrolment: they did happen that day. The occurrence
   // key is read so each is described as what it was rather than as an apply (#979). Under
-  // the same archive filter as the campaigns, or a campaign left off would still be named
-  // under the days it ran.
+  // the same filters as the campaigns (#979, #1016), or a campaign left off would still be
+  // named under the days it ran.
   const runs = await prisma.campaignRun.findMany({
     where: {
       shopId,
@@ -188,7 +187,7 @@ export async function calendarFor(
         gte: new Date(`${addDays(range.from, -1)}T00:00:00.000Z`),
         lte: new Date(`${addDays(range.to, 1)}T23:59:59.999Z`),
       },
-      campaign: { archivedAt },
+      campaign: filtered,
     },
     select: {
       id: true,
@@ -227,7 +226,7 @@ export async function calendarFor(
 
   return {
     days,
-    overlaps: await sharedScopes(shopId, onScreen, options.maxOverlapChecks ?? 20),
+    overlaps: await sharedScopes(shopId, onScreen, options.maxOverlapChecks ?? 20, now),
     timeZone,
     from: range.from,
     to: range.to,
@@ -244,15 +243,23 @@ export async function calendarFor(
  * A pair sharing zero variants is still returned. "These run at the same time and touch
  * nothing in common" is a useful thing for a merchant to be able to see, and dropping it
  * would leave them unable to tell it apart from "we did not check".
+ *
+ * The count is each campaign's scope *now*, past overlaps included: no record says what a
+ * segment matched while two campaigns that have ended ran together.
  */
 async function sharedScopes(
   shopId: string,
   campaigns: readonly CalendarCampaign[],
   limit: number,
+  now: string,
 ): Promise<Overlap[]> {
   const byId = new Map(campaigns.map((campaign) => [campaign.id, campaign]));
   const pairs = timeOverlaps(campaigns).slice(0, limit);
   if (pairs.length === 0) return [];
+
+  // Which of them are being ended, as `competingCampaigns` reads it: a campaign whose
+  // latest whole run is a revert prices nothing another campaign is planned against.
+  const ending = await endingAmong([...new Set(pairs.flatMap((pair) => [pair.a, pair.b]))]);
 
   // Scopes resolved once per campaign, not once per pair. A campaign in five overlaps
   // would otherwise have its segment looked up five times.
@@ -276,11 +283,15 @@ async function sharedScopes(
     const b = scopes.get(pair.b);
     if (!a || !b) continue;
 
-    const side = (id: string): OverlapSide => ({
-      id,
-      name: byId.get(id)?.name ?? id,
-      finished: FINISHED.has(byId.get(id)?.status ?? ""),
-    });
+    const side = (id: string): OverlapSide => {
+      const status = byId.get(id)?.status ?? "";
+      return {
+        id,
+        name: byId.get(id)?.name ?? id,
+        pricing: PRICING_STATES.has(status as CampaignState) && !ending.has(id),
+        scheduled: status === "SCHEDULED",
+      };
+    };
 
     overlaps.push({
       a: side(pair.a),
@@ -288,6 +299,8 @@ async function sharedScopes(
       sharedVariants: await prisma.variantIndex.count({
         where: { shopId, deletedAt: null, AND: [a, b] },
       }),
+      // By the windows drawn, so a pair is history once the first of them closed (#1016).
+      ended: overlapEnded(byId.get(pair.a) ?? {}, byId.get(pair.b) ?? {}, now),
     });
   }
 
