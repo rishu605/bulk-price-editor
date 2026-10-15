@@ -15,7 +15,7 @@
  */
 
 import { parseMoney, type Money } from "../money/money";
-import { inAnotherCurrency, type RawRow } from "./csv-rows";
+import { amountRefusal, inAnotherCurrency, type RawRow } from "./csv-rows";
 
 export interface ValidCostRow extends RawRow {
   parsedCost: Money;
@@ -65,7 +65,7 @@ export function validateCostRow(
   try {
     parsedCost = parseMoney(raw, currency);
   } catch {
-    return fail("cost-unparseable");
+    return { ...fail("cost-unparseable"), reason: amountRefusal("Cost", raw, currency, "12.50, not $12.50") };
   }
 
   // Zero is allowed, unlike a zero baseline. A genuinely free item — a sample, a

@@ -81,4 +81,16 @@ describe("reading a cost from a row", () => {
     expect(isValidCost(validateCostRow(row({ cost: "12.50", currency: "JPY" }), "USD")))
       .toBe(false);
   });
+
+  it("names too many decimals as the cause, not the number's shape (#759)", () => {
+    const result = validateCostRow(row({ cost: "4.125" }), "USD");
+
+    expect(isValidCost(result)).toBe(false);
+    if (!isValidCost(result)) {
+      expect(result.problem).toBe("cost-unparseable");
+      expect(result.reason).toBe(
+        "Cost 4.125 has more decimal places than USD allows, which is 2. Round it to 2 decimal places and import the file again.",
+      );
+    }
+  });
 });
