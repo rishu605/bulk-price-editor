@@ -209,6 +209,8 @@ describe("chaos: importing exact prices", () => {
         expect(result.ready).toBe(2);
         expect(result.duplicates).toHaveLength(1);
         expect(result.duplicates[0].line).toBe(4);
+        // The rule all three importers share (#989, D17): it names the row it repeats.
+        expect(result.duplicates[0].reason).toMatch(/^Line 4 repeats this variant's line 2; only line 2 is used\./);
 
         const stored = await prisma.priceImportRow.findMany({
           where: { importId: result.importId! },

@@ -17,8 +17,15 @@
  */
 
 import prisma from "../db.server";
-import { identifierRefusal, productRefusal, readRows } from "../lib/baselines/csv-rows";
-import { isValid, validateRow } from "../lib/baselines/csv-rows";
+import {
+  duplicateRefusal,
+  firstRows,
+  identifierRefusal,
+  isValid,
+  productRefusal,
+  readRows,
+  validateRow,
+} from "../lib/baselines/csv-rows";
 import { buildMatchIndex, matchIdentifiers, type CsvRow } from "../lib/segments/csv-import";
 import { logger } from "../lib/logging/logger";
 
@@ -35,7 +42,10 @@ export interface PriceImportResult {
   invalid: PriceImportProblem[];
   unmatched: PriceImportProblem[];
   ambiguous: PriceImportProblem[];
-  /** A variant the file named twice. Refused rather than letting the last row win. */
+  /**
+   * Rows naming a variant an earlier row already named. The first row is used and these
+   * are refused, rather than letting the last row win (#989, D17).
+   */
   duplicates: PriceImportProblem[];
   /**
    * Every row that needs attention, counted rather than listed (#766). The four lists stop
@@ -89,7 +99,7 @@ export async function importPrices(
       });
   result.importId = record?.id ?? null;
 
-  const seen = new Set<string>();
+  const earlierRow = firstRows();
   let batch: Array<{ importId: string; variantGid: string; price: bigint; compareAt: bigint | null }> = [];
 
   const flush = async () => {
@@ -156,16 +166,17 @@ export async function importPrices(
     }
 
     // A file naming a variant twice is a question, not two instructions. Letting the
-    // last row win would set a price the merchant may not have meant, silently.
-    if (seen.has(variantGid)) {
+    // last row win would set a price the merchant may not have meant, silently; the first
+    // row is used and the repeat says so, naming it (#989, D17).
+    const first = earlierRow(variantGid, raw.line);
+    if (first !== null) {
       problem(result.duplicates, {
         line: raw.line,
         identifier: raw.identifier,
-        reason: "This variant already has a price earlier in the file. Remove one of the rows.",
+        reason: duplicateRefusal(raw.line, first, "price"),
       });
       continue;
     }
-    seen.add(variantGid);
 
     result.ready++;
     if (record) {
