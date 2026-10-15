@@ -33,6 +33,7 @@ import {
 import { roundingChoices, sampleLine } from "../lib/money/rounding-example";
 import { ActionRow } from "../components/ActionRow";
 import { CampaignNameField } from "../components/campaign/CampaignNameField";
+import { importErrorCsv } from "../lib/reporting/baseline-errors";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { readSettings, shopCurrency } from "../services/settings.server";
@@ -482,7 +483,7 @@ export default function NewCampaign() {
   // Its own fetcher, posting to the import route. Sharing the editor's would mean one
   // `state` for two very different submissions, so a dry run in flight would put the
   // create button into a loading state it never leaves.
-  const importFetcher = useFetcher<{ result?: PriceImportResult }>();
+  const importFetcher = useFetcher<{ result?: PriceImportResult; checkKey?: string; ok?: boolean; message?: string }>();
   const importResult = importFetcher.data?.result;
   const importProblems = problemsFrom(importResult);
 
@@ -690,9 +691,13 @@ export default function NewCampaign() {
               {/* The one field that keeps the whole row. It names the thing being made,
                   and a title above the settings that describe it is the shape every form
                   of this kind takes. */}
-              <FullRow>
-                <CampaignNameField defaultName={defaultName} />
-              </FullRow>
+              {/* Not on the file path (#989): the file's form posts on its own and carries
+                  its own name field, so this one was a required field the import ignored. */}
+              {fromFile ? null : (
+                <FullRow>
+                  <CampaignNameField defaultName={defaultName} />
+                </FullRow>
+              )}
 
               {/* Not wrapped in a `FullRow`, deliberately. This renders *two* fields — the
                   adjustment and its amount — as a fragment, so as bare grid children they
@@ -1208,15 +1213,18 @@ export default function NewCampaign() {
             </s-paragraph>
           }
         >
-          {/* The campaign's name, again, because this form posts on its own and the one
-              in the section above goes with the form it belongs to. */}
+          {/* The campaign's name, here and only here on this path: this form posts on its
+              own, and the editor's name field is not rendered for a file (#989). */}
           <Field width="medium">
-            <s-text-field name="name" label="Call this" value={defaultName} />
+            <s-text-field name="name" label="Campaign name" value={defaultName} />
           </Field>
           {/* Practice, again, for the same reason: the editor's hidden field goes with the
               editor's form, and a practice campaign made from a file came out real and
               appliable (#765). */}
           <input type="hidden" name="practice" value={practice ? "1" : ""} />
+          {/* What the last check answered with; a commit without it, or with rows that are
+              not the ones checked, is refused by the route (#989). */}
+          <input type="hidden" name="checked" value={importFetcher.data?.checkKey ?? ""} />
         </ImportForm>
       ) : null}
 
@@ -1236,6 +1244,13 @@ export default function NewCampaign() {
         </>
       ) : null}
 
+      {/* A refused commit (#989) answers with no report, so its reason has to be said here. */}
+      {importFetcher.data?.ok === false && importFetcher.data.message ? (
+        <s-banner tone="critical">
+          <s-paragraph>{importFetcher.data.message}</s-paragraph>
+        </s-banner>
+      ) : null}
+
       {importResult ? (
         <ImportReport
           heading={importResult.dryRun ? "What would happen" : "What happened"}
@@ -1248,6 +1263,8 @@ export default function NewCampaign() {
           ]}
           problems={importProblems}
           problemCount={importResult.problems}
+          // The rows to fix and re-upload, as the baseline and cost imports offer (#989).
+          download={{ filename: "price-import-errors.csv", csv: () => importErrorCsv(importResult) }}
         />
       ) : null}
 

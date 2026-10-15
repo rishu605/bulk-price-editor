@@ -30,6 +30,7 @@ import { linesOf } from "../lib/reporting/lines";
 import { actorFor } from "../lib/audit/actor";
 import { EVERY_STATUS } from "../lib/campaigns/product-status";
 import { withGuard } from "../lib/errors/guard.server";
+import { importCheckKey } from "../lib/imports/check-key.server";
 import { isCommit } from "../lib/imports/intent";
 import { importSegmentName } from "../lib/imports/segment-name";
 
@@ -45,11 +46,21 @@ export const action = withGuard("/app/price-import", async ({ request }: ActionF
   // never applied. The editor promises exactly that above this form (#765).
   const practice = String(form.get("practice") ?? "") === "1";
   const actor = actorFor(sessionToken, session.shop);
+  const csv = String(form.get("csv") ?? "");
+
+  // A commit of rows nobody checked is refused before anything is read (#989).
+  if (!dryRun && form.get("checked") !== importCheckKey(csv)) {
+    return {
+      ok: false,
+      message:
+        "These rows are not the ones that were checked, so no campaign was created. Check the file again, then create the campaign from what the check shows.",
+    };
+  }
 
   const result = await importPrices(
     shop.id,
     name,
-    linesOf(String(form.get("csv") ?? "")),
+    linesOf(csv),
     currency,
     { dryRun, actor },
   );
@@ -58,6 +69,8 @@ export const action = withGuard("/app/price-import", async ({ request }: ActionF
     return {
       ok: true,
       result,
+      // Carried back by the commit: the rows it creates a campaign from are these (#989).
+      checkKey: importCheckKey(csv),
       message: `${result.ready} of ${result.total} rows matched a product. Nothing has been created yet.`,
     };
   }

@@ -307,7 +307,8 @@ export function ImportReport({
                 icon="download"
                 onClick={() => downloadCsv(download.filename, download.csv())}
               >
-                Download all {problems.length} (CSV)
+                {/* "All" only when it is (#989): past the cap the file holds the rows listed. */}
+                {unlisted > 0 ? `Download the first ${problems.length} (CSV)` : `Download all ${problems.length} (CSV)`}
               </s-button>
             </ActionRow>
           ) : null}

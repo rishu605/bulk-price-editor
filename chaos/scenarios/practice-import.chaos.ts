@@ -26,11 +26,27 @@ vi.mock("../../app/shopify.server", () => ({
   },
 }));
 
+/** The key the import route's check answers with for these rows. */
+async function checkKeyFor(csv: string): Promise<string> {
+  const { action } = await import("../../app/routes/app.price-import");
+  const body = new FormData();
+  body.set("intent", "dry-run");
+  body.set("csv", csv);
+  const answer = (await action({
+    request: new Request("https://example.invalid/app/price-import", { method: "POST", body }),
+    params: {},
+    context: {},
+  } as never)) as { checkKey: string };
+  return answer.checkKey;
+}
+
 /** The import form's commit, as the editor posts it. */
 async function commit(fields: Record<string, string>): Promise<string> {
   const { action } = await import("../../app/routes/app.price-import");
   const body = new FormData();
   for (const [key, value] of Object.entries(fields)) body.set(key, value);
+  // As the editor does: a commit carries the key its check answered with (#989).
+  if (fields.intent === "commit") body.set("checked", await checkKeyFor(fields.csv));
   const response = (await action({
     request: new Request("https://example.invalid/app/price-import", { method: "POST", body }),
     params: {},
