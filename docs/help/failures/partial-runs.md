@@ -14,12 +14,16 @@ the honest response is to say so rather than to report success and hope.
 - Every product that was not is recorded, with the reason.
 - Nothing is half-written. A price either changed and was read back and confirmed, or it did not change.
 
+Market prices count. A sale whose base prices landed and whose euro prices did not is
+partial too: shoppers in Europe are still paying full price.
+
 ## What to do
 
 Open the campaign and read the ledger. Each unfinished row says why.
 
 **Resume** picks up exactly where it stopped. It does not replan and it does not rewrite
-products that already succeeded, so resuming is safe however many times you do it.
+products that already succeeded, so resuming is safe however many times you do it. When only
+a market's prices are outstanding, Resume sends those and nothing else.
 
 If the reason was a deleted product or a rejected variant, resuming will not help those
 rows — fix the product in Shopify first, or exclude it.

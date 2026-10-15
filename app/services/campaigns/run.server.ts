@@ -42,6 +42,7 @@ import { applyCampaignTags, applyTakeoverTags, removeCampaignTags } from "./tags
 import {
   applyMarketSurfaces,
   captureMarketBaselinesFirst,
+  outstandingMarketRows,
   revertMarketSurfaces,
 } from "./market-surfaces.server";
 import { notify } from "../notifications.server";
@@ -1033,9 +1034,9 @@ async function executeCampaignRun(
 
   // Markets, after the base surface. A campaign that only ever touched the base price
   // does nothing for a merchant selling into four markets — their EUR and JPY customers
-  // see the old price for the whole sale. Failures here are reported and never fail the
-  // run: the base prices already landed, and the ledger names every market row that did
-  // not.
+  // see the old price for the whole sale. A failure here does not stop the run -- the base
+  // prices already landed -- but it does leave it unfinished: see below (#1001).
+  let marketsStopped = false;
   try {
     const markets = options.variantGids
       ? // A scoped run prices its own variants' markets and nobody else's (#763). It used
@@ -1052,7 +1053,9 @@ async function executeCampaignRun(
           options.variantGids,
           client,
           refusedMarkets,
-          { perProductOnly: true, onProgress: beat },
+          // A variant taken out of a sale follows a percentage list again, rather than being
+          // pinned at the price the list derives today (#1002).
+          { perProductOnly: true, onProgress: beat, letFollow: options.revert === true },
         )
       : options.revert
         ? await revertMarketSurfaces(shopId, campaignId, client, beat, {
@@ -1079,12 +1082,30 @@ async function executeCampaignRun(
       messages.push(...market.messages);
     }
   } catch (error) {
+    marketsStopped = true;
     messages.push(
       `Base prices were applied, but market prices did not finish: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
   }
+
+  // A market price is a price a shopper pays, so an apply is clean only when its market
+  // rows are as well (rule 5, #1001). Only the base rows used to count: an apply whose euro
+  // prices all failed ended Completed, the campaign read Active -- "every row was read back
+  // and verified" -- and EUR shoppers paid full price with nothing offering to fix it. Now it
+  // is Partial, and Resume retries the market rows that did not land and nothing else.
+  //
+  // Not a whole-campaign revert: its market deletes settle the apply's rows rather than its
+  // own, and Resume does not retry them yet (#706).
+  const markets = wholeRevert ? { failed: 0, unverified: 0 } : await outstandingMarketRows(run.id);
+  if (marketsStopped && !wholeRevert) result.clean = false;
+  if (markets.failed + markets.unverified > 0) result.clean = false;
+  // Every surface, for what the merchant reads: "Partial · 0 failed" over three euro prices
+  // that failed reads as nothing being wrong. The metrics below stay the base surface's;
+  // the market writer reports its own.
+  const failedRows = result.failed + markets.failed;
+  const unverifiedRows = result.unverified + markets.unverified;
 
   // The mirror, before anything says this run is over (#906). It was refreshed row by row
   // -- two queries a variant, 204,000 for a 102,132-variant apply -- *after* the campaign
@@ -1100,7 +1121,7 @@ async function executeCampaignRun(
     data: {
       status: result.clean ? "COMPLETED" : "PARTIAL",
       verifiedRows: result.verified,
-      failedRows: result.failed,
+      failedRows,
       skippedRows: outcome.counts.skipped,
       finishedAt: new Date(),
     },
@@ -1122,7 +1143,7 @@ async function executeCampaignRun(
   if (result.unverified > 0) {
     metric("run.rows", result.unverified, { shopId, campaignId, outcome: "unverified" });
   }
-    return scopedOutcome(run.id, outcome.counts.planned, result, messages);
+    return scopedOutcome(run.id, outcome.counts.planned, { ...result, failed: failedRows, unverified: unverifiedRows }, messages);
   }
 
   // Through the state machine, not a direct write: it enforces which moves are legal
@@ -1138,7 +1159,7 @@ async function executeCampaignRun(
 
   await transitionCampaign(shopId, campaignId, finalState, {
     reason:
-      `${options.revert ? "revert" : "apply"} finished: ${result.verified} verified, ${result.failed} failed` +
+      `${options.revert ? "revert" : "apply"} finished: ${result.verified} verified, ${failedRows} failed` +
       (settledNote ? `. ${settledNote}` : ""),
     runId: run.id,
     actor: options.actor,
@@ -1170,8 +1191,8 @@ async function executeCampaignRun(
     campaignName: campaignName ?? "Your campaign",
     counts: {
       verified: result.verified,
-      failed: result.failed,
-      unverified: result.unverified,
+      failed: failedRows,
+      unverified: unverifiedRows,
       skipped: outcome.counts.skipped,
       clamped: outcome.counts.clamped,
     },
@@ -1186,8 +1207,8 @@ async function executeCampaignRun(
     runId: run.id,
     planned: outcome.counts.planned,
     verified: result.verified,
-    failed: result.failed,
-    unverified: result.unverified,
+    failed: failedRows,
+    unverified: unverifiedRows,
     clean: result.clean,
     messages: [
       ...(settledNote ? [settledNote] : []),

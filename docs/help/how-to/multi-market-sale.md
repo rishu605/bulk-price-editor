@@ -34,3 +34,8 @@ rounding to something strange.
 Removes the campaign's prices from every market it touched. A market that normally derives
 its prices as a percentage goes back to doing that, rather than being pinned to numbers you
 never chose.
+
+**Revert this variant** does the same for one variant: in a market priced by a percentage, it
+follows the percentage again. A price you had set by hand in that market before the sale is
+put back as you set it, and if another sale still covers the variant, it gets that sale's
+price.
