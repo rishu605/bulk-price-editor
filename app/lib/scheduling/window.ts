@@ -248,7 +248,12 @@ export function windowEndText(raw: unknown, timeZone: string): string | undefine
     : undefined;
 }
 
-export function describeSchedule(schedule: Schedule, timeZone: string, status?: SchedulableStatus): string {
+export function describeSchedule(
+  schedule: Schedule,
+  timeZone: string,
+  status?: SchedulableStatus,
+  now: Date = new Date(),
+): string {
   if (schedule.kind !== "window") return "Runs when you apply it by hand.";
 
   const format = (iso: string) => formatScheduleInstant(iso, timeZone);
@@ -272,6 +277,15 @@ export function describeSchedule(schedule: Schedule, timeZone: string, status?: 
 
   const start = `Starts ${format(schedule.startAt)}`;
   if (!schedule.endAt) return `${start} (${timeZone}). Runs until you revert it.`;
+
+  // Its revert was due while it is still applying (#1056): it does not begin early, it waits.
+  const revertDue = revertMoment(schedule);
+  if (status === "APPLYING" && revertDue !== null && now.getTime() >= revertDue) {
+    return (
+      `${start}, reverts ${format(schedule.endAt)} (${timeZone}). It is still applying, so its revert waits for ` +
+      "that to finish and begins as soon as it does."
+    );
+  }
 
   const buffer = schedule.revertBufferMinutes ?? DEFAULT_REVERT_BUFFER_MINUTES;
   return (

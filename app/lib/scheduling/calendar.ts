@@ -30,6 +30,11 @@ export interface CalendarCampaign {
   id: string;
   name: string;
   status: string;
+  /**
+   * Its state as the campaigns list shows it (#1056), from `lifecycleOf`: "Applying — ending
+   * late" rather than the bare state. Absent, the bare state.
+   */
+  lifecycle?: { label: string; tone: string };
   /** ISO 8601 UTC. Absent for a campaign with nothing to place it on a day. */
   startAt?: string | null;
   /** ISO 8601 UTC. Absent means "runs until reverted by hand". */
@@ -57,6 +62,11 @@ export interface CalendarEntry {
   campaignId: string;
   name: string;
   status: string;
+  /**
+   * Its state as the campaigns list shows it (#1056), from `lifecycleOf`: "Applying — ending
+   * late" rather than the bare state. Absent, the bare state.
+   */
+  lifecycle?: { label: string; tone: string };
   /** True on the day the campaign starts, so the grid can mark the leading edge. */
   starts: boolean;
   /** True on its last day. A campaign with no end never sets this. */
@@ -198,9 +208,9 @@ export function dayLinkLabel(date: string, today: string): string {
  * and its status is the badge's colour. Neither reached a screen reader, which listed a
  * two-week sale as fourteen arrows.
  */
-export function entryLabel(entry: Pick<CalendarEntry, "name" | "status" | "day" | "days">): string {
+export function entryLabel(entry: Pick<CalendarEntry, "name" | "status" | "lifecycle" | "day" | "days">): string {
   const span = entry.days === null ? `day ${entry.day}, no end date` : `day ${entry.day} of ${entry.days}`;
-  return `${entry.name}, ${humanise(entry.status).toLowerCase()}, ${span}`;
+  return `${entry.name}, ${(entry.lifecycle?.label ?? humanise(entry.status)).toLowerCase()}, ${span}`;
 }
 
 export interface CalendarDay {
@@ -471,6 +481,7 @@ export function layOut(
         campaignId: campaign.id,
         name: campaign.name,
         status: campaign.status,
+        ...(campaign.lifecycle ? { lifecycle: campaign.lifecycle } : {}),
         starts,
         ends: Boolean(campaign.endAt) && day.date === end,
         // Past the edge of the view whether it has no end or an end beyond it (#768). It

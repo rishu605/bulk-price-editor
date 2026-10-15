@@ -190,6 +190,11 @@ export function describeState(
      * (#829); see `endingLateText`.
      */
     endingLate?: string | null;
+    /**
+     * When the window opened, for a scheduled campaign still applying well after it (#1056);
+     * see `startingLateText`.
+     */
+    startingLate?: string | null;
   } = {},
 ): StateDescription {
   switch (state) {
@@ -265,6 +270,17 @@ export function describeState(
             `It is still applying its prices, and its revert was due to begin so they would be back by ${context.endingLate}. ` +
             "One run writes a campaign's prices at a time, so the revert begins as soon as the apply finishes. Until then the " +
             "sale's prices stay on your storefront, past its end.",
+        };
+      }
+      // Its start came a while ago and its prices are still being written (#1056): the sale
+      // reaches the storefront product by product, later than the window says.
+      if (context.startingLate) {
+        return {
+          label: "Applying — starting late",
+          tone: "warning",
+          explanation:
+            `Its window opened at ${context.startingLate}, and its prices are still being written, so the sale is ` +
+            "reaching your storefront late: each product shows its sale price as it is written and read back.",
         };
       }
       return {

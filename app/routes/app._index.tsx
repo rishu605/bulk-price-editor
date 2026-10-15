@@ -34,6 +34,8 @@ import { UpcomingCampaigns } from "../components/UpcomingCampaigns";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { baselinesCaptured, onboarding } from "../lib/onboarding/steps";
 import { homeSections } from "../lib/dashboard/home";
+import { lifecycleBadge } from "../lib/campaigns/lifecycle-of";
+import type { CampaignState } from "../lib/lifecycle/transitions";
 import { ResultBanner } from "../components/ResultBanner";
 import { staleBaselineCount } from "../services/reconciliation.server";
 import { nextMoments } from "../lib/scheduling/upcoming";
@@ -101,7 +103,7 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
       },
       orderBy: { startAt: "asc" },
       take: 8,
-      select: { id: true, name: true, status: true, startAt: true, endAt: true },
+      select: { id: true, name: true, status: true, startAt: true, endAt: true, schedule: true },
     }),
     // What the plan covers. One indexed count and the shop's tier — see `plan-usage`
     // for why it is the catalogue size and not the largest campaign's scope.
@@ -208,6 +210,8 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
         id: campaign.id,
         name: campaign.name,
         status: campaign.status,
+        // As the campaigns list labels it, ending or starting late included (#1056).
+        lifecycle: lifecycleBadge(campaign.status as CampaignState, campaign.schedule, new Date()),
         startAt: campaign.startAt?.toISOString() ?? null,
         endAt: campaign.endAt?.toISOString() ?? null,
       })),
