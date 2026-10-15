@@ -6,6 +6,7 @@
  */
 
 import prisma from "../../db.server";
+import { labelled, priceListLabel } from "../../lib/markets/display-name";
 import { ROWS_PER_VIEW } from "../../lib/ui/table-budget";
 import { formatMinorUnits } from "../../lib/money/format";
 import { titleMapFor } from "./candidates.server";
@@ -55,10 +56,25 @@ export async function runLedger(
   });
 
   const titles = await titleMapFor(shopId, changes.map((c) => c.variantGid));
+  const listGids = [...new Set(changes.map((c) => c.priceListGid).filter(Boolean))];
+  const lists = listGids.length
+    ? await prisma.priceListRecord
+        .findMany({
+          where: { shopId, priceListGid: { in: listGids } },
+          select: { priceListGid: true, name: true, catalogTitle: true, surfaceKind: true },
+        })
+        .then((rows) => rows.map(labelled))
+    : [];
+  const listBy = new Map(lists.map((list) => [list.priceListGid, list]));
 
   return changes.map((change) => ({
     variantGid: change.variantGid,
     title: titles.get(change.variantGid) ?? change.variantGid,
+    surface: change.priceListGid
+      ? (listBy.get(change.priceListGid)?.name ?? priceListLabel({ name: "", surfaceKind: change.surfaceKind }))
+      : "Base price",
+    currency: change.currency,
+    priceListGid: change.priceListGid,
     before: formatMinorUnits(change.beforePrice, change.currency),
     intended: formatMinorUnits(change.intendedPrice, change.currency),
     status: change.status,

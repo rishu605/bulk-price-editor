@@ -231,6 +231,9 @@ export const previewRows: PreviewRow[] = PRODUCTS.map((product, index) => ({
 export const ledgerRows: LedgerRow[] = PRODUCTS.map((product, index) => ({
   variantGid: gid(index),
   title: product.title,
+  surface: "Base price",
+  currency: "USD",
+  priceListGid: "",
   before: product.baseline,
   intended: product.price,
   status: index === 2 ? "FAILED" : "VERIFIED",

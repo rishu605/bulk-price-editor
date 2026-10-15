@@ -59,6 +59,9 @@ export function LedgerTable({
     <s-table>
       <s-table-header-row>
         <s-table-header listSlot="primary">Variant</s-table-header>
+        {/* Which price, and in what currency (#887): a variant priced in a market has a row
+            per surface, and they read as duplicates without this. */}
+        <s-table-header listSlot="labeled">Surface</s-table-header>
         <s-table-header listSlot="labeled" format="currency">Before</s-table-header>
         <s-table-header listSlot="labeled" format="currency">{revert ? "Reverts to" : "Intended"}</s-table-header>
         <s-table-header listSlot="inline">State</s-table-header>
@@ -67,8 +70,9 @@ export function LedgerTable({
       </s-table-header-row>
       <s-table-body>
         {rows.map((row) => (
-          <s-table-row key={row.variantGid}>
+          <s-table-row key={`${row.variantGid}@${row.priceListGid}`}>
             <s-table-cell>{row.title}</s-table-cell>
+            <s-table-cell>{`${row.surface} (${row.currency})`}</s-table-cell>
             <s-table-cell>{row.before ?? <Blank />}</s-table-cell>
             <s-table-cell>{row.intended ?? <Blank />}</s-table-cell>
             <s-table-cell>
