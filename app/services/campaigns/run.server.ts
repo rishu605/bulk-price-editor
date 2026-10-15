@@ -37,7 +37,7 @@ import { recordEndMissed, recordStartRefused } from "./start-refusal.server";
 import { refusedForGood, startRefusedEntry } from "../../lib/scheduling/start-refusal";
 import type { CampaignState } from "../../lib/lifecycle/transitions";
 import { SKIP_REASON_GROUP } from "../../lib/planning/reasons";
-import { planResume, type LedgerState } from "../../lib/execution/resume";
+import { baseRowsOnly, type LedgerState, planResume } from "../../lib/execution/resume";
 import { applyCampaignTags, applyTakeoverTags, removeCampaignTags } from "./tags.server";
 import {
   applyMarketSurfaces,
@@ -1558,16 +1558,21 @@ async function priorLedger(campaignId: string, kind: "APPLY" | "REVERT") {
   const previous = await runToResume(campaignId);
   if (!previous || previous.kind !== kind) return [];
 
+  // The base price's rows only (#1037); see `baseRowsOnly`.
   const changes = await prisma.variantChange.findMany({
     where: { runId: previous.id },
-    select: { variantGid: true, status: true, attempt: true },
+    select: { variantGid: true, status: true, attempt: true, surfaceKind: true, priceListGid: true },
   });
 
-  return changes.map((change) => ({
-    variantGid: change.variantGid,
-    status: change.status as LedgerState,
-    attempt: change.attempt,
-  }));
+  return baseRowsOnly(
+    changes.map((change) => ({
+      variantGid: change.variantGid,
+      status: change.status as LedgerState,
+      attempt: change.attempt,
+      surfaceKind: change.surfaceKind,
+      priceListGid: change.priceListGid,
+    })),
+  );
 }
 
 async function recordResults(
