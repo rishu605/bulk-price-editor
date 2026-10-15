@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { useSearchParams } from "react-router";
 
 /**
@@ -43,8 +43,23 @@ export function FilterForm({
 }) {
   const [, setSearchParams] = useSearchParams();
 
+  // Enter submits, as it does in any form (#823). The browser's implicit submission needs a
+  // native input belonging to the form, and every field here is a Polaris custom element
+  // whose input lives in its shadow root, so Enter did nothing and only the Search button
+  // searched -- the one interaction a keyboard or screen-reader user has. Heard natively,
+  // so it does not depend on how React 18 sees a custom element's events (#863).
+  const form = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    const element = form.current;
+    if (!element) return;
+    const onKeyDown = (event: KeyboardEvent) => enterSubmits(event, element);
+    element.addEventListener("keydown", onKeyDown);
+    return () => element.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   return (
     <form
+      ref={form}
       onSubmit={(event) => {
         event.preventDefault();
         const data = new FormData(event.currentTarget);
@@ -66,4 +81,26 @@ export function FilterForm({
       {children}
     </form>
   );
+}
+
+/** Inputs where Enter means "search", as it would in a plain form. */
+const TEXT_ENTRY = new Set(["text", "search", "email", "url", "tel", "number", "password", ""]);
+
+/**
+ * Submits `form` when Enter is pressed in one of its text-entry fields (#823).
+ *
+ * The event's first path entry is the input inside the field's shadow root. Not while an
+ * input method is composing (Enter there picks a character), not from a textarea (Enter is
+ * a new line), and not when something else already handled the key.
+ */
+export function enterSubmits(
+  event: Pick<KeyboardEvent, "key" | "isComposing" | "defaultPrevented" | "composedPath" | "preventDefault">,
+  form: Pick<HTMLFormElement, "requestSubmit">,
+): boolean {
+  if (event.key !== "Enter" || event.isComposing || event.defaultPrevented) return false;
+  const origin = event.composedPath()[0] as { tagName?: string; type?: string } | undefined;
+  if (origin?.tagName !== "INPUT" || !TEXT_ENTRY.has((origin.type ?? "").toLowerCase())) return false;
+  event.preventDefault();
+  form.requestSubmit();
+  return true;
 }
