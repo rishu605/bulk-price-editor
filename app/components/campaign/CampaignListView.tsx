@@ -266,7 +266,12 @@ export function CampaignListView({
                               duplicating creates a campaign. Price drift already bordered
                               its three, so the two tables were following different rules
                               for the same kind of control. */}
-                          <s-button type="submit" variant="secondary" icon="duplicate">
+                          <s-button
+                            type="submit"
+                            variant="secondary"
+                            icon="duplicate"
+                            accessibilityLabel={`Duplicate ${campaign.name}`}
+                          >
                             Duplicate
                           </s-button>
                         </fetcher.Form>

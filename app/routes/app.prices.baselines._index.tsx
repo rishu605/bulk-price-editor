@@ -27,6 +27,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
+import prisma from "../db.server";
 import { baselineHistory, browseBaselines } from "../services/baseline-browser.server";
 import { BaselineTable } from "../components/BaselineTable";
 import { ActionRow } from "../components/ActionRow";
@@ -69,8 +70,12 @@ export const loader = withGuard("/app/prices/baselines", async ({ request }: Loa
   // behind a second click, because the click is the thing support is trying to avoid.
   const variantGid = url.searchParams.get("variant");
   const history = variantGid ? await baselineHistory(shop.id, variantGid) : [];
+  // By its title, not its gid (#796): the card named the variant `gid://shopify/…`.
+  const historyTitle = variantGid
+    ? ((await prisma.variantIndex.findFirst({ where: { shopId: shop.id, variantGid }, select: { title: true } }))?.title ?? null)
+    : null;
 
-  return { ...result, page, filters, variantGid, history, timeZone: shop.timezone };
+  return { ...result, page, filters, variantGid, history, historyTitle, timeZone: shop.timezone };
 });
 
 type ActionData = { ok: boolean; message: string; result?: BaselineImportResult; errorId?: string };
@@ -125,7 +130,7 @@ export const action = withGuard(
 );
 
 export default function Baselines() {
-  const { rows, total, vendors, sources, page, filters, variantGid, history, timeZone } =
+  const { rows, total, vendors, sources, page, filters, variantGid, history, historyTitle, timeZone } =
     useLoaderData<typeof loader>();
   const [params, setSearchParams] = useSearchParams();
   const fetcher = useFetcher<ActionData>();
@@ -251,10 +256,16 @@ export default function Baselines() {
         </s-stack>
       </s-section>
 
-      {variantGid && history.length > 0 ? (
-        <Card heading="Baseline history">      <s-paragraph>
-            <s-text>{variantGid}</s-text>
-          </s-paragraph>
+      {/* Named by title (#796), and said either way: with no baselines the History button
+          used to do nothing anyone could see or hear. */}
+      {variantGid ? (
+        <Card heading={`Baseline history of ${historyTitle ?? "this variant"}`}>
+          {history.length === 0 ? (
+            <EmptyState
+              title="No baselines recorded yet"
+              description="A baseline is captured when a campaign first prices this variant, or when you import or recapture one."
+            />
+          ) : (
           <s-table>
             {/* One variant's baselines over time, so the row's identity is when it was
                 captured, not what the number was. */}
@@ -290,6 +301,7 @@ export default function Baselines() {
               ))}
             </s-table-body>
           </s-table>
+          )}
         </Card>
       ) : null}
 

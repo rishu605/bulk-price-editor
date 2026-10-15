@@ -387,6 +387,21 @@ export async function resolveOverwrittenDrift(
   return ids.length;
 }
 
+/**
+ * The variant a drift event is about, by its title, for the sentence that says what a
+ * decision did (#796): "Ignored." twice in a row was the same words twice, so a screen
+ * reader did not announce the second, and neither said which price it was about.
+ */
+export async function driftTitle(shopId: string, eventId: string): Promise<string | null> {
+  const event = await prisma.driftEvent.findFirst({ where: { id: eventId, shopId }, select: { variantGid: true } });
+  if (!event) return null;
+  const variant = await prisma.variantIndex.findFirst({
+    where: { shopId, variantGid: event.variantGid },
+    select: { title: true },
+  });
+  return variant?.title ?? null;
+}
+
 export type DriftResolution = "adopt" | "reassert" | "ignore";
 
 /**

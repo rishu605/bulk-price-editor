@@ -761,7 +761,7 @@ describe("a sale a higher-priority one has taken variants from", () => {
 
     expect(html).toContain("1 of 3 variants have been changed since this campaign set them");
     expect(html).toContain("Already there");
-    expect(html.match(/Leave as it is/g), "a checkbox on a row that is not an edit").toHaveLength(1);
+    expect(html.match(/label="Leave [^"]* as it is"/g), "a checkbox on a row that is not an edit").toHaveLength(1);
     expect(html).toContain(`value="${editedByHand.variantGid}"`);
     expect(html).not.toContain(`value="${takenOver.variantGid}"`);
   });
