@@ -55,13 +55,25 @@ export function ReconciliationTable({
           <s-table-row key={`${row.variantGid}-${row.priceListGid}`}>
             <s-table-cell>{row.surface}</s-table-cell>
             <s-table-cell>
-              {/* A whole column of blue is what makes a table read as link soup — and
-                  this table is the one a merchant scans when prices disagree, so its
-                  names should read as names. The icon carries "this opens the Shopify
-                  admin", which the colour never did. */}
-              <s-button variant="tertiary" icon="external" href={row.adminUrl} target="_blank">
-                {row.title}
-              </s-button>
+              {/* A link in the text's own colour. A whole column of blue is what makes a
+                  table read as link soup — and this table is the one a merchant scans when
+                  prices disagree, so its names should read as names.
+
+                  It was a tertiary button, for the same reason, and Polaris never lets a
+                  button's label wrap: at 390px a seventy-character title ran past the card
+                  and pushed "Because of" off it (#1023). A link is text, so it wraps at any
+                  width.
+
+                  Inside `s-text` rather than `tone="neutral"`, which the types offer and
+                  the element ignores: Polaris styles a link's `critical` tone and nothing
+                  else, so a "neutral" one is drawn link-blue. Inside text, Polaris draws a
+                  link in the text's colour with an underline, which is how a link in prose
+                  looks. The label says where it goes, which no colour does. */}
+              <s-text>
+                <s-link href={row.adminUrl} target="_blank" accessibilityLabel={`Open ${row.title} in Shopify`}>
+                  {row.title}
+                </s-link>
+              </s-text>
             </s-table-cell>
             <s-table-cell>{row.live ?? <Blank />}</s-table-cell>
             <s-table-cell>{row.baseline ?? <Blank />}</s-table-cell>

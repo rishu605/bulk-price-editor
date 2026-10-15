@@ -38,6 +38,16 @@ const PRODUCTS = [
   // The widest amounts a column has to hold: seven digits and two decimals, and a JPY
   // price in the hundreds of millions. A number has nowhere to wrap.
   { title: "The Hidden Snowboard", sku: "SNOW-HIDDEN-168W", price: "1249995.00", baseline: "1249995.00", jpy: "196000000" },
+  // Seventy characters, a product and variant title a real catalogue has (#1023). On What's
+  // live the name sat in a button, which never wraps, so at 390px it ran past the card and
+  // took "Because of" with it. Every short title above fits on one line and proves nothing.
+  {
+    title: "The Collection Snowboard: Liquid, Limited Edition, Wide Fit 158 Bundle",
+    sku: "SNOW-LIQ-158WB",
+    price: "812.50",
+    baseline: "902.78",
+    jpy: "126500",
+  },
 ];
 
 const gid = (index: number) => `gid://shopify/ProductVariant/4${index}0000000${index}`;
