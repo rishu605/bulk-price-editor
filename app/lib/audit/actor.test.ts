@@ -12,7 +12,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { actorFor, describeActor, SCHEDULER_ACTOR } from "./actor";
+import { actorFor, describeActor, FLOW_ACTOR, SCHEDULER_ACTOR } from "./actor";
 
 const token = (sub: unknown) => ({ sub }) as never;
 
@@ -104,5 +104,11 @@ describe("rendering an actor", () => {
     // The two halves are used by different processes and had no test tying them
     // together, which is how a prefix change breaks display without failing anything.
     expect(describeActor(actorFor(token("99"), "shop.myshopify.com"))).toBe("Staff 99");
+  });
+});
+
+describe("Shopify Flow as an actor (#1047)", () => {
+  it("is named, not shown as its stored id", () => {
+    expect(describeActor(FLOW_ACTOR)).toBe("Shopify Flow");
   });
 });

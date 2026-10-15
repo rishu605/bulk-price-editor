@@ -93,6 +93,8 @@ function shortId(id: string): string {
 export function describeActor(actor: string | null): string {
   if (!actor || actor === SCHEDULER_ACTOR || actor === "system") return "Scheduler";
   if (actor === "drift-detector") return "Drift detector";
+  // Shopify Flow by name (#1047): "shopify-flow" is the stored id, not a word a merchant reads.
+  if (actor === FLOW_ACTOR) return "Shopify Flow";
   if (actor.startsWith("staff:")) return `Staff ${shortId(actor.slice("staff:".length))}`;
   return actor;
 }
