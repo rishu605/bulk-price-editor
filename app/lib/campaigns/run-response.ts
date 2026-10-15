@@ -23,6 +23,8 @@
  * the action.
  */
 
+import { countOf, formatCount } from "../format/display";
+
 export interface RunResponse {
   ok: boolean;
   /** Absent means critical when `ok` is false. See the note above. */
@@ -59,9 +61,10 @@ export function runResponse(
 
   return {
     ok: result.clean,
+    // Through the shared count helpers (#759): "Applied 1 variants" was this sentence.
     message: result.clean
-      ? `${verb} ${result.verified} variants, all verified.`
-      : `${verb} with ${result.failed} failures and ${result.unverified} unverified. ` +
+      ? `${verb} ${countOf(result.verified, "variant")}, all verified.`
+      : `${verb} with ${countOf(result.failed, "failure")} and ${formatCount(result.unverified)} unverified. ` +
         `Nothing is hidden — resume to retry.`,
     details: result.messages,
   };

@@ -17,6 +17,7 @@
 import prisma from "../../db.server";
 import { FLOW_ACTOR } from "../../lib/audit/actor";
 import { toAppError } from "../../lib/errors/app-error";
+import { countOf, formatCount } from "../../lib/format/display";
 import { logger } from "../../lib/logging/logger";
 import type { RunOutcome } from "../campaigns/types";
 
@@ -70,10 +71,10 @@ export function answerForRun(outcome: RunOutcome, campaignName: string, verb: "a
     return {
       status: 200,
       outcome: "partial",
-      message: `"${campaignName}" ${verb} with ${outcome.failed} failed and ${outcome.unverified} unverified. Resume it from the campaign page.`,
+      message: `"${campaignName}" ${verb} with ${formatCount(outcome.failed)} failed and ${formatCount(outcome.unverified)} unverified. Resume it from the campaign page.`,
     };
   }
-  return { status: 200, outcome: "done", message: `"${campaignName}" ${verb}: ${outcome.verified} variants, all verified.` };
+  return { status: 200, outcome: "done", message: `"${campaignName}" ${verb}: ${countOf(outcome.verified, "variant")}, all verified.` };
 }
 
 /**
