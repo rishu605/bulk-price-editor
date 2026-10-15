@@ -644,7 +644,15 @@ export async function revertMarketSurfaces(
     // planned without this campaign -- its own baseline, or another campaign's price --
     // and written back, ledgered under the revert like any other write.
     const handSet = recompute && list ? await handSetAmong(shopId, priceListGid, variantGids) : new Set<string>();
-    const followed = variantGids.filter((gid) => !handSet.has(gid));
+    // And where another campaign still prices the variant on this list (#1038): revert is
+    // resolve(without C) (rule 6), so it gets that campaign's price, as "Revert this variant"
+    // writes it (#1002) -- not the list's percentage, which deleting would have left.
+    const others =
+      recompute && list
+        ? await pricedByOthers(shopId, list, variantGids.filter((gid) => !handSet.has(gid)), recompute.campaigns, client)
+        : new Set<string>();
+    const rewrite = new Set([...handSet, ...others]);
+    const followed = variantGids.filter((gid) => !rewrite.has(gid));
 
     const deleted = followed.length > 0 ? await deleteMarketPrices(client, priceListGid, followed, onProgress) : null;
     if (deleted) {
@@ -656,10 +664,10 @@ export async function revertMarketSurfaces(
       });
     }
 
-    const restored = recompute && list && handSet.size > 0 ? await rewriteHandSet(shopId, list, [...handSet], recompute, client, onProgress) : null;
+    const restored = recompute && list && rewrite.size > 0 ? await rewriteHandSet(shopId, list, [...rewrite], recompute, client, onProgress) : null;
     if (restored) {
       await prisma.variantChange.updateMany({
-        where: { shopId, priceListGid, variantGid: { in: [...handSet] }, run: { campaignId }, NOT: { runId: recompute!.runId } },
+        where: { shopId, priceListGid, variantGid: { in: [...rewrite] }, run: { campaignId }, NOT: { runId: recompute!.runId } },
         data: { status: restored.clean ? "REVERTED" : "FAILED" },
       });
     }
@@ -671,6 +679,33 @@ export async function revertMarketSurfaces(
   }
 
   return [...outcomes, ...wideOutcomes(wideMessages)];
+}
+
+/**
+ * Which of these variants another campaign still prices on this list, planned without the
+ * one being reverted (#1038). None while a campaign's percentage is on the whole list: a
+ * variant whose fixed price is deleted follows it, which is that campaign's price already,
+ * as `followersAmong` reasons for the per-variant revert.
+ */
+async function pricedByOthers(
+  shopId: string,
+  list: Parameters<typeof planMarket>[1],
+  variantGids: readonly string[],
+  campaigns: readonly ResolvableCampaign[],
+  client: AdminClient,
+): Promise<Set<string>> {
+  if (variantGids.length === 0 || campaigns.length === 0) return new Set();
+  const percentage = await prisma.priceListChange.count({
+    where: { shopId, priceListGid: list.priceListGid, status: { in: ["APPLIED", "VERIFIED"] } },
+  });
+  if (percentage > 0) return new Set();
+  const plan = await planMarket(shopId, list, [...variantGids], campaigns, client);
+  if (!plan || plan.outcome.kind !== "ok") return new Set();
+  return new Set(
+    plan.outcome.rows
+      .filter((row) => row.status !== "skipped" && row.intendedPrice && row.campaignId)
+      .map((row) => row.ref.variantGid),
+  );
 }
 
 /**
