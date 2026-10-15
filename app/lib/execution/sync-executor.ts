@@ -118,9 +118,15 @@ export interface ExecuteOptions {
  */
 export const INPUT_ARRAY_MAX = 250;
 
+/**
+ * `allowPartialUpdates: true`, deliberately (#1020, D14 in `docs/decisions.md`). Without it
+ * Shopify writes none of a call's variants if any one is refused -- one deleted variant
+ * failed up to 250 of its product's -- while the ledger, the read-back and every report
+ * treat each row as standing or falling on its own.
+ */
 export const PRODUCT_VARIANTS_BULK_UPDATE = `#graphql
   mutation AnchorProductVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-    productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+    productVariantsBulkUpdate(productId: $productId, variants: $variants, allowPartialUpdates: true) {
       product { updatedAt }
       productVariants { id price compareAtPrice }
       userErrors { field message code }

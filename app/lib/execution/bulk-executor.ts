@@ -248,9 +248,10 @@ export async function submitBulkMutation(
   return { operation, layout: layoutOf(lines) };
 }
 
+/** Each line's rows stand or fall on their own, as on the sync path (#1020, D14). */
 export const DEFAULT_BULK_MUTATION = `
   mutation call($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-    productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+    productVariantsBulkUpdate(productId: $productId, variants: $variants, allowPartialUpdates: true) {
       product { updatedAt }
       productVariants { id price compareAtPrice }
       userErrors { field message code }
