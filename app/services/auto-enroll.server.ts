@@ -29,6 +29,7 @@
 import prisma from "../db.server";
 import { captureBaselines } from "./baselines.server";
 import { astToWhere } from "./segments.server";
+import { inheritedBy } from "./campaigns/handover.server";
 import { endingAmong, scopeOf, toResolvable } from "./campaigns/model.server";
 import { assignEnrollments, type CampaignMatch } from "../lib/enrollment/assign";
 
@@ -101,10 +102,16 @@ export async function enrollNewVariants(
       distinct: ["variantGid"],
     });
 
+    // And one another campaign's revert handed it, which it never wrote (#1043): without
+    // this every edit to such a product enrolled it again and queued a run writing nothing.
+    const alreadyPriced = new Set(priced.map((row) => row.variantGid));
+    const unpriced = matched.map((row) => row.variantGid).filter((gid) => !alreadyPriced.has(gid));
+    for (const gid of (await inheritedBy(shopId, campaign.id, unpriced)).keys()) alreadyPriced.add(gid);
+
     matches.push({
       campaign: toResolvable(campaign),
       matched: matched.map((row) => row.variantGid),
-      alreadyPriced: new Set(priced.map((row) => row.variantGid)),
+      alreadyPriced,
     });
   }
 

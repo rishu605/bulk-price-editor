@@ -28,7 +28,9 @@ import { inheritedBy, revertTakesBack } from "../../app/services/campaigns/hando
 import { rollbackReport } from "../../app/services/campaigns/rollback-report.server";
 import { runCampaign } from "../../app/services/campaigns/run.server";
 import { revertVariant } from "../../app/services/campaigns/variant-revert.server";
+import { enrollNewVariants } from "../../app/services/auto-enroll.server";
 import { checkForDrift } from "../../app/services/drift.server";
+import { reconcile, staleBaselineCount, staleBaselineVariants, uncontrolledAmong } from "../../app/services/reconciliation.server";
 import { chaosAdminClient } from "../harness/http-client";
 import { withChaos, type ChaosContext } from "../harness/scenario";
 
@@ -240,6 +242,35 @@ describe("chaos: a variant a sale inherited from a higher sale's end (#998)", ()
       expect(event.campaignId, "the edit went to A, whose price C wrote over").toBe(c.id);
       expect(await statusOf(a)).toBe("ACTIVE");
       expect(await statusOf(c.id)).toBe("HELD");
+    });
+  });
+
+  it("is credited to A on What's live, is not a price changed outside the app, and is not enrolled again (#1043)", async () => {
+    await withChaos("inherited-readers", { catalog: { products: 3, variantsPerProduct: 1 }, percent: -10 }, async (chaos) => {
+      const { shopId, domain, campaignId: a, variantGids } = chaos.fixture;
+      const [inherited] = variantGids;
+      await handedToA(chaos);
+
+      // What's live names the campaign the price is because of, and A's filter finds it.
+      const page = await reconcile(shopId, domain, { priceListGid: "" });
+      const row = page.rows.find((r) => r.variantGid === inherited);
+      expect(row?.campaignId, "What's live credits an inherited price to nobody").toBe(a);
+      expect(row?.drifted).toBe(false);
+      const ofA = await reconcile(shopId, domain, { priceListGid: "", campaignId: a });
+      expect(ofA.rows.map((r) => r.variantGid), "filtering What's live by A leaves out the price it inherited").toContain(inherited);
+
+      // Not "changed outside a campaign": a stale-baseline recapture would make A's sale
+      // price the variant's baseline, and A's revert would then write the sale back.
+      expect(await staleBaselineVariants(shopId), "an inherited sale price reads as changed outside the app").not.toContain(inherited);
+      expect(await staleBaselineCount(shopId)).toBe(0);
+      expect(await uncontrolledAmong(shopId, [inherited]), "the previews count an inherited price as uncontrolled").toBe(0);
+      expect(page.counts.staleBaseline).toBe(0);
+
+      // A products webhook for it does not enrol it into A, which already prices it.
+      await prisma.campaign.update({ where: { id: a }, data: { autoEnroll: true } });
+      const enrolled = await enrollNewVariants(shopId, [inherited]);
+      expect(enrolled.flatMap((result) => result.variantGids), "an inherited variant looked new to auto-enrol").toEqual([]);
+      expect((await prisma.campaign.findUniqueOrThrow({ where: { id: a } })).enrollPendingVariantGids).toEqual([]);
     });
   });
 });

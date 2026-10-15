@@ -16,6 +16,8 @@
  * from what the revert wrote (`lib/planning/handover.ts`), whenever it is needed.
  */
 
+import { Prisma } from "@prisma/client";
+
 import prisma from "../../db.server";
 import { inheritors } from "../../lib/planning/handover";
 import { guardrailsFor } from "../settings.server";
@@ -35,11 +37,25 @@ export async function inheritorOf(
   /** What the revert wrote, in minor units. */
   handedOver: bigint,
 ): Promise<Pick<Pricing, "id" | "name" | "status"> | null> {
+  return (await inheritorsOf(shopId, new Map([[variantGid, handedOver]]))).get(variantGid) ?? null;
+}
+
+/**
+ * The same for many variants at once, by variant (#1043): What's live asks it of a page of
+ * prices whose newest write was another campaign's revert. Absent: nobody's.
+ */
+export async function inheritorsOf(
+  shopId: string,
+  /** Variant gid -> what the revert wrote there, in minor units. */
+  handedOver: ReadonlyMap<string, bigint>,
+): Promise<Map<string, Pick<Pricing, "id" | "name" | "status">>> {
+  if (handedOver.size === 0) return new Map();
   // Running, and not being ended: a campaign handing its variants back keeps none (#805).
   const pricing = await competingCampaigns(shopId);
-  if (pricing.length === 0) return null;
-  const id = (await inheritorsAmong(shopId, pricing, new Map([[variantGid, handedOver]]))).get(variantGid);
-  return pricing.find((campaign) => campaign.id === id) ?? null;
+  if (pricing.length === 0) return new Map();
+  const byId = new Map(pricing.map((campaign) => [campaign.id, campaign]));
+  const found = await inheritorsAmong(shopId, pricing, handedOver);
+  return new Map([...found].flatMap(([gid, id]) => (byId.has(id) ? [[gid, byId.get(id)!] as const] : [])));
 }
 
 /**
@@ -47,18 +63,17 @@ export async function inheritorOf(
  * with the price that revert wrote, for those still showing nothing newer of ours (#998).
  * Whatever the campaign's scope says now: a product archived since is still at its price.
  */
-export async function inheritedBy(shopId: string, campaignId: string): Promise<Map<string, bigint>> {
+export async function inheritedBy(
+  shopId: string,
+  campaignId: string,
+  /** Only these variants, for a caller asking about a few (auto-enrol, #1043). */
+  among?: readonly string[],
+): Promise<Map<string, bigint>> {
+  if (among?.length === 0) return new Map();
   const campaign = await prisma.campaign.findFirst({ where: { id: campaignId, shopId } });
   if (!campaign) return new Map();
 
-  // Since this campaign last finished ending, as for what it wrote (`pricesWrittenBy`):
-  // nothing handed to it before then is still its own.
-  const lastRevert = await prisma.campaignRun.findFirst({
-    where: { campaignId, kind: "REVERT", status: "COMPLETED", NOT: { occurrenceKey: { startsWith: "VARIANT-" } } },
-    orderBy: { createdAt: "desc" },
-    select: { createdAt: true },
-  });
-  const since = lastRevert?.createdAt ?? campaign.createdAt;
+  const since = await sinceLastEnded(campaign);
 
   // Each variant whose newest landed base write is another campaign's revert: a price that
   // revert recomputed, and nothing has written over since. Deleted variants are left out,
@@ -73,6 +88,7 @@ export async function inheritedBy(shopId: string, campaignId: string): Promise<M
       AND c."shopId" = ${shopId} AND c."surfaceKind" = 'BASE' AND c."priceListGid" = ''
       AND c."status" IN ('VERIFIED', 'CLAMPED') AND c."intendedPrice" IS NOT NULL
       AND v."deletedAt" IS NULL
+      ${among ? Prisma.sql`AND c."variantGid" = ANY(${[...among]})` : Prisma.empty}
       AND NOT EXISTS (
         SELECT 1 FROM "variant_changes" n
         WHERE n."shopId" = c."shopId" AND n."variantGid" = c."variantGid"
@@ -87,6 +103,62 @@ export async function inheritedBy(shopId: string, campaignId: string): Promise<M
   const handedOver = new Map(rows.map((row) => [row.variantGid, row.intendedPrice]));
   const winners = await inheritorsAmong(shopId, [campaign, ...(await competingCampaigns(shopId, campaignId))], handedOver);
   return new Map([...handedOver].filter(([gid]) => winners.get(gid) === campaignId));
+}
+
+/**
+ * The market prices another campaign's revert handed this one (#1043), on these lists.
+ *
+ * The same handover as `inheritedBy`, on a market: B ends and its revert writes A's price
+ * on the lists they share (#1038), ledgered under B's revert -- so A's own revert, taking
+ * back the market rows of A's runs, left A's price there after A ended. Each cell whose
+ * newest landed write is another campaign's revert since this one last ended, and whose
+ * mirror still shows what that revert wrote: a price changed by hand since is nobody's to
+ * take back.
+ *
+ * Not narrowed to the cells the planner would credit to this campaign. The revert that
+ * takes them back recomputes each one without it (rule 6) -- written back where another
+ * campaign or a hand-set price accounts for it, released to the list otherwise -- so a cell
+ * that was not this campaign's is written its own price.
+ */
+export async function marketsHandedTo(
+  shopId: string,
+  campaignId: string,
+  priceListGids: readonly string[],
+): Promise<Array<{ variantGid: string; priceListGid: string }>> {
+  if (priceListGids.length === 0) return [];
+  const campaign = await prisma.campaign.findFirst({ where: { id: campaignId, shopId }, select: { id: true, createdAt: true } });
+  if (!campaign) return [];
+  const since = await sinceLastEnded(campaign);
+  return prisma.$queryRaw<Array<{ variantGid: string; priceListGid: string }>>`
+    SELECT c."variantGid", c."priceListGid"
+    FROM "variant_changes" c
+    JOIN "campaign_runs" r ON r."id" = c."runId"
+    JOIN "price_surface_entries" e
+      ON e."shopId" = c."shopId" AND e."variantGid" = c."variantGid" AND e."priceListGid" = c."priceListGid"
+    WHERE r."shopId" = ${shopId} AND r."kind" = 'REVERT' AND r."campaignId" <> ${campaignId}
+      AND r."createdAt" > (${since}::timestamptz AT TIME ZONE 'UTC')
+      AND c."shopId" = ${shopId} AND c."priceListGid" = ANY(${[...priceListGids]})
+      AND c."status" IN ('VERIFIED', 'CLAMPED') AND c."intendedPrice" IS NOT NULL
+      AND e."livePrice" = c."intendedPrice"
+      AND NOT EXISTS (
+        SELECT 1 FROM "variant_changes" n
+        WHERE n."shopId" = c."shopId" AND n."variantGid" = c."variantGid" AND n."priceListGid" = c."priceListGid"
+          AND n."status" IN ('VERIFIED', 'CLAMPED')
+          AND (n."createdAt" > c."createdAt" OR (n."createdAt" = c."createdAt" AND n."id" > c."id"))
+      )`;
+}
+
+/**
+ * Since this campaign last finished ending, as for what it wrote (`pricesWrittenBy`):
+ * nothing handed to it before then is still its own.
+ */
+async function sinceLastEnded(campaign: { id: string; createdAt: Date }): Promise<Date> {
+  const lastRevert = await prisma.campaignRun.findFirst({
+    where: { campaignId: campaign.id, kind: "REVERT", status: "COMPLETED", NOT: { occurrenceKey: { startsWith: "VARIANT-" } } },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  });
+  return lastRevert?.createdAt ?? campaign.createdAt;
 }
 
 /**

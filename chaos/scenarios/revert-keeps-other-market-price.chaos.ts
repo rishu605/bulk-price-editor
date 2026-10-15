@@ -68,4 +68,57 @@ describe("chaos: reverting the higher of two sales on a market", () => {
       expect(chaos.fake.fixedPricesOn(EUR).get(shared)?.amount, "the revert left the list's price, not A's").toBe(lowersEuro);
     });
   });
+
+  it("is taken back by the lower sale's own revert when the higher one handed it over (#1043)", async () => {
+    await withChaos("market-handover-revert", { catalog: { products: 2, variantsPerProduct: 1 }, percent: -10 }, async (chaos) => {
+      const { shopId, campaignId: lower, variantGids } = chaos.fixture;
+      const [shared] = variantGids;
+      const client = chaosAdminClient(chaos.server.endpoint());
+      const HANDED = "gid://shopify/PriceList/market-handover-eu";
+      chaos.fake.addPriceList({
+        id: HANDED,
+        name: "Europe",
+        currency: "EUR",
+        country: "DE",
+        adjustment: { type: "PERCENTAGE_DECREASE", value: 0 },
+        catalog: { id: "gid://shopify/MarketCatalog/market-handover-eu", title: "EU", __typename: "MarketCatalog" },
+        prices: [],
+      });
+      const { syncMarkets } = await import("../../app/services/markets-sync.server");
+      await syncMarkets(client, shopId);
+      await prisma.campaign.update({ where: { id: lower }, data: { priority: 100, surfaces: { base: true, priceLists: [HANDED] } as never } });
+
+      // B first, so A's own apply never writes the shared variant's euro price.
+      await prisma.variantIndex.updateMany({ where: { shopId, variantGid: shared }, data: { tags: ["chaos", "chaos-b"] } });
+      const higher = await createCampaign(shopId, {
+        name: "chaos/higher-market-sale",
+        priority: 200,
+        rule: { kind: "percent-change", percent: -30 },
+        compareAtPolicy: { kind: "leave" },
+        rounding: { default: "none", byCurrency: {} },
+        ast: { groups: [{ conditions: [{ field: "tag", value: "chaos-b" }] }] },
+        schedule: { kind: "manual" },
+      } as never);
+      await prisma.campaign.update({ where: { id: higher.id }, data: { surfaces: { base: true, priceLists: [HANDED] } as never } });
+      expect((await runCampaign(shopId, higher.id, client, { actor: "chaos", verifySampleRate: 1 })).clean).toBe(true);
+      await chaos.expectHonest((await chaos.apply()).runId);
+      const ofLower = await prisma.variantChange.count({ where: { shopId, variantGid: shared, surfaceKind: "MARKET", run: { campaignId: lower } } });
+      expect(ofLower, "the premise: A never wrote the shared euro price").toBe(0);
+
+      // B ends and hands the euro price to A.
+      expect((await runCampaign(shopId, higher.id, client, { actor: "chaos", revert: true, verifySampleRate: 1 })).clean).toBe(true);
+      expect(chaos.fake.fixedPricesOn(HANDED).get(shared), "the premise: B's revert wrote A's euro price").toBeTruthy();
+
+      // A ends: nothing of A's is left on the market.
+      const reverted = await chaos.revert();
+      await chaos.expectHonest(reverted.runId);
+      expect(reverted.clean).toBe(true);
+      expect(chaos.fake.fixedPricesOn(HANDED).get(shared), "A's euro price stayed after A ended").toBeUndefined();
+      // Ledgered under A's revert before it was let go, and read back (I4, rule 5).
+      const row = await prisma.variantChange.findFirst({ where: { runId: reverted.runId, variantGid: shared, priceListGid: HANDED } });
+      expect(row?.status, "the release was not ledgered under A's revert").toBe("VERIFIED");
+      expect(row?.intendedPrice).toBeNull();
+      expect(chaos.fake.fixedPricesOn(HANDED).size).toBe(0);
+    });
+  });
 });
