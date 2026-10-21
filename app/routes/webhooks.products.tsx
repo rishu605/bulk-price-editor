@@ -10,7 +10,8 @@
  *
  *   Out-of-order deliveries are ignored, not applied. Shopify does not guarantee
  *   ordering, so an older payload arriving after a newer one would otherwise
- *   overwrite current data with stale data. `remoteUpdatedAt` decides.
+ *   overwrite current data with stale data. `remoteUpdatedAt` decides, by the rule in
+ *   `mirror-version.server.ts`, which the catalogue syncs write by too (#1087).
  *
  * One thing this path CANNOT supply: cost per item. Shopify's product webhook
  * payload has no cost field -- cost lives on the inventory item, behind a separate
@@ -28,7 +29,8 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { logger } from "../lib/logging/logger";
 import { parseMoney } from "../lib/money/money";
-import { checkForDrift, ourEchoes, predatesOurWrite } from "../services/drift.server";
+import { checkForDrift, ourEchoes } from "../services/drift.server";
+import { newerInMirror } from "../services/mirror-version.server";
 import { enrollNewVariants } from "../services/auto-enroll.server";
 import { toAdminClient } from "../services/admin-client.server";
 import { giftCardFlagFor } from "../services/gift-card.server";
@@ -114,39 +116,26 @@ export const action = recordedWebhook(async ({ request }: ActionFunctionArgs) =>
       ? product.tags.split(",").map((t) => t.trim()).filter(Boolean)
       : [];
 
-  for (const variant of product.variants ?? []) {
-    const variantGid =
-      variant.admin_graphql_api_id ?? `gid://shopify/ProductVariant/${variant.id}`;
+  const described = (product.variants ?? []).map((variant) => ({
+    variant,
+    variantGid: variant.admin_graphql_api_id ?? `gid://shopify/ProductVariant/${variant.id}`,
+    price: safeMinor(variant.price, currency),
+  }));
 
-    const existing = await prisma.variantIndex.findUnique({
-      where: { shopId_variantGid: { shopId: shop.id, variantGid } },
-      select: { remoteUpdatedAt: true, price: true },
-    });
+  // Stale for these variants: the mirror already holds something newer. A delivery older
+  // than the product's latest version there (#828), or one from earlier in the same second
+  // showing a price our write in that second replaced -- an earlier call's snapshot of a
+  // product written in several, delivered late (#985). The rule both catalogue syncs write
+  // by (#1087), asked for the whole delivery at once.
+  const newer = await newerInMirror(
+    shop.id,
+    described.map(({ variantGid, price }) => ({ variantGid, stamp: remoteUpdatedAt, price })),
+  );
 
-    // Stale delivery: we already hold something newer.
-    if (
-      existing?.remoteUpdatedAt &&
-      remoteUpdatedAt &&
-      existing.remoteUpdatedAt > remoteUpdatedAt
-    ) {
-      continue;
-    }
+  for (const { variant, variantGid, price } of described) {
+    if (newer.has(variantGid)) continue;
 
-    const price = safeMinor(variant.price, currency);
     const compareAt = safeMinor(variant.compare_at_price, currency);
-
-    // Not older to the second, but from before the write the mirror holds: an earlier
-    // call's snapshot of a product written in several, delivered late (#985). Asked only
-    // when the second is the same and the price differs, which an echo of that write never is.
-    if (
-      existing?.remoteUpdatedAt &&
-      remoteUpdatedAt &&
-      existing.remoteUpdatedAt.getTime() === remoteUpdatedAt.getTime() &&
-      price !== existing.price &&
-      (await predatesOurWrite(shop.id, variantGid, remoteUpdatedAt, price))
-    ) {
-      continue;
-    }
 
     const data = {
       productGid,

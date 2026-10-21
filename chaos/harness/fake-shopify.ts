@@ -26,7 +26,9 @@
  *   Bulk queries run too, against their own limit, beside any mutations (#1081). One over
  *   `products` publishes the store's catalogue as Shopify's JSONL, so the catalogue sync
  *   can be driven against the store rather than against a hand-written file, and can be
- *   seen to run while a campaign's bulk mutation is still going.
+ *   seen to run while a campaign's bulk mutation is still going. It reads the store when
+ *   it is accepted and publishes what it read when it finishes, so a price written in
+ *   between is not in its file, as on a real store where the read takes minutes (#1087).
  *
  * State is public on purpose: scenarios assert against `variants` to answer "what
  * does the store actually say now", which is the only question that matters.
@@ -43,6 +45,12 @@ export interface FakeProduct {
   productGid: string;
   /** Shopify stores tags per product, and treats them case-insensitively. */
   tags: string[];
+  /**
+   * The product's `updatedAt`, on the store's clock and to the second. A base price write
+   * moves it -- the product's, not the variant's, which a write leaves alone (checked live,
+   * #932) -- and a bulk query over products publishes it (#1087). A scenario may set it.
+   */
+  updatedAt: string;
 }
 
 export interface FakePriceList {
@@ -112,6 +120,8 @@ interface FakeBulkOperation {
   failsAfterLines?: number;
   /** `bulkRefusesLines` likewise. */
   refusesLines: Set<number>;
+  /** A query's result: the store's catalogue as it stood when the query was accepted. */
+  read?: string[];
 }
 
 const DEFAULT_THROTTLE: ThrottleStatus = {
@@ -281,7 +291,7 @@ export class FakeShopify {
   addVariant(variant: Omit<FakeVariant, "deleted">): void {
     this.variants.set(variant.variantGid, { ...variant, deleted: false });
     if (!this.products.has(variant.productGid)) {
-      this.products.set(variant.productGid, { productGid: variant.productGid, tags: [] });
+      this.products.set(variant.productGid, { productGid: variant.productGid, tags: [], updatedAt: this.storeNow() });
     }
   }
 
@@ -487,6 +497,7 @@ export class FakeShopify {
   private applyVariantInputs(inputs: Array<Record<string, unknown>>, allowPartial: boolean) {
     const productVariants: Array<{ id: string; price: string; compareAtPrice: string | null }> = [];
     const userErrors: Array<{ field: string[]; message: string; code?: string }> = [];
+    const written = new Set<string>();
 
     if (!allowPartial) {
       inputs.forEach((input, index) => {
@@ -531,9 +542,16 @@ export class FakeShopify {
         price: variant.price,
         compareAtPrice: variant.compareAtPrice,
       });
+      written.add(variant.productGid);
     });
 
-    return { product: { updatedAt: this.storeNow() }, productVariants, userErrors };
+    // The write's version of the product, which is what the call answers with.
+    const updatedAt = this.storeNow();
+    for (const productGid of written) {
+      const product = this.products.get(productGid);
+      if (product) product.updatedAt = updatedAt;
+    }
+    return { product: { updatedAt }, productVariants, userErrors };
   }
 
   /**
@@ -1359,6 +1377,10 @@ export class FakeShopify {
       polls: 0,
       holdFor: this.pollsBeforeComplete,
       refusesLines: new Set(),
+      // Read now, published when it finishes. Shopify reads the store as it builds the
+      // file, over minutes on a large one, so a price written meanwhile can be missing from
+      // the file it publishes after that write (#1087).
+      read: this.catalogueLines(),
     };
     this.bulkOps.set(id, operation);
 
@@ -1428,11 +1450,11 @@ export class FakeShopify {
   }
 
   /**
-   * Publishes the store's catalogue as a bulk query over products writes it: one line per
-   * product, then one per variant carrying `__parentId`. Deleted variants are gone, as they
-   * are from Shopify.
+   * The store's catalogue as a bulk query over products writes it: one line per product,
+   * with its `updatedAt`, then one per variant carrying `__parentId`. Deleted variants are
+   * gone, as they are from Shopify.
    */
-  private finishQuery(operation: FakeBulkOperation): BulkOperationState {
+  private catalogueLines(): string[] {
     const lines: string[] = [];
     for (const product of this.products.values()) {
       const variants = [...this.variants.values()].filter((v) => v.productGid === product.productGid && !v.deleted);
@@ -1443,6 +1465,7 @@ export class FakeShopify {
           title: product.productGid,
           status: "ACTIVE",
           tags: product.tags,
+          updatedAt: product.updatedAt,
           isGiftCard: false,
         }),
       );
@@ -1458,7 +1481,12 @@ export class FakeShopify {
         );
       }
     }
+    return lines;
+  }
 
+  /** Publishes what a bulk query read when it was accepted. */
+  private finishQuery(operation: FakeBulkOperation): BulkOperationState {
+    const lines = operation.read ?? [];
     const { id } = operation.state;
     const url = this.blobs.put(`results/${id.split("/").at(-1)}`, lines.length > 0 ? `${lines.join("\n")}\n` : "");
     return { id, status: "COMPLETED", url: lines.length > 0 ? url : null, objectCount: String(lines.length) };

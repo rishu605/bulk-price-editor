@@ -8,11 +8,14 @@
  * This is the **paginated** path, which suits dev stores and small catalogues. The
  * bulk-query path (P1.1) is the one that matters at 500K variants, where the result
  * file has to be streamed rather than paged; that lands separately. Both write the
- * same rows, so everything downstream is unaffected by which ran.
+ * same rows, through the same writer (`writeCatalogRows`), so everything downstream is
+ * unaffected by which ran -- including the rule that a page read before a campaign settled
+ * its prices does not put the old ones back in the mirror (#1087).
  */
 
 import { carryShopifyCosts } from "./baselines.server";
-import prisma from "../db.server";
+import { writeCatalogRows } from "./catalog-write.server";
+import type { CatalogRow } from "../lib/catalog/bulk-jsonl";
 import { variantDisplayTitle } from "../lib/catalog/variant-title";
 import { parseMoney } from "../lib/money/money";
 import { isTimeZone } from "../lib/scheduling/zone-shift";
@@ -229,15 +232,27 @@ export async function syncCatalog(
         }
       }
 
+      // Read one at a time, so a price that does not parse costs that variant and not its
+      // product; then written together.
+      const rows: CatalogRow[] = [];
       for (const variant of variants) {
         try {
-          await upsertVariant(shopId, product, variant, collections, shopCurrency);
-          result.variants++;
+          rows.push(rowOf(product, variant, collections, shopCurrency));
         } catch (error) {
           result.errors.push(
             `${variant.id}: ${error instanceof Error ? error.message : String(error)}`,
           );
         }
+      }
+
+      try {
+        await writeCatalogRows(shopId, shopCurrency, rows);
+        result.variants += rows.length;
+      } catch (error) {
+        result.errors.push(
+          `${product.id}: ${rows.length === 1 ? "its variant" : `its ${rows.length} variants`} could not be written — ` +
+            `${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     }
 
@@ -332,24 +347,17 @@ async function remainingVariants(
   throw new Error("stopped after 40 pages of variants");
 }
 
-async function upsertVariant(
-  shopId: string,
+/** One variant as the page read it, as the mirror holds it. Throws on a price that does not parse. */
+function rowOf(
   product: ProductNode,
   variant: VariantNode,
   collections: string[],
   shopCurrency: string,
-): Promise<void> {
-  const price = variant.price ? parseMoney(variant.price, shopCurrency).amount : null;
-  const compareAt = variant.compareAtPrice
-    ? parseMoney(variant.compareAtPrice, shopCurrency).amount
-    : null;
-
+): CatalogRow {
   const unitCost = variant.inventoryItem?.unitCost;
-  const cost = unitCost?.amount
-    ? parseMoney(unitCost.amount, unitCost.currencyCode ?? shopCurrency).amount
-    : null;
 
-  const data = {
+  return {
+    variantGid: variant.id,
     productGid: product.id,
     sku: variant.sku ?? null,
     barcode: variant.barcode ?? null,
@@ -358,10 +366,9 @@ async function upsertVariant(
     // product photo is the common case, and showing nothing for it would make the
     // difference between "no photo" and "same photo as its siblings" invisible.
     imageUrl: variant.image?.url ?? product.featuredImage?.url ?? null,
-    price: price === null ? null : BigInt(price),
-    compareAt: compareAt === null ? null : BigInt(compareAt),
-    cost: cost === null ? null : BigInt(cost),
-    currency: shopCurrency,
+    price: variant.price ? parseMoney(variant.price, shopCurrency) : null,
+    compareAt: variant.compareAtPrice ? parseMoney(variant.compareAtPrice, shopCurrency) : null,
+    cost: unitCost?.amount ? parseMoney(unitCost.amount, unitCost.currencyCode ?? shopCurrency) : null,
     inventoryQty: variant.inventoryQuantity ?? null,
     status: mapStatus(product.status),
     vendor: product.vendor ?? null,
@@ -370,37 +377,7 @@ async function upsertVariant(
     collections,
     isGiftCard: product.isGiftCard === true,
     remoteUpdatedAt: product.updatedAt ? new Date(product.updatedAt) : null,
-    syncedAt: new Date(),
-    deletedAt: null,
   };
-
-  await prisma.variantIndex.upsert({
-    where: { shopId_variantGid: { shopId, variantGid: variant.id } },
-    create: { shopId, variantGid: variant.id, ...data },
-    update: data,
-  });
-
-  // Base-surface row, so the resolver and preview read every surface uniformly.
-  await prisma.priceSurfaceEntry.upsert({
-    where: {
-      shopId_variantGid_surfaceKind_priceListGid: {
-        shopId,
-        variantGid: variant.id,
-        surfaceKind: "BASE",
-        priceListGid: "",
-      },
-    },
-    create: {
-      shopId,
-      variantGid: variant.id,
-      surfaceKind: "BASE",
-      priceListGid: "",
-      currency: shopCurrency,
-      livePrice: data.price,
-      liveCompareAt: data.compareAt,
-    },
-    update: { livePrice: data.price, liveCompareAt: data.compareAt, syncedAt: new Date() },
-  });
 }
 
 function mapStatus(status?: string | null): "ACTIVE" | "ARCHIVED" | "DRAFT" {
