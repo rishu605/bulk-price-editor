@@ -89,6 +89,17 @@ describe("the page's counts (#759)", () => {
       "2,000 were already correct.",
     );
   });
+
+  // The page and Flow answer with this one sentence, wholesale prices included (#1092).
+  it("counts the wholesale prices recaptured with their quantity breaks, and names any left as they were", () => {
+    expect(recapturedMessage({ captured: 6, scope: 3, superseded: 6, alreadyCurrent: 0, wholesale: 1, wholesaleLeft: 0 })).toBe(
+      "Recaptured 6 baselines across 3 variants, superseding 6, including 1 wholesale price with its quantity breaks.",
+    );
+    expect(recapturedMessage({ captured: 3, scope: 3, superseded: 3, alreadyCurrent: 0, wholesale: 0, wholesaleLeft: 2 })).toBe(
+      "Recaptured 3 baselines across 3 variants, superseding 3. 2 wholesale prices were left as they were: " +
+        "their quantity breaks could not be read from Shopify. Recapture again to include them.",
+    );
+  });
 });
 
 describe("confirmationMatches", () => {

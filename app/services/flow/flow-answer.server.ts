@@ -29,6 +29,16 @@ import type { RunOutcome } from "../campaigns/types";
 export const FLOW_INLINE_ROWS = 2_000;
 
 /**
+ * How many Shopify reads a Flow capture may make for wholesale ladders before answering
+ * (#1092). A wholesale price is baselined with its quantity ladder or not at all, and the
+ * ladder is read from Shopify, 25 prices a read (`LADDER_READ_VARIANTS`). Four reads -- a
+ * hundred wholesale prices -- is a second or two on a Plus store, whose bucket and restore
+ * rate leave a read of this cost unthrottled, and B2B catalogues are a Plus feature. A
+ * scope needing more goes to the worker, as a large capture does.
+ */
+export const FLOW_INLINE_LADDER_READS = 4;
+
+/**
  * How long a Flow action may spend writing prices before answering (#790).
  *
  * Half of Flow's ten seconds, leaving the rest for authentication, planning and
