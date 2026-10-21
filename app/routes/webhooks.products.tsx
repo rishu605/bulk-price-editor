@@ -28,6 +28,8 @@ import { variantDisplayTitle } from "../lib/catalog/variant-title";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { logger } from "../lib/logging/logger";
+import { isKnownCurrency } from "../lib/money/currency";
+import { fetchShopCurrency, type GraphQLRunner } from "../services/catalog-sync.server";
 import { parseMoney } from "../lib/money/money";
 import { checkForDrift, ourEchoes } from "../services/drift.server";
 import { newerInMirror } from "../services/mirror-version.server";
@@ -101,7 +103,14 @@ export const action = recordedWebhook(async ({ request }: ActionFunctionArgs) =>
     })
   )._max.remoteUpdatedAt;
   const staleDelivery = !!(remoteUpdatedAt && newestApplied && newestApplied > remoteUpdatedAt);
-  const currency = await currencyFor(shop.id);
+  const currency = await currencyFor(shop.id, admin ?? null);
+  // Nothing mirrored and Shopify not saying (#1101): it used to be US dollars, so a yen
+  // store's ¥1,200 product was recorded as $1,200.00, and enrolment captured baselines from
+  // it. Left for the first sync, which reads the store's currency before any price.
+  if (!currency) {
+    logger.info("products webhook before the store's currency is known: left for the sync", { shop: shopDomain, productGid });
+    return new Response();
+  }
 
   // Asked of Shopify before any variant is mirrored, so the enrolment below never sees
   // a new gift card as an ordinary product (#689). Undefined leaves the column alone.
@@ -290,12 +299,24 @@ function safeMinor(value: string | null | undefined, currency: string): bigint |
   }
 }
 
-async function currencyFor(shopId: string): Promise<string> {
+/**
+ * The store's currency: a mirrored variant's, or Shopify's own when nothing is mirrored yet --
+ * before the first sync, or on a store the sync refused (#1089). Null when neither says, and
+ * never a guess (#1101). A currency Anchor has no precision for is not one it can mirror.
+ */
+async function currencyFor(shopId: string, admin: GraphQLRunner | null): Promise<string | null> {
   const row = await prisma.variantIndex.findFirst({
     where: { shopId, currency: { not: null } },
     select: { currency: true },
   });
-  return row?.currency ?? "USD";
+  if (row?.currency) return row.currency;
+  if (!admin) return null;
+  try {
+    const currency = await fetchShopCurrency(admin);
+    return currency && isKnownCurrency(currency) ? currency : null;
+  } catch {
+    return null;
+  }
 }
 
 function mapStatus(status?: string | null): "ACTIVE" | "ARCHIVED" | "DRAFT" {

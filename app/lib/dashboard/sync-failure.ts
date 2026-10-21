@@ -39,6 +39,18 @@ export function unpricedCurrencyFailure(currency: string): string {
   );
 }
 
+/**
+ * The sentence for a sync that could not learn the store's currency from Shopify at all
+ * (#1101). Usually a failed request: it read nothing rather than guess one.
+ */
+export function unstatedCurrencyFailure(): string {
+  return (
+    "Anchor couldn't read your store's currency from Shopify, so it read none of your products rather than " +
+    "guess one, and nothing in your store was changed. This is usually brief: sync again from here in a few " +
+    `minutes, and if it keeps happening, write to ${SUPPORT_ADDRESS}.`
+  );
+}
+
 /** Which heading Home puts over the sync's failure sentence. */
 export function syncFailureHeading(failure: string): string {
   return failure.startsWith(OPENING) ? UNPRICED_CURRENCY_HEADING : SYNC_STOPPED_HEADING;

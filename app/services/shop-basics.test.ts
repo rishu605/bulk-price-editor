@@ -63,8 +63,9 @@ describe("recognising a development store", () => {
   it("says it does not know the zone rather than guessing UTC (#799)", async () => {
     // "UTC" here was recorded on the shop as if Shopify had said it, and every time typed
     // in the editor was then converted in it: a 9 AM New York sale opened at 4 AM.
+    // Nor the currency (#1101): "USD" synced a yen store's ¥1,200 as $1,200.00.
     const basics = await fetchShopBasics(runner({}));
-    expect(basics).toEqual({ currency: "USD", timezone: null, developerStore: false });
+    expect(basics).toEqual({ currency: null, timezone: null, developerStore: false });
   });
 
   it("does not pass on a zone nothing can convert in", async () => {
