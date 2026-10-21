@@ -40,7 +40,7 @@ describe("chaos: tags after a run that did not finish them", () => {
         expect(claim.alreadyPresent, "the campaign's own tag was recorded as the merchant's").toEqual([]);
         expect(claim.addedTags).toEqual(["SALE"]);
       }
-      expect(resumed.messages.join("\n")).not.toMatch(/already on their products and were left as they are/);
+      expect(resumed.messages.join("\n")).not.toMatch(/already on (their products|its product) and (were|was) left as/);
     });
   });
 
