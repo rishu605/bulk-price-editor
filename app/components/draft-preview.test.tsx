@@ -161,13 +161,20 @@ describe("the states that are not a table", () => {
 
   it("reports a guardrail that would stop the whole run", () => {
     const html = render(
-      preview({ blocked: { reason: "below-floor", variantGid: "gid://shopify/ProductVariant/9" } }),
+      preview({
+        blocked: {
+          reason: "below-floor",
+          variantGid: "gid://shopify/ProductVariant/9",
+          message: `A guardrail set to block the whole campaign would stop it before anything is written: "Gloves · L" would be $0.33, under its $10.00 floor.`,
+        },
+      }),
     );
 
-    expect(html).toContain("below your");
-    expect(html, "the merchant needs to know nothing at all would be written").toContain(
-      "Nothing would",
-    );
+    // The service's sentence, as it wrote it (#1076): never the raw id or the code.
+    expect(html).toContain("would stop it before anything is written");
+    expect(html).toContain("Gloves · L");
+    expect(html).not.toContain("gid://");
+    expect(html).not.toContain("below-floor");
   });
 
   it("explains every row that will not move", () => {

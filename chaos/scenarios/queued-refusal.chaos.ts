@@ -141,7 +141,7 @@ describe("chaos: a queued run refused before it starts", () => {
       expect(started.message).toMatch(/background worker is applying it/);
 
       const failed = await work();
-      expect(failed?.message).toMatch(/blocked by a guardrail/);
+      expect(failed?.message).toMatch(/^A guardrail stopped this run before anything was written: "/);
       expect((await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } })).status).toBe("DRAFT");
       expect(chaos.fake.writeLog).toHaveLength(0);
 

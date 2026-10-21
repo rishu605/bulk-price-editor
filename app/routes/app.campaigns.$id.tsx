@@ -337,11 +337,7 @@ export default function CampaignDetail() {
 
       {preview.blocked ? (
         <s-banner tone="critical">
-          <s-paragraph>
-            Blocked by a guardrail on {preview.blocked.variantGid}:{" "}
-            {preview.blocked.reason}. No prices were changed — a blocking guardrail
-            stops the whole run, not just the offending variant.
-          </s-paragraph>
+          <s-paragraph>{preview.blocked.message}</s-paragraph>
         </s-banner>
       ) : null}
       {/* A stored rule the run refuses, in the run's own words (#818). */}

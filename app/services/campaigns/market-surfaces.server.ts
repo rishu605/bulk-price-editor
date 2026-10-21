@@ -52,6 +52,7 @@ import { inChunks } from "../../lib/db/chunk";
 import { tallyStatuses } from "../../lib/campaigns/run-result";
 import type { PlannedRow } from "../../lib/planning/types";
 import { marketsHandedTo } from "./handover.server";
+import { describeBlocked } from "./blocked.server";
 import { mirrorMarketDelete, mirrorMarketWrite } from "./mirror.server";
 
 /** Which surfaces a campaign writes to. Stored on the campaign as JSON. */
@@ -365,9 +366,8 @@ export async function applyMarketSurfaces(
         verified: 0,
         failed: 0,
         chunks: 0,
-        messages: [
-          `${priceListLabel(list)}: a guardrail stopped this market before anything was written (${outcome.reason}).`,
-        ],
+        // By name, as the base surface's refusal is (#1076), never the reason code.
+        messages: [`${priceListLabel(list)}: ${await describeBlocked(shopId, outcome.blocked, "run")}`],
         path: "per-product",
       });
       continue;

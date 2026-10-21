@@ -22,6 +22,7 @@ import { equals, type Money } from "../money/money";
 import { resolve } from "../pricing/resolver";
 import type { Resolution } from "../pricing/types";
 import type {
+  BlockedVariant,
   PlanCandidate,
   PlanCounts,
   PlanCoverage,
@@ -84,6 +85,7 @@ export function planRun(input: PlanInput): PlanOutcome {
   // and keeps the failure mode out of the executor entirely. First occurrence wins,
   // so the result stays deterministic.
   const seen = new Set<string>();
+  const blocked: BlockedVariant[] = [];
 
   for (const candidate of candidates) {
     const key = refKey(candidate.ref);
@@ -150,14 +152,17 @@ export function planRun(input: PlanInput): PlanOutcome {
     if (onBase && resolution.meta.controlledBy) won(resolution.meta.controlledBy, applicable);
 
     // A blocking policy stops the whole run. Returning partial rows here would let
-    // a caller write some of them, which is exactly what "block" must prevent.
+    // a caller write some of them, which is exactly what "block" must prevent. Every
+    // blocked variant is collected first (#1076), so the merchant fixes them in one go
+    // rather than one at a time; no row is returned while any is blocked.
     if (resolution.meta.outcome === "blocked") {
-      return {
-        kind: "blocked",
-        reason: resolution.meta.reason ?? "below-floor",
+      blocked.push({
         ref: candidate.ref,
-        counts,
-      };
+        reason: resolution.meta.reason ?? "below-floor",
+        ...(resolution.meta.unroundedPrice ? { wouldBe: resolution.meta.unroundedPrice } : {}),
+        ...(resolution.meta.floor ? { floor: resolution.meta.floor } : {}),
+      });
+      continue;
     }
 
     if (resolution.meta.outcome === "skipped") {
@@ -220,6 +225,9 @@ export function planRun(input: PlanInput): PlanOutcome {
     if (resolution.meta.clamped && resolution.meta.reason === "non-positive-price") counts.clampedToMinimum++;
   }
 
+  if (blocked.length > 0) {
+    return { kind: "blocked", reason: blocked[0].reason, ref: blocked[0].ref, counts, blocked };
+  }
   return { kind: "ok", rows, counts, coverage: [...coverage.values()], unchanged };
 }
 
