@@ -288,6 +288,35 @@ describe("a practice campaign is never offered a way to apply", () => {
   });
 });
 
+describe("a practice campaign offers its way to a real one (#1077)", () => {
+  const html = render(<CampaignHeader {...props({ practice: true, canApply: false })} />);
+  const row = html.split("<s-modal")[0];
+  /** The form that posts a real copy, from its opening tag to its close. */
+  const form = /<form[^>]*>(?:(?!<\/form>)[\s\S])*?value="real-copy"[\s\S]*?<\/form>/.exec(row)?.[0] ?? "";
+
+  it("makes the real copy the one black button, posting the intent the page's action answers", () => {
+    expect(form, "no form posts a real copy").toMatch(/method="post"/);
+    expect(form).toMatch(/<s-button[^>]*type="submit"[^>]*variant="primary"[^>]*>Make a real copy<\/s-button>/);
+    expect((row.match(/variant="primary"/g) ?? []).length).toBe(1);
+  });
+
+  it("points the banner's sentence at it, instead of at rebuilding the campaign", () => {
+    expect(row).toMatch(/<s-banner tone="info">[\s\S]*This is a practice campaign\.[\s\S]*Make a real copy[\s\S]*<\/s-banner>/);
+    expect(html).not.toMatch(/Create a real campaign with the same scope and rule/);
+  });
+
+  it("is not offered on a real campaign, which has Apply and Duplicate", () => {
+    const real = render(<CampaignHeader {...props()} />);
+    expect(real).not.toContain("Make a real copy");
+    expect(real).not.toContain('value="real-copy"');
+    expect(real).not.toContain("This is a practice campaign");
+  });
+
+  it("keeps Duplicate in the menu, which still copies the practice flag (#762)", () => {
+    expect(html).toMatch(/<s-menu[\s\S]*>Duplicate<\/s-button>/);
+  });
+});
+
 describe("a revert with edits to decide about points at the decision", () => {
   const drifted = {
     straightforward: false,
