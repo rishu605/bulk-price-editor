@@ -51,6 +51,21 @@ export function describeMovedMarket(market: string, count: number): string[] {
   ];
 }
 
+/**
+ * The variants a market is not priced for because its percentage has moved since their price
+ * there was recorded, and the price on them now is a campaign's, which hides the new regular
+ * price (#1093). Priced from the old one, a sale could land above what the market charges.
+ */
+export function describeStaleSettingMarket(market: string, count: number): string[] {
+  if (count === 0) return [];
+  const variants = `${count} ${count === 1 ? "variant" : "variants"}`;
+  return [
+    `${market}: ${variants} not priced separately. This market's percentage has changed since ${count === 1 ? "its" : "their"} ` +
+      `price here was recorded, and the price on ${count === 1 ? "it" : "them"} now is a campaign's, so the new regular price ` +
+      `can't be read yet. Revert the campaign and apply it again to price ${count === 1 ? "it" : "them"} at the market's new setting.`,
+  ];
+}
+
 export function describeMarketSkips(
   market: string,
   currency: string,

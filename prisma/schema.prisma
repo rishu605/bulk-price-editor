@@ -294,6 +294,13 @@ model Baseline {
   /// every baseline captured before this -- which a revert treats as derived.
   handSet Boolean?
 
+  /// A derived market baseline only: the list's percentage, in basis points, when the price
+  /// was read (#1093). A list whose percentage has moved since has a different regular
+  /// price, and a campaign computing from this one would discount the old setting -- a
+  /// 20%-off sale written above the market's new 30%-off price. Null for a fixed price, and
+  /// for every derived baseline captured before this, which is read again when it can be.
+  listAdjustmentBps Int?
+
   source     BaselineSource
   capturedAt DateTime       @default(now())
   capturedBy String?
