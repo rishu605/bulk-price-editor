@@ -301,6 +301,12 @@ model Baseline {
   /// for every derived baseline captured before this, which is read again when it can be.
   listAdjustmentBps Int?
 
+  /// A wholesale baseline only: whether the catalogue's quantity ladder was read when this was
+  /// captured (#1103). True with `quantityBreaks` null means "the merchant had none". Null
+  /// means nobody looked -- every wholesale baseline a campaign captured while each ladder read
+  /// failed -- which a tiered revert must not take for "none" and clear the merchant's ladder.
+  ladderRead Boolean?
+
   source     BaselineSource
   capturedAt DateTime       @default(now())
   capturedBy String?

@@ -43,7 +43,7 @@ import {
 } from "../../lib/execution/market-executor";
 import type { AdminClient } from "../../lib/execution/sync-executor";
 import type { ResolvableCampaign } from "../../lib/pricing/types";
-import { describeMarketSkips, describeMovedMarket, describeStaleSettingMarket } from "../../lib/markets/guardrails";
+import { describeLadderUnread, describeMarketSkips, describeMovedMarket, describeStaleSettingMarket } from "../../lib/markets/guardrails";
 import { logger } from "../../lib/logging/logger";
 import { metric } from "../../lib/telemetry/metrics";
 import { LANDED } from "../../lib/execution/landed";
@@ -147,7 +147,12 @@ export async function captureMarketBaselinesFirst(
 
   for (const list of lists) {
     try {
-      await marketBaselines(shopId, list, [...variantGids], client);
+      const { ladderUnread } = await marketBaselines(shopId, list, [...variantGids], client);
+      // Not recorded, so not priced: said once, here, and kept out of the market step (#1103).
+      if (ladderUnread) {
+        messages.push(...describeLadderUnread(priceListLabel(list), true));
+        refused.push(list.priceListGid);
+      }
     } catch (error) {
       if (!(error instanceof UnconvertedMarketError)) throw error;
       messages.push(error.message);
@@ -351,6 +356,7 @@ export async function applyMarketSurfaces(
       ...describeMarketSkips(priceListLabel(list), list.currency, outcome.rows, plan.inStoreCurrency),
       ...describeMovedMarket(priceListLabel(list), plan.moved.length),
       ...describeStaleSettingMarket(priceListLabel(list), plan.stale.length),
+      ...describeLadderUnread(priceListLabel(list), plan.ladderUnread),
     ];
 
     if (rows.length === 0) {

@@ -70,6 +70,11 @@ export interface MarketPlan {
    */
   stale: string[];
   /**
+   * A wholesale catalogue whose quantity ladders could not be read, so its prices were not
+   * recorded and it is not priced this time (#1103).
+   */
+  ladderUnread: boolean;
+  /**
    * The market is priced in the store's own currency, so recorded costs and the store's
    * minimum price apply to it as they do to the base price. In any other currency they
    * cannot be checked, and a cost-based guardrail leaves the market's rows alone.
@@ -112,8 +117,8 @@ export async function planMarket(
   campaigns: readonly ResolvableCampaign[],
   client: AdminClient,
 ): Promise<MarketPlan | null> {
-  const { prices: baselines, compareAts, moved, stale } = await marketBaselines(shopId, list, [...variantGids], client);
-  if (baselines.size === 0 && moved.length === 0 && stale.length === 0) return null;
+  const { prices: baselines, compareAts, moved, stale, ladderUnread } = await marketBaselines(shopId, list, [...variantGids], client);
+  if (baselines.size === 0 && moved.length === 0 && stale.length === 0 && !ladderUnread) return null;
 
   const inStoreCurrency = list.currency === (await shopCurrency(shopId));
   const costs = inStoreCurrency ? await recordedCosts(shopId, list.currency, [...baselines.keys()]) : new Map();
@@ -146,7 +151,7 @@ export async function planMarket(
     })),
   });
 
-  return { shopId, list, baselines, outcome, moved, stale, inStoreCurrency };
+  return { shopId, list, baselines, outcome, moved, stale, ladderUnread, inStoreCurrency };
 }
 
 /** Each variant's recorded cost, the way the base surface reads it: baseline first, then mirror. */
@@ -320,7 +325,7 @@ export async function marketBaselines(
   list: MarketList,
   variantGids: string[],
   client: AdminClient,
-): Promise<{ prices: Map<string, Money>; compareAts: Map<string, Money>; moved: string[]; stale: string[] }> {
+): Promise<{ prices: Map<string, Money>; compareAts: Map<string, Money>; moved: string[]; stale: string[]; ladderUnread: boolean }> {
   const stored = await prisma.baseline.findMany({
     where: {
       shopId,
@@ -329,19 +334,18 @@ export async function marketBaselines(
       supersededAt: null,
       variantGid: { in: variantGids },
     },
-    select: { id: true, variantGid: true, basePrice: true, baseCompareAt: true, currency: true, handSet: true, listAdjustmentBps: true },
+    select: { id: true, variantGid: true, basePrice: true, baseCompareAt: true, currency: true, handSet: true, listAdjustmentBps: true, ladderRead: true },
   });
 
   // Read again when the list's percentage has moved since (#1093), as far as it can be.
   const { refresh, unreadable } = await staleSetting(shopId, list, stored);
-  if (refresh.length > 0) {
-    await prisma.baseline.updateMany({
-      where: { id: { in: refresh.map((row) => row.id) }, supersededAt: null },
-      data: { supersededAt: new Date() },
-    });
-  }
+  // Retired by the capture below, in the transaction that records each one's replacement: a
+  // capture that fails -- Shopify unreachable, a ladder unread (#1103) -- keeps the old one.
+  const supersedes = new Map(refresh.map((row) => [row.variantGid, row.id]));
   const dropped = new Set([...refresh, ...unreadable].map((row) => row.variantGid));
   const current = stored.filter((row) => !dropped.has(row.variantGid));
+  // Wholesale baselines recorded before anyone read their ladder (#1103): read once now.
+  if (!list.contextCountry) await readUnreadLadders(shopId, list, current, client);
 
   const out = new Map<string, Money>(
     current.map((row) => [
@@ -360,21 +364,22 @@ export async function marketBaselines(
   const stale = unreadable.map((row) => row.variantGid);
   const unread = new Set(stale);
   const missing = variantGids.filter((gid) => !out.has(gid) && !unread.has(gid));
-  if (missing.length === 0) return { prices: out, compareAts, moved: [], stale };
+  if (missing.length === 0) return { prices: out, compareAts, moved: [], stale, ladderUnread: false };
 
   const moved = await movedSinceBaseline(shopId, list, missing);
-  const captured = await captureMarketBaselines(
+  const { captured, ladderUnread } = await captureMarketBaselines(
     shopId,
     list,
     missing.filter((gid) => !moved.has(gid)),
     client,
+    supersedes,
   );
   for (const [variantGid, baseline] of captured) {
     out.set(variantGid, baseline.price);
     if (baseline.compareAt) compareAts.set(variantGid, baseline.compareAt);
   }
 
-  return { prices: out, compareAts, moved: [...moved], stale };
+  return { prices: out, compareAts, moved: [...moved], stale, ladderUnread };
 }
 
 /**
@@ -510,6 +515,63 @@ async function movedSinceBaseline(
 }
 
 /**
+ * Reads the ladder of wholesale baselines recorded without one being read (#1103).
+ *
+ * Until #704 every ladder read failed, and a campaign's capture recorded "no ladder" anyway,
+ * so every wholesale baseline a campaign captured says so without anyone having looked. Read
+ * once, as each catalogue is next planned, and stamped. Not where a campaign's ladder is on the
+ * catalogue and not taken back: that one is the campaign's, not the merchant's. A read that
+ * fails leaves them unknown, which the tiered revert holds back rather than clearing on.
+ */
+async function readUnreadLadders(
+  shopId: string,
+  list: MarketList,
+  rows: ReadonlyArray<{ id: string; variantGid: string; ladderRead: boolean | null }>,
+  client: AdminClient,
+): Promise<void> {
+  const unread = rows.filter((row) => row.ladderRead !== true);
+  if (unread.length === 0) return;
+
+  const written = await inChunks(
+    unread.map((row) => row.variantGid),
+    (batch) =>
+      prisma.variantChange.findMany({
+        where: {
+          shopId,
+          priceListGid: list.priceListGid,
+          variantGid: { in: batch },
+          quantityBreaks: { not: Prisma.DbNull },
+          // Still on the catalogue: written and not taken back, whatever state its campaign is in.
+          status: { in: ["WRITING", "APPLIED", ...LANDED] },
+          run: { kind: { not: "REVERT" } },
+        },
+        select: { variantGid: true },
+        distinct: ["variantGid"],
+      }),
+  );
+  const campaigns = new Set(written.map((row) => row.variantGid));
+  const toRead = unread.filter((row) => !campaigns.has(row.variantGid));
+  if (toRead.length === 0) return;
+
+  const ladders = await captureLadders(client, list, toRead.map((row) => row.variantGid));
+  if (ladders === null) return;
+  for (let i = 0; i < toRead.length; i += 500) {
+    await prisma.$transaction(
+      toRead.slice(i, i + 500).map((row) =>
+        prisma.baseline.update({
+          where: { id: row.id },
+          data: {
+            ladderRead: true,
+            // Cast at the boundary, as the capture's write is: `serialiseLadder` is the check.
+            quantityBreaks: (serialiseLadder(ladders.get(row.variantGid) ?? []) as unknown as Prisma.InputJsonValue | null) ?? Prisma.DbNull,
+          },
+        }),
+      ),
+    );
+  }
+}
+
+/**
  * Variants whose store price a campaign that may still be live has written, by the ledger
  * (#1093). The mirror catches up only as a run settles, so mid-run it can still show the price
  * from before the run's own write -- and a market price read then would be the sale's, derived,
@@ -557,11 +619,13 @@ async function captureLadders(
   client: AdminClient,
   list: MarketList,
   variantGids: readonly string[],
-): Promise<Map<string, LadderRung[]>> {
+): Promise<Map<string, LadderRung[]> | null> {
+  // Null when the read failed (#1103): not an empty map, which says "no ladder", and which the
+  // tiered revert acts on by clearing the merchant's quantity breaks.
   try {
     return await readBaselineLadders(client, list.priceListGid, list.currency, variantGids);
   } catch {
-    return new Map();
+    return null;
   }
 }
 
@@ -602,7 +666,9 @@ async function captureMarketBaselines(
   list: MarketList,
   variantGids: string[],
   client: AdminClient,
-): Promise<Map<string, { price: Money; compareAt?: Money }>> {
+  /** Current baselines these replace, by variant (#1093): retired as their replacements are recorded. */
+  supersedes: ReadonlyMap<string, string> = new Map(),
+): Promise<{ captured: Map<string, { price: Money; compareAt?: Money }>; ladderUnread: boolean }> {
   const found = new Map<string, Money>();
   // Which of those prices the merchant set by hand on the list, for the revert (#930).
   const handSet = new Set<string>();
@@ -712,37 +778,56 @@ async function captureMarketBaselines(
   // market price list has no concept of ordering twelve.
   const ladders = list.contextCountry
     ? new Map<string, LadderRung[]>()
-    : await captureLadders(client, list, [...found.keys()]);
+    : found.size > 0
+      ? await captureLadders(client, list, [...found.keys()])
+      : new Map<string, LadderRung[]>();
+  // A catalogue whose ladders could not be read is left uncaptured, and said (#1103): a
+  // baseline recorded now would claim "no ladder" without anyone having looked, the sync
+  // would never correct it (it skips a price that has a baseline), and a tiered revert would
+  // clear the merchant's quantity breaks on it. The next run reads it again.
+  if (ladders === null) return { captured: new Map(), ladderUnread: true };
 
   if (found.size > 0) {
-    await prisma.baseline.createMany({
-      data: [...found].map(([variantGid, price]) => ({
-        shopId,
-        variantGid,
-        surfaceKind: "MARKET" as const,
-        priceListGid: list.priceListGid,
-        currency: price.currency,
-        basePrice: BigInt(price.amount),
-        baseCompareAt: minorUnits(compareAts.get(variantGid)),
-        // Null for the great majority: most wholesale variants have a single price, and
-        // null says "no ladder" rather than "we did not look".
-        // Cast at the boundary: Prisma's JSON input type is structurally strict and the
-        // shape is already validated by `serialiseLadder`, which is the check that matters.
-        quantityBreaks: (serialiseLadder(ladders.get(variantGid) ?? []) ??
-          undefined) as Prisma.InputJsonValue | undefined,
-        handSet: handSet.has(variantGid),
-        // The setting a derived price was read at (#1093); a fixed price has none to go stale.
-        listAdjustmentBps: handSet.has(variantGid) ? null : list.adjustmentBps,
-        source: "AUTO_ENROLL" as const,
-      })),
-      skipDuplicates: true,
+    const retiring = [...found.keys()].map((gid) => supersedes.get(gid)).filter((id): id is string => Boolean(id));
+    // One transaction: an old baseline is retired only as its replacement is recorded.
+    await prisma.$transaction(async (tx) => {
+      if (retiring.length > 0) {
+        await tx.baseline.updateMany({ where: { id: { in: retiring }, supersededAt: null }, data: { supersededAt: new Date() } });
+      }
+      await tx.baseline.createMany({
+        data: [...found].map(([variantGid, price]) => ({
+          shopId,
+          variantGid,
+          surfaceKind: "MARKET" as const,
+          priceListGid: list.priceListGid,
+          currency: price.currency,
+          basePrice: BigInt(price.amount),
+          baseCompareAt: minorUnits(compareAts.get(variantGid)),
+          // Null for the great majority: most wholesale variants have a single price, and
+          // null says "no ladder" rather than "we did not look".
+          // Cast at the boundary: Prisma's JSON input type is structurally strict and the
+          // shape is already validated by `serialiseLadder`, which is the check that matters.
+          quantityBreaks: (serialiseLadder(ladders.get(variantGid) ?? []) ??
+            undefined) as Prisma.InputJsonValue | undefined,
+          handSet: handSet.has(variantGid),
+          // The setting a derived price was read at (#1093); a fixed price has none to go stale.
+          listAdjustmentBps: handSet.has(variantGid) ? null : list.adjustmentBps,
+          // A wholesale catalogue's ladder was read, whatever it held (#1103).
+          ladderRead: list.contextCountry ? null : true,
+          source: "AUTO_ENROLL" as const,
+        })),
+        skipDuplicates: true,
+      });
     });
   }
 
   // A variant Shopify has no price for on this market is left out rather than guessed
   // at. It simply is not priced there, which the run reports — the alternative is
   // inventing a reference price and writing a real one on top of it.
-  return new Map([...found].map(([variantGid, price]) => [variantGid, { price, compareAt: compareAts.get(variantGid) }]));
+  return {
+    captured: new Map([...found].map(([variantGid, price]) => [variantGid, { price, compareAt: compareAts.get(variantGid) }])),
+    ladderUnread: false,
+  };
 }
 
 function minorUnits(value: Money | undefined): bigint | null {
