@@ -142,9 +142,12 @@ describe("the editor's preview says what it found", () => {
     expect(region(panel(preview({ ruleProblem: "Enter an amount for the rule." }))).text).toBe(
       "Enter an amount for the rule.",
     );
-    expect(region(panel(preview({ blocked: { reason: "floor", variantGid: "gid://shopify/ProductVariant/9" } }))).text).toContain(
-      "below your floor",
-    );
+    const blocked = "Cotton tee · M would be priced $8.00, below its floor of $10.00. Nothing would be written.";
+    expect(
+      region(panel(preview({ blocked: { reason: "floor", variantGid: "gid://shopify/ProductVariant/9", message: blocked } })))
+        .text,
+      "the banner's own sentence, which names the variant (#1076)",
+    ).toBe(blocked);
     expect(region(panel(preview({ matched: 0, changing: 0, rows: [] }))).text).toBe("Nothing matches this scope.");
     expect(
       region(panel(preview({ matched: 0, changing: 0, rows: [], leftOutByStatus: 3 }))).text,

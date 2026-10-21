@@ -55,9 +55,8 @@ export function DraftPreview(props: DraftPreviewProps) {
 export function previewAnnouncement(preview: Preview | null, pending: boolean): string {
   if (pending || !preview) return "";
   if (preview.ruleProblem) return preview.ruleProblem;
-  if (preview.blocked) {
-    return "This rule would price a variant below your floor, and your guardrail setting is to stop, so nothing would be written.";
-  }
+  // The banner's own sentence, which names each variant, its price and its floor (#1076).
+  if (preview.blocked) return preview.blocked.message;
 
   const notice = preview.catalogue ? catalogueNotice(preview.catalogue) : null;
   if (notice) return `${notice.title}.`;
