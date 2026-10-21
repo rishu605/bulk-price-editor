@@ -175,7 +175,7 @@ jobs:
         run: npx prisma generate
 
       - name: No price table clips a number at narrow widths
-        run: npx tsx scripts/measure-narrow-tables.ts
+        run: npx tsx scripts/measure-narrow-tables.ts --no-sandbox
 
   chaos-shard:
     name: Chaos scenarios (${{ matrix.shard }}/4)

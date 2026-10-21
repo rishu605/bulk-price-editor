@@ -137,11 +137,12 @@ export class FakeShopify {
    * null, which a real store never does, to model a read that tells Anchor nothing.
    */
   shopTimezone: string | null = "UTC";
-  /** Whether the store is a partner development store (#713); null as if Shopify did not say. */
+  /**
+   * Whether the store is a partner development store, as `shop.plan.partnerDevelopment` says
+   * (#713, #1081); null as if Shopify did not say. False by default, as a fixture's shop is on
+   * its real plan: the scheduler's daily check would otherwise make every fixture exempt.
+   */
   partnerDevelopment: boolean | null = false;
-
-  /** Whether the store is a development store, as `shop.plan.partnerDevelopment` says. */
-  partnerDevelopment = true;
 
   /**
    * Stores a different price than the one requested, and reports the stored one.
@@ -391,7 +392,8 @@ export class FakeShopify {
     if (query.includes("AnchorContextualPrices")) {
       return this.contextualPrices(variables) as { data?: T; extensions?: { cost?: QueryCost } };
     }
-    // The shop's basics, as the sync and the daily development-store check ask (#713).
+    // The shop's basics: the catalogue sync's first read (#1081), and the daily
+    // development-store check (#713).
     // `partnerDevelopment` null answers with no plan at all, as a failed field would.
     if (query.includes("AnchorShopCurrency")) {
       return {
@@ -408,19 +410,6 @@ export class FakeShopify {
     if (query.includes("AnchorShopTimezone")) {
       return {
         data: { shop: { ianaTimezone: this.shopTimezone } },
-        extensions: this.cost(1),
-      } as { data?: T; extensions?: { cost?: QueryCost } };
-    }
-    // The catalogue sync's first read: the shop's currency, zone and plan.
-    if (query.includes("AnchorShopCurrency")) {
-      return {
-        data: {
-          shop: {
-            currencyCode: this.shopCurrency,
-            ianaTimezone: this.shopTimezone,
-            plan: { partnerDevelopment: this.partnerDevelopment },
-          },
-        },
         extensions: this.cost(1),
       } as { data?: T; extensions?: { cost?: QueryCost } };
     }
