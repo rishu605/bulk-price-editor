@@ -503,7 +503,8 @@ async function executeCampaignRun(
       code: "VALIDATION",
       userMessage:
         "This is a practice campaign, so it cannot be applied — that is the point of it. " +
-        "Create a real campaign with the same scope and rule when you are ready.",
+        // The page's button for it (#1077), where this told the merchant to rebuild it.
+        "When you are ready, Make a real copy on its page: a draft with the same scope and rule, which can be applied.",
       context: { campaignId },
     });
   }

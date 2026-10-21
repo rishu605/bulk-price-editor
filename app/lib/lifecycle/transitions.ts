@@ -230,8 +230,11 @@ export function describeState(
         return {
           label: "Draft",
           tone: STATE_TONE.DRAFT,
+          // Pointing at the page's button, which makes the real one (#1077): the merchant
+          // was told to create it and rebuilt the scope and rule by hand.
           explanation:
-            "A practice campaign. Nothing has been written to your storefront, and nothing ever will be: a practice campaign is never applied.",
+            "A practice campaign. Nothing has been written to your storefront, and nothing ever will be: a practice campaign is never applied. " +
+            "To run this sale, Make a real copy: a draft with the same scope and rule, which you can apply.",
         };
       }
       return {

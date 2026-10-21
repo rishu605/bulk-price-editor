@@ -163,6 +163,12 @@ describe("a practice campaign's status (#759)", () => {
     expect(practice.nextAction).toBeUndefined();
   });
 
+  it("names the action that makes a real campaign of it (#1077)", () => {
+    // Not "create a real campaign with the same scope and rule": the page has a button that
+    // does exactly that, and the merchant was rebuilding the campaign by hand.
+    expect(describeState("DRAFT", { practice: true }).explanation).toMatch(/Make a real copy/);
+  });
+
   it("leaves a real draft's explanation and its Apply alone", () => {
     expect(describeState("DRAFT").explanation).toContain("until you apply it");
     expect(describeState("DRAFT", { practice: false }).nextAction?.intent).toBe("apply");

@@ -343,22 +343,10 @@ export default function CampaignDetail() {
       {/* A stored rule the run refuses, in the run's own words (#818). */}
       {preview.refused ? <s-banner tone="critical"><s-paragraph>{preview.refused}</s-paragraph></s-banner> : null}
 
-      {/* Up here with the other banners rather than inside the actions, which is where
-          it was. It qualifies the whole page — nothing on it will ever write a price —
-          not the row of buttons it happened to sit above. */}
-      {practice ? (
-        <s-banner tone="info">
-          <s-paragraph>
-            This is a practice campaign. The preview is exactly what would happen, and
-            nothing has been or will be written to your storefront. Create a real
-            campaign with the same scope and rule when you are ready.
-          </s-paragraph>
-        </s-banner>
-      ) : null}
-
       {/* Status and what to do about it, above the tabs and visible in every state.
           PARTIAL and HELD are the product's whole trust proposition; putting them inside
-          a tab would be hiding exactly the states that must not be hidden. */}
+          a tab would be hiding exactly the states that must not be hidden. The practice
+          banner opens it, beside the button it names (#1077). */}
       <CampaignHeader {...detail} />
 
       <CampaignTabs tabs={tabs} current={tab} />

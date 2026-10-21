@@ -17,7 +17,7 @@ const { prisma } = vi.hoisted(() => ({
 }));
 vi.mock("../../db.server", () => ({ default: prisma }));
 
-import { duplicateCampaign, setArchived, setNote } from "./housekeeping.server";
+import { duplicateCampaign, housekeepingAction, setArchived, setNote } from "./housekeeping.server";
 import { astOf, isPractice, segmentIdOf } from "./model.server";
 
 const SOURCE = {
@@ -149,6 +149,67 @@ describe("duplicating a campaign", () => {
       entityId: "copy-1",
       after: { from: "c1" },
     });
+  });
+});
+
+describe("a practice campaign's real copy (#1077)", () => {
+  /** What the page's action does with a press, as its form posts it. */
+  const press = (intent: string) =>
+    housekeepingAction("shop", "c1", "ada", new Map([["intent", intent]]) as unknown as FormData);
+  /** A record less some of its keys. */
+  const without = (record: Record<string, unknown>, ...keys: string[]) =>
+    Object.fromEntries(Object.entries(record).filter(([key]) => !keys.includes(key)));
+
+  it("is the same copy, without the practice flag", async () => {
+    // The same copier as Duplicate, so it prices exactly what its source previewed.
+    await duplicateCampaign("shop", "c1", "ada");
+    const duplicate = prisma.campaign.create.mock.calls[0]![0].data;
+    await duplicateCampaign("shop", "c1", "ada", { real: true });
+    const real = prisma.campaign.create.mock.calls[1]![0].data;
+
+    expect(isPractice({ schedule: real.schedule } as never), "the real copy is practice").toBe(false);
+    expect(isPractice({ schedule: duplicate.schedule } as never), "Duplicate stopped keeping practice (#762)").toBe(true);
+    expect(real.schedule).toEqual(without(duplicate.schedule, "practice"));
+    expect(without(real, "name", "schedule")).toEqual(without(duplicate, "name", "schedule"));
+    expect(real.status).toBe("DRAFT");
+  });
+
+  it("is named for what it is", async () => {
+    await duplicateCampaign("shop", "c1", "ada", { real: true });
+
+    expect(prisma.campaign.create.mock.calls[0]![0].data.name).toBe("Summer sale (real)");
+  });
+
+  it("is refused for a rule every Apply refuses (#818), and nothing is made", async () => {
+    prisma.campaign.findFirstOrThrow.mockResolvedValue({
+      ...SOURCE,
+      ruleRows: [{ segmentIds: [], rule: { kind: "percent-change", percent: -150 } }],
+    });
+
+    await expect(duplicateCampaign("shop", "c1", "ada", { real: true })).rejects.toMatchObject({ code: "VALIDATION" });
+    expect(prisma.campaign.create).not.toHaveBeenCalled();
+  });
+
+  it("is recorded as a copy that is not practice", async () => {
+    await duplicateCampaign("shop", "c1", "ada", { real: true });
+
+    expect(prisma.auditLogEntry.create.mock.calls[0]![0].data).toMatchObject({
+      action: "campaign.duplicate",
+      after: { from: "c1", practice: false },
+    });
+  });
+
+  it("is what the page's real-copy press makes, landing on the copy", async () => {
+    const reply = await press("real-copy");
+
+    expect(reply).toMatchObject({ ok: true, redirectTo: "/app/campaigns/copy-1?duplicated=1" });
+    expect(isPractice({ schedule: prisma.campaign.create.mock.calls[0]![0].data.schedule } as never)).toBe(false);
+  });
+
+  it("leaves Duplicate's press making a practice copy", async () => {
+    await press("duplicate");
+
+    expect(isPractice({ schedule: prisma.campaign.create.mock.calls[0]![0].data.schedule } as never)).toBe(true);
   });
 });
 

@@ -16,6 +16,7 @@ import { uncopiableRule } from "../../lib/campaigns/rule-limits";
 import { copiedSchedule } from "../../lib/campaigns/schedule-blob";
 import { AppError } from "../../lib/errors/app-error";
 import { logger } from "../../lib/logging/logger";
+import { isPractice } from "./model.server";
 
 /**
  * Everything that describes what a campaign *does*, and nothing about what it *did*.
@@ -30,7 +31,8 @@ import { logger } from "../../lib/logging/logger";
  * Copied from inside `schedule`, too: the filter, the segment id, the rounding and the
  * practice flag live in that JSON beside the dates (`lib/campaigns/schedule-blob.ts`).
  * Dropping the whole blob made every copy price the entire catalogue, let a practice
- * campaign's copy be applied, and lost its rounding (#762).
+ * campaign's copy be applied, and lost its rounding (#762). The practice flag is left behind
+ * only when asked for by name: a practice campaign's real copy (#1077).
  *
  * Not copied, and this is the point of the feature: `status` (a copy is a draft), the
  * schedule's window and `startAt`/`endAt` (last month's dates are never the dates the
@@ -55,10 +57,17 @@ const COPIED = {
   note: true,
 } as const;
 
+/**
+ * `real` makes a practice campaign's real copy (#1077): the same copy without the practice
+ * flag, named "(real)". Its page told the merchant to create a real campaign with the same
+ * scope and rule and offered no way to, and a second copier would be free to disagree with
+ * this one about what "the same" is.
+ */
 export async function duplicateCampaign(
   shopId: string,
   campaignId: string,
   actor: string | null,
+  options: { real?: boolean } = {},
 ): Promise<{ id: string; name: string }> {
   const source = await prisma.campaign.findFirstOrThrow({
     where: { id: campaignId, shopId },
@@ -76,6 +85,7 @@ export async function duplicateCampaign(
   const taken = await prisma.campaign.findMany({ where: { shopId }, select: { name: true } });
 
   const { segments, ruleRows, surfaces, compareAtPolicy, guardrails, schedule, ...fields } = source;
+  const copied = copiedSchedule(schedule, { real: options.real });
 
   const copy = await prisma.campaign.create({
     data: {
@@ -90,13 +100,14 @@ export async function duplicateCampaign(
       compareAtPolicy: compareAtPolicy as Prisma.InputJsonValue,
       guardrails: guardrails === null ? Prisma.DbNull : (guardrails as Prisma.InputJsonValue),
       shopId,
-      name: copyName(source.name, taken.map((c) => c.name)),
+      name: copyName(source.name, taken.map((c) => c.name), options.real ? "real" : "copy"),
       status: "DRAFT",
       // What it prices, run by hand: the same scope, rounding and practice flag, and no
       // dates. A draft, so `manual` -- the window is what is deliberately left behind.
       // Without the source's typed confirmation too (#1009): that was a person's decision
-      // about the source, and the copy's start is asked about afresh.
-      schedule: copiedSchedule(schedule) as Prisma.InputJsonValue,
+      // about the source, and the copy's start is asked about afresh. A real copy leaves
+      // the practice flag behind as well (#1077), and nothing else.
+      schedule: copied as Prisma.InputJsonValue,
       createdBy: actor,
       // Connected, not copied. A segment is a saved definition shared across campaigns;
       // duplicating the rows would give the copy a segment that stops tracking the
@@ -113,7 +124,9 @@ export async function duplicateCampaign(
       action: "campaign.duplicate",
       entity: "campaign",
       entityId: copy.id,
-      after: { from: campaignId, name: copy.name } as never,
+      // Whether the copy is practice, as "campaign.created" records it: a real copy of a
+      // practice campaign is the moment it became something that can be applied (#1077).
+      after: { from: campaignId, name: copy.name, practice: isPractice({ schedule: copied as never }) } as never,
     },
   });
 
@@ -129,9 +142,10 @@ export async function duplicateOrRefusal(
   shopId: string,
   campaignId: string,
   actor: string | null,
+  options: { real?: boolean } = {},
 ): Promise<{ id: string; name: string } | { refused: string }> {
   try {
-    return await duplicateCampaign(shopId, campaignId, actor);
+    return await duplicateCampaign(shopId, campaignId, actor, options);
   } catch (error) {
     if (error instanceof AppError && error.code === "VALIDATION") return { refused: error.userMessage };
     throw error;
@@ -239,8 +253,10 @@ export async function housekeepingAction(
 ): Promise<{ ok: boolean; message: string; redirectTo?: string } | null> {
   const intent = String(form.get("intent") ?? "");
 
-  if (intent === "duplicate") {
-    const copy = await duplicateOrRefusal(shopId, campaignId, actor);
+  // "real-copy" is a practice campaign's "Make a real copy" (#1077): Duplicate, without the
+  // practice flag. Its page offers it in place of the Apply a practice campaign never has.
+  if (intent === "duplicate" || intent === "real-copy") {
+    const copy = await duplicateOrRefusal(shopId, campaignId, actor, { real: intent === "real-copy" });
     if ("refused" in copy) return { ok: false, message: copy.refused };
     return {
       ok: true,

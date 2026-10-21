@@ -32,3 +32,23 @@ describe("copyName", () => {
     expect(copyName("Copy deck pricing", [])).toBe("Copy deck pricing (copy)");
   });
 });
+
+describe("copyName for a practice campaign's real copy (#1077)", () => {
+  it("says which of the two is the real one", () => {
+    // Side by side in the list, "Practice · 21/09/2026" and its copy have to be told apart
+    // by the one that can be applied.
+    expect(copyName("Practice · 21/09/2026", ["Practice · 21/09/2026"], "real")).toBe("Practice · 21/09/2026 (real)");
+  });
+
+  it("numbers a second one, and does not stack the suffix", () => {
+    const taken = ["Sale", "Sale (real)"];
+    expect(copyName("Sale", taken, "real")).toBe("Sale (real 2)");
+    expect(copyName("Sale (real)", taken, "real")).toBe("Sale (real 2)");
+  });
+
+  it("keeps the other suffix, which is part of the source's name", () => {
+    // A real copy of a practice campaign's duplicate is a real copy of that duplicate.
+    expect(copyName("Sale (copy)", [], "real")).toBe("Sale (copy) (real)");
+    expect(copyName("Sale (real)", [])).toBe("Sale (real) (copy)");
+  });
+});

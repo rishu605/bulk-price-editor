@@ -27,7 +27,7 @@
  *
  * A practice campaign is never applicable and the button is not merely disabled: offering
  * a control that exists only to be refused undermines the promise the merchant was given
- * when they chose practice.
+ * when they chose practice. Its black button is "Make a real copy" (#1077).
  */
 
 import { ActionRow } from "../ActionRow";
@@ -70,6 +70,20 @@ export function CampaignHeader({
 }: CampaignDetailProps) {
   return (
     <>
+    {/* With the page's other banners, above the row. It qualifies the whole page -- nothing
+        on it will ever write a price -- and names the button in the row that makes a real
+        campaign of it (#1077). It told the merchant to create one "with the same scope and
+        rule", which meant rebuilding both by hand: Duplicate keeps the practice flag (#762). */}
+    {practice ? (
+      <s-banner tone="info">
+        <s-paragraph>
+          This is a practice campaign. The preview is exactly what would happen, and nothing has
+          been or will be written to your storefront. When you are ready to run it, Make a real
+          copy: a new draft with the same scope and rule, which you can apply. This one stays as
+          it is.
+        </s-paragraph>
+      </s-banner>
+    ) : null}
     {/* Above the row, with the page's other banners: it qualifies the schedule sentence
         beside the badge, which reads in the store's zone now (#799). */}
     {zoneShift ? <ZoneShiftNotice zoneShift={zoneShift} fetcher={fetcher} busy={busy} /> : null}
@@ -90,10 +104,20 @@ export function CampaignHeader({
       </s-stack>
 
       <ActionRow>
-        {/* Not rendered at all for a practice campaign — see above. While a run is writing,
+        {/* Not rendered at all for a practice campaign — see above. Its next step is a real
+            copy instead (#1077): Duplicate without the practice flag, landing on the new
+            draft, whose Apply is this button. Posted rather than confirmed, as Duplicate is:
+            it writes no price and leaves this campaign as it is. While a run is writing,
             what it is doing takes the button's place (#793): a second Apply has nothing to
             do but stand down, and a black button beside "Applying" asked for one. */}
-        {practice ? null : IN_FLIGHT.has(state) ? (
+        {practice ? (
+          <fetcher.Form method="post">
+            <input type="hidden" name="intent" value="real-copy" />
+            <s-button type="submit" variant="primary" icon="duplicate" loading={busy || undefined}>
+              Make a real copy
+            </s-button>
+          </fetcher.Form>
+        ) : IN_FLIGHT.has(state) ? (
           <s-text color="subdued">{writing(runs, timeZone)}</s-text>
         ) : (
           <>

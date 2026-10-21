@@ -42,4 +42,6 @@ not always the price it was before, and that is deliberate. See
 ## Try it without the risk
 
 A **practice campaign** does everything above and refuses to write anything, ever. If you
-have fifty thousand products and want to build confidence first, start there.
+have fifty thousand products and want to build confidence first, start there. When the
+preview is what you want, **Make a real copy** on its page: a new draft with the same scope
+and rule, which you can apply. The practice campaign stays as it is.
