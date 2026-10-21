@@ -13,7 +13,8 @@
  * a buyer would get whichever Shopify preferred.
  */
 
-import { formatMoney, type Money } from "../money/money";
+import { formatMoney, parseMoney, type Money } from "../money/money";
+import { parseLadder, type LadderRung } from "../pricing/ladder-baseline";
 import { isThrottledError, withRetry } from "../shopify/budget";
 import { classifyFailure } from "./classify";
 import { readBackVerdict } from "./read-back";
@@ -253,6 +254,34 @@ export async function readLadders(
   }
 
   return found;
+}
+
+/**
+ * The ladders a catalogue holds now, as a baseline records them: integer minor units of
+ * `currency`, and a ladder that does not parse left out, which is "no ladder".
+ *
+ * One reading for every capture that records a wholesale baseline -- the campaign's, before
+ * it writes, and the catalogue sync's (#1071) -- so the two cannot record the same ladder
+ * differently. Throws when Shopify cannot be read: what an unread ladder means is the
+ * caller's to decide.
+ */
+export async function readBaselineLadders(
+  client: AdminClient,
+  priceListGid: string,
+  currency: string,
+  variantGids: readonly string[],
+): Promise<Map<string, LadderRung[]>> {
+  if (variantGids.length === 0) return new Map();
+
+  const ladders = new Map<string, LadderRung[]>();
+  for (const [variantGid, rungs] of await readLadders(client, priceListGid, variantGids)) {
+    const parsed = parseLadder(
+      rungs.map((rung) => ({ minimumQuantity: rung.minimumQuantity, amount: parseMoney(rung.amount, currency).amount })),
+      currency,
+    );
+    if (parsed) ladders.set(variantGid, parsed);
+  }
+  return ladders;
 }
 
 async function verifyLadders(

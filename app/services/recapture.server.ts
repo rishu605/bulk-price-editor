@@ -15,6 +15,7 @@
 
 import prisma from "../db.server";
 import { AppError } from "../lib/errors/app-error";
+import type { AdminClient } from "../lib/execution/sync-executor";
 import { countOf, formatCount } from "../lib/format/display";
 import {
   assessRecapture,
@@ -60,6 +61,11 @@ export interface RecaptureOptions extends RecaptureScope {
    * run on a count nobody saw.
    */
   expectedScope?: number;
+  /**
+   * Shopify, to read a wholesale price's quantity ladder with it. Without one a wholesale
+   * price's baseline is left as it is: see `CaptureOptions.client` (#1071).
+   */
+  client?: AdminClient;
 }
 
 export async function recapture(shopId: string, options: RecaptureOptions = {}) {
@@ -102,6 +108,7 @@ export async function recapture(shopId: string, options: RecaptureOptions = {}) 
     recapture: true,
     source: "RECAPTURE",
     capturedBy: options.actor,
+    client: options.client,
   });
 
   // Written whatever the outcome, and written with the overlaps. Six weeks later the

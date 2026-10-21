@@ -12,9 +12,14 @@
  * surface.
  */
 
+import type { BaselineSource, Prisma, SurfaceKind } from "@prisma/client";
+
 import prisma from "../db.server";
-import { inChunks } from "../lib/db/chunk";
-import type { BaselineSource } from "@prisma/client";
+import { chunk, inChunks } from "../lib/db/chunk";
+import { readBaselineLadders } from "../lib/execution/quantity-executor";
+import type { AdminClient } from "../lib/execution/sync-executor";
+import { logger } from "../lib/logging/logger";
+import { serialiseLadder, type LadderRung } from "../lib/pricing/ladder-baseline";
 
 export interface CaptureResult {
   captured: number;
@@ -34,6 +39,22 @@ export interface CaptureOptions {
   capturedBy?: string;
   /** Called after each chunk is written: surfaces captured so far, of how many (#801). */
   onProgress?: (done: number, total: number) => void | Promise<void>;
+  /**
+   * Shopify, for a wholesale catalogue's quantity ladders (#1071).
+   *
+   * A wholesale price is baselined with its ladder or not at all, because a baseline's null
+   * ladder says "the merchant had none", and a revert clears a ladder on that word. Without
+   * a client a wholesale price is left as it is, and the campaign captures it -- ladder and
+   * all -- before it first writes there. The sync and the merchant's recapture pass one; an
+   * auto-enrolment, answering a webhook, cannot wait on the read.
+   */
+  client?: AdminClient;
+}
+
+/** A baseline about to be written, and the current one it replaces. */
+interface PlannedBaseline {
+  row: Prisma.BaselineCreateManyInput & { priceListGid: string; currency: string };
+  supersedes: string | null;
 }
 
 /**
@@ -60,8 +81,24 @@ export async function captureBaselines(
     select: { id: true, variantGid: true, surfaceKind: true, priceListGid: true },
   });
 
+  // A wholesale baseline filed as B2B: the sync's before #1071, and the release before this
+  // one's still. Nothing prices from it -- every campaign reads a price list's baseline as
+  // MARKET -- so beside the campaign's own it is a second baseline for the price, at the sale
+  // price when a sync ran during the sale. Put away here, as the migration put away the ones
+  // before it, and the price is captured below as MARKET if it has no baseline left.
+  const inScope = options.variantGids ? new Set(options.variantGids) : null;
+  const filedAsB2B = existing.filter((b) => b.surfaceKind === "B2B" && (!inScope || inScope.has(b.variantGid)));
+  for (const batch of chunk(filedAsB2B.map((b) => b.id))) {
+    await prisma.baseline.updateMany({ where: { id: { in: batch } }, data: { supersededAt: new Date() } });
+  }
+  if (filedAsB2B.length > 0) {
+    logger.info("superseded wholesale baselines filed as B2B", { shopId, superseded: filedAsB2B.length });
+  }
+
   const currentKey = new Map(
-    existing.map((b) => [`${b.variantGid}|${b.surfaceKind}|${b.priceListGid}`, b.id]),
+    existing
+      .filter((b) => b.surfaceKind !== "B2B")
+      .map((b) => [cellKey(b.variantGid, b.surfaceKind, b.priceListGid), b.id]),
   );
 
   // Costs are fetched once for the whole batch. Looking them up per variant meant
@@ -76,60 +113,53 @@ export async function captureBaselines(
     ).map((v) => [v.variantGid, v.cost]),
   );
 
-  const toSupersede: string[] = [];
-  const toCreate: Array<{
-    shopId: string;
-    variantGid: string;
-    surfaceKind: (typeof entries)[number]["surfaceKind"];
-    priceListGid: string;
-    currency: string;
-    basePrice: bigint;
-    baseCompareAt: bigint | null;
-    cost: bigint | null;
-    handSet: boolean | null;
-    source: BaselineSource;
-    capturedBy: string | null;
-  }> = [];
+  const planned: PlannedBaseline[] = [];
+  const wholesale: PlannedBaseline[] = [];
 
   for (const entry of entries) {
     // A surface with no live price has nothing to anchor to. Recording zero would be
     // a lie that every future campaign would compute from.
     if (entry.livePrice === null) continue;
 
-    const key = `${entry.variantGid}|${entry.surfaceKind}|${entry.priceListGid}`;
-    const currentId = currentKey.get(key);
+    const surfaceKind = baselineKindOf(entry.surfaceKind);
+    const currentId = currentKey.get(cellKey(entry.variantGid, surfaceKind, entry.priceListGid));
 
     if (currentId && !options.recapture) {
       result.alreadyCurrent++;
       continue;
     }
 
-    if (currentId) toSupersede.push(currentId);
-
-    toCreate.push({
-      shopId,
-      variantGid: entry.variantGid,
-      surfaceKind: entry.surfaceKind,
-      priceListGid: entry.priceListGid,
-      currency: entry.currency,
-      basePrice: entry.livePrice,
-      baseCompareAt: entry.liveCompareAt,
-      cost: costs.get(entry.variantGid) ?? null,
-      handSet: handSetFromMirror(entry),
-      source: options.source ?? (currentId ? "RECAPTURE" : "INSTALL_CAPTURE"),
-      capturedBy: options.capturedBy ?? null,
-    });
+    const baseline: PlannedBaseline = {
+      supersedes: currentId ?? null,
+      row: {
+        shopId,
+        variantGid: entry.variantGid,
+        surfaceKind,
+        priceListGid: entry.priceListGid,
+        currency: entry.currency,
+        basePrice: entry.livePrice,
+        baseCompareAt: entry.liveCompareAt,
+        cost: costs.get(entry.variantGid) ?? null,
+        handSet: handSetFromMirror(entry),
+        source: options.source ?? (currentId ? "RECAPTURE" : "INSTALL_CAPTURE"),
+        capturedBy: options.capturedBy ?? null,
+      },
+    };
+    (entry.surfaceKind === "B2B" ? wholesale : planned).push(baseline);
   }
+
+  // Wholesale prices with their ladders, or not at all: see `client`.
+  if (options.client) planned.push(...(await withLadders(shopId, options.client, wholesale)));
 
   // Supersede and create together per chunk. The partial unique index allows only
   // one current baseline per variant per surface, so the old row must be retired in
   // the same transaction that adds its replacement -- otherwise a mid-batch failure
   // leaves either two current baselines or none, and campaign maths depends on
-  // exactly one.
+  // exactly one. Each chunk retires the rows its own baselines replace.
   const CHUNK = 1_000;
-  for (let i = 0; i < toCreate.length; i += CHUNK) {
-    const createChunk = toCreate.slice(i, i + CHUNK);
-    const supersedeChunk = toSupersede.slice(i, i + CHUNK);
+  for (let i = 0; i < planned.length; i += CHUNK) {
+    const createChunk = planned.slice(i, i + CHUNK);
+    const supersedeChunk = createChunk.flatMap((baseline) => (baseline.supersedes ? [baseline.supersedes] : []));
 
     await prisma.$transaction([
       ...(supersedeChunk.length > 0
@@ -140,9 +170,9 @@ export async function captureBaselines(
             }),
           ]
         : []),
-      prisma.baseline.createMany({ data: createChunk }),
+      prisma.baseline.createMany({ data: createChunk.map((baseline) => baseline.row) }),
     ]);
-    await options.onProgress?.(Math.min(i + CHUNK, toCreate.length), toCreate.length);
+    await options.onProgress?.(Math.min(i + CHUNK, planned.length), planned.length);
 
     result.captured += createChunk.length;
     result.superseded += supersedeChunk.length;
@@ -152,22 +182,90 @@ export async function captureBaselines(
 }
 
 /**
+ * The kind a baseline from this mirror row is filed under: a price list's as MARKET, a
+ * wholesale catalogue's included (#1071).
+ *
+ * The mirror files a wholesale catalogue's prices as B2B, which is how What's live names the
+ * list and billing gates it. A baseline does not: every campaign reads and captures a price
+ * list's baseline as MARKET -- `marketBaselines`, `captureMarketBaselines`, `handSetAmong` --
+ * and the kind is part of the one-current-baseline index. Filed as B2B, the sync's baseline
+ * was one no campaign read, so the campaign captured a second; and the sync, looking for a
+ * B2B one, did not see the campaign's, so a sync during a sale baselined the sale price.
+ */
+function baselineKindOf(kind: SurfaceKind): SurfaceKind {
+  return kind === "B2B" ? "MARKET" : kind;
+}
+
+/** A price's one current baseline, as the partial unique index keys it. */
+function cellKey(variantGid: string, surfaceKind: SurfaceKind, priceListGid: string): string {
+  return `${variantGid}|${surfaceKind}|${priceListGid}`;
+}
+
+/**
  * Whether a baseline taken from this mirror row is a price the merchant set by hand on the
  * list, as the revert reads it (#1064).
  *
- * A market's row is: the markets sync mirrors a list's fixed prices and nothing else -- a
- * price the list derives has no row -- and a cell a campaign has written already has the
- * MARKET baseline the campaign captured before writing, so this capture skips it. Left
- * unsaid, the campaign took this baseline as its own without ever recording the flag, and
- * the revert deleted the merchant's price for the one the list's percentage derives (#930).
- *
- * A wholesale row says nothing. It is filed under B2B, which no revert reads -- the campaign
- * captures its own MARKET baseline for the cell -- and because that one is filed under
- * another kind, a sync during a sale baselines the price the campaign wrote here (#1071).
- * The base price has no list to be fixed on.
+ * Any list's row is, a wholesale catalogue's as much as a market's: the markets sync mirrors
+ * a list's fixed prices and nothing else -- a price the list derives has no row -- and a
+ * price a campaign has written already has the MARKET baseline the campaign captured before
+ * writing, so this capture skips it and never takes a campaign's price for the merchant's.
+ * Left unsaid, the campaign took this baseline as its own without ever recording the flag,
+ * and the revert deleted the merchant's price for the one the list's percentage derives
+ * (#930). The base price has no list to be fixed on.
  */
-function handSetFromMirror(entry: { surfaceKind: string; priceListGid: string }): boolean | null {
-  return entry.surfaceKind === "MARKET" && entry.priceListGid !== "" ? true : null;
+function handSetFromMirror(entry: { priceListGid: string }): boolean | null {
+  return entry.priceListGid !== "" ? true : null;
+}
+
+/**
+ * Wholesale baselines with the quantity ladder each price has now, the merchant's: as a
+ * campaign's capture records it, through the same read (#704, #1071).
+ *
+ * A catalogue Shopify cannot be read for is left out rather than recorded as "no ladder",
+ * which is a claim the revert would act on. Its prices are captured by the next sync, or by
+ * the campaign before it first writes them -- whichever comes first.
+ */
+async function withLadders(
+  shopId: string,
+  client: AdminClient,
+  wholesale: readonly PlannedBaseline[],
+): Promise<PlannedBaseline[]> {
+  const byList = new Map<string, PlannedBaseline[]>();
+  for (const baseline of wholesale) {
+    const list = byList.get(baseline.row.priceListGid);
+    if (list) list.push(baseline);
+    else byList.set(baseline.row.priceListGid, [baseline]);
+  }
+
+  const out: PlannedBaseline[] = [];
+  for (const [priceListGid, baselines] of byList) {
+    let ladders: Map<string, LadderRung[]>;
+    try {
+      ladders = await readBaselineLadders(
+        client,
+        priceListGid,
+        baselines[0]!.row.currency,
+        baselines.map((baseline) => baseline.row.variantGid),
+      );
+    } catch (error) {
+      logger.warn("wholesale prices not baselined: their quantity ladders could not be read", {
+        shopId,
+        priceListGid,
+        variants: baselines.length,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      continue;
+    }
+
+    for (const baseline of baselines) {
+      // Null for most: a wholesale price usually has no ladder, and null says so. Cast at the
+      // boundary, as the campaign's capture does: `serialiseLadder` is the check that matters.
+      const ladder = serialiseLadder(ladders.get(baseline.row.variantGid) ?? []);
+      if (ladder) baseline.row.quantityBreaks = ladder as unknown as Prisma.InputJsonValue;
+      out.push(baseline);
+    }
+  }
+  return out;
 }
 
 export interface BaselineHealth {

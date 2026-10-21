@@ -122,7 +122,8 @@ export async function enrollNewVariants(
   const results: EnrollResult[] = [];
 
   for (const assignment of assignments) {
-    // Baselines first -- see the note at the top of this file.
+    // Baselines first -- see the note at the top of this file. No client: a wholesale price
+    // waits for the campaign's own capture, which reads its quantity ladder (#1071).
     const capture = await captureBaselines(shopId, {
       variantGids: assignment.enroll,
       source: "AUTO_ENROLL",
