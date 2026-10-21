@@ -87,6 +87,11 @@ describe("native HTML inside the embedded app", () => {
     ["routes/app.settings.diagnostics.tsx", "no Polaris equivalent for a stack trace"],
     // No progress component exists; `s-spinner` is indeterminate and has no bar form.
     ["components/RouteProgress.tsx", "no Polaris progress bar"],
+    // `s-box accessibilityRole="status"` puts the role inside its shadow root, around a
+    // slot: the message would be light-DOM text in a shadow-DOM live region, the shape
+    // screen readers are least consistent about announcing (#798). A live region has to
+    // be the one thing on the page every one of them handles.
+    ["components/LiveStatus.tsx", "a live region screen readers reliably announce"],
     // The tab bar's selected-tab indicator. `s-box background="strong"` is the most
     // intense background Polaris offers and renders around #ebebeb, which against the
     // admin's grey page is invisible -- the bar shipped once with no visible selection at

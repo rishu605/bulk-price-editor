@@ -27,6 +27,7 @@ import { practiceWindowProblem, typedWindow, windowInputProblem } from "../lib/s
 import { presetStartFor } from "../lib/scheduling/calendar";
 import { formatClock, formatCount, formatDay, formatWhen } from "../lib/format/display";
 import { PriceImportHistory } from "../components/imports/PriceImportHistory";
+import { ImportAnswer } from "../components/imports/ImportAnswer";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { describeAdjustment } from "../lib/markets/describe";
 import {
@@ -1251,28 +1252,12 @@ export default function NewCampaign() {
         </ImportForm>
       ) : null}
 
-      {fromFile ? (
-        <>
-          <PriceImportHistory imports={priceImports} timeZone={importsTimeZone} />
-
-          {/* Moved here with the table it qualifies. Said out loud rather than papered
-              over: the gap is real, and a merchant who imports a baseline file and then
-              looks for it in a list is owed the reason it is not there. */}
-          <HelpNote label="Only price files are listed">
-            <s-paragraph>
-              Baseline and cost imports do not record a file yet. Their results are shown
-              when you run them, on the pages they belong to.
-            </s-paragraph>
-          </HelpNote>
-        </>
-      ) : null}
-
-      {/* A refused commit (#989) answers with no report, so its reason has to be said here. */}
-      {importFetcher.data?.ok === false && importFetcher.data.message ? (
-        <s-banner tone="critical">
-          <s-paragraph>{importFetcher.data.message}</s-paragraph>
-        </s-banner>
-      ) : null}
+      {/* Every check's answer, and then its report, under the form that asked (#798) — as
+          the baseline and cost imports give theirs. The answer was kept only for a refused
+          commit (#989), so a check that passed said nothing: its one sentence was dropped,
+          and the report it produced sat below the import history table, a table's length
+          from the button. A banner is announced as well as shown. */}
+      <ImportAnswer answer={importFetcher.data} />
 
       {importResult ? (
         <ImportReport
@@ -1289,6 +1274,22 @@ export default function NewCampaign() {
           // The rows to fix and re-upload, as the baseline and cost imports offer (#989).
           download={{ filename: "price-import-errors.csv", csv: () => importErrorCsv(importResult) }}
         />
+      ) : null}
+
+      {fromFile ? (
+        <>
+          <PriceImportHistory imports={priceImports} timeZone={importsTimeZone} />
+
+          {/* Moved here with the table it qualifies. Said out loud rather than papered
+              over: the gap is real, and a merchant who imports a baseline file and then
+              looks for it in a list is owed the reason it is not there. */}
+          <HelpNote label="Only price files are listed">
+            <s-paragraph>
+              Baseline and cost imports do not record a file yet. Their results are shown
+              when you run them, on the pages they belong to.
+            </s-paragraph>
+          </HelpNote>
+        </>
       ) : null}
 
       {/* Beside the rule, not below it.
