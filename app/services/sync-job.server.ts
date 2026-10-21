@@ -234,14 +234,17 @@ export async function runFullSync(shopId: string, client: AdminClient, actor: st
         await new Promise<void>((resolve) => setTimeout(resolve, ms));
       },
     });
-    // Falling back rather than failing: a shop already running a bulk operation still
-    // deserves a sync, and on a small store the paginated path is what it is for.
+    // Falling back rather than failing: a shop whose bulk read was refused -- another
+    // catalogue import still recorded running, or Shopify at its limit of bulk queries for
+    // the app -- still deserves a sync, and on a small store the paginated path is what it
+    // is for. A campaign's bulk price update is not among those reasons (#1081).
     const catalogue =
       bulk.errors.length === 0 && bulk.written > 0
         ? { variants: bulk.written, products: bulk.products, errors: [] as string[] }
         : await syncCatalog(runner, shopId, basics.currency);
 
-    // After the catalogue, never alongside it: one bulk operation per shop.
+    // Then the markets, which page through price lists and run no bulk operation, so there
+    // is nothing for them to wait on (#1081).
     phase = "markets";
     await track("markets", undefined, true);
     const markets = await syncMarkets(client, shopId);
@@ -271,10 +274,9 @@ export async function runFullSync(shopId: string, client: AdminClient, actor: st
         } as never,
       },
     });
-    // Problems that did not stop the sync -- a market refused because a stranded bulk
-    // record said an import was still running, a batch that would not write -- are said on
-    // Home, as the banner after a sync used to say them (#733). The worker has nobody else
-    // to tell.
+    // Problems that did not stop the sync -- a price list whose prices could not be read, a
+    // batch that would not write -- are said on Home, as the banner after a sync used to say
+    // them (#733). The worker has nobody else to tell.
     const errors = [...catalogue.errors, ...markets.errors];
     await releaseSync(
       shopId,

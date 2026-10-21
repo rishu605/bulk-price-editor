@@ -6,6 +6,8 @@
  * a dyno restarting under Home's inline Re-sync -- so the record said CREATED for ever.
  * Every later catalogue sync refused as "already running", and so did every market sync,
  * silently: market mirroring was dead for that shop from then on.
+ *
+ * The market sync no longer asks at all: it runs no bulk operation (#1081).
  */
 
 import { describe, expect, it } from "vitest";
@@ -14,7 +16,7 @@ import prisma from "../../app/db.server";
 import type { AdminClient } from "../../app/lib/execution/sync-executor";
 import {
   BULK_STRANDED_AFTER_MS,
-  bulkOperationInFlight,
+  catalogueImportInFlight,
   syncCatalogViaBulk,
 } from "../../app/services/catalog-bulk-sync.server";
 import { syncMarkets } from "../../app/services/markets-sync.server";
@@ -28,7 +30,7 @@ function flakyClient(gid: string): AdminClient {
       if (query.includes("bulkOperationRunQuery")) {
         return { data: { bulkOperationRunQuery: { bulkOperation: { id: gid, status: "CREATED" }, userErrors: [] } } as T };
       }
-      if (query.includes("currentBulkOperation")) throw new Error("read ECONNRESET");
+      if (query.includes("bulkOperation(id:")) throw new Error("read ECONNRESET");
       throw new Error(`unexpected query: ${query.slice(0, 40)}`);
     },
   };
@@ -41,8 +43,8 @@ function goodClient(gid: string): AdminClient {
       if (query.includes("bulkOperationRunQuery")) {
         return { data: { bulkOperationRunQuery: { bulkOperation: { id: gid, status: "CREATED" }, userErrors: [] } } as T };
       }
-      if (query.includes("currentBulkOperation")) {
-        return { data: { currentBulkOperation: { id: gid, status: "COMPLETED", url: "https://example.invalid/f.jsonl", objectCount: "2" } } as T };
+      if (query.includes("bulkOperation(id:")) {
+        return { data: { bulkOperation: { id: gid, status: "COMPLETED", url: "https://example.invalid/f.jsonl", objectCount: "2" } } as T };
       }
       throw new Error(`unexpected query: ${query.slice(0, 40)}`);
     },
@@ -96,16 +98,19 @@ describe("chaos: a catalogue bulk operation left 'running'", () => {
           submittedAt: new Date(Date.now() - BULK_STRANDED_AFTER_MS - 60_000),
         },
       });
-      expect(await bulkOperationInFlight(shopId)).toBeNull();
+      expect(await catalogueImportInFlight(shopId)).toBeNull();
       expect((await prisma.bulkOperationRecord.findUniqueOrThrow({ where: { shopifyGid: stale } })).errorCode).toBe("STRANDED");
 
       const markets = await syncMarkets(chaosAdminClient(chaos.server.endpoint()), shopId);
       expect(markets.errors.join(" ")).not.toMatch(ALREADY_RUNNING);
 
-      // One submitted a minute ago is still somebody's, and both syncs still wait for it.
+      // One submitted a minute ago is still somebody's, and the catalogue sync still waits
+      // for it. The market sync, which runs no bulk operation, has no reason to (#1081).
       await prisma.bulkOperationRecord.create({ data: { shopId, shopifyGid: fresh, kind: "QUERY", status: "RUNNING" } });
-      expect((await bulkOperationInFlight(shopId))?.shopifyGid).toBe(fresh);
-      expect((await syncMarkets(chaosAdminClient(chaos.server.endpoint()), shopId)).errors.join(" ")).toMatch(ALREADY_RUNNING);
+      expect((await catalogueImportInFlight(shopId))?.shopifyGid).toBe(fresh);
+      const second = await syncCatalogViaBulk(goodClient(`${fresh}-second`), shopId, "USD", { sleep: async () => {} });
+      expect(second.errors.join(" ")).toMatch(ALREADY_RUNNING);
+      expect((await syncMarkets(chaosAdminClient(chaos.server.endpoint()), shopId)).errors.join(" ")).not.toMatch(ALREADY_RUNNING);
     });
   });
 });

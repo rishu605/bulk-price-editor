@@ -23,8 +23,9 @@ describe("the job classes", () => {
   });
 
   it("keeps sync to one job at a time", () => {
-    // Shopify permits one bulk operation per shop. Queueing more only discovers that
-    // later and less clearly.
+    // A sync streams a whole catalogue into the database. Not for Shopify's sake: it runs
+    // five bulk queries per app and shop at once from API 2026-01 (#1081), and a second
+    // catalogue import of one shop is refused by the import itself.
     expect(QUEUE_POLICIES.sync.concurrency).toBe(1);
   });
 

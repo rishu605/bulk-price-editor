@@ -23,6 +23,11 @@
  *   `LIMIT_REACHED` user error (#1054). This used to hold one operation and let a second
  *   submission replace the first, so two campaigns' bulk runs could never be tested.
  *
+ *   Bulk queries run too, against their own limit, beside any mutations (#1081). One over
+ *   `products` publishes the store's catalogue as Shopify's JSONL, so the catalogue sync
+ *   can be driven against the store rather than against a hand-written file, and can be
+ *   seen to run while a campaign's bulk mutation is still going.
+ *
  * State is public on purpose: scenarios assert against `variants` to answer "what
  * does the store actually say now", which is the only question that matters.
  */
@@ -90,15 +95,19 @@ export interface FakeOptions {
   throttle?: ThrottleStatus;
 }
 
-/** One bulk mutation, from its submission to its result file. */
+/** One bulk operation, from its submission to its result file. */
 interface FakeBulkOperation {
+  /** Shopify counts the two types against separate limits (#1081). */
+  type: "QUERY" | "MUTATION";
   state: BulkOperationState;
-  /** The JSONL it was given. */
+  /** The JSONL it was given; empty for a query, which is given no file. */
   body: string;
-  /** The mutation it applies to each line, for its flags (#1020). */
+  /** The mutation it applies to each line, for its flags (#1020); empty for a query. */
   mutation: string;
   /** Polls it has been through. */
   polls: number;
+  /** Polls it stays RUNNING: `pollsBeforeComplete` as it stood when it was submitted. */
+  holdFor: number;
   /** `bulkFailsAfterLines` as it stood when this operation was submitted. */
   failsAfterLines?: number;
   /** `bulkRefusesLines` likewise. */
@@ -128,6 +137,9 @@ export class FakeShopify {
    * null, which a real store never does, to model a read that tells Anchor nothing.
    */
   shopTimezone: string | null = "UTC";
+
+  /** Whether the store is a development store, as `shop.plan.partnerDevelopment` says. */
+  partnerDevelopment = true;
 
   /**
    * Stores a different price than the one requested, and reports the stored one.
@@ -182,8 +194,16 @@ export class FakeShopify {
   /** Bulk-operation status polls served. Proof the fallback did the recovering. */
   polls = 0;
 
+  /**
+   * Polls a bulk operation submitted from now on stays RUNNING before it completes.
+   *
+   * Taken by each operation as it is submitted, so a scenario can hold one operation
+   * running and let a later one finish: a campaign's bulk mutation still going while the
+   * catalogue's bulk query completes beside it (#1081).
+   */
+  pollsBeforeComplete: number;
+
   private readonly blobs: BlobStore;
-  private pollsBeforeComplete: number;
   private throttle: ThrottleStatus;
 
   /** When the bucket was last recomputed, so it restores with the clock. */
@@ -204,7 +224,17 @@ export class FakeShopify {
   /** Submissions refused because `bulkMutationLimit` operations were already running. */
   bulkRefusals = 0;
 
-  /** Every bulk mutation submitted, by id, in the order they were created. */
+  /**
+   * How many bulk queries the app may have running in this shop at once (#1081).
+   *
+   * Counted apart from the mutations, as Shopify counts them: "In API versions 2026-01 and
+   * higher, each app can run up to five bulk operations of each type per shop
+   * simultaneously" (https://shopify.dev/docs/api/usage/bulk-operations/queries#rate-limits).
+   * One past it is refused with `BulkOperationUserErrorCode.LIMIT_REACHED`.
+   */
+  bulkQueryLimit = 5;
+
+  /** Every bulk operation submitted, queries and mutations, by id, oldest first. */
   private readonly bulkOps = new Map<string, FakeBulkOperation>();
 
   /**
@@ -325,8 +355,14 @@ export class FakeShopify {
     if (query.includes("bulkOperationRunMutation")) {
       return this.runBulkMutation(variables) as { data?: T; extensions?: { cost?: QueryCost } };
     }
+    if (query.includes("bulkOperationRunQuery")) {
+      return this.runBulkQuery(variables) as { data?: T; extensions?: { cost?: QueryCost } };
+    }
     if (query.includes("currentBulkOperation")) {
-      return this.currentBulkOperation() as { data?: T; extensions?: { cost?: QueryCost } };
+      return this.currentBulkOperation(/type:\s*MUTATION/.test(query) ? "MUTATION" : "QUERY") as {
+        data?: T;
+        extensions?: { cost?: QueryCost };
+      };
     }
     // By id, both ways Shopify answers it: `bulkOperation(id:)` from 2026-01, and `node(id:)`.
     if (query.includes("bulkOperation(id:")) {
@@ -356,6 +392,19 @@ export class FakeShopify {
     if (query.includes("AnchorShopTimezone")) {
       return {
         data: { shop: { ianaTimezone: this.shopTimezone } },
+        extensions: this.cost(1),
+      } as { data?: T; extensions?: { cost?: QueryCost } };
+    }
+    // The catalogue sync's first read: the shop's currency, zone and plan.
+    if (query.includes("AnchorShopCurrency")) {
+      return {
+        data: {
+          shop: {
+            currencyCode: this.shopCurrency,
+            ianaTimezone: this.shopTimezone,
+            plan: { partnerDevelopment: this.partnerDevelopment },
+          },
+        },
         extensions: this.cost(1),
       } as { data?: T; extensions?: { cost?: QueryCost } };
     }
@@ -1227,8 +1276,7 @@ export class FakeShopify {
     // run. The code is the 2026-07 schema's `BulkMutationErrorCode.LIMIT_REACHED` and the
     // message its documented description; the docs show no live example of either, so the
     // executor reads the code, and `OPERATION_IN_PROGRESS` the same way.
-    const running = [...this.bulkOps.values()].filter((op) => !isTerminal(op.state.status)).length;
-    if (running >= this.bulkMutationLimit) {
+    if (this.running("MUTATION") >= this.bulkMutationLimit) {
       this.bulkRefusals++;
       return {
         data: {
@@ -1243,10 +1291,12 @@ export class FakeShopify {
 
     const id = `gid://shopify/BulkOperation/${++this.bulkSeq}`;
     const operation: FakeBulkOperation = {
+      type: "MUTATION",
       state: { id, status: "CREATED" },
       body,
       mutation: String(variables.mutation ?? ""),
       polls: 0,
+      holdFor: this.pollsBeforeComplete,
       // The faults armed for "the next bulk operation" are this one's.
       failsAfterLines: this.bulkFailsAfterLines,
       refusesLines: new Set(this.bulkRefusesLines ?? []),
@@ -1259,6 +1309,63 @@ export class FakeShopify {
       data: { bulkOperationRunMutation: { bulkOperation: operation.state, userErrors: [] } },
       extensions: this.cost(10),
     };
+  }
+
+  /**
+   * A bulk query, counted against its own limit and never against the mutations' (#1081):
+   * a campaign's bulk price update running does not stop the catalogue being read.
+   *
+   * Only a query over `products` is modelled, the catalogue sync's; it publishes the
+   * store's products and variants as Shopify's JSONL when it finishes.
+   */
+  private runBulkQuery(variables: Record<string, unknown>) {
+    const document = String(variables.query ?? "");
+    if (!/\bproducts\b/.test(document)) {
+      return {
+        data: {
+          bulkOperationRunQuery: {
+            bulkOperation: null,
+            userErrors: [{ field: ["query"], message: "FakeShopify models only a bulk query over products.", code: "INVALID" }],
+          },
+        },
+        extensions: this.cost(10),
+      };
+    }
+
+    // `BulkOperationUserErrorCode.LIMIT_REACHED`, as for a mutation past its limit.
+    if (this.running("QUERY") >= this.bulkQueryLimit) {
+      return {
+        data: {
+          bulkOperationRunQuery: {
+            bulkOperation: null,
+            userErrors: [{ field: null, message: "Bulk operations limit reached. Please try again later.", code: "LIMIT_REACHED" }],
+          },
+        },
+        extensions: this.cost(10),
+      };
+    }
+
+    const id = `gid://shopify/BulkOperation/${++this.bulkSeq}`;
+    const operation: FakeBulkOperation = {
+      type: "QUERY",
+      state: { id, status: "CREATED" },
+      body: "",
+      mutation: "",
+      polls: 0,
+      holdFor: this.pollsBeforeComplete,
+      refusesLines: new Set(),
+    };
+    this.bulkOps.set(id, operation);
+
+    return {
+      data: { bulkOperationRunQuery: { bulkOperation: operation.state, userErrors: [] } },
+      extensions: this.cost(10),
+    };
+  }
+
+  /** How many of the app's bulk operations of one type are still running. */
+  private running(type: FakeBulkOperation["type"]): number {
+    return [...this.bulkOps.values()].filter((op) => op.type === type && !isTerminal(op.state.status)).length;
   }
 
   /**
@@ -1277,17 +1384,19 @@ export class FakeShopify {
       if (isTerminal(operation.state.status)) continue;
       operation.polls++;
       operation.state = { ...operation.state, status: "RUNNING" };
-      if (operation.polls > this.pollsBeforeComplete) operation.state = this.finishBulk(operation);
+      if (operation.polls > operation.holdFor) {
+        operation.state = operation.type === "QUERY" ? this.finishQuery(operation) : this.finishBulk(operation);
+      }
     }
   }
 
   /**
-   * The app's most recent bulk mutation, as the deprecated `currentBulkOperation` answers:
-   * the newest, whichever run submitted it. With two running it is not the older one's
-   * (#1054).
+   * The app's most recent bulk operation of one type, as the deprecated
+   * `currentBulkOperation` answers (its `type` defaults to QUERY): the newest, whichever
+   * process submitted it. With two running it is not the older one's (#1054).
    */
-  private currentBulkOperation() {
-    const latest = [...this.bulkOps.values()].at(-1);
+  private currentBulkOperation(type: FakeBulkOperation["type"]) {
+    const latest = [...this.bulkOps.values()].filter((op) => op.type === type).at(-1);
     if (!latest) return { data: { currentBulkOperation: null }, extensions: this.cost(1) };
     this.tick();
     return { data: { currentBulkOperation: latest.state }, extensions: this.cost(1) };
@@ -1304,9 +1413,50 @@ export class FakeShopify {
     return { data: { [field]: operation.state }, extensions: this.cost(1) };
   }
 
-  /** Lets an operation held running by a large `pollsBeforeComplete` finish on its next poll. */
+  /**
+   * Lets every operation held running by a large `pollsBeforeComplete` finish on its next
+   * poll, and every later one on its first.
+   */
   finishBulkOnNextPoll(): void {
     this.pollsBeforeComplete = 0;
+    for (const operation of this.bulkOps.values()) operation.holdFor = 0;
+  }
+
+  /**
+   * Publishes the store's catalogue as a bulk query over products writes it: one line per
+   * product, then one per variant carrying `__parentId`. Deleted variants are gone, as they
+   * are from Shopify.
+   */
+  private finishQuery(operation: FakeBulkOperation): BulkOperationState {
+    const lines: string[] = [];
+    for (const product of this.products.values()) {
+      const variants = [...this.variants.values()].filter((v) => v.productGid === product.productGid && !v.deleted);
+      if (variants.length === 0) continue;
+      lines.push(
+        JSON.stringify({
+          id: product.productGid,
+          title: product.productGid,
+          status: "ACTIVE",
+          tags: product.tags,
+          isGiftCard: false,
+        }),
+      );
+      for (const variant of variants) {
+        lines.push(
+          JSON.stringify({
+            id: variant.variantGid,
+            __parentId: product.productGid,
+            title: "Default Title",
+            price: variant.price,
+            compareAtPrice: variant.compareAtPrice,
+          }),
+        );
+      }
+    }
+
+    const { id } = operation.state;
+    const url = this.blobs.put(`results/${id.split("/").at(-1)}`, lines.length > 0 ? `${lines.join("\n")}\n` : "");
+    return { id, status: "COMPLETED", url: lines.length > 0 ? url : null, objectCount: String(lines.length) };
   }
 
   /** Applies an operation's JSONL and publishes a Shopify-shaped result file for it. */
