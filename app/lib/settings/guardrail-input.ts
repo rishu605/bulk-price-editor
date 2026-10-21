@@ -16,6 +16,8 @@ import {
   DEFAULT_CONFIRM_ABOVE_VARIANTS,
 } from "../campaigns/blast-radius";
 import { formatCount } from "../format/display";
+import { isKnownCurrency } from "../money/currency";
+import { typedAmount } from "../money/typed-amount";
 
 export interface GuardrailInputProblem {
   field: "minMarginPercent" | "minPrice" | "approvalThreshold" | "confirmAboveVariants" | "confirmAboveChangePercent";
@@ -111,6 +113,12 @@ export function guardrailInputProblems(read: Read, currency: string): GuardrailI
         field: "minPrice",
         message: `Minimum price (${currency}) must be zero or more, or blank for none. “${floor}” is not.`,
       });
+    } else if (isKnownCurrency(currency)) {
+      // Refused rather than rounded (#1068): `Math.round(9.995 * 100)` made a 9.995 floor
+      // 9.99, below what was typed. A currency the table does not know cannot say how many
+      // decimals it has, and is left to save as it always has.
+      const typed = typedAmount(`Minimum price (${currency})`, floor, currency);
+      if (!typed.ok) problems.push({ field: "minPrice", message: typed.message });
     }
   }
 

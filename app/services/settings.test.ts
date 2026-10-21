@@ -65,6 +65,25 @@ describe("toGuardrails", () => {
     expect(toGuardrails(settings, "KWD").minPrice).toEqual({ amount: 10000, currency: "KWD" });
   });
 
+  it("converts a stored minimum price exactly, not through a float (#1068)", () => {
+    const at = (minPrice: number, currency: string) => toGuardrails({ ...DEFAULT_SETTINGS, minPrice }, currency).minPrice;
+    expect(at(9.99, "USD")).toEqual({ amount: 999, currency: "USD" });
+    expect(at(0.29, "USD")).toEqual({ amount: 29, currency: "USD" });
+    expect(at(1500, "JPY")).toEqual({ amount: 1500, currency: "JPY" });
+    expect(at(1.005, "KWD")).toEqual({ amount: 1005, currency: "KWD" });
+  });
+
+  it("never reads a floor saved before #1068 as less than it says", () => {
+    // A save now refuses these, but one stored earlier still has to be read. A minimum of
+    // 9.995 is met by 10.00 and not by 9.99, which is what `Math.round` on the float made
+    // it; 0.145 likewise is 0.15, where the float made it 0.14.
+    const at = (minPrice: number) => toGuardrails({ ...DEFAULT_SETTINGS, minPrice }, "USD").minPrice;
+    expect(at(9.995)).toEqual({ amount: 1000, currency: "USD" });
+    expect(at(0.145)).toEqual({ amount: 15, currency: "USD" });
+    expect(at(4.355)).toEqual({ amount: 436, currency: "USD" });
+    expect(toGuardrails({ ...DEFAULT_SETTINGS, minPrice: 1500.5 }, "JPY").minPrice).toEqual({ amount: 1501, currency: "JPY" });
+  });
+
   it("omits floors the merchant did not set", () => {
     const guardrails = toGuardrails(DEFAULT_SETTINGS, "USD");
     expect(guardrails.minPrice).toBeUndefined();

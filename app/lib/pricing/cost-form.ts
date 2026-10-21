@@ -58,8 +58,7 @@ export function readCostForm(fields: CostFormFields, currency: string): CostForm
     };
   }
 
-  const amount = Number(typed);
-  if (!Number.isFinite(amount)) {
+  if (!Number.isFinite(Number(typed))) {
     return {
       ok: false,
       field: "value",
@@ -67,8 +66,11 @@ export function readCostForm(fields: CostFormFields, currency: string): CostForm
     };
   }
 
-  const rule = costRuleFrom(kind, amount, currency);
-  return { ok: true, vendor, rule, key: checkKeyOf(vendor, rule) };
+  // An amount with more decimals than the currency has is refused here, for both buttons,
+  // rather than rounded into a cost nobody typed (#1068).
+  const read = costRuleFrom(kind, typed, currency);
+  if (!read.ok) return { ok: false, field: "value", message: `${read.message} Nothing was checked or changed.` };
+  return { ok: true, vendor, rule: read.rule, key: checkKeyOf(vendor, read.rule) };
 }
 
 /**

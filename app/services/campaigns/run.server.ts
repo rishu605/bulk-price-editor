@@ -626,11 +626,9 @@ async function executeCampaignRun(
       };
     }
 
-    // How many variants this run will attempt: the list a subset apply was sent, or the
-    // count the budget already made. The plan gate counts for itself otherwise.
-    const scopedCount = options.variantGids?.length ?? work?.variants;
-
-    const refusal = await refusedByPlan(shopId, campaignId, scopedCount);
+    // How many variants this run will attempt: the count the budget already made, or the
+    // plan gate counts for itself -- a subset apply's list through the scope, as it is priced.
+    const refusal = await refusedByPlan(shopId, campaignId, { counted: work?.variants, only: options.variantGids });
     if (refusal) {
       return {
         runId: "",
@@ -1924,11 +1922,17 @@ function verifiedVariants(rows: ExecutedRows): string[] {
 async function refusedByPlan(
   shopId: string,
   campaignId: string,
-  scopedCount: number | undefined,
+  run: {
+    /** The scope's size, when the inline budget has already counted it. */
+    counted?: number;
+    /** The variants a subset apply was sent. */
+    only?: readonly string[];
+  },
 ): Promise<string | null> {
   const { billingFor } = await import("../billing.server");
   const { canStart } = await import("../../lib/billing/plans");
   const { parseSurfaces } = await import("./market-surfaces.server");
+  const { scopedSubsetSize } = await import("./scope-size.server");
 
   const [{ plan, exempt }, campaign] = await Promise.all([
     billingFor(shopId),
@@ -1951,13 +1955,16 @@ async function refusedByPlan(
   // Counted from the campaign's own scope rather than the whole catalogue: the plan
   // meters variants *under management*, and a campaign targeting forty products on a
   // 500K store is forty variants under management.
-  const variants =
-    scopedCount ??
-    (await prisma.variantIndex.count({
-      // Through `scopeOf`, so a campaign targeting a segment is metered on what the
-      // segment matches now — the same set its run will price.
-      where: astToWhere(shopId, await scopeOf(shopId, campaign)),
-    }));
+  //
+  // Through `scopeOf`, so a campaign targeting a segment is metered on what the segment
+  // matches now — the same set its run will price. A subset's list too (#1075): it was
+  // counted as sent, so a variant deleted since it was enrolled, or a gift card, counted
+  // towards a limit the meter promised no campaign could reach, though `loadCandidates`
+  // never prices either.
+  const scope = async () => astToWhere(shopId, await scopeOf(shopId, campaign));
+  const variants = run.only
+    ? await scopedSubsetSize(await scope(), run.only)
+    : (run.counted ?? (await prisma.variantIndex.count({ where: await scope() })));
 
   const verdict = canStart(plan, {
     variants,

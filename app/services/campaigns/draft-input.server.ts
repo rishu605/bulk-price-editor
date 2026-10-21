@@ -46,7 +46,7 @@ export async function draftCampaignFrom(
       })
     : null;
 
-  const ruleProblem = ruleInputProblem(read);
+  const ruleProblem = ruleInputProblem(read, currency);
 
   return {
     ast: {

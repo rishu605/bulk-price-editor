@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { usageLine } from "./usage-line";
+import { giftCardNote, usageLine } from "./usage-line";
 
 describe("a shop that cannot reach its limit", () => {
   const line = usageLine({
@@ -127,5 +127,31 @@ describe("a development store", () => {
     expect(line.headline).toBe("Development store · every feature included");
     expect(line.headline).not.toContain("Wholesale");
     expect(line.detail).toMatch(/test charge/);
+  });
+});
+
+describe("gift cards (#1075)", () => {
+  // The count is what a campaign can cover, and no campaign prices a gift card. Live on
+  // `dartmode-labs` the meter said 3,669 and a whole-catalogue campaign covered 3,665; the
+  // four were gift cards, and nothing on the page said where they went.
+  it.each([
+    ["no cap", null, false, "Your catalogue is 3,665 variants. A campaign can cover all of it."],
+    ["a cap out of reach", 10_000, false, "Your whole catalogue is 3,665 variants, so no campaign can reach the limit."],
+    ["a cap within reach", 500, true, "Your catalogue is 3,665 variants, so a campaign covering all of it would need a larger plan."],
+  ])("says they are not counted, under %s", (_case, variantLimit, couldExceed, lead) => {
+    const line = usageLine({ planName: "Growth", variantLimit, catalogueVariants: 3_665, giftCards: 4, couldExceed, synced: true });
+    expect(line.detail.startsWith(lead), line.detail).toBe(true);
+    expect(line.detail).toMatch(/ 4 gift cards are not counted: no campaign prices a gift card\.$/);
+  });
+
+  it("says nothing of gift cards in a shop with none", () => {
+    const line = usageLine({ planName: "Growth", variantLimit: 10_000, catalogueVariants: 1_240, giftCards: 0, couldExceed: false, synced: true });
+    expect(line.detail).toBe("Your whole catalogue is 1,240 variants, so no campaign can reach the limit.");
+  });
+
+  it("counts one in the singular, and groups a large number", () => {
+    expect(giftCardNote(1)).toBe("1 gift card is not counted: no campaign prices a gift card.");
+    expect(giftCardNote(1_204)).toBe("1,204 gift cards are not counted: no campaign prices a gift card.");
+    expect(giftCardNote(0)).toBe("");
   });
 });

@@ -158,45 +158,78 @@ describe("describing a rule", () => {
   });
 });
 
+/** The rule a form reads, for a form that reads. */
+const ruleOf = (kind: string, typed: string, currency: string) => {
+  const read = costRuleFrom(kind, typed, currency);
+  if (!read.ok) throw new Error(read.message);
+  return read.rule;
+};
+
 describe("reading the cost form in the store's currency (#694)", () => {
   it("stores ¥1,500 as 1500 yen, not 150000", () => {
     // A literal 100 made the never-below-cost floor on a ¥3,000 product ¥150,000.
-    expect(costRuleFrom("set-exact", 1500, "JPY")).toEqual({
-      kind: "set-exact",
-      amount: money(1_500, "JPY"),
+    expect(costRuleFrom("set-exact", "1500", "JPY")).toEqual({
+      ok: true,
+      rule: { kind: "set-exact", amount: money(1_500, "JPY") },
     });
   });
 
   it("stores 1.5 KWD as 1500 fils, not 150", () => {
-    expect(costRuleFrom("set-exact", 1.5, "KWD")).toEqual({
+    expect(ruleOf("set-exact", "1.5", "KWD")).toEqual({
       kind: "set-exact",
       amount: money(1_500, "KWD"),
     });
   });
 
   it("keeps two-decimal currencies as they were", () => {
-    expect(costRuleFrom("fixed-change", -2.5, "USD")).toEqual({
+    expect(ruleOf("fixed-change", "-2.5", "USD")).toEqual({
       kind: "fixed-change",
       amount: money(-250, "USD"),
     });
   });
 
   it("passes percentages through untouched", () => {
-    expect(costRuleFrom("share-of-price", 40, "JPY")).toEqual({ kind: "share-of-price", percent: 40 });
-    expect(costRuleFrom("percent-change", -5, "KWD")).toEqual({ kind: "percent-change", percent: -5 });
+    expect(ruleOf("share-of-price", "40", "JPY")).toEqual({ kind: "share-of-price", percent: 40 });
+    expect(ruleOf("percent-change", "-5", "KWD")).toEqual({ kind: "percent-change", percent: -5 });
+    // A percentage is not money, so its decimals are not the currency's to refuse.
+    expect(ruleOf("percent-change", "4.355", "JPY")).toEqual({ kind: "percent-change", percent: 4.355 });
   });
 
   it("says the amount that will be stored, in that currency's own decimals", () => {
     // Dividing by a literal 100 here cancelled the form's mistake: the dry run showed
     // "1500.00" while ¥150,000 was written.
-    expect(describeCostRule(costRuleFrom("set-exact", 1500, "JPY"))).toBe(
+    expect(describeCostRule(ruleOf("set-exact", "1500", "JPY"))).toBe(
       "Set every matching cost to 1500",
     );
-    expect(describeCostRule(costRuleFrom("set-exact", 1.5, "KWD"))).toBe(
+    expect(describeCostRule(ruleOf("set-exact", "1.5", "KWD"))).toBe(
       "Set every matching cost to 1.500",
     );
-    expect(describeCostRule(costRuleFrom("fixed-change", -2.5, "USD"))).toBe(
+    expect(describeCostRule(ruleOf("fixed-change", "-2.5", "USD"))).toBe(
       "Subtract 2.50 from every matching cost",
     );
+  });
+});
+
+describe("a typed cost with more decimals than its currency has (#1068)", () => {
+  // `Math.round(value * perMajor)` on the float: 9.995 stored 9.99 and 4.355 stored 4.36,
+  // and a cost is the never-below-cost floor, so the half cent moved a guardrail.
+  it.each([
+    ["set-exact", "9.995", "USD", "The amount 9.995 has 3 decimal places, but USD has 2. Enter it to 2 decimal places, such as 9.99 or 10.00."],
+    ["set-exact", "1.005", "USD", "The amount 1.005 has 3 decimal places, but USD has 2. Enter it to 2 decimal places, such as 1.00 or 1.01."],
+    ["fixed-change", "4.355", "USD", "The amount 4.355 has 3 decimal places, but USD has 2. Enter it to 2 decimal places, such as 4.35 or 4.36."],
+    ["fixed-change", "-0.145", "USD", "The amount -0.145 has 3 decimal places, but USD has 2. Enter it to 2 decimal places, such as -0.15 or -0.14."],
+    ["set-exact", "1.0005", "KWD", "The amount 1.0005 has 4 decimal places, but KWD has 3. Enter it to 3 decimal places, such as 1.000 or 1.001."],
+    ["set-exact", "1500.5", "JPY", "The amount 1500.5 has 1 decimal place, but JPY has none. Enter a whole number, such as 1500 or 1501."],
+  ])("refuses %s %s in %s rather than rounding it", (kind, typed, currency, message) => {
+    expect(costRuleFrom(kind, typed, currency)).toEqual({ ok: false, message });
+  });
+
+  it.each([
+    ["set-exact", "9.99", "USD", 999],
+    ["set-exact", "1500", "JPY", 1500],
+    ["set-exact", "1.005", "KWD", 1005],
+    ["fixed-change", "-0.29", "USD", -29],
+  ])("stores %s %s %s as exactly the minor units typed", (kind, typed, currency, minor) => {
+    expect(ruleOf(kind, typed, currency)).toEqual({ kind, amount: money(minor, currency) });
   });
 });

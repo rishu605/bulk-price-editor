@@ -12,8 +12,9 @@
  * change and is not after it.
  */
 
-import { decimalsFor, format } from "../money/format";
+import { format } from "../money/format";
 import { abs, applyPercentChange, money, percentOf, type Money } from "../money/money";
+import { typedAmount } from "../money/typed-amount";
 
 export type CostRule =
   | { kind: "set-exact"; amount: Money }
@@ -78,26 +79,27 @@ function positive(cost: Money): CostOutcome {
   return cost.amount < 0 ? { kind: "skipped", reason: "not-positive" } : { kind: "set", cost };
 }
 
+export type CostRuleRead = { ok: true; rule: CostRule } | { ok: false; message: string };
+
 /**
- * The rule the merchant typed on the cost form, in the store's currency.
+ * The rule the merchant typed on the cost form, in the store's currency, or why it is not one.
  *
- * `10 ** decimalsFor(currency)`, as `ruleFrom` does for campaigns since #343, and not a
- * literal 100: that stored a ¥1,500 cost as ¥150,000 and a 1.5 KWD cost as 0.150 (#694).
- * Costs set the never-below-cost floor, so the yen mistake priced a ¥3,000 product at
- * ¥150,000 on the next run, and the dinar one took the floor away.
+ * In the currency's own minor units, and not a literal 100: that stored a ¥1,500 cost as
+ * ¥150,000 and a 1.5 KWD cost as 0.150 (#694). Costs set the never-below-cost floor, so the
+ * yen mistake priced a ¥3,000 product at ¥150,000 on the next run, and the dinar one took
+ * the floor away.
+ *
+ * Read from the typed text, not from a float multiplied up (#1068): `Math.round(9.995 * 100)`
+ * stored 9.99 and 4.355 stored 4.36. An amount with more decimals than the currency has is
+ * refused, naming them; a percentage is not money, and keeps its decimals.
  */
-export function costRuleFrom(kind: string, value: number, currency: string): CostRule {
-  const perMajor = 10 ** decimalsFor(currency);
-  switch (kind) {
-    case "set-exact":
-      return { kind: "set-exact", amount: money(Math.round(value * perMajor), currency) };
-    case "fixed-change":
-      return { kind: "fixed-change", amount: money(Math.round(value * perMajor), currency) };
-    case "share-of-price":
-      return { kind: "share-of-price", percent: value };
-    default:
-      return { kind: "percent-change", percent: value };
+export function costRuleFrom(kind: string, typed: string, currency: string): CostRuleRead {
+  if (kind === "set-exact" || kind === "fixed-change") {
+    const read = typedAmount("The amount", typed, currency);
+    return read.ok ? { ok: true, rule: { kind, amount: read.amount } } : read;
   }
+  const percent = Number(typed);
+  return { ok: true, rule: kind === "share-of-price" ? { kind, percent } : { kind: "percent-change", percent } };
 }
 
 /**

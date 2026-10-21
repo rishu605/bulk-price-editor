@@ -29,6 +29,8 @@ import { toAdminClient } from "../services/admin-client.server";
 import { fetchShopBasics } from "../services/catalog-sync.server";
 import { billingPlanName, planReturnUrl, trialDaysFor } from "../lib/billing/billing-api";
 import { paysOn } from "../lib/billing/subscription-payload";
+import { giftCardNote } from "../lib/billing/usage-line";
+import { coverableCatalogue } from "../services/plan-usage.server";
 import { ActionRow } from "../components/ActionRow";
 import { isPlanId, PLAN_ORDER, PLANS, planFor, planPrice, type PlanId } from "../lib/billing/plans";
 import { logger } from "../lib/logging/logger";
@@ -58,9 +60,9 @@ export const loader = withGuard("/app/settings/plan", async ({ request }: Loader
   });
 
   const billing = billingFrom(record);
-  const variants = await prisma.variantIndex.count({
-    where: { shopId: shop.id, deletedAt: null },
-  });
+  // What a campaign could cover, as Home's meter counts it (#1075): gift cards were counted
+  // here, so this page said 3,669 where a whole-catalogue campaign covered 3,665.
+  const { variants, giftCards } = await coverableCatalogue(shop.id);
 
   // The plan this shop subscribes to. A development store has every feature whatever it
   // is on, but it still has a plan of its own, so a plan change made there -- App Review
@@ -86,6 +88,7 @@ export const loader = withGuard("/app/settings/plan", async ({ request }: Loader
     trialEndsAt: trialEndsAt?.toISOString() ?? null,
     returned,
     variants,
+    giftCards,
     // What would stop being startable on the free plan, so the downgrade copy is about
     // this merchant's campaigns rather than about plans in the abstract.
     affected: await campaignsAffectedBy(shop.id, PLANS.free),
@@ -174,7 +177,7 @@ export const action = withGuard("/app/settings/plan", async ({ request }: Action
 });
 
 export default function PlanPage() {
-  const { current, exempt, testCharges, trialing, trialEndsAt, returned, variants, plans, affected, timeZone } =
+  const { current, exempt, testCharges, trialing, trialEndsAt, returned, variants, giftCards, plans, affected, timeZone } =
     useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
   const choosing = fetcher.state !== "idle" ? String(fetcher.formData?.get("plan") ?? "") : "";
@@ -250,6 +253,7 @@ export default function PlanPage() {
             </s-text>
             {" — "}
             {formatCount(variants)} variants in your catalogue.
+            {giftCards > 0 ? ` ${giftCardNote(giftCards)}` : null}
           </>
         }
         secondary={

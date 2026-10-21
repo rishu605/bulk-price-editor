@@ -71,6 +71,32 @@ describe("reading the amount", () => {
     });
   });
 
+  it.each([
+    ["set-exact", "9.995", "USD", "The amount 9.995 has 3 decimal places, but USD has 2. Enter it to 2 decimal places, such as 9.99 or 10.00."],
+    ["fixed-change", "1.005", "USD", "The amount 1.005 has 3 decimal places, but USD has 2. Enter it to 2 decimal places, such as 1.00 or 1.01."],
+    ["set-exact", "1.0005", "KWD", "The amount 1.0005 has 4 decimal places, but KWD has 3. Enter it to 3 decimal places, such as 1.000 or 1.001."],
+    ["set-exact", "1500.5", "JPY", "The amount 1500.5 has 1 decimal place, but JPY has none. Enter a whole number, such as 1500 or 1501."],
+  ])("refuses %s %s in %s, for both buttons, rather than rounding it (#1068)", (ruleKind, value, currency, message) => {
+    // Rounded by float error, 9.995 was a cost of 9.99 and 4.355 one of 4.36: the same half
+    // cent either way, under a check that named the rounded amount as if it had been typed.
+    expect(readCostForm(fields({ ruleKind, value }), currency)).toEqual({
+      ok: false,
+      field: "value",
+      message: `${message} Nothing was checked or changed.`,
+    });
+  });
+
+  it.each([
+    ["9.99", "USD", 999],
+    ["1500", "JPY", 1_500],
+    ["1.005", "KWD", 1_005],
+  ])("reads %s %s as exactly the minor units typed", (value, currency, minor) => {
+    expect(readCostForm(fields({ ruleKind: "set-exact", value }), currency)).toMatchObject({
+      ok: true,
+      rule: { kind: "set-exact", amount: money(minor, currency) },
+    });
+  });
+
   it("reads a negative percentage as a cut, which is a real request", () => {
     expect(readCostForm(fields({ value: "-10" }), "USD")).toMatchObject({
       ok: true,

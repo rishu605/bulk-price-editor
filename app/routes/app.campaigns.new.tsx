@@ -306,8 +306,9 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
   const read = readerFor(form);
   const currency = await shopCurrency(shop.id);
   // Refused here, naming the field (#696). A blank amount read as 0, so an exact price left
-  // empty saved a campaign that priced the whole scope at 0.01; a decimal comma crashed.
-  const ruleProblem = ruleInputProblem(read);
+  // empty saved a campaign that priced the whole scope at 0.01; a decimal comma crashed;
+  // 9.995 dollars was rounded to 9.99 by float error (#1068).
+  const ruleProblem = ruleInputProblem(read, currency);
   if (ruleProblem) {
     throw new AppError({ code: "VALIDATION", userMessage: `${ruleProblem} Nothing was created.` });
   }
