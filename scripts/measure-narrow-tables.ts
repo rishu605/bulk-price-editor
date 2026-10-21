@@ -177,6 +177,9 @@ class Browser {
         `--user-data-dir=${profile}`,
         "--remote-debugging-port=0",
         "--window-size=1400,1000",
+        // A CI runner's Ubuntu restricts the user namespaces Chrome's sandbox needs, and the
+        // pages here are the app's own, built locally (#804).
+        ...(process.env.CI ? ["--no-sandbox"] : []),
         "about:blank",
       ],
       { stdio: ["ignore", "ignore", "pipe"] },
