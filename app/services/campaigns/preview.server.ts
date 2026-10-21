@@ -34,7 +34,7 @@ import {
   planMarket,
   UnconvertedMarketError,
 } from "./market-plan.server";
-import { describeMarketSkips, describeMovedMarket, describeStaleSettingMarket } from "../../lib/markets/guardrails";
+import { describeLadderUnread, describeMarketSkips, describeMovedMarket, describeStaleSettingMarket } from "../../lib/markets/guardrails";
 import { parseSurfaces } from "./market-surfaces.server";
 import { labelled } from "../../lib/markets/display-name";
 import type { AdminClient } from "../../lib/execution/sync-executor";
@@ -415,6 +415,7 @@ async function marketPathPreview(
         : []),
       ...describeMovedMarket(list.name, plan.moved.length),
       ...describeStaleSettingMarket(list.name, plan.stale.length),
+      ...describeLadderUnread(list.name, plan.ladderUnread),
     ];
 
     // Nothing to write (#844): no write path to describe -- "will get a price per product"

@@ -291,6 +291,8 @@ async function withLadders(
       // boundary, as the campaign's capture does: `serialiseLadder` is the check that matters.
       const ladder = serialiseLadder(ladders.get(baseline.row.variantGid) ?? []);
       if (ladder) baseline.row.quantityBreaks = ladder as unknown as Prisma.InputJsonValue;
+      // Read, whatever it held: "none" is now known to be none (#1103).
+      baseline.row.ladderRead = true;
       out.push(baseline);
     }
   }

@@ -259,7 +259,7 @@ export async function revertQuantityBreaks(
 
   const others = await tieredCampaignsOn(shopId, list.priceListGid, ours, campaignId);
 
-  const { variants, unanchored } = await ladderBaselines(shopId, list, ours);
+  const { variants, unanchored, unread } = await ladderBaselines(shopId, list, ours);
   const plan = planLadderRevert(variants, others, guardrail);
 
   const result = plan.rows.length > 0
@@ -286,6 +286,12 @@ export async function revertQuantityBreaks(
       `${list.name}: ${countOf(unanchored.length, "product")} still ${unanchored.length === 1 ? "has" : "have"} this campaign's quantity breaks, because no baseline records the price there before it. Capture baselines on Prices → Baselines, then resume to finish the revert.`,
     );
   }
+  // A baseline whose ladder was never read (#1103): what to put back is not known.
+  if (unread.length > 0) {
+    messages.push(
+      `${list.name}: ${countOf(unread.length, "product")} still ${unread.length === 1 ? "has" : "have"} this campaign's quantity breaks, because the ones ${unread.length === 1 ? "it" : "they"} had before were never recorded. If ${unread.length === 1 ? "it" : "they"} had quantity breaks of ${unread.length === 1 ? "its" : "their"} own, set them again in Shopify; the campaign's stay until then.`,
+    );
+  }
   if (handedOn > 0) {
     messages.push(
       `${list.name}: ${countOf(handedOn, "product")} now ${handedOn === 1 ? "has" : "have"} the quantity breaks of the next campaign that prices ${handedOn === 1 ? "it" : "them"} there.`,
@@ -304,11 +310,11 @@ export async function revertQuantityBreaks(
     priceListGid: list.priceListGid,
     name: list.name,
     verified: result.verified,
-    failed: result.failed + unanchored.length,
+    failed: result.failed + unanchored.length + unread.length,
     refused: 0,
     chunks: result.chunks,
     messages,
-    clean: result.clean && unanchored.length === 0,
+    clean: result.clean && unanchored.length === 0 && unread.length === 0,
   };
 }
 
@@ -347,12 +353,12 @@ async function ladderBaselines(
   shopId: string,
   list: { priceListGid: string; currency: string },
   variantGids: readonly string[],
-): Promise<{ variants: LadderBaselineInput[]; unanchored: string[] }> {
+): Promise<{ variants: LadderBaselineInput[]; unanchored: string[]; unread: string[] }> {
   const [baselines, titles] = await Promise.all([
     inChunks([...variantGids], (batch) =>
       prisma.baseline.findMany({
         where: { shopId, surfaceKind: "MARKET", priceListGid: list.priceListGid, variantGid: { in: batch }, supersededAt: null },
-        select: { variantGid: true, currency: true, basePrice: true, quantityBreaks: true },
+        select: { variantGid: true, currency: true, basePrice: true, quantityBreaks: true, ladderRead: true },
       }),
     ),
     inChunks([...variantGids], (batch) =>
@@ -365,10 +371,17 @@ async function ladderBaselines(
 
   const variants: LadderBaselineInput[] = [];
   const unanchored: string[] = [];
+  const unread: string[] = [];
   for (const variantGid of variantGids) {
     const baseline = byVariant.get(variantGid);
     if (!baseline) {
       unanchored.push(variantGid);
+      continue;
+    }
+    // A ladder nobody read is not "no ladder" (#1103): reverting on it would clear the
+    // merchant's quantity breaks, so it is held back as a variant with no baseline is.
+    if (baseline.ladderRead !== true) {
+      unread.push(variantGid);
       continue;
     }
     const currency = baseline.currency || list.currency;
@@ -380,5 +393,5 @@ async function ladderBaselines(
       ladder: parseLadder(baseline.quantityBreaks, currency),
     });
   }
-  return { variants, unanchored };
+  return { variants, unanchored, unread };
 }

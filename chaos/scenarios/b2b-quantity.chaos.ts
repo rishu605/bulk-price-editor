@@ -225,6 +225,7 @@ describe("chaos: wholesale quantity breaks", () => {
                 { minimumQuantity: 1, amount: 5000 },
                 { minimumQuantity: 24, amount: 4500 },
               ],
+              ladderRead: true,
               source: "AUTO_ENROLL" as const,
             },
             {
@@ -234,6 +235,7 @@ describe("chaos: wholesale quantity breaks", () => {
               priceListGid: LIST.priceListGid,
               currency: LIST.currency,
               basePrice: 4000n,
+              ladderRead: true,
               source: "AUTO_ENROLL" as const,
             },
           ],
@@ -340,7 +342,7 @@ describe("chaos: wholesale quantity breaks", () => {
         await chaos.apply();
         await applyQuantityBreaks(shopId, await chaos.latestRunId("APPLY"), LIST, catalogue(variantGids), TIERS, FLOOR, client);
         await prisma.baseline.create({
-          data: { shopId, variantGid: anchored, surfaceKind: "MARKET", priceListGid: LIST.priceListGid, currency: "USD", basePrice: 4_000n, source: "AUTO_ENROLL" },
+          data: { shopId, variantGid: anchored, surfaceKind: "MARKET", priceListGid: LIST.priceListGid, currency: "USD", basePrice: 4_000n, ladderRead: true, source: "AUTO_ENROLL" },
         });
 
         await chaos.revert();
@@ -558,8 +560,8 @@ async function twoSales(chaos: ChaosContext) {
   await prisma.variantIndex.updateMany({ where: { shopId }, data: { cost: 1_000n } });
   await prisma.baseline.createMany({
     data: [
-      { shopId, variantGid: a, surfaceKind: "MARKET" as const, priceListGid: LIST.priceListGid, currency: "USD", basePrice: 5_000n, handSet: true, source: "AUTO_ENROLL" as const, quantityBreaks: [{ minimumQuantity: 1, amount: 5_000 }, { minimumQuantity: 24, amount: 4_500 }] },
-      { shopId, variantGid: b, surfaceKind: "MARKET" as const, priceListGid: LIST.priceListGid, currency: "USD", basePrice: 4_000n, handSet: true, source: "AUTO_ENROLL" as const },
+      { shopId, variantGid: a, surfaceKind: "MARKET" as const, priceListGid: LIST.priceListGid, currency: "USD", basePrice: 5_000n, handSet: true, ladderRead: true, source: "AUTO_ENROLL" as const, quantityBreaks: [{ minimumQuantity: 1, amount: 5_000 }, { minimumQuantity: 24, amount: 4_500 }] },
+      { shopId, variantGid: b, surfaceKind: "MARKET" as const, priceListGid: LIST.priceListGid, currency: "USD", basePrice: 4_000n, handSet: true, ladderRead: true, source: "AUTO_ENROLL" as const },
     ],
   });
 

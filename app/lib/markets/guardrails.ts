@@ -66,6 +66,19 @@ export function describeStaleSettingMarket(market: string, count: number): strin
   ];
 }
 
+/**
+ * A wholesale catalogue whose quantity ladders could not be read from Shopify (#1103). Its
+ * prices were not recorded, so it is not priced this time rather than priced from a baseline
+ * that would say "no ladder" without anyone having looked.
+ */
+export function describeLadderUnread(market: string, unread: boolean): string[] {
+  if (!unread) return [];
+  return [
+    `${market}: its quantity breaks couldn't be read from Shopify, so its wholesale prices weren't recorded and it ` +
+      "isn't priced this time. Nothing was changed there. Apply again in a few minutes to price it.",
+  ];
+}
+
 export function describeMarketSkips(
   market: string,
   currency: string,
