@@ -128,7 +128,7 @@ describe("the overlap card", () => {
 
   it("writes the sentence on the card after both names, in the past once the overlap has ended", () => {
     const html = render({ overlaps: [overlap({ ended: true })] });
-    expect(textOf(html)).toContain("Spring sale and Clearance ran together and shared 3 products.");
+    expect(textOf(html)).toContain("Spring sale and Clearance ran together. As they are set up now, 3 products are in both.");
   });
 
   it("is headed in the past when every overlap on it has ended, and offers no price link (#1016)", () => {
