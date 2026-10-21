@@ -250,6 +250,188 @@ describe("chaos: repricing a market with one mutation", () => {
     );
   });
 
+  it("re-applied after a revert, composes with and puts back the market's setting as it is now (#705)", async () => {
+    /**
+     * A recurring sale on a market priced by a percentage, and a merchant who changed that
+     * percentage between two months of it.
+     *
+     * The campaign remembers the market's own percentage so its revert can put it back,
+     * and it remembered the first one it ever saw. That is right within one application --
+     * a second run's "before" is the campaign's own percentage -- and wrong across a revert,
+     * after which the market is the merchant's again and they may move it. Month two then
+     * composed with last month's 10% instead of today's 15%, and its revert wrote 10% over
+     * the merchant's 15%: their own setting, lost to a sale that had ended.
+     */
+    await withChaos(
+      "market-wide-reapply-after-revert",
+      { catalog: { products: 6, variantsPerProduct: 1 }, percent: -20 },
+      async (chaos) => {
+        const { campaignId, variantGids } = chaos.fixture;
+
+        addEuMarket(chaos);
+        await syncMarkets(chaos);
+        await targetEu(campaignId, false);
+        const euList = chaos.fake.priceLists.find((l) => l.id === EU)!;
+
+        // ------------------------------------------------------------ month one
+        const first = await chaos.apply();
+        await chaos.expectHonest(first.runId);
+        // The campaign's 20% composed with the market's 10%.
+        expect(chaos.fake.parentWrites.at(-1)).toMatchObject({
+          priceListGid: EU,
+          type: "PERCENTAGE_DECREASE",
+          value: 28,
+        });
+
+        const firstRevert = await chaos.revert();
+        await chaos.expectHonest(firstRevert.runId);
+        expect(euList.adjustment).toEqual({ type: "PERCENTAGE_DECREASE", value: 10 });
+
+        // ------------------------------------------- the merchant's own change
+        // Made in Shopify, between the two months, with no campaign on the market.
+        euList.adjustment = { type: "PERCENTAGE_DECREASE", value: 15 };
+        await syncMarkets(chaos);
+
+        // ------------------------------------------------------------ month two
+        const second = await chaos.apply();
+        await chaos.expectHonest(second.runId);
+
+        const writes = chaos.fake.parentWrites.filter((w) => w.priceListGid === EU);
+        expect(writes, "month two did not take the market-wide path").toHaveLength(3);
+        // composeBps(-1500, -2000): the campaign's 20% on the merchant's 15%, not on the
+        // 10% the market had a month ago.
+        expect(writes.at(-1), "composed with last month's market setting").toMatchObject({
+          type: "PERCENTAGE_DECREASE",
+          value: 32,
+        });
+
+        const change = await prisma.priceListChange.findFirstOrThrow({
+          where: { runId: second.runId, priceListGid: EU },
+        });
+        expect(change.priorAdjustmentBps, "recorded last month's setting as the merchant's").toBe(-1500);
+        expect(change.appliedAdjustmentBps).toBe(-3200);
+
+        const secondRevert = await chaos.revert();
+        await chaos.expectHonest(secondRevert.runId);
+
+        // ------------------------------------------- the merchant's setting back
+        expect(
+          chaos.fake.parentWrites.filter((w) => w.priceListGid === EU).at(-1),
+          "the revert wrote last month's setting over the merchant's own",
+        ).toMatchObject({ type: "PERCENTAGE_DECREASE", value: 15 });
+        expect(euList.adjustment).toEqual({ type: "PERCENTAGE_DECREASE", value: 15 });
+
+        // And what a European shopper pays is the merchant's 15% again: no price left
+        // pinned on the list, every one derived from their own setting.
+        expect(chaos.fake.fixedPricesOn(EU).size).toBe(0);
+        for (const gid of variantGids) {
+          expect(chaos.fake.priceOf(gid, EU)).toBe(chaos.fake.derivedPriceOf(gid, euList));
+        }
+      },
+    );
+  });
+
+  it("keeps the merchant's setting from the sale's first write while it is on, and nothing from before the revert after it (#705)", async () => {
+    /**
+     * The edges of #705's rule.
+     *
+     * "Since the last revert" must not become "since the last write". Until the revert, the
+     * list carries the campaign's own 28%, and a resumed or repeated market-wide write that
+     * took that for the merchant's would compose 20% on top of it -- 42.4% off -- and its
+     * revert would put the sale's 28% back as theirs.
+     *
+     * Nor "since the last row the revert settled". A write Shopify rejected during the sale
+     * is never settled as reverted, and still carries the old setting after the revert.
+     *
+     * The second write is called directly because a run cannot reach it here: the first
+     * write's corrections leave fixed prices on the list, and a fixed price refuses the
+     * shortcut next time.
+     */
+    await withChaos(
+      "market-wide-second-write-live",
+      { catalog: { products: 4, variantsPerProduct: 1 }, percent: -20 },
+      async (chaos) => {
+        const { shopId, campaignId } = chaos.fixture;
+
+        addEuMarket(chaos);
+        await syncMarkets(chaos);
+        await targetEu(campaignId, false);
+        const euList = chaos.fake.priceLists.find((l) => l.id === EU)!;
+
+        const applied = await chaos.apply();
+        await chaos.expectHonest(applied.runId);
+
+        const { applyMarketWide } = await import("../../app/services/campaigns/market-wide.server");
+        const { readParentState } = await import("../../app/lib/execution/price-list-parent");
+        const { chaosAdminClient } = await import("../harness/http-client");
+        const client = chaosAdminClient(chaos.server.endpoint());
+
+        // What the list says now is the campaign's percentage, not the merchant's.
+        const parent = (await readParentState(client, EU))!;
+        expect(parent.adjustmentBps).toBe(-2800);
+
+        const again = await prisma.campaignRun.create({
+          data: { shopId, campaignId, kind: "APPLY", occurrenceKey: "APPLY-705-again", status: "COMPLETED" },
+        });
+        await applyMarketWide({
+          shopId,
+          campaignId,
+          runId: again.id,
+          list: { priceListGid: EU, name: "Europe", currency: "EUR" },
+          rows: [],
+          campaignBps: -2000,
+          parent,
+          client,
+        });
+
+        const change = await prisma.priceListChange.findFirstOrThrow({
+          where: { runId: again.id, priceListGid: EU },
+        });
+        expect(change.priorAdjustmentBps, "took the campaign's own percentage for the merchant's").toBe(-1000);
+        expect(chaos.fake.parentWrites.at(-1)).toMatchObject({
+          priceListGid: EU,
+          type: "PERCENTAGE_DECREASE",
+          value: 28,
+        });
+
+        // And one more during the sale that Shopify rejected, ledgered as `applyMarketWide`
+        // ledgers a rejection. The revert leaves it FAILED, not REVERTED, so it is still
+        // there once the market is the merchant's again -- older than the revert, and
+        // carrying the 10% the merchant is about to change.
+        const rejected = await prisma.campaignRun.create({
+          data: { shopId, campaignId, kind: "APPLY", occurrenceKey: "APPLY-705-rejected", status: "PARTIAL" },
+        });
+        await prisma.priceListChange.create({
+          data: {
+            shopId,
+            runId: rejected.id,
+            campaignId,
+            priceListGid: EU,
+            priorAdjustmentBps: -1000,
+            appliedAdjustmentBps: -2800,
+            status: "FAILED",
+            failureReason: "Shopify rejected the adjustment.",
+          },
+        });
+
+        const reverted = await chaos.revert();
+        await chaos.expectHonest(reverted.runId);
+        expect(euList.adjustment).toEqual({ type: "PERCENTAGE_DECREASE", value: 10 });
+
+        // The merchant's own change, then the next month's sale: composed with today's 15%,
+        // because everything this campaign wrote before the revert landed is history.
+        euList.adjustment = { type: "PERCENTAGE_DECREASE", value: 15 };
+        const next = await chaos.apply();
+        await chaos.expectHonest(next.runId);
+
+        const nextChange = await prisma.priceListChange.findFirstOrThrow({
+          where: { runId: next.runId, priceListGid: EU },
+        });
+        expect(nextChange.priorAdjustmentBps, "a write from before the revert decided the prior").toBe(-1500);
+      },
+    );
+  });
+
   it("falls back to a price per product when the campaign covers only part of a market", async () => {
     await withChaos(
       "market-wide-partial",

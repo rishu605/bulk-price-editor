@@ -262,7 +262,9 @@ export async function revertMarketWide(
     await prisma.priceListChange.updateMany({
       where: { campaignId, priceListGid: change.priceListGid, status: { in: ["APPLIED", "VERIFIED"] } },
       data: write.ok
-        ? { status: "REVERTED", verifiedAt: new Date() }
+        ? // The moment the market is the merchant's again: `priorAdjustment` reads the
+          // campaign's history on this list from here on (#705).
+          { status: "REVERTED", verifiedAt: new Date() }
         : { status: "FAILED", failureReason: write.errors.join("; ") },
     });
 
@@ -280,17 +282,36 @@ export async function revertMarketWide(
 /**
  * What this market's percentage was before the campaign.
  *
- * The earliest ledger row for this campaign and market, falling back to the live value
- * the first time round. Earliest, not latest: a later row's "prior" is this campaign's
- * own previous adjustment.
+ * The earliest ledger row for this campaign and market since the campaign's last
+ * completed revert there, falling back to the live value when there is none. Earliest,
+ * not latest: a later row's "prior" is this campaign's own previous adjustment.
+ *
+ * Since the last revert, not ever (#705). Once the merchant's percentage is back on the
+ * list, the market is theirs again and they may change it -- a recurring sale re-applies
+ * a month later to a market at 15% that it last saw at 10%. The first row this campaign
+ * ever wrote would then compose with the old 10%, and its revert would write that 10%
+ * over the merchant's own 15%.
  */
 async function priorAdjustment(
   campaignId: string,
   priceListGid: string,
   parent: ParentState,
 ): Promise<number | null> {
+  // When the merchant's percentage was last confirmed back on this list. `revertMarketWide`
+  // stamps that moment on the rows it settles as REVERTED, and only once its write landed;
+  // a revert that failed here leaves them unreverted, the campaign's percentage still on
+  // the list, and their prior still the one to keep. Per list rather than from the REVERT
+  // run's status, which reads COMPLETED when a market's write failed (#706). And the
+  // moment, not the reverted row's own age: a write Shopify rejected mid-sale stays FAILED,
+  // never REVERTED, and is history once the revert lands however recently it was made.
+  const lastRevert = await prisma.priceListChange.aggregate({
+    where: { campaignId, priceListGid, status: "REVERTED" },
+    _max: { verifiedAt: true },
+  });
+  const revertedAt = lastRevert._max.verifiedAt;
+
   const first = await prisma.priceListChange.findFirst({
-    where: { campaignId, priceListGid },
+    where: { campaignId, priceListGid, ...(revertedAt ? { createdAt: { gt: revertedAt } } : {}) },
     orderBy: { createdAt: "asc" },
     select: { priorAdjustmentBps: true },
   });
