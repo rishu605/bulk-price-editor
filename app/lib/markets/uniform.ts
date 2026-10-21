@@ -20,6 +20,8 @@
  * without knowing about any of them, and will catch the fifth we have not thought of.
  */
 
+import { countOf } from "../format/display";
+import { parseMoney, type Money } from "../money/money";
 import type { PlannedRow } from "../planning/types";
 
 export type UniformVerdict =
@@ -283,4 +285,53 @@ export function toAdjustmentInput(bps: number): { type: string; value: number } 
     type: bps < 0 ? "PERCENTAGE_DECREASE" : "PERCENTAGE_INCREASE",
     value: Math.abs(bps) / 100,
   };
+}
+
+/**
+ * Why a variant's price after a market-wide percentage could not be verified, so it was given
+ * an exact one (#1094):
+ *
+ *   rounding   a minor unit either side of the campaign's, read in the market's currency.
+ *              Our price is the market's recorded baseline -- already rounded into its
+ *              currency -- with the campaign's percentage applied; Shopify's is one composed
+ *              percentage on the unrounded converted base price. Two roundings of one number
+ *              land at most a minor unit apart.
+ *   unchecked  no price to compare: none came back, or it came back in another currency. A
+ *              list priced by a percentage answers in the shop's currency (#257), so on a
+ *              market in another currency this is every variant.
+ *   missed     any wider gap: the percentage composed onto a base price that had moved, as
+ *              #260's did and #1094's did again, or one that moved since.
+ */
+export type CorrectionCause = "rounding" | "unchecked" | "missed";
+
+export function correctionCause(derived: { amount: string; currency: string } | undefined, intended: Money): CorrectionCause {
+  if (!derived || derived.currency !== intended.currency) return "unchecked";
+  let amount: number;
+  try {
+    amount = parseMoney(derived.amount, derived.currency).amount;
+  } catch {
+    return "unchecked";
+  }
+  return Math.abs(amount - intended.amount) <= 1 ? "rounding" : "missed";
+}
+
+/**
+ * The run's sentences for the prices a market-wide percentage was followed by an exact price
+ * for, by cause. "Rounded them differently" is said only of the ones rounding explains: it was
+ * said of every one, which named rounding as the cause of a double discount (#1094) and of a
+ * price read back in dollars.
+ */
+export function describeCorrections(market: string, corrected: Partial<Record<CorrectionCause, number>>): string[] {
+  const them = (count: number) => (count === 1 ? "it" : "them");
+  const their = (count: number) => (count === 1 ? "its" : "their");
+  const because: Record<CorrectionCause, (count: number) => string> = {
+    rounding: (count) => `a market-wide percentage rounded ${them(count)} differently`,
+    unchecked: (count) =>
+      `Shopify did not report ${their(count)} market-wide price in this market's currency, so it could not be checked`,
+    missed: (count) => `the market-wide percentage did not give ${them(count)} the campaign's price`,
+  };
+  return (["rounding", "unchecked", "missed"] as const).flatMap((cause) => {
+    const count = corrected[cause] ?? 0;
+    return count > 0 ? [`${market}: ${countOf(count, "product")} needed an exact price because ${because[cause](count)}.`] : [];
+  });
 }

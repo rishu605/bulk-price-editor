@@ -158,6 +158,16 @@ export interface PlanInput {
    */
   excludeCampaignId?: string;
   /**
+   * The campaign whose apply or preview this is. A revert names it in `excludeCampaignId`.
+   *
+   * Absent asks who prices each base price, which is the right question for a plan that is
+   * nobody's run. Named, a campaign that prices only its markets plans no base price at all
+   * (#1094): each of its base candidates is left as it is, credited to whoever would win the
+   * variant were every campaign on it, which is what the market planner resolves and so
+   * what its markets are planned over (`marketScope`).
+   */
+  campaignId?: string;
+  /**
    * Variants a hand edit holds in another campaign, by the campaign holding them (#821).
    * Planned as skipped, whoever would win them: the merchant has been asked whether to
    * keep that price, and no other campaign's run writes it until they answer.

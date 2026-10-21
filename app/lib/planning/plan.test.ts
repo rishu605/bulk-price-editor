@@ -5,6 +5,7 @@ import { money } from "../money/money";
 import { NO_ROUNDING } from "../money/rounding";
 import { policyOf } from "../money/rounding-policy";
 import type { ResolvableCampaign } from "../pricing/types";
+import { marketScope } from "./market-scope";
 import { planRun, priceDelta, refKey, rowsNeedingWrite } from "./plan";
 import { reasonForRow } from "./reasons";
 import { DEFAULT_THRESHOLD, selectWritePath, thresholdFromEnv } from "./write-path";
@@ -668,5 +669,83 @@ describe("a reduction too small for the rounding step (#825)", () => {
     expect(out.rows).toEqual([expect.objectContaining({ status: "skipped", reason: "discount-below-rounding-step" })]);
     expect(out.counts).toMatchObject({ planned: 0, skipped: 1 });
     expect(reasonForRow("discount-below-rounding-step")).toBe("Discount smaller than the rounding step");
+  });
+});
+
+describe("a campaign that prices its markets and not the base price (#1094)", () => {
+  // A sale for Europe and nowhere else, above a storewide one.
+  const europe = campaign({
+    id: "europe",
+    priority: 200,
+    marketsOnly: true,
+    ruleRows: [{ segmentIds: [], rule: { kind: "percent-change", percent: -30 } }],
+  });
+  const storewide = campaign({ id: "storewide", priority: 100 });
+
+  it("never prices the base price in another campaign's plan", () => {
+    const out = planRun({ campaigns: [storewide, europe], candidates: [candidate()], campaignId: "storewide" });
+    if (out.kind !== "ok") throw new Error(out.kind);
+
+    expect(out.rows).toEqual([expect.objectContaining({ campaignId: "storewide", intendedPrice: usd(8_000) })]);
+    expect(out.coverage.find((entry) => entry.campaignId === "europe"), "covered a base price it never writes").toBeUndefined();
+  });
+
+  it("is not who a revert hands the base price to", () => {
+    const out = planRun({
+      campaigns: [storewide, europe],
+      candidates: [candidate({ livePrice: usd(8_000) })],
+      excludeCampaignId: "storewide",
+    });
+    if (out.kind !== "ok") throw new Error(out.kind);
+
+    expect(out.rows).toEqual([expect.objectContaining({ intendedPrice: usd(10_000), campaignId: undefined })]);
+  });
+
+  it("plans no base price of its own, and still answers for the variants it wins", () => {
+    const out = planRun({ campaigns: [europe, storewide], candidates: [candidate()], campaignId: "europe" });
+    if (out.kind !== "ok") throw new Error(out.kind);
+
+    expect(out.rows, "planned a base price for a campaign that does not price it").toEqual([]);
+    expect(out.counts).toMatchObject({ planned: 0, noop: 1, skipped: 0 });
+    // What its markets are planned over: it outranks the storewide sale here.
+    expect(marketScope("europe", out.rows, out.unchanged)).toEqual(["gid://Variant/1"]);
+  });
+
+  it("leaves a variant a higher campaign wins out of its markets, as any campaign does (#937)", () => {
+    const higher = campaign({ id: "higher", priority: 300 });
+    const out = planRun({ campaigns: [europe, higher], candidates: [candidate()], campaignId: "europe" });
+    if (out.kind !== "ok") throw new Error(out.kind);
+
+    expect(out.rows).toEqual([]);
+    expect(marketScope("europe", out.rows, out.unchanged)).toEqual([]);
+  });
+
+  it("plans no base price on its revert either, whatever the base price shows", () => {
+    const out = planRun({
+      campaigns: [europe, storewide],
+      candidates: [candidate({ livePrice: usd(7_000) })],
+      excludeCampaignId: "europe",
+    });
+    if (out.kind !== "ok") throw new Error(out.kind);
+
+    expect(out.rows).toEqual([]);
+  });
+
+  it("is not stopped by a base-price guardrail it never meets: each market checks its own", () => {
+    const blocking = campaign({ ...europe, guardrails: { minPrice: usd(9_000) }, guardrailViolationPolicy: "block" });
+    const out = planRun({ campaigns: [blocking], candidates: [candidate()], campaignId: "europe" });
+
+    expect(out.kind).toBe("ok");
+    if (out.kind !== "ok") return;
+    expect(out.rows).toEqual([]);
+    expect(marketScope("europe", out.rows, out.unchanged)).toEqual(["gid://Variant/1"]);
+  });
+
+  it("prices its markets as before", () => {
+    const market: SurfaceRef = { ...baseRef("gid://Variant/1"), surfaceKind: "market", priceListGid: "gid://PriceList/eu" };
+    const out = planRun({ campaigns: [europe], candidates: [candidate({ ref: market, livePrice: undefined })] });
+    if (out.kind !== "ok") throw new Error(out.kind);
+
+    expect(out.rows).toEqual([expect.objectContaining({ campaignId: "europe", intendedPrice: usd(7_000) })]);
   });
 });

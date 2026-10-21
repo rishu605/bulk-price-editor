@@ -15,6 +15,8 @@ import type { PlannedRow } from "../planning/types";
 import {
   applyBps,
   composeBps,
+  correctionCause,
+  describeCorrections,
   feasibleBps,
   toAdjustmentInput,
   uniformAdjustment,
@@ -342,5 +344,44 @@ describe("feasibleBps", () => {
       ),
       { numRuns: 500 },
     );
+  });
+});
+
+describe("why a market-wide percentage needed an exact price after it (#1094)", () => {
+  const intended = money(5_760, "EUR");
+
+  it("calls a minor unit either side rounding", () => {
+    expect(correctionCause({ amount: "57.61", currency: "EUR" }, intended)).toBe("rounding");
+    expect(correctionCause({ amount: "57.59", currency: "EUR" }, intended)).toBe("rounding");
+    expect(correctionCause({ amount: "5761", currency: "JPY" }, money(5_760, "JPY"))).toBe("rounding");
+  });
+
+  it("does not call a percentage applied twice rounding", () => {
+    // The campaign's 20% composed onto a base price it had already moved by 20%.
+    expect(correctionCause({ amount: "46.08", currency: "EUR" }, intended)).toBe("missed");
+    expect(correctionCause({ amount: "57.62", currency: "EUR" }, intended)).toBe("missed");
+  });
+
+  it("does not call a price it could not read, or read in another currency, rounding", () => {
+    expect(correctionCause(undefined, intended)).toBe("unchecked");
+    // What a list priced by a percentage answers: the shop's currency (#257).
+    expect(correctionCause({ amount: "57.60", currency: "USD" }, intended)).toBe("unchecked");
+    expect(correctionCause({ amount: "not a price", currency: "EUR" }, intended)).toBe("unchecked");
+  });
+
+  it("names rounding as the cause only for the prices it was the cause of", () => {
+    expect(describeCorrections("Europe", { rounding: 1 })).toEqual([
+      "Europe: 1 product needed an exact price because a market-wide percentage rounded it differently.",
+    ]);
+    expect(describeCorrections("Europe", { rounding: 3, unchecked: 40, missed: 2 })).toEqual([
+      "Europe: 3 products needed an exact price because a market-wide percentage rounded them differently.",
+      "Europe: 40 products needed an exact price because Shopify did not report their market-wide price in this market's currency, so it could not be checked.",
+      "Europe: 2 products needed an exact price because the market-wide percentage did not give them the campaign's price.",
+    ]);
+    expect(describeCorrections("Europe", { unchecked: 1, missed: 1 })).toEqual([
+      "Europe: 1 product needed an exact price because Shopify did not report its market-wide price in this market's currency, so it could not be checked.",
+      "Europe: 1 product needed an exact price because the market-wide percentage did not give it the campaign's price.",
+    ]);
+    expect(describeCorrections("Europe", {})).toEqual([]);
   });
 });

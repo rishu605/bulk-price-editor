@@ -128,7 +128,8 @@ describe("the editor's preview says what it found", () => {
     const text = region(panel(preview({ skipped: 2, withoutBaseline: 4 }))).text;
 
     expect(text).toContain("2 would be left alone.");
-    expect(text).toContain("4 have no baseline yet, so they cannot be priced.");
+    // The panel's own sentence, word for word (#1097).
+    expect(text).toContain("4 have no baseline yet, so they cannot be priced at all.");
   });
 
   it("empties while it recalculates, so the same answer twice is still heard twice", () => {

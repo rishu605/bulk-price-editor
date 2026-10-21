@@ -27,7 +27,13 @@ import {
   type ParentState,
 } from "../../lib/execution/price-list-parent";
 import type { AdminClient } from "../../lib/execution/sync-executor";
-import { composeBps, toAdjustmentInput } from "../../lib/markets/uniform";
+import {
+  composeBps,
+  correctionCause,
+  describeCorrections,
+  toAdjustmentInput,
+  type CorrectionCause,
+} from "../../lib/markets/uniform";
 import { parseMoney } from "../../lib/money/money";
 import type { PlannedRow } from "../../lib/planning/types";
 import { mirrorMarketWrite } from "./mirror.server";
@@ -35,7 +41,7 @@ import { mirrorMarketWrite } from "./mirror.server";
 export interface MarketWideResult {
   verified: number;
   failed: number;
-  /** Rows Shopify rounded differently, then fixed with a per-product price. */
+  /** Rows the percentage did not land on, then fixed with a per-product price. */
   corrected: number;
   messages: string[];
 }
@@ -127,6 +133,8 @@ export async function applyMarketWide(
 
   const drifted: MarketPriceRow[] = [];
   const verified: string[] = [];
+  // Why each drifted one could not be verified, so the run names the cause it had (#1094).
+  const causes = new Map<string, CorrectionCause>();
 
   for (const row of rows) {
     const intended = row.intendedPrice;
@@ -147,6 +155,7 @@ export async function applyMarketWide(
       // The price only: these rows were planned without a strike-through decision, and
       // `null` would now clear one (#763).
       drifted.push({ variantGid: row.ref.variantGid, price: intended });
+      causes.set(row.ref.variantGid, correctionCause(live, intended));
     }
   }
 
@@ -186,10 +195,12 @@ export async function applyMarketWide(
       });
     }
 
-    messages.push(
-      `${list.name}: ${corrected} ${corrected === 1 ? "product" : "products"} needed an ` +
-        `exact price because a market-wide percentage rounded them differently.`,
-    );
+    const byCause: Partial<Record<CorrectionCause, number>> = {};
+    for (const row of fix.rows) {
+      const cause = causes.get(row.variantGid);
+      if (row.status === "verified" && cause) byCause[cause] = (byCause[cause] ?? 0) + 1;
+    }
+    messages.push(...describeCorrections(list.name, byCause));
   }
 
   messages.unshift(

@@ -12,12 +12,15 @@
  * formality here. On the per-product path we send a price and Shopify stores it. Here
  * we send a percentage and Shopify computes the prices, rounding its own way — so a
  * handful can land a minor unit from what the ledger promised, and those get corrected
- * with an exact price rather than being marked verified on trust.
+ * with an exact price rather than being marked verified on trust. So does every price it
+ * reports in a currency other than the market's, which on a percentage list in another
+ * currency is all of them (#257): see the first scenario.
  */
 
 import { describe, expect, it } from "vitest";
 
 import prisma from "../../app/db.server";
+import { describeCorrections } from "../../app/lib/markets/uniform";
 import { parseMoney } from "../../app/lib/money/money";
 import { withChaos, type ChaosContext } from "../harness/scenario";
 
@@ -43,7 +46,8 @@ function addEuMarket(chaos: ChaosContext) {
  * derive every price from the *current* base price — so if the campaign also moves the
  * base price, the only adjustment that reproduces the intended prices is the list's
  * existing one, unchanged, and the shortcut has nothing to do (#260). It is for a
- * markets-only campaign: a promotion running in Europe and nowhere else.
+ * markets-only campaign: a promotion running in Europe and nowhere else, which leaves the
+ * base price where it is (#1094).
  */
 async function targetEu(campaignId: string, base = true) {
   await prisma.campaign.update({
@@ -56,6 +60,18 @@ async function syncMarkets(chaos: ChaosContext) {
   const { syncMarkets: sync } = await import("../../app/services/markets-sync.server");
   const { chaosAdminClient } = await import("../harness/http-client");
   await sync(chaosAdminClient(chaos.server.endpoint()), chaos.fixture.shopId);
+}
+
+/**
+ * Every variant's base price as the store holds it, and how many base-price rows the shop's
+ * runs ledgered. A campaign on Europe alone changes neither (#1094): it used to reprice the
+ * base price for every shopper, 97.00 to 77.60, and the shortcut then took its 20% again.
+ */
+async function baseOf(chaos: ChaosContext) {
+  return {
+    prices: new Map(chaos.fixture.variantGids.map((gid) => [gid, chaos.fake.priceOf(gid)])),
+    rows: await prisma.variantChange.count({ where: { shopId: chaos.fixture.shopId, surfaceKind: "BASE" } }),
+  };
 }
 
 describe("chaos: repricing a market with one mutation", () => {
@@ -74,8 +90,8 @@ describe("chaos: repricing a market with one mutation", () => {
         // this one.
         await targetEu(campaignId, false);
 
-        // Captured before the run: once the base price moves this is no longer the
-        // market's baseline, it is the sale price with the market's rule on top (#259).
+        // Captured before the run: once the market's percentage moves this is no longer
+        // the market's baseline, it is the sale price (#259).
         const euList = chaos.fake.priceLists.find((l) => l.id === EU)!;
         const before = new Map(
           variantGids.map((gid) => [
@@ -83,9 +99,14 @@ describe("chaos: repricing a market with one mutation", () => {
             parseMoney(chaos.fake.derivedPriceOf(gid, euList)!, "EUR").amount,
           ]),
         );
+        const base = await baseOf(chaos);
 
         const applied = await chaos.apply();
         await chaos.expectHonest(applied.runId);
+
+        // A sale for Europe, and nowhere else: the price every other shopper pays is where
+        // it was, and no run planned or ledgered one (#1094).
+        expect(await baseOf(chaos), "a markets-only campaign moved the base price").toEqual(base);
 
         // One mutation for forty products, instead of a price each.
         expect(chaos.fake.parentWrites).toHaveLength(1);
@@ -104,22 +125,33 @@ describe("chaos: repricing a market with one mutation", () => {
           expect(parseMoney(chaos.fake.priceOf(gid, EU)!, "EUR").amount).toBe(expected);
         }
 
-        // Rows are corrected rather than marked verified on trust, and for a market in
-        // another currency that is most of them.
+        // Rows are corrected rather than marked verified on trust: for a market in another
+        // currency, every one of them, and not because of rounding.
         //
-        // I predicted a minority here and was wrong. The two sides round at different
-        // points: our intended price is the *recorded baseline* — itself already rounded
-        // into euros — times the campaign's percentage, while Shopify applies one composed
-        // percentage to the unrounded base price. `round(round(x × 0.9) × 0.8)` and
-        // `round(x × 0.72)` agree only by luck, so nearly every row lands a minor unit
-        // apart and gets an exact price written after the shortcut.
+        // This said rounding was why, and so did the run, in a sentence to the merchant.
+        // Rounding does put some rows a minor unit apart -- our price rounds the recorded
+        // baseline into euros before the campaign's percentage, Shopify rounds one composed
+        // percentage at the end, and `round(round(x × 0.9) × 0.8)` and `round(x × 0.72)` agree
+        // only by luck -- but it is not what makes every row need one. A list priced by a
+        // percentage answers in the shop's currency (#257), so the read-back has no euro
+        // price to check any row against. And until #1094 the corrections hid something
+        // worse: the run moved the base price too, so the percentage derived every euro price
+        // from a base already 20% off, 0.8 × 0.72 of it, until each row was pinned.
         //
-        // That makes the shortcut roughly break-even for a cross-currency market — one
-        // parent write plus a correction per row — and genuinely cheap only where no
-        // conversion is involved. Noted on #260 rather than papered over; what is asserted
-        // here is that every row is corrected to the *right* number, which is the property
-        // that matters and the one the count was only ever a proxy for.
-        expect(chaos.fake.fixedPricesOn(EU).size).toBeGreaterThan(0);
+        // So what is asserted is the thing the corrections cannot hide: the percentage itself
+        // lands within a cent of every price the ledger promised, composed onto a base price
+        // that did not move. And the run names the cause it had.
+        const corrected = chaos.fake.fixedPricesOn(EU);
+        expect(corrected.size).toBe(variantGids.length);
+        for (const gid of variantGids) {
+          const derived = parseMoney(chaos.fake.derivedPriceOf(gid, euList)!, "EUR").amount;
+          expect(
+            Math.abs(derived - Math.round(before.get(gid)! * 0.8)),
+            `${gid}: the percentage alone does not give the campaign's price`,
+          ).toBeLessThanOrEqual(1);
+        }
+        expect(applied.messages).toContain(describeCorrections("Europe", { unchecked: variantGids.length })[0]);
+        expect(applied.messages.join(" "), "named rounding as the cause").not.toContain("rounded");
 
         // The campaign's 20% composed with the merchant's own 10%, not replacing it.
         // Writing 20% here would raise every European price by 8% while reporting the
@@ -156,6 +188,8 @@ describe("chaos: repricing a market with one mutation", () => {
           type: "PERCENTAGE_DECREASE",
           value: 10,
         });
+        // And nothing to put back on the base price, because nothing moved it.
+        expect(await baseOf(chaos), "the revert wrote a base price").toEqual(base);
       },
     );
   });
@@ -189,13 +223,19 @@ describe("chaos: repricing a market with one mutation", () => {
         });
 
         await syncMarkets(chaos);
+        // Markets only, so the shortcut is the path taken at all. Until #1094 this was the
+        // base surface too, and that never takes the shortcut: the market follows the base
+        // price there and is already right (`writes nothing to a market that already follows
+        // the base price`, below). A markets-only campaign used to move the base price as
+        // well, and then the shortcut doubled the discount and every row was corrected. Now
+        // the base price stays put, and a parity list needs no correction at all.
         await prisma.campaign.update({
           where: { id: campaignId },
-          data: { surfaces: { base: true, priceLists: [parity] } as never },
+          data: { surfaces: { base: false, priceLists: [parity] } as never },
         });
 
         // What the parity market shows before anything runs, captured now because the
-        // base price is about to move and take this value with it (#259).
+        // market's percentage is about to move and take this value with it (#259).
         const parityList = chaos.fake.priceLists.find((l) => l.id === parity)!;
         const parityBaseline = new Map(
           variantGids.map((gid) => [
@@ -203,13 +243,18 @@ describe("chaos: repricing a market with one mutation", () => {
             parseMoney(chaos.fake.derivedPriceOf(gid, parityList)!, "USD").amount,
           ]),
         );
+        const base = await baseOf(chaos);
 
-        await chaos.apply();
-        // Was asserted as zero, which encoded #260: a parity list follows the base price
-        // exactly, so a correctly-composed run writes nothing per variant. Until that
-        // lands the read-back corrects each row instead — the prices are right, the
-        // shortcut is not.
-        const afterFirst = chaos.fake.fixedPricesOn(parity).size;
+        const first = await chaos.apply();
+        await chaos.expectHonest(first.runId);
+        // One percentage, and not one exact price after it: the same currency, so nothing to
+        // round twice. Was asserted as zero once, then relaxed to "zero or more" while the
+        // double discount made every row need one (#260, #1094).
+        expect(chaos.fake.parentWrites.filter((w) => w.priceListGid === parity)).toEqual([
+          { priceListGid: parity, type: "PERCENTAGE_DECREASE", value: 20 },
+        ]);
+        expect(chaos.fake.fixedPricesOn(parity).size, "a same-currency market needed exact prices").toBe(0);
+        expect(first.messages.join(" ")).not.toContain("needed an exact price");
 
         // The merchant deepens the sale and applies again. Without this the second run
         // finds every price already correct, plans nothing, and the test would pass
@@ -223,29 +268,41 @@ describe("chaos: repricing a market with one mutation", () => {
           },
         });
 
+        // And a sync in between, as the store's own webhooks bring one: the mirror now says
+        // the list is 20% off. That is the campaign's percentage, not the merchant's, and a
+        // baseline read again "at today's setting" (#1093) would be the sale price -- 30% off
+        // it is 44% off the market's regular price (#1094).
+        await syncMarkets(chaos);
+
         const again = await chaos.apply();
         await chaos.expectHonest(again.runId);
 
         // What a shopper on the parity market pays after the second run: 30% off the
         // market's baseline, not 30% off the 20% already applied.
-        //
-        // Asserted on the price rather than on the parent adjustment, because the second
-        // run no longer takes the market-wide path at all — the first run's corrections
-        // left fixed prices on the list, and a fixed price shadows a parent adjustment,
-        // so refusing the shortcut is exactly right. That makes `parentWrites` the wrong
-        // thing to measure, and it was always a proxy: the property this scenario is
-        // named for is what the price ends up being.
-        //
-        // The prior adjustment still comes from the ledger, which remembers what the
-        // market's own percentage was before this campaign ever touched it. Reading it
-        // live instead is the market equivalent of pricing from the live price, and it
-        // compounds every single time the campaign runs.
         for (const gid of variantGids) {
           const expected = Math.round(parityBaseline.get(gid)! * 0.7);
           expect(parseMoney(chaos.fake.priceOf(gid, parity)!, "USD").amount).toBe(expected);
         }
 
-        expect(afterFirst).toBeGreaterThanOrEqual(0);
+        // And by the shortcut again, which is the guard this scenario is named for. With
+        // fixed prices left by a first run's corrections, the second refused the shortcut
+        // and this was asserted on the price alone.
+        //
+        // The prior adjustment comes from the ledger, which remembers what the market's own
+        // percentage was before this campaign ever touched it: 0%, so 30% is written, not the
+        // 44% that composing with the campaign's own 20% would be. Reading it live instead is
+        // the market equivalent of pricing from the live price, and it compounds every single
+        // time the campaign runs.
+        expect(chaos.fake.parentWrites.filter((w) => w.priceListGid === parity).at(-1), "the second run compounded").toEqual({
+          priceListGid: parity,
+          type: "PERCENTAGE_DECREASE",
+          value: 30,
+        });
+        const change = await prisma.priceListChange.findFirstOrThrow({ where: { runId: again.runId, priceListGid: parity } });
+        expect(change.priorAdjustmentBps).toBe(0);
+        expect(chaos.fake.fixedPricesOn(parity).size).toBe(0);
+
+        expect(await baseOf(chaos), "a markets-only campaign moved the base price").toEqual(base);
       },
     );
   });
@@ -272,16 +329,19 @@ describe("chaos: repricing a market with one mutation", () => {
         await syncMarkets(chaos);
         await targetEu(campaignId, false);
         const euList = chaos.fake.priceLists.find((l) => l.id === EU)!;
+        const base = await baseOf(chaos);
 
         // ------------------------------------------------------------ month one
         const first = await chaos.apply();
         await chaos.expectHonest(first.runId);
-        // The campaign's 20% composed with the market's 10%.
+        // The campaign's 20% composed with the market's 10%, onto a base price it left
+        // alone (#1094): logging the base price around these runs is how that was found.
         expect(chaos.fake.parentWrites.at(-1)).toMatchObject({
           priceListGid: EU,
           type: "PERCENTAGE_DECREASE",
           value: 28,
         });
+        expect(await baseOf(chaos), "month one moved the base price").toEqual(base);
 
         const firstRevert = await chaos.revert();
         await chaos.expectHonest(firstRevert.runId);
@@ -327,6 +387,8 @@ describe("chaos: repricing a market with one mutation", () => {
         for (const gid of variantGids) {
           expect(chaos.fake.priceOf(gid, EU)).toBe(chaos.fake.derivedPriceOf(gid, euList));
         }
+        // Two months on and off, and the base price never moved.
+        expect(await baseOf(chaos)).toEqual(base);
       },
     );
   });
@@ -357,9 +419,12 @@ describe("chaos: repricing a market with one mutation", () => {
         await syncMarkets(chaos);
         await targetEu(campaignId, false);
         const euList = chaos.fake.priceLists.find((l) => l.id === EU)!;
+        const base = await baseOf(chaos);
 
         const applied = await chaos.apply();
         await chaos.expectHonest(applied.runId);
+        expect(await baseOf(chaos), "a markets-only campaign moved the base price").toEqual(base);
+        expect(chaos.fake.fixedPricesOn(EU).size, "no correction, so a run could reach the second write").toBeGreaterThan(0);
 
         const { applyMarketWide } = await import("../../app/services/campaigns/market-wide.server");
         const { readParentState } = await import("../../app/lib/execution/price-list-parent");
