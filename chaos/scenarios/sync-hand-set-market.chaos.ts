@@ -68,8 +68,9 @@ async function syncedWithHandSet(chaos: ChaosContext, list: List) {
   });
 
   // What the sync does after the catalogue.
-  await syncMarkets(chaosAdminClient(chaos.server.endpoint()), shopId);
-  await captureBaselines(shopId);
+  const client = chaosAdminClient(chaos.server.endpoint());
+  await syncMarkets(client, shopId);
+  await captureBaselines(shopId, { client });
 
   await prisma.campaign.update({
     where: { id: campaignId },
@@ -99,16 +100,13 @@ describe("chaos: a hand-set price the catalogue sync baselined (#1064)", () => {
       await chaos.expectHonest((await chaos.apply()).runId);
       expect(chaos.fake.fixedPricesOn(list.id).get(struck), "the sale never reached the hand-set price").toEqual({ amount: "40.00", compareAt: "50.00" });
 
-      // The baselines the revert reads -- the sync's for a market, the campaign's own for a
-      // wholesale catalogue, whose sync baselines are filed where no revert looks -- say
-      // which prices were the merchant's.
+      // The baselines the revert reads -- the sync's, on either kind of list since #1071 --
+      // say which prices were the merchant's.
       const read = await prisma.baseline.findMany({ where: { shopId, surfaceKind: "MARKET", priceListGid: list.id, supersededAt: null } });
       expect(new Map(read.map((b) => [b.variantGid, [b.handSet, b.baseCompareAt]])), "the baseline does not say the price was set by hand").toEqual(
         new Map([[struck, [true, 6_500n]], [plain, [true, null]], [derived, [false, null]]]),
       );
-      expect(read.filter((b) => b.variantGid !== derived).map((b) => b.source)).toEqual(
-        list === MARKET ? ["INSTALL_CAPTURE", "INSTALL_CAPTURE"] : ["AUTO_ENROLL", "AUTO_ENROLL"],
-      );
+      expect(read.filter((b) => b.variantGid !== derived).map((b) => b.source)).toEqual(["INSTALL_CAPTURE", "INSTALL_CAPTURE"]);
 
       const reverted = await chaos.revert();
       await chaos.expectHonest(reverted.runId);

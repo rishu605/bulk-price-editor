@@ -26,6 +26,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { ensureShop } from "../services/shop.server";
+import { toAdminClient } from "../services/admin-client.server";
 import { planRecapture, recapture } from "../services/recapture.server";
 import { recaptureScopeFrom, STALE_SCOPE } from "../lib/baselines/recapture-scope";
 import { recapturedMessage, replaceLabel, scopeSentence } from "../lib/baselines/recapture";
@@ -70,7 +71,7 @@ export const loader = withGuard("/app/prices/baselines/recapture", async ({ requ
 type ActionData = { ok: boolean; message: string; errorId?: string };
 
 export const action = withGuard("/app/prices/baselines/recapture", async ({ request }: ActionFunctionArgs) => {
-  const { session, sessionToken } = await authenticate.admin(request);
+  const { admin, session, sessionToken } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
   const form = await request.formData();
 
@@ -91,6 +92,8 @@ export const action = withGuard("/app/prices/baselines/recapture", async ({ requ
       confirmation: String(form.get("confirmation") ?? ""),
       actor: actorFor(sessionToken, session.shop),
       expectedScope: Number(shown),
+      // For a wholesale price's quantity ladder, which is recaptured with it (#1071).
+      client: toAdminClient(admin),
     });
 
     return { ok: true, message: recapturedMessage(result) };

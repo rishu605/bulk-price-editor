@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import { money } from "../money/money";
 import {
   chunkQuantityRows,
+  readBaselineLadders,
   readLadders,
   writeQuantityBreaks,
   type QuantityRow,
@@ -393,5 +394,45 @@ describe("reading the ladders a catalogue already holds", () => {
 
     await readLadders(client, "gid://PriceList/1", ["gid://v/1"]);
     expect(pages).toBe(3);
+  });
+
+  // What a baseline records, for the campaign's capture and the sync's alike (#1071).
+  describe("as a baseline records them", () => {
+    it("takes integer minor units in the list's currency, a zero-decimal one included", async () => {
+      const client = listWith([
+        { variant: { id: "gid://v/1" }, quantityPriceBreaks: { nodes: [{ minimumQuantity: 12, price: { amount: "36.50" } }] } },
+      ]);
+      const yen = listWith([
+        { variant: { id: "gid://v/1" }, quantityPriceBreaks: { nodes: [{ minimumQuantity: 12, price: { amount: "3650" } }] } },
+      ]);
+
+      expect(await readBaselineLadders(client, "gid://PriceList/1", "USD", ["gid://v/1"])).toEqual(
+        new Map([["gid://v/1", [{ minimumQuantity: 12, price: money(3_650, "USD") }]]]),
+      );
+      expect(await readBaselineLadders(yen, "gid://PriceList/1", "JPY", ["gid://v/1"])).toEqual(
+        new Map([["gid://v/1", [{ minimumQuantity: 12, price: money(3_650, "JPY") }]]]),
+      );
+    });
+
+    it("leaves out a ladder that does not parse, which is no ladder, never half of one", async () => {
+      const client = listWith([
+        {
+          variant: { id: "gid://v/1" },
+          quantityPriceBreaks: { nodes: [{ minimumQuantity: 12, price: { amount: "36.00" } }, { minimumQuantity: 12, price: { amount: "30.00" } }] },
+        },
+      ]);
+
+      expect(await readBaselineLadders(client, "gid://PriceList/1", "USD", ["gid://v/1"])).toEqual(new Map());
+    });
+
+    it("throws when Shopify cannot be read, rather than answering that there are no ladders", async () => {
+      const client = {
+        async request<T>(): Promise<{ data?: T }> {
+          throw new Error("Service Unavailable");
+        },
+      };
+
+      await expect(readBaselineLadders(client, "gid://PriceList/1", "USD", ["gid://v/1"])).rejects.toThrow(/Service Unavailable/);
+    });
   });
 });

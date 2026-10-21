@@ -13,8 +13,8 @@ import prisma from "../../db.server";
 import { readContextualPrices, readDerivedPrices, readFixedPriceVariants } from "../../lib/execution/market-executor";
 import { unconvertedMessage } from "../../lib/markets/conversion-check";
 import { AppError } from "../../lib/errors/app-error";
-import { readLadders } from "../../lib/execution/quantity-executor";
-import { parseLadder, serialiseLadder, type LadderRung } from "../../lib/pricing/ladder-baseline";
+import { readBaselineLadders } from "../../lib/execution/quantity-executor";
+import { serialiseLadder, type LadderRung } from "../../lib/pricing/ladder-baseline";
 import {
   readParentState,
   type MarketWritePath,
@@ -369,24 +369,8 @@ async function captureLadders(
   list: MarketList,
   variantGids: readonly string[],
 ): Promise<Map<string, LadderRung[]>> {
-  if (variantGids.length === 0) return new Map();
-
   try {
-    const raw = await readLadders(client, list.priceListGid, variantGids);
-    const ladders = new Map<string, LadderRung[]>();
-
-    for (const [variantGid, rungs] of raw) {
-      const parsed = parseLadder(
-        rungs.map((rung) => ({
-          minimumQuantity: rung.minimumQuantity,
-          amount: parseMoney(rung.amount, list.currency).amount,
-        })),
-        list.currency,
-      );
-      if (parsed) ladders.set(variantGid, parsed);
-    }
-
-    return ladders;
+    return await readBaselineLadders(client, list.priceListGid, list.currency, variantGids);
   } catch {
     return new Map();
   }

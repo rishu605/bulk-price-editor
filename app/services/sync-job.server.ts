@@ -289,10 +289,12 @@ export async function runFullSync(shopId: string, client: AdminClient, actor: st
     const markets = await syncMarkets(client, shopId);
 
     // Baselines at sync time: the only moment the live price can be taken to be the
-    // merchant's normal one.
+    // merchant's normal one. With the client, so a wholesale price's baseline records its
+    // quantity ladder (#1071).
     phase = "baselines";
     await track("baselines", undefined, true);
     const capture = await captureBaselines(shopId, {
+      client,
       onProgress: (done, total) => track("baselines", { done, total }),
     });
 
