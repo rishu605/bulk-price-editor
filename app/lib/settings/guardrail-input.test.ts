@@ -35,6 +35,24 @@ describe("checking typed guardrails", () => {
     expect(problem.message).toMatch(/Minimum price \(USD\) must be zero or more/);
   });
 
+  it.each([
+    ["9.995", "USD", "Minimum price (USD) 9.995 has 3 decimal places, but USD has 2. Enter it to 2 decimal places, such as 9.99 or 10.00."],
+    ["4.355", "USD", "Minimum price (USD) 4.355 has 3 decimal places, but USD has 2. Enter it to 2 decimal places, such as 4.35 or 4.36."],
+    ["1500.5", "JPY", "Minimum price (JPY) 1500.5 has 1 decimal place, but JPY has none. Enter a whole number, such as 1500 or 1501."],
+    ["1.0005", "KWD", "Minimum price (KWD) 1.0005 has 4 decimal places, but KWD has 3. Enter it to 3 decimal places, such as 1.000 or 1.001."],
+  ])("refuses a minimum price of %s %s rather than rounding it into a floor (#1068)", (minPrice, currency, message) => {
+    // Converted with `Math.round(minPrice * perMajor)`, a 9.995 floor was 9.99, which is
+    // below what the merchant typed, and 4.355 was 4.36: the same half cent either way.
+    expect(guardrailInputProblems(form({ minPrice }), currency)).toEqual([{ field: "minPrice", message }]);
+  });
+
+  it("accepts a minimum price at its currency's precision", () => {
+    expect(guardrailInputProblems(form({ minPrice: "9.99" }), "USD")).toEqual([]);
+    expect(guardrailInputProblems(form({ minPrice: "1500" }), "JPY")).toEqual([]);
+    expect(guardrailInputProblems(form({ minPrice: "1.005" }), "KWD")).toEqual([]);
+    expect(guardrailInputProblems(form({ minPrice: "4.990" }), "USD")).toEqual([]);
+  });
+
   it("refuses a word, which used to switch the guardrail off", () => {
     expect(problems({ minMarginPercent: "twenty" }).map((p) => p.field)).toEqual(["minMarginPercent"]);
     expect(problems({ minPrice: "abc" }).map((p) => p.field)).toEqual(["minPrice"]);

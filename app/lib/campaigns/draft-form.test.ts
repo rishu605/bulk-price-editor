@@ -30,33 +30,33 @@ const read = (fields: Record<string, string>) => readerFor(new URLSearchParams(f
 
 describe("a rule amount the merchant has not given (#696)", () => {
   it("refuses a blank amount, naming the field, for every kind of rule", () => {
-    expect(ruleInputProblem(read({ ruleKind: "set-exact", ruleValue: "" }))).toBe("The exact price is empty. Enter a number.");
-    expect(ruleInputProblem(read({ ruleKind: "fixed-change", ruleValue: "  " }))).toBe("The amount to change by is empty. Enter a number.");
-    expect(ruleInputProblem(read({ ruleKind: "percent-change" }))).toBe("The percentage is empty. Enter a number.");
+    expect(ruleInputProblem(read({ ruleKind: "set-exact", ruleValue: "" }), "USD")).toBe("The exact price is empty. Enter a number.");
+    expect(ruleInputProblem(read({ ruleKind: "fixed-change", ruleValue: "  " }), "USD")).toBe("The amount to change by is empty. Enter a number.");
+    expect(ruleInputProblem(read({ ruleKind: "percent-change" }), "USD")).toBe("The percentage is empty. Enter a number.");
   });
 
   it("refuses a decimal comma, and says how to write it", () => {
-    expect(ruleInputProblem(read({ ruleKind: "set-exact", ruleValue: "1,5" }))).toBe(
+    expect(ruleInputProblem(read({ ruleKind: "set-exact", ruleValue: "1,5" }), "USD")).toBe(
       'The exact price "1,5" is not a number. Use a full stop for decimals, as in 1.5.',
     );
-    expect(ruleInputProblem(read({ ruleKind: "percent-change", ruleValue: "abc" }))).toBe('The percentage "abc" is not a number.');
+    expect(ruleInputProblem(read({ ruleKind: "percent-change", ruleValue: "abc" }), "USD")).toBe('The percentage "abc" is not a number.');
   });
 
   it("refuses an exact price of zero or less, rather than letting it be clamped to 0.01", () => {
     for (const ruleValue of ["0", "-5"]) {
-      expect(ruleInputProblem(read({ ruleKind: "set-exact", ruleValue })), ruleValue).toMatch(/^An exact price has to be more than zero/);
+      expect(ruleInputProblem(read({ ruleKind: "set-exact", ruleValue }), "USD"), ruleValue).toMatch(/^An exact price has to be more than zero/);
     }
   });
 
   it("refuses a reduction of 100% or more, in either spelling", () => {
-    expect(ruleInputProblem(read({ ruleKind: "percent-change", ruleValue: "150", ruleDirection: "down" }))).toBe(
+    expect(ruleInputProblem(read({ ruleKind: "percent-change", ruleValue: "150", ruleDirection: "down" }), "USD")).toBe(
       "A 150% reduction would make every price free or negative. Enter less than 100.",
     );
-    expect(ruleInputProblem(read({ ruleKind: "percent-change", ruleValue: "-100" }))).toMatch(/^A 100% reduction/);
+    expect(ruleInputProblem(read({ ruleKind: "percent-change", ruleValue: "-100" }), "USD")).toMatch(/^A 100% reduction/);
   });
 
   it("refuses a change of zero, which would leave every price where it is", () => {
-    expect(ruleInputProblem(read({ ruleKind: "percent-change", ruleValue: "0", ruleDirection: "down" }))).toMatch(/is 0, which would leave/);
+    expect(ruleInputProblem(read({ ruleKind: "percent-change", ruleValue: "0", ruleDirection: "down" }), "USD")).toMatch(/is 0, which would leave/);
   });
 
   it("accepts what a merchant means", () => {
@@ -68,8 +68,72 @@ describe("a rule amount the merchant has not given (#696)", () => {
       { ruleKind: "percent-change", ruleValue: "-20" },
     ];
     for (const fields of meant) {
-      expect(ruleInputProblem(read(fields)), JSON.stringify(fields)).toBeNull();
+      expect(ruleInputProblem(read(fields), "USD"), JSON.stringify(fields)).toBeNull();
     }
+  });
+});
+
+describe("an amount with more decimals than its currency has (#1068)", () => {
+  // `Math.round(9.995 * 100)` is `Math.round(999.4999999999999)`: the double nearest 9.995
+  // sits just under it, so 9.995 saved 9.99 while 4.355 saved 4.36. The same half cent went
+  // either way by float error, and no field said the third decimal was not a price.
+  it.each([
+    ["set-exact", "9.995", "USD", "The exact price 9.995 has 3 decimal places, but USD has 2. Enter it to 2 decimal places, such as 9.99 or 10.00."],
+    ["set-exact", "1.005", "USD", "The exact price 1.005 has 3 decimal places, but USD has 2. Enter it to 2 decimal places, such as 1.00 or 1.01."],
+    ["fixed-change", "4.355", "USD", "The amount to change by 4.355 has 3 decimal places, but USD has 2. Enter it to 2 decimal places, such as 4.35 or 4.36."],
+    ["fixed-change", "0.145", "USD", "The amount to change by 0.145 has 3 decimal places, but USD has 2. Enter it to 2 decimal places, such as 0.14 or 0.15."],
+    ["set-exact", "1500.5", "JPY", "The exact price 1500.5 has 1 decimal place, but JPY has none. Enter a whole number, such as 1500 or 1501."],
+    ["set-exact", "1.0005", "KWD", "The exact price 1.0005 has 4 decimal places, but KWD has 3. Enter it to 3 decimal places, such as 1.000 or 1.001."],
+  ])("refuses %s %s in %s, naming the field, the value and the currency's decimals", (ruleKind, ruleValue, currency, message) => {
+    expect(ruleInputProblem(read({ ruleKind, ruleValue }), currency)).toBe(message);
+    expect(ruleInputProblem(read({ ruleKind, ruleValue, ruleDirection: "down" }), currency)).toBe(message);
+  });
+
+  it("refuses rather than rounds in ruleFrom too, for a caller that did not ask first", () => {
+    expect(() => ruleFrom(read({ ruleKind: "set-exact", ruleValue: "9.995" }), "USD")).toThrow(
+      "The exact price 9.995 has 3 decimal places, but USD has 2.",
+    );
+    expect(() => ruleFrom(read({ ruleKind: "fixed-change", ruleValue: "1500.5", ruleDirection: "down" }), "JPY")).toThrow(
+      /1500\.5 has 1 decimal place, but JPY has none/,
+    );
+  });
+
+  it("refuses an exact price that is not a plain amount, rather than reading 1e3 as a thousand", () => {
+    expect(ruleInputProblem(read({ ruleKind: "set-exact", ruleValue: "1e3" }), "USD")).toBe(
+      "The exact price 1e3 is not a plain amount. Enter digits with a full stop for decimals, such as 12.50.",
+    );
+  });
+
+  it.each([
+    ["set-exact", "9.99", "USD", 999],
+    ["set-exact", "9.9900", "USD", 999],
+    ["set-exact", "0.29", "USD", 29],
+    ["set-exact", "1500", "JPY", 1500],
+    ["set-exact", "1.005", "KWD", 1005],
+    ["fixed-change", "-4.35", "USD", -435],
+    ["fixed-change", "1500", "JPY", 1500],
+  ])("stores %s %s %s as exactly the minor units typed", (ruleKind, ruleValue, currency, minor) => {
+    expect(ruleInputProblem(read({ ruleKind, ruleValue }), currency)).toBeNull();
+    expect(ruleFrom(read({ ruleKind, ruleValue }), currency)).toEqual({ kind: ruleKind, amount: { amount: minor, currency } });
+  });
+
+  it("keeps the direction on an exact fixed amount", () => {
+    expect(ruleFrom(read({ ruleKind: "fixed-change", ruleValue: "1.005", ruleDirection: "down" }), "KWD")).toEqual({
+      kind: "fixed-change",
+      amount: { amount: -1005, currency: "KWD" },
+    });
+    expect(ruleFrom(read({ ruleKind: "fixed-change", ruleValue: "-0.29", ruleDirection: "up" }), "USD")).toEqual({
+      kind: "fixed-change",
+      amount: { amount: 29, currency: "USD" },
+    });
+  });
+
+  it("leaves a percentage's decimals alone: it is not money, and the maths reads it exactly", () => {
+    expect(ruleInputProblem(read({ ruleKind: "percent-change", ruleValue: "12.345", ruleDirection: "down" }), "JPY")).toBeNull();
+    expect(ruleFrom(read({ ruleKind: "percent-change", ruleValue: "12.345", ruleDirection: "down" }), "JPY")).toEqual({
+      kind: "percent-change",
+      percent: -12.345,
+    });
   });
 });
 

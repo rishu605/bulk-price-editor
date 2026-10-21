@@ -12,8 +12,8 @@
  * supply it means there is no default left to be silently wrong.
  */
 
-import { decimalsFor } from "../money/format";
-import { money } from "../money/money";
+import { abs, negate, type Money } from "../money/money";
+import { typedAmount } from "../money/typed-amount";
 import type { AdjustmentRule, CompareAtPolicy } from "../pricing/types";
 import type { FilterAst } from "../../services/segments.server";
 import { PRODUCT_STATUS_FIELDS, productStatusesOf, type ProductStatus } from "./product-status";
@@ -41,13 +41,6 @@ export function readerFor(source: FormData | URLSearchParams): FieldReader {
   };
 }
 
-/**
- * The rule the merchant has described.
- *
- * `10 ** decimalsFor(currency)` rather than a literal 100: a hardcoded hundred reads a
- * ¥3,000 price as ¥300,000 and a 1.5 KWD price as 0.15 KWD. The same literal has been
- * removed from three service files already.
- */
 /**
  * Which way a change goes, asked as a direction rather than as a minus sign.
  *
@@ -84,6 +77,29 @@ function signedAmount(read: FieldReader): number {
   return (direction === "up" ? magnitude : -magnitude) || 0;
 }
 
+/** The field a rule's amount is typed into, as the refusals name it. */
+function fieldOf(kind: string): string {
+  return kind === "set-exact" ? "The exact price" : kind === "fixed-change" ? "The amount to change by" : "The percentage";
+}
+
+/**
+ * A money rule's amount in minor units, read from the text (#1068), or why it cannot be.
+ *
+ * `10 ** decimalsFor(currency)` replaced a literal 100 here once (#343): a hundred read a
+ * ¥3,000 price as ¥300,000. It still multiplied a float, so 9.995 dollars became
+ * `Math.round(999.4999999999999)` and saved 9.99, while 4.355 saved 4.36. The text is read
+ * as text now, and more decimals than the currency has is refused, never rounded.
+ */
+function typedRuleAmount(read: FieldReader, kind: string, currency: string) {
+  return typedAmount(fieldOf(kind), read("ruleValue") ?? "", currency);
+}
+
+/** A fixed change's amount, signed by the direction when there is one, as `signedAmount`. */
+function directed(amount: Money, direction: string | null): Money {
+  if (direction !== "up" && direction !== "down") return amount;
+  return direction === "up" ? abs(amount) : negate(abs(amount));
+}
+
 /**
  * Why the rule's amount cannot be used, naming the field, or null when it can (#696).
  *
@@ -93,12 +109,14 @@ function signedAmount(read: FieldReader): number {
  * same. A decimal comma ("1,5", the usual spelling across most of Europe) reached `money()`
  * as NaN and threw as an unclassified error. Each is refused here, before anything is
  * priced or saved, in words the merchant can act on.
+ *
+ * The currency is the shop's, because whether 9.995 is a price depends on it (#1068): it
+ * is three decimals too many for dollars, and 1.005 is exactly right for dinar.
  */
-export function ruleInputProblem(read: FieldReader): string | null {
+export function ruleInputProblem(read: FieldReader, currency: string): string | null {
   const kind = read("ruleKind") ?? "percent-change";
   const raw = (read("ruleValue") ?? "").trim();
-  const field =
-    kind === "set-exact" ? "The exact price" : kind === "fixed-change" ? "The amount to change by" : "The percentage";
+  const field = fieldOf(kind);
 
   if (raw === "") return `${field} is empty. Enter a number.`;
   if (!Number.isFinite(Number(raw))) {
@@ -107,8 +125,12 @@ export function ruleInputProblem(read: FieldReader): string | null {
       : `${field} "${raw}" is not a number.`;
   }
 
-  if (kind === "set-exact") {
-    return Number(raw) > 0 ? null : "An exact price has to be more than zero. Enter the price to set.";
+  if (kind === "set-exact" || kind === "fixed-change") {
+    const typed = typedRuleAmount(read, kind, currency);
+    if (!typed.ok) return typed.message;
+    if (kind === "set-exact") {
+      return typed.amount.amount > 0 ? null : "An exact price has to be more than zero. Enter the price to set.";
+    }
   }
 
   const signed = signedAmount(read);
@@ -118,22 +140,26 @@ export function ruleInputProblem(read: FieldReader): string | null {
   return kind === "percent-change" ? reductionProblem(signed) : null;
 }
 
+/**
+ * The rule the merchant has described.
+ *
+ * Callers ask `ruleInputProblem` first and show its sentence. An amount it would refuse
+ * throws here with the same sentence rather than being rounded into a price nobody typed.
+ *
+ * @throws {RangeError} for a money amount the currency cannot hold.
+ */
 export function ruleFrom(read: FieldReader, currency: string): AdjustmentRule {
   const kind = read("ruleKind") ?? "percent-change";
-  const perMajor = 10 ** decimalsFor(currency);
 
-  if (kind === "fixed-change") {
-    return {
-      kind: "fixed-change",
-      amount: money(Math.round(signedAmount(read) * perMajor), currency),
-    };
-  }
-  if (kind === "set-exact") {
+  if (kind === "fixed-change" || kind === "set-exact") {
+    const typed = typedRuleAmount(read, kind, currency);
+    if (!typed.ok) throw new RangeError(typed.message);
     // An exact price has no direction — it is not a change, so a sign would be a
-    // negative price. The raw value is right here, and the editor renders no direction
+    // negative price. The typed value is right here, and the editor renders no direction
     // control for it.
-    const amount = Number(read("ruleValue") ?? 0);
-    return { kind: "set-exact", amount: money(Math.round(amount * perMajor), currency) };
+    return kind === "set-exact"
+      ? { kind: "set-exact", amount: typed.amount }
+      : { kind: "fixed-change", amount: directed(typed.amount, read("ruleDirection")) };
   }
   return { kind: "percent-change", percent: signedAmount(read) };
 }

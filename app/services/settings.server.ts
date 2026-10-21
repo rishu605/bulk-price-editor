@@ -15,8 +15,7 @@ import {
   parseRoundingPolicy,
   type StoredRoundingPolicy,
 } from "../lib/money/rounding-policy";
-import { decimalsFor } from "../lib/money/format";
-import { money } from "../lib/money/money";
+import { storedMajorUnits } from "../lib/money/typed-amount";
 import type { Guardrails } from "../lib/pricing/types";
 import { DEFAULT_CONFIRM_ABOVE_CHANGE_PERCENT, DEFAULT_CONFIRM_ABOVE_VARIANTS } from "../lib/campaigns/blast-radius";
 
@@ -211,21 +210,21 @@ export async function writeSettings(
  * `minPrice` is typed by merchants in major units and stored that way, so it is
  * converted to minor units here -- the single place that translation happens.
  *
- * The multiplier comes from the currency table rather than a literal 100. A
+ * The scale comes from the currency table rather than a literal 100. A
  * hardcoded 100 would read a ¥1,000 floor as ¥100,000 and a 1.5 KWD floor as
  * 0.15 KWD, which is the same mistake three service files were quietly making
  * until recently.
+ *
+ * And it is applied to the decimal the number prints as, not to the float (#1068):
+ * `Math.round(9.995 * 100)` is 999, so a 9.995 floor let 9.99 through. A save refuses that
+ * many decimals now; one stored before is rounded up, because a minimum of 9.995 is met by
+ * 10.00 and not by 9.99.
  */
 export function toGuardrails(settings: StoreSettings, currency: string): Guardrails {
-  const perMajor = 10 ** decimalsFor(currency);
-
   return {
     neverBelowCost: settings.neverBelowCost,
     minMarginPercent: settings.minMarginPercent ?? undefined,
-    minPrice:
-      settings.minPrice === null
-        ? undefined
-        : money(Math.round(settings.minPrice * perMajor), currency),
+    minPrice: settings.minPrice === null ? undefined : storedMajorUnits(settings.minPrice, currency, "ceil"),
     missingCostPolicy: settings.missingCostPolicy,
   };
 }

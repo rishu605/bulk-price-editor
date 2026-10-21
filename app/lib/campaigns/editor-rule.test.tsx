@@ -114,8 +114,8 @@ describe("Reduce by is capped below 100% in the form (#818)", () => {
   it("refuses at the boundary what the cap stops, for anything typed past it", () => {
     const read = (ruleValue: string) =>
       readerFor(new URLSearchParams({ ruleKind: "percent-change", ruleValue, ruleDirection: "down" }));
-    expect(ruleInputProblem(read("99.99"))).toBeNull();
-    expect(ruleInputProblem(read("100"))).toMatch(/^A 100% reduction would make every price free or negative/);
-    expect(ruleInputProblem(read("150"))).toMatch(/^A 150% reduction/);
+    expect(ruleInputProblem(read("99.99"), "USD")).toBeNull();
+    expect(ruleInputProblem(read("100"), "USD")).toMatch(/^A 100% reduction would make every price free or negative/);
+    expect(ruleInputProblem(read("150"), "USD")).toMatch(/^A 150% reduction/);
   });
 });
