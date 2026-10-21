@@ -33,6 +33,7 @@ import { sendDueDigests } from "./digest.server";
 import { pruneErrorEvents } from "./error-report.server";
 import { pruneWebhookLog } from "./webhook-log.server";
 import { auditMirror } from "./mirror-audit.server";
+import { refreshDeveloperStore } from "./sync-job.server";
 import { logger } from "../lib/logging/logger";
 import { metric } from "../lib/telemetry/metrics";
 
@@ -337,6 +338,8 @@ async function auditDueMirrors(now: Date): Promise<number> {
       const client = await adminClientForShop(shop.domain);
       if (!client) continue;
 
+      // A development store transferred to a merchant stops being free (#713).
+      await refreshDeveloperStore(client, shop.id);
       await auditMirror(client, shop.id, { now });
       audited++;
     } catch (error) {

@@ -424,6 +424,19 @@ const SHOP_CURRENCY = `#graphql
   }
 `;
 
+/**
+ * Whether Shopify says this is a partner development store, or null when it did not say --
+ * a failed query, a field missing. For the daily re-check (#713), which must not take a
+ * development store's free tier away because one request failed.
+ */
+export async function fetchPartnerDevelopment(client: GraphQLRunner): Promise<boolean | null> {
+  const body = (await (await client.graphql(SHOP_CURRENCY)).json()) as {
+    data?: { shop?: { plan?: { partnerDevelopment?: boolean } | null } };
+  };
+  const flag = body.data?.shop?.plan?.partnerDevelopment;
+  return typeof flag === "boolean" ? flag : null;
+}
+
 export async function fetchShopBasics(
   client: GraphQLRunner,
 ): Promise<{ currency: string; timezone: string | null; developerStore: boolean }> {

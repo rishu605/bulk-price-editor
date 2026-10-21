@@ -75,8 +75,8 @@ describe("chaos: a merchant uninstalls", () => {
       const entry = await prisma.auditLogEntry.findFirstOrThrow({ where: { shopId, action: "shop.uninstall" } });
       expect(entry.after).toMatchObject({ liveCampaigns: [] });
 
-      // The weekly digest: no email to a merchant who left.
-      await sendDueDigests(new Date());
+      // The weekly digest: no email to a merchant who left, even once one would be due (#713).
+      await sendDueDigests(new Date(Date.now() + 8 * 24 * 60 * 60_000));
       expect(await prisma.auditLogEntry.count({ where: { shopId, action: "notification.digest" } }), "a digest went to an uninstalled shop").toBe(0);
 
       // The scheduler: the due campaign is not attempted, so no session is asked for.
@@ -95,7 +95,8 @@ describe("chaos: a merchant uninstalls", () => {
       await ensureShop(domain);
       const back = await prisma.shop.findUniqueOrThrow({ where: { id: shopId } });
       expect(back.uninstalledAt).toBeNull();
-      await sendDueDigests(new Date());
+      // A week after it was turned on, as any shop's first digest is (#713).
+      await sendDueDigests(new Date(Date.now() + 8 * 24 * 60 * 60_000));
       expect(await prisma.auditLogEntry.count({ where: { shopId, action: "notification.digest" } }), "the control: a digest after reinstall").toBe(1);
 
       // ...and an uninstall Shopify triggered before the reinstall, delivered late, is not

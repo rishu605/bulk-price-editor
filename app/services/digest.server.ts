@@ -11,7 +11,7 @@
 
 import prisma from "../db.server";
 import { logger } from "../lib/logging/logger";
-import { notify, readPreferences } from "./notifications.server";
+import { digestEnabledAt, notify, readPreferences } from "./notifications.server";
 import { LANDED } from "../lib/execution/landed";
 
 const WEEK_MS = 7 * 24 * 60 * 60_000;
@@ -26,7 +26,7 @@ const WEEK_MS = 7 * 24 * 60 * 60_000;
 export async function sendDueDigests(now: Date = new Date()): Promise<number> {
   const shops = await prisma.shop.findMany({
     where: { uninstalledAt: null },
-    select: { id: true, domain: true },
+    select: { id: true, domain: true, settings: true, installedAt: true },
   });
 
   let sent = 0;
@@ -42,12 +42,12 @@ export async function sendDueDigests(now: Date = new Date()): Promise<number> {
         select: { createdAt: true },
       });
 
-      // A shop that has never had one waits a full week rather than getting a digest
-      // covering the day they installed, which would be an empty email as a welcome.
-      const since = lastSent?.createdAt ?? new Date(now.getTime() - WEEK_MS);
-      if (now.getTime() - since.getTime() < WEEK_MS) {
-        if (lastSent) continue;
-      }
+      // A shop that has never had one waits a full week from turning it on, rather than
+      // getting a digest of that day, which would be an empty email as a welcome. It used to
+      // take "a week ago" as the start, so the first one went on the very next tick (#713).
+      // One turned on before the date was recorded counts from its install.
+      const since = lastSent?.createdAt ?? digestEnabledAt(shop.settings) ?? shop.installedAt;
+      if (now.getTime() - since.getTime() < WEEK_MS) continue;
 
       const [campaignsRun, variantsChanged, driftOpen, partialRuns] = await Promise.all([
         prisma.campaignRun.count({ where: { shopId: shop.id, createdAt: { gte: since } } }),
