@@ -306,7 +306,7 @@ describe("chaos: a campaign's market prices in the mirror and on What's live (#7
       const verdict = await chaos.expectHonest(applied.runId);
       expect(verdict.outcome, "an apply whose market prices failed reported clean").toBe("partial");
       expect((await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } })).status).toBe("PARTIAL");
-      expect(applied.messages.join(" ")).toMatch(/Europe \(EUR\): 3 price\(s\) did not apply/);
+      expect(applied.messages.join(" ")).toMatch(/Europe \(EUR\): 3 prices did not apply/);
       expect(chaos.fake.fixedPricesOn(EU).get(variantGids[0])?.amount, "the write landed, so this tests nothing").toBe("50.00");
 
       // Null is "we have not looked": not the €50 from before, not the €40 nobody confirmed.
