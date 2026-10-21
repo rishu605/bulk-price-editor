@@ -153,6 +153,30 @@ jobs:
   # PR waited on it. Within a shard the scenarios still run one at a time
   # (`fileParallelism: false`), so the isolation each scenario relies on is unchanged; the
   # shards share nothing. `fail-fast: false` so one red shard still reports the others.
+  # Every price table #804 named, rendered at phone and narrow-window widths in real Chrome
+  # with real Polaris, failing when any cell's content is cut off ("708.7" for 708.76). Its
+  # own job, beside the chaos shards, so it adds nothing to the time a PR waits: the script
+  # takes seconds. Chrome is the runner's; Polaris is the CDN file the admin loads.
+  narrow-tables:
+    name: Narrow tables
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: No price table clips a number at narrow widths
+        run: npx tsx scripts/measure-narrow-tables.ts
+
   chaos-shard:
     name: Chaos scenarios (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
