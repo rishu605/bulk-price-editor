@@ -22,14 +22,18 @@
 import { Prisma } from "@prisma/client";
 
 import prisma from "../db.server";
+import { unpricedCurrencyFailure } from "../lib/dashboard/sync-failure";
 import { syncMessage } from "../lib/dashboard/sync-message";
+import { AppError } from "../lib/errors/app-error";
 import type { AdminClient } from "../lib/execution/sync-executor";
 import { formatCount } from "../lib/format/display";
 import { logger } from "../lib/logging/logger";
+import { isKnownCurrency } from "../lib/money/currency";
 import { enqueueWithin, webQueue } from "../worker/web-queue.server";
 import { captureBaselines } from "./baselines.server";
 import { syncCatalogViaBulk } from "./catalog-bulk-sync.server";
 import { fetchPartnerDevelopment, fetchShopBasics, syncCatalog, type GraphQLRunner } from "./catalog-sync.server";
+import { reportError } from "./error-report.server";
 import { recordShopTimezone } from "./shop-timezone.server";
 import { syncMarkets } from "./markets-sync.server";
 import { markSyncComplete } from "./shop.server";
@@ -263,6 +267,21 @@ export async function runFullSync(shopId: string, client: AdminClient, actor: st
     // Through the one writer of the zone, which records what campaigns were typed in (#799).
     // Left alone when Shopify did not say, rather than reset to a guess.
     if (basics.timezone) await recordShopTimezone(shopId, basics.timezone, actor);
+
+    // A currency with no known precision stops the sync before any product is read (#1089).
+    // Every price would throw `UnknownCurrencyError`: the bulk read stopped on the first one,
+    // and Home quoted the throw, a developer's note to register the code in currency.ts. Not
+    // thrown here: the sync queue retries, and no retry succeeds until the code is added.
+    if (!isKnownCurrency(basics.currency)) {
+      const failure = unpricedCurrencyFailure(basics.currency);
+      // Support's copy: Diagnostics and Sentry, with the shop and the code.
+      await reportError(
+        new AppError({ code: "UNKNOWN", userMessage: failure, context: { currency: basics.currency }, retryable: false }),
+        { shopId, route: "sync" },
+      );
+      await releaseSync(shopId, failure);
+      return { message: failure, errors: [failure] };
+    }
 
     // Bulk first: one operation and a streamed result beats ten thousand paginated round
     // trips. Its poll sleeps are the heartbeat while Shopify builds the file.
