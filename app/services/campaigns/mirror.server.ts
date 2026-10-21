@@ -36,16 +36,9 @@ export async function settleMirror(runId: string): Promise<void> {
   // and syncs stamp (#911). Converted to UTC explicitly.
   const now = Prisma.sql`(${new Date()}::timestamptz AT TIME ZONE 'UTC')`;
 
-  await prisma.$executeRaw`
-    UPDATE "price_surface_entries" e
-    SET "livePrice" = c."intendedPrice",
-        "liveCompareAt" = CASE WHEN c."intendedCompareAtSet" THEN c."intendedCompareAt" ELSE e."liveCompareAt" END,
-        "syncedAt" = ${now}
-    FROM "variant_changes" c
-    WHERE ${landed} AND e."shopId" = c."shopId" AND e."variantGid" = c."variantGid"
-      AND e."surfaceKind" = 'BASE' AND e."priceListGid" = ''`;
-  // The version of the variant this write produced, as far as webhooks are concerned
-  // (#828). The products webhook skips a delivery older than `remoteUpdatedAt`; left where
+  // The version of the variant this write produced, as far as webhooks and catalogue syncs
+  // are concerned (#828, #1087). The products webhook skips a delivery older than
+  // `remoteUpdatedAt`, and a sync a read older than it; left where
   // it was, a delayed payload from before this write was applied over it and put the old
   // price back in the mirror -- and a revert planned from that mirror found nothing to do.
   //
@@ -64,6 +57,19 @@ export async function settleMirror(runId: string): Promise<void> {
         "syncedAt" = ${now}
     FROM "variant_changes" c
     WHERE ${landed} AND v."shopId" = c."shopId" AND v."variantGid" = c."variantGid"`;
+  // After the stamp above, never before it. A catalogue sync writes a row only where the
+  // stamp is older than its read (#1087), so once it has moved, a sync that read the product
+  // before this write leaves both rows alone. In the other order there was a moment when
+  // the base-surface row held this price and the stamp did not yet, and a sync writing then
+  // put its older price over the surface row while this went on to stamp the index row.
+  await prisma.$executeRaw`
+    UPDATE "price_surface_entries" e
+    SET "livePrice" = c."intendedPrice",
+        "liveCompareAt" = CASE WHEN c."intendedCompareAtSet" THEN c."intendedCompareAt" ELSE e."liveCompareAt" END,
+        "syncedAt" = ${now}
+    FROM "variant_changes" c
+    WHERE ${landed} AND e."shopId" = c."shopId" AND e."variantGid" = c."variantGid"
+      AND e."surfaceKind" = 'BASE' AND e."priceListGid" = ''`;
   await prisma.$executeRaw`
     UPDATE "price_surface_entries" e
     SET "livePrice" = NULL, "liveCompareAt" = NULL, "syncedAt" = ${now}

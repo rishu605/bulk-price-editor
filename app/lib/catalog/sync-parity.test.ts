@@ -15,9 +15,13 @@
  * Adding `imageUrl` reproduced the first half of exactly that: the query fetched it, the
  * parser carried it, and the bulk writer dropped it on the floor.
  *
- * So this compares the two writers field by field, from the source. It cannot prove the
+ * So this compares the two paths field by field, from the source. It cannot prove the
  * values agree — only a real sync does that — but it does prove neither path has a
  * column the other has never heard of.
+ *
+ * Since #1087 both write through one writer, `writeCatalogRows`, which keeps a row the
+ * mirror holds a newer version of. So the comparison is of what each path reads into a row
+ * against what that writer puts in the mirror, and that neither path writes around it.
  */
 
 import { readFileSync } from "node:fs";
@@ -33,6 +37,10 @@ const paginated = readFileSync(
 );
 const bulk = readFileSync(
   join(process.cwd(), "app", "services", "catalog-bulk-sync.server.ts"),
+  "utf8",
+);
+const writer = readFileSync(
+  join(process.cwd(), "app", "services", "catalog-write.server.ts"),
   "utf8",
 );
 
@@ -71,39 +79,51 @@ const CATALOGUE_COLUMNS = [
 ];
 
 /**
- * The bulk writer is an upsert, so it has two independent field lists. Checking the file
- * as a whole passes when a column is dropped from one of them — and a column present on
- * create but missing on update means a variant is right until the next sync touches it,
- * which is worse than being wrong from the start because it looks like it worked.
+ * The writer creates a variant it has never seen and rewrites one it has, so it has two
+ * independent field lists. Checking the file as a whole passes when a column is dropped
+ * from one of them — and a column present on create but missing on update means a variant
+ * is right until the next sync touches it, which is worse than being wrong from the start
+ * because it looks like it worked.
  */
-function upsertBranches(source: string): { create: Set<string>; update: Set<string> } {
-  const slice = (key: "create" | "update") => {
-    const start = source.indexOf(`        ${key}: {`);
-    if (start < 0) return new Set<string>();
-    return columnsWritten(source.slice(start, source.indexOf("\n        },", start)));
-  };
-  return { create: slice("create"), update: slice("update") };
+function writerBranches(source: string): { create: Set<string>; update: Set<string> } {
+  const createStart = source.indexOf("prisma.variantIndex.createMany(");
+  const create = createStart < 0 ? new Set<string>() : columnsWritten(source.slice(createStart, source.indexOf("skipDuplicates", createStart)));
+  const updateStart = source.indexOf("written AS (");
+  const update =
+    updateStart < 0
+      ? new Set<string>()
+      : new Set([...source.slice(updateStart, source.indexOf("RETURNING", updateStart)).matchAll(/"(\w+)" = i\./g)].map((match) => match[1]));
+  return { create, update };
 }
 
 describe("the bulk path writes everything the paginated path does", () => {
   const inPaginated = columnsWritten(paginated);
-  const branches = upsertBranches(bulk);
+  const branches = writerBranches(writer);
 
-  it("found both halves of the upsert to compare", () => {
+  it("found both halves of the writer to compare", () => {
     expect(branches.create.size).toBeGreaterThan(8);
     expect(branches.update.size).toBeGreaterThan(8);
   });
 
+  it("writes both paths through the one writer, and neither around it (#1087)", () => {
+    for (const [path, source] of [["paginated", paginated], ["bulk", bulk]] as const) {
+      expect(source, `the ${path} path does not write through writeCatalogRows`).toContain("writeCatalogRows(");
+      expect(source, `the ${path} path writes the mirror around the writer, unguarded`).not.toMatch(
+        /(variantIndex|priceSurfaceEntry)\.(upsert|update|updateMany|create|createMany)\(/,
+      );
+    }
+  });
+
   it.each(CATALOGUE_COLUMNS)("both paths write %s", (column) => {
-    expect(inPaginated.has(column), `the paginated path never writes ${column}`).toBe(true);
+    expect(inPaginated.has(column), `the paginated path never reads ${column} into a row`).toBe(true);
     expect(
       branches.create.has(column),
-      `the bulk path does not write ${column} when it first sees a variant — so a store ` +
-        `large enough to take that path gets it empty, and only large stores are affected`,
+      `the catalogue writer does not write ${column} when it first sees a variant — so a ` +
+        `store gets it empty until something else fills it`,
     ).toBe(true);
     expect(
       branches.update.has(column),
-      `the bulk path does not write ${column} when it re-syncs a variant — so it is ` +
+      `the catalogue writer does not write ${column} when it re-syncs a variant — so it is ` +
         `right once and wrong from the second sync onwards, which looks like it worked`,
     ).toBe(true);
   });

@@ -12,10 +12,14 @@
  * property is the difference between an import and one of this category's "the app
  * froze on our catalogue" reviews.
  *
- * Resumable by construction rather than by bookkeeping: every row is an upsert keyed on
+ * Resumable by construction rather than by bookkeeping: every row is written keyed on
  * (shop, variant), so an import interrupted at row 300,000 and restarted rewrites the
  * first 300,000 harmlessly and finishes the rest. Recording a cursor would be a second
  * source of truth that could disagree with the database.
+ *
+ * The file is written minutes after Shopify read the products into it, so a row is written
+ * only where the mirror holds nothing newer -- a campaign's price settled meanwhile stays
+ * (#1087). `writeCatalogRows`, which the paginated sync writes through too, says how.
  *
  * ## Beside other bulk operations (#1081)
  *
@@ -39,6 +43,7 @@
  */
 
 import { carryShopifyCosts } from "./baselines.server";
+import { writeCatalogRows } from "./catalog-write.server";
 import prisma from "../db.server";
 import { CATALOG_BULK_QUERY, parseCatalogJsonl, type CatalogRow, type ParseStats } from "../lib/catalog/bulk-jsonl";
 import { bulkOperationById, isTerminal, type BulkOperationState } from "../lib/execution/bulk-executor";
@@ -75,6 +80,11 @@ export interface BulkSyncProgress {
 export interface BulkSyncResult extends ParseStats {
   /** Rows actually written. Differs from `variants` only if a batch failed. */
   written: number;
+  /**
+   * Of those, rows the mirror held a newer version of than the file -- a campaign's price
+   * settled, or a webhook applied, after Shopify read the product -- and kept (#1087).
+   */
+  kept: number;
   bulkOperationGid: string | null;
   errors: string[];
 }
@@ -151,6 +161,7 @@ export async function syncCatalogViaBulk(
     orphans: 0,
     malformed: 0,
     written: 0,
+    kept: 0,
     bulkOperationGid: null,
     errors: [],
   };
@@ -258,6 +269,7 @@ export async function syncCatalogViaBulk(
     products: result.products,
     variants: result.variants,
     written: result.written,
+    kept: result.kept,
     orphans: result.orphans,
     malformed: result.malformed,
   });
@@ -308,11 +320,12 @@ async function ingest(
     batch = [];
 
     try {
-      await writeBatch(shopId, currency, rows);
+      const { kept } = await writeCatalogRows(shopId, currency, rows);
       result.written += rows.length;
+      result.kept += kept;
     } catch (error) {
-      // One bad batch loses those rows, not the import. Every row is an upsert, so
-      // running the import again fills the gap rather than duplicating anything.
+      // One bad batch loses those rows, not the import. Every row is keyed on its variant,
+      // so running the import again fills the gap rather than duplicating anything.
       result.errors.push(
         `A batch of ${rows.length} variants could not be written: ${
           error instanceof Error ? error.message : String(error)
@@ -329,111 +342,6 @@ async function ingest(
   }
 
   await flush();
-}
-
-/**
- * One batch, one transaction.
- *
- * `createMany` with `skipDuplicates` would be faster and would silently ignore every
- * variant whose price had changed since the last import, which is the one thing this
- * table exists to know.
- */
-async function writeBatch(shopId: string, currency: string, rows: CatalogRow[]): Promise<void> {
-  await prisma.$transaction(
-    rows.flatMap((row) => [
-      prisma.variantIndex.upsert({
-        where: { shopId_variantGid: { shopId, variantGid: row.variantGid } },
-        create: {
-          shopId,
-          variantGid: row.variantGid,
-          productGid: row.productGid,
-          title: row.title,
-          sku: row.sku,
-          barcode: row.barcode,
-          price: row.price ? BigInt(row.price.amount) : null,
-          compareAt: row.compareAt ? BigInt(row.compareAt.amount) : null,
-          cost: row.cost ? BigInt(row.cost.amount) : null,
-          currency: row.price?.currency ?? currency,
-          inventoryQty: row.inventoryQty,
-          status: row.status,
-          vendor: row.vendor,
-          productType: row.productType,
-          tags: row.tags,
-          collections: row.collections,
-          imageUrl: row.imageUrl,
-          remoteUpdatedAt: row.remoteUpdatedAt,
-          isGiftCard: row.isGiftCard,
-        },
-        update: {
-          productGid: row.productGid,
-          title: row.title,
-          sku: row.sku,
-          barcode: row.barcode,
-          price: row.price ? BigInt(row.price.amount) : null,
-          compareAt: row.compareAt ? BigInt(row.compareAt.amount) : null,
-          cost: row.cost ? BigInt(row.cost.amount) : null,
-          currency: row.price?.currency ?? currency,
-          inventoryQty: row.inventoryQty,
-          status: row.status,
-          vendor: row.vendor,
-          productType: row.productType,
-          tags: row.tags,
-          collections: row.collections,
-          imageUrl: row.imageUrl,
-          remoteUpdatedAt: row.remoteUpdatedAt,
-          isGiftCard: row.isGiftCard,
-          // A variant reappearing after deletion clears its tombstone.
-          deletedAt: null,
-          syncedAt: new Date(),
-        },
-      }),
-      // The base-surface row, in the same transaction as the index row.
-      //
-      // This was missing, and the consequence was that the bulk path could not produce a
-      // priceable variant. Baselines are captured from `price_surface_entries`, not from
-      // `variant_index` — so a variant imported here got mirrored, counted, and shown in
-      // the catalogue, and then had no baseline, and a variant with no baseline cannot be
-      // included in a campaign.
-      //
-      // The dashboard's remedy made it worse rather than better: "N variants have no
-      // baseline yet — re-sync to capture them" ran the bulk path again, which again wrote
-      // no surface row. The warning could not be cleared by the only action offered for
-      // clearing it.
-      //
-      // Small stores hid it. The paginated path writes both tables and runs whenever the
-      // bulk path errors or returns nothing, so the failure was invisible until a
-      // catalogue was big enough for the bulk path to succeed — which is to say, the app
-      // was broken specifically on the stores it exists for.
-      //
-      // Same transaction rather than a second pass, because the two tables disagreeing is
-      // the bug itself, and a second pass can fail on its own.
-      prisma.priceSurfaceEntry.upsert({
-        where: {
-          shopId_variantGid_surfaceKind_priceListGid: {
-            shopId,
-            variantGid: row.variantGid,
-            surfaceKind: "BASE",
-            priceListGid: "",
-          },
-        },
-        create: {
-          shopId,
-          variantGid: row.variantGid,
-          surfaceKind: "BASE",
-          priceListGid: "",
-          currency: row.price?.currency ?? currency,
-          livePrice: row.price ? BigInt(row.price.amount) : null,
-          liveCompareAt: row.compareAt ? BigInt(row.compareAt.amount) : null,
-        },
-        update: {
-          currency: row.price?.currency ?? currency,
-          livePrice: row.price ? BigInt(row.price.amount) : null,
-          liveCompareAt: row.compareAt ? BigInt(row.compareAt.amount) : null,
-          syncedAt: new Date(),
-        },
-      }),
-    ]),
-  );
 }
 
 /** Reads a result file as text chunks, never buffering the whole body. */

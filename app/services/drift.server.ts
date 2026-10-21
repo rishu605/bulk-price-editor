@@ -103,46 +103,6 @@ export async function isOurEcho(
 }
 
 /**
- * Whether a products delivery stamped in the same second as one of our writes to this
- * variant describes it from before that write (#985).
- *
- * A product with more than 250 variants in scope is written in several calls, and each
- * one sends its own `products/update`. Shopify stamps `updated_at` to the second, so two
- * calls a moment apart carry the same time, and deliveries are not ordered. The first
- * call's snapshot shows a variant the second call wrote at its old price. Arriving after
- * that write was recorded, it is not older to the second, so it was applied: the old price
- * went back into the mirror and was taken for a hand edit, and a revert planned from that
- * mirror found the variant already back at its baseline and left the sale price live.
- *
- * The ledger recognises it: a landed write of ours to this variant, stamped this second,
- * replacing exactly this price. A merchant's edit in the same second sets some other price
- * and is still drift (#932). The one case it cannot tell apart is an edit within that
- * second back to the very price the write replaced.
- */
-export async function predatesOurWrite(
-  shopId: string,
-  variantGid: string,
-  stamp: Date,
-  price: bigint | null,
-): Promise<boolean> {
-  if (price === null) return false;
-  const write = await prisma.variantChange.findFirst({
-    where: {
-      shopId,
-      variantGid,
-      surfaceKind: "BASE",
-      priceListGid: "",
-      status: { in: [...LANDED] },
-      remoteUpdatedAt: stamp,
-      beforePrice: price,
-      intendedPrice: { not: price },
-    },
-    select: { id: true },
-  });
-  return write !== null;
-}
-
-/**
  * Which of these values are the echo of something we wrote recently: `isOurEcho` for a
  * whole webhook's variants in one query.
  */
