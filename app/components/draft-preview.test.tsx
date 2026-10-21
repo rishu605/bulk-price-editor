@@ -113,7 +113,9 @@ describe("when the storefront disagrees with the baseline", () => {
   it("stays quiet when they agree", () => {
     // The ordinary case. A second identical number in every row teaches a merchant to
     // ignore the column, and then it is not read on the day it matters.
-    expect(render(preview())).not.toContain("live");
+    // Words only: the panel's live region carries `aria-live` in its markup (#798), and
+    // that is an attribute, not a "live" a merchant reads.
+    expect(render(preview()).replace(/<[^>]+>/g, " ")).not.toMatch(/\blive\b/);
   });
 });
 

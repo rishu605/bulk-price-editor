@@ -15,6 +15,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { ReconciliationTable } from "./ReconciliationTable";
+import { newTabName } from "../lib/ui/new-tab";
 import type { ReconciliationRow } from "../services/reconciliation.server";
 
 const TITLE = "The Collection Snowboard: Liquid, Limited Edition, Wide Fit 158 Bundle";
@@ -61,6 +62,7 @@ describe("the product name on What's live (#1023)", () => {
   });
 
   it("says where it goes, which the colour no longer does", () => {
-    expect(nameCell).toContain(`accessibilityLabel="Open ${TITLE} in Shopify"`);
+    // And that it goes there in a new tab, which nothing else on the link says (#798).
+    expect(nameCell).toContain(`accessibilityLabel="${newTabName(`Open ${TITLE} in Shopify`)}"`);
   });
 });

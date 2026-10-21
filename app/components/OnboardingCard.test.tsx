@@ -44,8 +44,25 @@ describe("a brand new shop", () => {
 
   it("does not open with a wall of explanation", () => {
     // Every step's `detail` is a paragraph. Rendering them all is what made this a wall.
-    const words = html.replace(/<[^>]+>/g, " ").split(/\s+/).filter(Boolean).length;
+    //
+    // Counted on screen, which is not all of the markup (#798): each detail is in the
+    // page now, inside the closed popover its "Why?" opens, and each step's state is
+    // spelled out in visually hidden text for a screen reader. Neither is something a
+    // merchant reads on arrival, so neither is counted.
+    const onScreen = html
+      .replace(/<s-popover\b[\s\S]*?<\/s-popover>/g, " ")
+      .replace(/<s-text accessibilityVisibility="exclusive">[^<]*<\/s-text>/g, " ");
+    const words = onScreen.replace(/<[^>]+>/g, " ").split(/\s+/).filter(Boolean).length;
     expect(words, "the first screen after install should not be an essay").toBeLessThan(60);
+  });
+
+  it("keeps each explanation closed until it is asked for", () => {
+    // The other half of the count above: what it leaves out is behind a "Why?", not gone.
+    const popovers = html.match(/<s-popover\b[\s\S]*?<\/s-popover>/g) ?? [];
+
+    expect(popovers.length, "one popover per step still to do").toBe(3);
+    expect(popovers.join(" "), "a popover rendered open is a wall again").not.toMatch(/<s-popover[^>]*\sopen/);
+    expect(popovers[0]).toContain("Anchor works out every price from a baseline");
   });
 
   it("still says nothing is written yet, which is the reassurance that earns trust", () => {

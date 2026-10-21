@@ -2,6 +2,7 @@ import { NoMatches } from "./AsyncState";
 import { Blank } from "./Blank";
 import type { ReconciliationRow } from "../services/reconciliation.server";
 import { stateLabel } from "../lib/reporting/reconciliation-csv";
+import { newTabName } from "../lib/ui/new-tab";
 import { RowState } from "./RowState";
 
 /**
@@ -70,7 +71,11 @@ export function ReconciliationTable({
                   link in the text's colour with an underline, which is how a link in prose
                   looks. The label says where it goes, which no colour does. */}
               <s-text>
-                <s-link href={row.adminUrl} target="_blank" accessibilityLabel={`Open ${row.title} in Shopify`}>
+                <s-link
+                  href={row.adminUrl}
+                  target="_blank"
+                  accessibilityLabel={newTabName(`Open ${row.title} in Shopify`)}
+                >
                   {row.title}
                 </s-link>
               </s-text>

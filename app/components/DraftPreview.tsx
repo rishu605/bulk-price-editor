@@ -1,5 +1,6 @@
 import { catalogueNotice } from "../lib/catalogue/state";
-import { formatCount } from "../lib/format/display";
+import { countOf, formatCount } from "../lib/format/display";
+import { LiveStatus } from "./LiveStatus";
 import { MoneyCell } from "./MoneyCell";
 import { ActionRow } from "./ActionRow";
 import { EmptyState } from "./AsyncState";
@@ -23,12 +24,61 @@ import { Secondary } from "./Type";
  * written — a preview that showed only the happy rows would be the estimate it claims
  * not to be.
  */
-export function DraftPreview({
-  preview,
-  pending = false,
-  surface,
-  fullPreviewHref,
-}: {
+export function DraftPreview(props: DraftPreviewProps) {
+  return (
+    <>
+      {/* First, and outside every branch below (#798). The panel swaps between a banner, an
+          empty state and a table as the merchant types; a region inside any one of them
+          would be a new region each time it swapped, and a new region says nothing. This
+          one is on the page from the first render, empty until there is an answer. */}
+      <LiveStatus message={previewAnnouncement(props.preview, props.pending ?? false)} />
+      <PreviewBody {...props} />
+    </>
+  );
+}
+
+/**
+ * What the panel says aloud when it settles, in a sentence or three (#798).
+ *
+ * The count line used to be the only feedback a rule change produced, and it was plain
+ * text at the end of the aside — after the whole form in reading order, and not a live
+ * region — so a merchant using a screen reader changed the rule and heard nothing back.
+ *
+ * Empty while a request is in flight, which the visible panel is not: it keeps the old
+ * figures marked "updating…" so there is something to compare against. A region whose
+ * text goes from X to X has not changed, so clearing it is what makes an identical answer
+ * to a changed rule audible as an answer.
+ *
+ * The example product is said as well as the counts, because 20% off and 30% off reach
+ * the same "3 of 5" — the example is the part that moves.
+ */
+export function previewAnnouncement(preview: Preview | null, pending: boolean): string {
+  if (pending || !preview) return "";
+  if (preview.ruleProblem) return preview.ruleProblem;
+  // The banner's own sentence, which names each variant, its price and its floor (#1076).
+  if (preview.blocked) return preview.blocked.message;
+
+  const notice = preview.catalogue ? catalogueNotice(preview.catalogue) : null;
+  if (notice) return `${notice.title}.`;
+  if (preview.matched === 0 && preview.leftOutByStatus > 0) return "Only draft or archived products match.";
+  if (preview.matched === 0) return "Nothing matches this scope.";
+
+  const sentences = [
+    `${formatCount(preview.changing)} of ${countOf(preview.matched, "variant")} would change price.`,
+  ];
+  const example = exampleRowFrom(preview.rows);
+  if (example?.before && example.after) {
+    sentences.push(`${example.title} would go from ${example.before} to ${example.after}.`);
+  }
+  if (preview.skipped > 0) sentences.push(`${formatCount(preview.skipped)} would be left alone.`);
+  if (preview.withoutBaseline === 1) sentences.push("1 has no baseline yet, so it cannot be priced.");
+  if (preview.withoutBaseline > 1) {
+    sentences.push(`${formatCount(preview.withoutBaseline)} have no baseline yet, so they cannot be priced.`);
+  }
+  return sentences.join(" ");
+}
+
+interface DraftPreviewProps {
   preview: Preview | null;
   /**
    * Where "see all rows" goes, with this draft serialised into it.
@@ -48,7 +98,9 @@ export function DraftPreview({
    * at a card headed "on your storefront" and has three storefronts.
    */
   surface?: string;
-}) {
+}
+
+function PreviewBody({ preview, pending = false, surface, fullPreviewHref }: DraftPreviewProps) {
   if (!preview) {
     return (
       <Secondary>

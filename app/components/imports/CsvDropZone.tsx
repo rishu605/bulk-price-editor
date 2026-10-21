@@ -1,6 +1,8 @@
 import { useState } from "react";
 
+import { countOf } from "../../lib/format/display";
 import { SPACE } from "../../lib/ui/spacing";
+import { LiveStatus } from "../LiveStatus";
 
 /**
  * Dropping a CSV file instead of opening it and pasting its contents.
@@ -27,7 +29,7 @@ export function CsvDropZone({
   target: string;
   label?: string;
 }) {
-  const [loaded, setLoaded] = useState<{ name: string; lines: number } | null>(null);
+  const [loaded, setLoaded] = useState<LoadedFile | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
 
   const read = async (file: File | undefined) => {
@@ -58,6 +60,39 @@ export function CsvDropZone({
   };
 
   return (
+    <CsvDropZoneView label={label} loaded={loaded} problem={problem} onFile={(file) => void read(file)} />
+  );
+}
+
+/** A file that landed: its name, and how many non-blank lines it put in the box. */
+export interface LoadedFile {
+  name: string;
+  lines: number;
+}
+
+/** The sentence a landed file earns, on screen and aloud. */
+function loadedSentence(loaded: LoadedFile): string {
+  return `${loaded.name} — ${countOf(loaded.lines, "line")} loaded below. Nothing is imported until you run it.`;
+}
+
+/**
+ * The drop zone as drawn, from what has happened to it so far.
+ *
+ * Apart from the reading so it can be rendered in a test without a file: what a merchant
+ * sees and hears after a drop is the part that went wrong (#798), and all of it is here.
+ */
+export function CsvDropZoneView({
+  label = "Drop a CSV file",
+  loaded,
+  problem,
+  onFile,
+}: {
+  label?: string;
+  loaded: LoadedFile | null;
+  problem: string | null;
+  onFile: (file: File | undefined) => void;
+}) {
+  return (
     // The zone and the line reporting what landed in it are one object, so they sit at
     // item rhythm. `small-200` was a step off the scale entirely — between item and
     // tight, and therefore telling the reader nothing either of them would have.
@@ -65,20 +100,22 @@ export function CsvDropZone({
       <s-drop-zone
         label={label}
         accept=".csv,text/csv,text/plain"
+        // On the control, not in a paragraph after it (#798). The paragraph was tied to
+        // nothing, so a screen reader on the drop zone had no way to learn it had failed,
+        // and the zone's own error slot sat empty.
+        error={problem ?? undefined}
         // `files` is a File[], not a FileList — the Polaris element hands back an array.
-        onChange={(event) => void read(event.currentTarget.files?.[0])}
+        onChange={(event) => onFile(event.currentTarget.files?.[0])}
       />
+      {/* Said as well as shown. Choosing a file takes focus to the system's file dialog
+          and back, and the line below appears while the merchant is somewhere else: a
+          screen reader user was never told the box had filled, or that it had not. A
+          failure is said here too, because an error on a field is read when the field is
+          focused, not when it appears. */}
+      <LiveStatus message={problem ?? (loaded ? loadedSentence(loaded) : "")} />
       {loaded ? (
         <s-paragraph>
-          <s-text tone="success">
-            {loaded.name} — {loaded.lines} line{loaded.lines === 1 ? "" : "s"} loaded below.
-            Nothing is imported until you run it.
-          </s-text>
-        </s-paragraph>
-      ) : null}
-      {problem ? (
-        <s-paragraph>
-          <s-text tone="critical">{problem}</s-text>
+          <s-text tone="success">{loadedSentence(loaded)}</s-text>
         </s-paragraph>
       ) : null}
     </s-stack>

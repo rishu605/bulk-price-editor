@@ -45,6 +45,7 @@ import { RouteBoundary } from "../components/RouteBoundary";
 import { HELP_ROUTE } from "../lib/errors/help-links";
 import { withGuard } from "../lib/errors/guard.server";
 import { helpNav } from "../lib/help/nav.server";
+import { newTabName } from "../lib/ui/new-tab";
 import { SPACE } from "../lib/ui/spacing";
 import { Secondary } from "../components/Type";
 import { Card } from "../components/Card";
@@ -131,7 +132,13 @@ export default function HelpIndex() {
                         titles are what the merchant is scanning, and a list of them in
                         plain dark text is a list of things that do not look like they go
                         anywhere. */}
-                    <s-link href={`${HELP_ROUTE}/${item.slug}`} target="_blank">
+                    {/* Named as a new tab, which neither the eye nor a screen reader was
+                        told (#798). */}
+                    <s-link
+                      href={`${HELP_ROUTE}/${item.slug}`}
+                      target="_blank"
+                      accessibilityLabel={newTabName(item.title)}
+                    >
                       {item.title}
                     </s-link>
                     {/* Always rendered, even when there is no blurb: the grid places

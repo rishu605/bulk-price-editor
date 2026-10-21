@@ -52,8 +52,10 @@ import { SPACE } from "../lib/ui/spacing";
  * same thing in the same language rather than in two.
  *
  * `type="redundant"` and not a CSS line-through: Polaris documents that type for this
- * exact case and renders it as `<s>`, so a screen reader announces it. A line drawn in
- * CSS is a line only sighted merchants get.
+ * exact case and renders it as `<s>`, which is at least the right element. It is not
+ * enough on its own, and this comment used to say it was: the major screen readers do not
+ * announce `<s>` by default, so a listener heard "$19.20 $24.00" with no cue which was the
+ * old price (#798). `OldPrice` puts a visually hidden "was" in front of it.
  */
 export function MoneyCell({
   amount,
@@ -113,12 +115,29 @@ export function MoneyCell({
     // a column of prices needs it more than anywhere else in the app.
     <s-stack gap={SPACE.tight} alignItems="end">
       {amount ? <s-text>{amount}</s-text> : <Blank />}
-      {struck ? (
-        <s-text color="subdued" type="redundant">
-          {struck}
-        </s-text>
-      ) : null}
+      {struck ? <OldPrice amount={struck} /> : null}
       {note}
     </s-stack>
+  );
+}
+
+/**
+ * A price the current one replaces: struck through for the eye, and called "was" aloud.
+ *
+ * The only strike-through in the app, so every one carries the word —
+ * `screen-reader-names.test.tsx` fails if `type="redundant"` is written anywhere else.
+ *
+ * The word sits *inside* the struck element rather than beside it. A visually hidden
+ * sibling is still a box to the stack around it, and would add a gap above the price it
+ * describes; inside, it is a hidden run of text in a line that is already there.
+ * `accessibilityVisibility="exclusive"` is Polaris' visually hidden text, read out of
+ * `polaris.js` to be the same clip-and-position declarations everyone uses.
+ */
+export function OldPrice({ amount }: { amount: string }) {
+  return (
+    <s-text color="subdued" type="redundant">
+      <s-text accessibilityVisibility="exclusive">was </s-text>
+      {amount}
+    </s-text>
   );
 }

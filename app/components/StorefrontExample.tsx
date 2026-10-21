@@ -1,4 +1,5 @@
 import { SPACE } from "../lib/ui/spacing";
+import { OldPrice } from "./MoneyCell";
 import type { DraftPreviewRow } from "../services/campaigns/draft-preview.server";
 
 /**
@@ -48,13 +49,10 @@ export function StorefrontExample({
               <s-text type="strong">{row.after ?? "—"}</s-text>
               {/* `redundant`, not a CSS strike-through. Polaris documents this type for
                   exactly this case — "no longer accurate… one such use-case is discounted
-                  prices" — and renders it as `<s>`, so a screen reader says so too. A line
-                  drawn with CSS is a line only sighted merchants see. */}
-              {onSale ? (
-                <s-text color="subdued" type="redundant">
-                  {row.afterCompareAt}
-                </s-text>
-              ) : null}
+                  prices" — and renders it as `<s>`. That is not, on its own, a screen
+                  reader saying so: the major ones do not announce `<s>` by default, which
+                  is why `OldPrice` also says "was" (#798). */}
+              {onSale && row.afterCompareAt ? <OldPrice amount={row.afterCompareAt} /> : null}
               {onSale ? <s-badge tone="critical">Sale</s-badge> : null}
             </s-stack>
           </s-stack>

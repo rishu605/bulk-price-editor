@@ -291,8 +291,9 @@ export default function PlanPage() {
                     ? "Unlimited"
                     : formatCount(plan.variantLimit)}
                 </s-table-cell>
-                <s-table-cell>{plan.markets ? "Yes" : <Blank />}</s-table-cell>
-                <s-table-cell>{plan.b2b ? "Yes" : <Blank />}</s-table-cell>
+                {/* The dash means No here, and a screen reader is told so (#798). */}
+                <s-table-cell>{plan.markets ? "Yes" : <Blank means="No" />}</s-table-cell>
+                <s-table-cell>{plan.b2b ? "Yes" : <Blank means="No" />}</s-table-cell>
                 <s-table-cell>{plan.trialDays > 0 ? `${plan.trialDays} days` : <Blank />}</s-table-cell>
               </s-table-row>
             ))}
