@@ -31,7 +31,6 @@ import { isFixedOrigin, toBasisPoints } from "../lib/markets/adjustment";
 import { parseMoney } from "../lib/money/money";
 import { isThrottledError, withRetry } from "../lib/shopify/budget";
 import { currentTopology, recordTopologyChanges } from "./markets-topology.server";
-import { bulkOperationInFlight } from "./catalog-bulk-sync.server";
 
 export const PRICE_LISTS_QUERY = `#graphql
   query AnchorPriceLists($cursor: String) {
@@ -155,9 +154,14 @@ export interface MarketsSyncResult {
 /**
  * Reads the shop's price-list topology and mirrors what it holds.
  *
- * Serialised against the catalogue bulk query: Shopify permits one bulk operation per
- * shop at a time, and a market sync racing a catalogue sync would have one of them
- * fail with an error about the other that says nothing useful about either.
+ * Waits on no bulk operation, because it runs none: it pages through price lists with
+ * ordinary queries. It used to refuse while any bulk operation was recorded running in the
+ * shop -- a campaign's bulk price update included -- saying a catalogue sync was running
+ * and that "Shopify allows one bulk operation at a time" (#1081). Neither was so: Shopify
+ * runs bulk queries and mutations side by side, five of each per app and shop from API
+ * 2026-01 (https://shopify.dev/docs/api/usage/bulk-operations/queries#rate-limits), and
+ * this sync is neither. Nor does it share rows with a catalogue import running beside it:
+ * that writes the base surface, and this writes only the market and B2B ones.
  */
 export async function syncMarkets(
   client: AdminClient,
@@ -177,17 +181,6 @@ export async function syncMarkets(
   // as we understood it against the shop as it now is. Taken here rather than passed in
   // because a caller that forgot would silently get "nothing changed" for ever.
   const before = await currentTopology(shopId);
-
-  // The same question the catalogue sync asks, including retiring a record a crashed
-  // poll left "running" -- which otherwise stopped market mirroring for good (#733).
-  const running = await bulkOperationInFlight(shopId);
-  if (running) {
-    result.errors.push(
-      "A catalogue sync is already running for this shop. Market prices are mirrored " +
-        "once it finishes — Shopify allows one bulk operation at a time.",
-    );
-    return result;
-  }
 
   const lists = await readPriceLists(client);
   const seen: string[] = [];

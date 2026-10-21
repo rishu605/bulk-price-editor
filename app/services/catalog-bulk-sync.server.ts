@@ -16,32 +16,53 @@
  * (shop, variant), so an import interrupted at row 300,000 and restarted rewrites the
  * first 300,000 harmlessly and finishes the rest. Recording a cursor would be a second
  * source of truth that could disagree with the database.
+ *
+ * ## Beside other bulk operations (#1081)
+ *
+ * Shopify counts bulk queries and bulk mutations apart. For the API version this app pins
+ * (2026-07): "In API versions 2026-01 and higher, each app can run up to five bulk
+ * operations of each type per shop simultaneously"; before 2026-01, one of each type
+ * (https://shopify.dev/docs/api/usage/bulk-operations/queries#rate-limits). The schema says
+ * it too: "Bulk query and bulk mutation operations can run at the same time per shop."
+ *
+ * So a campaign's bulk price update never stands in this import's way. It used to: the
+ * import refused while *any* bulk operation was recorded running in the shop, on a rule of
+ * one at a time that Shopify never had across types, and a 100,000-price update stopped
+ * catalogue mirroring for the hour it ran (#832). What still keeps an import out is another
+ * catalogue import -- this app's own rule, since two would read and rewrite the same rows --
+ * and Shopify refusing it because the app already runs as many bulk queries there as it may.
+ *
+ * And it follows its own operation by id, `bulkOperation(id:)`. It used to poll
+ * `currentBulkOperation(type: QUERY)`, which answers with the app's *most recent* bulk query
+ * and is deprecated in 2026-07; with two running, it read the other one's status and file,
+ * the misattribution #1054 fixed for campaigns.
  */
 
 import { carryShopifyCosts } from "./baselines.server";
 import prisma from "../db.server";
 import { CATALOG_BULK_QUERY, parseCatalogJsonl, type CatalogRow, type ParseStats } from "../lib/catalog/bulk-jsonl";
+import { bulkOperationById, isTerminal, type BulkOperationState } from "../lib/execution/bulk-executor";
 import { streamLines } from "../lib/execution/jsonl";
 import { logger } from "../lib/logging/logger";
 import type { AdminClient } from "../lib/execution/sync-executor";
 import { isThrottledError, withRetry } from "../lib/shopify/budget";
+import type { AnchorCatalogBulkQueryMutation } from "../types/admin.generated";
 
 export const BULK_QUERY_RUN = `#graphql
   mutation AnchorCatalogBulkQuery($query: String!) {
     bulkOperationRunQuery(query: $query) {
       bulkOperation { id status }
-      userErrors { field message }
+      userErrors { field message code }
     }
   }
 `;
 
-export const CURRENT_BULK_QUERY = `#graphql
-  query AnchorCurrentBulkQuery {
-    currentBulkOperation(type: QUERY) {
-      id status url partialDataUrl objectCount errorCode
-    }
-  }
-`;
+/**
+ * The refusals that mean "this app already runs as many bulk queries in this shop as Shopify
+ * allows". `BulkOperationUserErrorCode` has both, and the docs do not say which the limit
+ * returns -- the same ambiguity #1054 met for mutations -- so either is read as that.
+ */
+const LIMIT_REACHED: ReadonlySet<string> = new Set(["LIMIT_REACHED", "OPERATION_IN_PROGRESS"]);
 
 /** Rows per transaction. Big enough to amortise the round trip, small enough to hold. */
 const BATCH = 1_000;
@@ -73,39 +94,47 @@ export interface BulkSyncOptions {
 export const BULK_POLL_BUDGET_MS = 30 * 60_000;
 
 /**
- * How long a record may say CREATED or RUNNING before it is treated as stranded (#733).
+ * How long a catalogue import's record may say CREATED or RUNNING before it is treated as
+ * stranded (#733).
  *
- * The process that submits an operation polls it for `BULK_POLL_BUDGET_MS` and always
- * records how it ended -- so a record still "running" well past that was left by a process
- * that stopped mid-poll: a dyno restart, a request that outlived its host. Shopify's own
- * ceiling is ten days, which is how long every market sync for the shop would otherwise
- * refuse. If Shopify really is still building the file, it refuses the next submission
- * itself, and that is reported like any other refusal.
+ * The process that submits an import polls it for `BULK_POLL_BUDGET_MS` and always records
+ * how it ended -- so a record still "running" well past that was left by a process that
+ * stopped mid-poll: a dyno restart, a request that outlived its host. Shopify's own ceiling
+ * is ten days, which is how long every catalogue sync for the shop would otherwise refuse.
+ * If Shopify is in fact still building that file, a new import is one more of the five bulk
+ * queries it runs at once, and past five Shopify refuses it, which is said in its terms.
+ *
+ * A catalogue rule only. A campaign's bulk mutation is polled on its own budget and goes on
+ * for over an hour on a large store (#832); its records are the campaign path's to settle,
+ * and retiring one here marked an update Shopify was still applying as failed (#1081).
  */
 export const BULK_STRANDED_AFTER_MS = BULK_POLL_BUDGET_MS + 10 * 60_000;
 
 /**
- * The bulk operation this shop has in flight, if any, after retiring stranded records.
+ * The catalogue import this shop has in flight, if any, after retiring stranded ones.
  *
- * Shopify runs one bulk operation per shop at a time, so the catalogue sync and the
- * market sync both ask this before starting. A record that is only stale, rather than
- * running, is marked FAILED with `STRANDED` instead of blocking both for ten days.
+ * Only the catalogue's own bulk queries count (`kind: QUERY`). Shopify runs bulk queries
+ * and bulk mutations side by side, so a campaign's bulk price update running in the shop is
+ * no reason to wait (#1081); a second catalogue import is, because two would read and
+ * rewrite the same rows. A record that is only stale, rather than running, is marked FAILED
+ * with `STRANDED` instead of blocking every catalogue sync for ten days.
  */
-export async function bulkOperationInFlight(shopId: string): Promise<{ shopifyGid: string } | null> {
+export async function catalogueImportInFlight(shopId: string): Promise<{ shopifyGid: string } | null> {
   const stranded = await prisma.bulkOperationRecord.updateMany({
     where: {
       shopId,
+      kind: "QUERY",
       status: { in: ["CREATED", "RUNNING"] },
       submittedAt: { lt: new Date(Date.now() - BULK_STRANDED_AFTER_MS) },
     },
     data: { status: "FAILED", errorCode: "STRANDED", finishedAt: new Date() },
   });
   if (stranded.count > 0) {
-    logger.warn("retired stranded bulk operation records", { shopId, count: stranded.count });
+    logger.warn("retired stranded catalogue import records", { shopId, count: stranded.count });
   }
 
   return prisma.bulkOperationRecord.findFirst({
-    where: { shopId, status: { in: ["CREATED", "RUNNING"] } },
+    where: { shopId, kind: "QUERY", status: { in: ["CREATED", "RUNNING"] } },
     select: { shopifyGid: true },
   });
 }
@@ -128,30 +157,33 @@ export async function syncCatalogViaBulk(
 
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
 
-  // Shopify runs one bulk operation per shop at a time. Claimed in our own table too,
-  // so a second tab or a scheduler tick finds out here rather than from a Shopify
-  // error that names neither operation.
-  const inFlight = await bulkOperationInFlight(shopId);
+  // One catalogue import per shop: a second would read and rewrite the same rows. Only the
+  // catalogue's own imports count -- a campaign's bulk price update runs beside it (#1081).
+  const inFlight = await catalogueImportInFlight(shopId);
   if (inFlight) {
     result.errors.push(
-      "A catalogue import is already running for this shop. It will finish on its own; " +
-        "starting a second one is not possible while Shopify is building the first.",
+      "A catalogue sync is already running for this store, reading its catalogue from Shopify, so a " +
+        "second one was not started. It finishes on its own; run the sync again after that if you still need to.",
     );
     return result;
   }
 
   const submitted = await withRetry(
-    () =>
-      client.request<{
-        bulkOperationRunQuery?: {
-          bulkOperation?: { id: string; status: string } | null;
-          userErrors?: Array<{ message: string }>;
-        };
-      }>(BULK_QUERY_RUN, { query: CATALOG_BULK_QUERY }),
+    () => client.request<AnchorCatalogBulkQueryMutation>(BULK_QUERY_RUN, { query: CATALOG_BULK_QUERY }),
     isThrottledError,
   );
 
   const errors = submitted.data?.bulkOperationRunQuery?.userErrors ?? [];
+  if (errors.length > 0 && errors.every((error) => error.code && LIMIT_REACHED.has(error.code))) {
+    // Bulk queries this app has running in the shop that no record here holds -- sent by a
+    // process that died before recording one, or still being built after a poll gave up.
+    result.errors.push(
+      "Shopify is already running as many bulk catalogue reads for Anchor in this store as it allows " +
+        "at once, so it did not start this one. Nothing was imported from it; run the sync again in a " +
+        "few minutes, once one of those has finished.",
+    );
+    return result;
+  }
   if (errors.length > 0) {
     result.errors.push(`Shopify refused the catalogue query: ${errors.map((e) => e.message).join("; ")}`);
     return result;
@@ -172,12 +204,12 @@ export async function syncCatalogViaBulk(
   });
 
   // A poll that throws -- a dropped connection, a Shopify 5xx -- must still close the
-  // record. Left CREATED, it made every later catalogue and market sync refuse as
-  // "already running", for good (#733). Reported rather than thrown, so the caller falls
-  // back to the paginated sync as it does for any other failed bulk import.
-  let finished: BulkState | null;
+  // record. Left CREATED, it made every later catalogue sync refuse as "already running",
+  // for good (#733). Reported rather than thrown, so the caller falls back to the
+  // paginated sync as it does for any other failed bulk import.
+  let finished: BulkOperationState | null;
   try {
-    finished = await pollUntilReady(client, options, sleep);
+    finished = await pollUntilReady(client, operation.id, options, sleep);
   } catch (error) {
     await prisma.bulkOperationRecord.update({
       where: { shopifyGid: operation.id },
@@ -233,33 +265,27 @@ export async function syncCatalogViaBulk(
   return result;
 }
 
-interface BulkState {
-  id: string;
-  status: string;
-  url?: string | null;
-  objectCount?: string | number | null;
-  errorCode?: string | null;
-}
-
+/**
+ * Polls this import's own operation, by id, until it ends or the budget runs out.
+ *
+ * By id because the app may have other bulk queries running in the shop, and the field that
+ * answers "the current one" answers with the newest of them, whoever's it is (#1081).
+ */
 async function pollUntilReady(
   client: AdminClient,
+  id: string,
   options: BulkSyncOptions,
   sleep: (ms: number) => Promise<void>,
-): Promise<BulkState | null> {
+): Promise<BulkOperationState | null> {
   // Half an hour by default. A hundred-thousand-variant catalogue takes Shopify a few
   // minutes; the generous ceiling is for the store that is an order larger than that.
   const deadline = Date.now() + (options.timeoutMs ?? BULK_POLL_BUDGET_MS);
   const interval = options.pollIntervalMs ?? 5_000;
-  let last: BulkState | null = null;
+  let last: BulkOperationState | null = null;
 
   for (;;) {
-    const response = await withRetry(
-      () => client.request<{ currentBulkOperation?: BulkState | null }>(CURRENT_BULK_QUERY, {}),
-      isThrottledError,
-    );
-
-    last = response.data?.currentBulkOperation ?? last;
-    if (last && last.status !== "CREATED" && last.status !== "RUNNING") return last;
+    last = (await bulkOperationById(client, id)) ?? last;
+    if (last && isTerminal(last.status)) return last;
     if (Date.now() >= deadline) return last;
 
     await sleep(interval);

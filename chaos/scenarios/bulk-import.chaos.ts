@@ -32,9 +32,9 @@ function bulkClient(url: string, gid = "gid://shopify/BulkOperation/1"): AdminCl
           } as T,
         };
       }
-      if (query.includes("currentBulkOperation")) {
+      if (query.includes("bulkOperation(id:")) {
         return {
-          data: { currentBulkOperation: { id: gid, status: "COMPLETED", url, objectCount: "3" } } as T,
+          data: { bulkOperation: { id: gid, status: "COMPLETED", url, objectCount: "3" } } as T,
         };
       }
       throw new Error(`unexpected query: ${query.slice(0, 40)}`);
@@ -142,9 +142,9 @@ describe("chaos: the catalogue bulk import", () => {
       async (chaos) => {
         const { shopId } = chaos.fixture;
 
-        // Shopify allows one bulk operation per shop. Claiming it here means a second
-        // tab finds out in our words rather than from a Shopify error naming neither
-        // operation.
+        // One catalogue import per shop, by this app's own rule: a second would read and
+        // rewrite the same rows. Shopify would run it (five bulk queries per app and shop
+        // from 2026-01), so the refusal is ours, and says which sync is in the way.
         await prisma.bulkOperationRecord.create({
           data: {
             shopId,
@@ -161,7 +161,7 @@ describe("chaos: the catalogue bulk import", () => {
           { sleep: async () => {} },
         );
 
-        expect(result.errors[0]).toMatch(/already running/i);
+        expect(result.errors[0]).toMatch(/^A catalogue sync is already running/);
         expect(result.written).toBe(0);
       },
     );

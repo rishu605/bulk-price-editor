@@ -190,9 +190,9 @@ export const PROBES: Probe[] = [
         }
       }
     `,
-    // Deliberately not a query. A valid one would start a real bulk operation, and this
-    // shop may only run one at a time — a probe that occupies that slot is a probe that
-    // breaks the thing it is checking.
+    // Deliberately not a query. A valid one would start a real bulk operation: a read of
+    // the whole catalogue, for nothing, holding one of the few bulk-query slots Shopify
+    // gives the app in this shop (five from 2026-01) while the catalogue sync may need it.
     variables: { query: "this is not a graphql document" },
   },
   {
