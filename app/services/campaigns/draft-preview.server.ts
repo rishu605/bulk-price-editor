@@ -42,6 +42,7 @@ import type {
 } from "../../lib/pricing/types";
 import type { StoredRoundingPolicy } from "../../lib/money/rounding-policy";
 import prisma from "../../db.server";
+import { describeBlocked } from "./blocked.server";
 
 /** Just enough of a campaign to price with. Everything else is irrelevant to the maths. */
 export interface DraftCampaign {
@@ -116,7 +117,7 @@ export interface DraftPreview {
    * merchant met their own floor as a crash after committing rather than as a sentence
    * while editing.
    */
-  blocked: { reason: string; variantGid: string } | null;
+  blocked: { reason: string; variantGid: string; message: string } | null;
   /**
    * Of the rows this draft would change, how many have a price changed outside the app
    * while no campaign was running on them (#745). Their baseline is out of date, so this
@@ -239,7 +240,11 @@ export async function previewDraft(
       matched,
       leftOutByStatus,
       withoutBaseline: matched - candidates.length,
-      blocked: { reason: outcome.reason, variantGid: outcome.ref.variantGid },
+      blocked: {
+        reason: outcome.reason,
+        variantGid: outcome.ref.variantGid,
+        message: await describeBlocked(shopId, outcome.blocked, "preview"),
+      },
     };
   }
 

@@ -56,6 +56,7 @@ import { noteBulkWait } from "./bulk-wait.server";
 import { HEARTBEAT_EVERY_MS } from "./reaper.server";
 import { metric } from "../../lib/telemetry/metrics";
 import { addLogContext, withLogContext } from "../../lib/logging/context.server";
+import { describeBlocked } from "./blocked.server";
 
 export interface RunOptions {
   revert?: boolean;
@@ -765,11 +766,14 @@ async function executeCampaignRun(
     unplanned = written.filter((gid) => !plannable.has(gid));
   }
 
+  // Each blocking variant by name, with its price, its floor and what to do (#1076): the
+  // history, the scheduler's refusal and Flow's run log all read this sentence.
   if (outcome.kind === "blocked") {
-    throw new Error(
-      `Campaign blocked by a guardrail on ${outcome.ref.variantGid}: ${outcome.reason}. ` +
-        `No prices were changed -- a blocking guardrail stops the whole run.`,
-    );
+    throw new AppError({
+      code: "GUARDRAIL_BLOCKED",
+      userMessage: await describeBlocked(shopId, outcome.blocked, "run"),
+      context: { campaignId, blocked: outcome.blocked.length, firstVariantGid: outcome.ref.variantGid, reason: outcome.reason },
+    });
   }
 
   // A start nobody is there to confirm (#1009): the scheduler's, or Flow's. Over the store's

@@ -176,7 +176,8 @@ export interface CampaignPreview {
   status: string;
   counts: { planned: number; noop: number; skipped: number; clamped: number; clampedToMinimum: number };
   rows: PreviewRow[];
-  blocked?: { reason: string; variantGid: string };
+  /** The first blocking variant, and every one of them in the merchant's words (#1076). */
+  blocked?: { reason: string; variantGid: string; message: string };
   writePath: string;
   writePathReason: string;
   /**

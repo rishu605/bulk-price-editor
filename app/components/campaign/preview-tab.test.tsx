@@ -72,7 +72,7 @@ describe("how the run will go", () => {
     const html = render({
       writePath: "none",
       writePathReason: "Blocked before planning completed.",
-      blocked: { reason: "below-floor", variantGid: "gid://shopify/ProductVariant/1" },
+      blocked: { reason: "below-floor", variantGid: "gid://shopify/ProductVariant/1", message: "A guardrail would stop it." },
     });
 
     expect(html).not.toContain("while you wait");

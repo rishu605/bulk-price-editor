@@ -215,6 +215,26 @@ describe("guardrail policy at plan time", () => {
     expect(out.ref.variantGid).toBe("gid://Variant/2");
     expect(out).not.toHaveProperty("rows");
   });
+
+  it("reports every variant a blocking guardrail stops, with its price and its floor (#1076)", () => {
+    // Only the first was reported, so fixing it surfaced the next one, and the next.
+    const out = planRun({
+      campaigns: [campaign({ guardrailViolationPolicy: "block" })],
+      candidates: [
+        candidate({ ref: baseRef("gid://Variant/1") }),
+        candidate({ ref: baseRef("gid://Variant/2"), baseline: { price: usd(10_000), cost: usd(9_000) } }),
+        candidate({ ref: baseRef("gid://Variant/3"), baseline: { price: usd(20_000), cost: usd(19_000) } }),
+      ],
+      storeGuardrails: { neverBelowCost: true },
+    });
+
+    expect(out.kind).toBe("blocked");
+    if (out.kind !== "blocked") return;
+    expect(out.blocked.map((entry) => entry.ref.variantGid)).toEqual(["gid://Variant/2", "gid://Variant/3"]);
+    expect(out.blocked[0]).toMatchObject({ reason: "below-floor", floor: usd(9_000) });
+    expect(out.blocked[0].wouldBe?.amount).toBeLessThan(9_000);
+    expect(out).not.toHaveProperty("rows");
+  });
 });
 
 describe("revert planning (invariant I3)", () => {

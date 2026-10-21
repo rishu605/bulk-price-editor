@@ -125,7 +125,28 @@ export type PlanOutcome =
    * A "block" policy was violated. No rows are returned and nothing may be written —
    * a blocking guardrail must stop the entire run, not merely the offending variant.
    */
-  | { kind: "blocked"; reason: ResolutionReason; ref: SurfaceRef; counts: PlanCounts };
+  | {
+      kind: "blocked";
+      /** The first blocking variant's reason and surface, as every caller read them before #1076. */
+      reason: ResolutionReason;
+      ref: SurfaceRef;
+      counts: PlanCounts;
+      /**
+       * Every variant a blocking guardrail stopped, in plan order (#1076), with the price the
+       * rule would give it and the floor that price breaches where the resolver knows them.
+       * Only the first used to be reported, so fixing it surfaced the next one, and the next.
+       */
+      blocked: BlockedVariant[];
+    };
+
+export interface BlockedVariant {
+  ref: SurfaceRef;
+  reason: ResolutionReason;
+  /** What the rule would have priced it at, before the guardrail. */
+  wouldBe?: Money;
+  /** The floor that price breaches. */
+  floor?: Money;
+}
 
 export interface PlanInput {
   campaigns: ResolvableCampaign[];

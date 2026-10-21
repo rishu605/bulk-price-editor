@@ -46,6 +46,7 @@ import {
 } from "./types";
 import { rowsThatFit } from "../../lib/ui/table-budget";
 import { inChunks } from "../../lib/db/chunk";
+import { describeBlocked } from "./blocked.server";
 
 export interface PreviewOptions {
   /** Preview the revert instead of the apply. */
@@ -135,7 +136,11 @@ export async function previewCampaign(
       status: campaign.status,
       counts: outcome.counts,
       rows: [],
-      blocked: { reason: outcome.reason, variantGid: outcome.ref.variantGid },
+      blocked: {
+        reason: outcome.reason,
+        variantGid: outcome.ref.variantGid,
+        message: await describeBlocked(shopId, outcome.blocked, "preview"),
+      },
       writePath: "none",
       writePathReason: "Blocked before planning completed.",
       markets: [],

@@ -100,6 +100,11 @@ describe("chaos: the editor's preview and the run agree", () => {
           "the merchant's own floor must be reported while editing, not thrown on submit",
         ).not.toBeNull();
         expect(blocked.blocked?.reason).toContain("below-floor");
+        // In words, by name, with the next step (#1076): not the variant's id and the code.
+        expect(blocked.blocked?.message).toMatch(/^A guardrail set to block the whole campaign would stop it before anything is written: "/);
+        expect(blocked.blocked?.message).toMatch(/would be \$[\d.,]+, under its \$100,000\.00 floor/);
+        expect(blocked.blocked?.message).not.toMatch(/gid:\/\/|below-floor/);
+        expect(blocked.blocked?.message).toContain('set "When a price would breach a floor" to clamp or skip instead of blocking.');
 
         // And with the shop set to clamp, the same draft previews clamped prices --
         // which is the point: the preview follows the shop's setting, exactly as the

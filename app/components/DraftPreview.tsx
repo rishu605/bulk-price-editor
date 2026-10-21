@@ -75,11 +75,8 @@ export function DraftPreview({
   if (preview.blocked) {
     return (
       <s-banner tone="critical">
-        <s-paragraph>
-          This rule would price {preview.blocked.variantGid.split("/").pop()} below your
-          floor, and your guardrail setting is to stop rather than adjust. Nothing would
-          be written. Lower the floor, narrow the scope, or change the rule.
-        </s-paragraph>
+        {/* Each blocking variant by name, its price and its floor, and what to do (#1076). */}
+        <s-paragraph>{preview.blocked.message}</s-paragraph>
       </s-banner>
     );
   }
