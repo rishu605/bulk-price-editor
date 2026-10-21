@@ -18,6 +18,10 @@ import { parseLadder, type LadderRung } from "../pricing/ladder-baseline";
 import { isThrottledError, withRetry } from "../shopify/budget";
 import { classifyFailure } from "./classify";
 import { readBackVerdict } from "./read-back";
+import type {
+  AnchorPriceListQuantityBreaksQuery,
+  AnchorPriceListQuantityBreaksQueryVariables,
+} from "../../types/admin.generated";
 
 export const QUANTITY_PRICING_UPDATE = `#graphql
   mutation AnchorQuantityPricingUpdate($priceListId: ID!, $input: QuantityPricingByVariantUpdateInput!) {
@@ -32,21 +36,40 @@ export const QUANTITY_PRICING_UPDATE = `#graphql
 export const MAX_VARIANTS_PER_QUANTITY_REQUEST = 100;
 
 /**
- * Reads the ladders back off the price list.
+ * Reads the ladders back off the price list, for the variants asked about only (#704).
  *
  * The mutation confirms which variants it touched but not what it stored, and this
  * surface is not exempt from the rule the others just learned: "Shopify accepted it" is a
  * claim about the request, not about what a buyer will be charged. A price list rounding
  * rule reshapes a tier without raising a single userError.
+ *
+ * Filtered by variant, as the market reads are (`readFixedPriceVariants`). It used to walk
+ * the whole list's prices, an entry per variant, relative ones included, and stopped after
+ * 50 pages of 100: a variant past entry 5,000 had "no ladder", and three wanted variants
+ * cost 50 calls. And it could never have run: 100 prices with 20 rungs each is a requested
+ * cost near 4,400 points, and Shopify refuses any query over 1,000 before running it. Every
+ * read failed, and the callers' catch blocks hid it.
+ *
+ * The rungs are read a few at a time, with `pageInfo`, so a long ladder is followed to its
+ * end rather than cut short: half a ladder recorded as a baseline is a ladder the revert
+ * would write back with its top tiers missing. See `ladderReadCost` for the arithmetic.
  */
 export const PRICE_LIST_QUANTITY_BREAKS = `#graphql
-  query AnchorPriceListQuantityBreaks($id: ID!, $after: String) {
+  query AnchorPriceListQuantityBreaks(
+    $id: ID!
+    $query: String!
+    $first: Int!
+    $after: String
+    $rungs: Int!
+    $rungsAfter: String
+  ) {
     priceList(id: $id) {
-      prices(first: 100, after: $after) {
+      prices(query: $query, first: $first, after: $after) {
         nodes {
           variant { id }
-          quantityPriceBreaks(first: 20) {
+          quantityPriceBreaks(first: $rungs, after: $rungsAfter) {
             nodes { minimumQuantity price { amount currencyCode } }
+            pageInfo { hasNextPage endCursor }
           }
         }
         pageInfo { hasNextPage endCursor }
@@ -54,6 +77,42 @@ export const PRICE_LIST_QUANTITY_BREAKS = `#graphql
     }
   }
 `;
+
+/**
+ * How many variants one ladder read asks about.
+ *
+ * Half the market reads' `MAX_VARIANTS_PER_PRICE_QUERY`, for the bucket rather than the
+ * single-query cap: Shopify will not start a query until the bucket holds its whole
+ * requested cost, and a smaller one starts sooner after the one before. What a read
+ * actually spends -- about five points a variant with no ladder -- is the same either way.
+ */
+export const LADDER_READ_VARIANTS = 25;
+
+/** Rungs read with each variant. Most ladders are shorter; a longer one is followed. */
+const RUNGS_PER_READ = 5;
+
+/** Rungs per follow-up read of one ladder longer than `RUNGS_PER_READ`. */
+const RUNGS_PER_FOLLOW_UP = 100;
+
+/**
+ * Shopify's requested cost of one ladder read: an object is 1, a connection 2 plus `first`
+ * times what each node selects (https://shopify.dev/docs/apps/build/apis/graphql-admin/rate-limits).
+ * Each price is itself, its variant, its rungs' connection (each rung and its price), and
+ * the rungs' `pageInfo`; around them, the list and the prices' connection and `pageInfo`.
+ */
+export function ladderReadCost(variants: number, rungs: number): number {
+  return 1 + 2 + variants * (1 + 1 + (2 + rungs * 2) + 1) + 1;
+}
+
+/** Shopify refuses a query whose requested cost is over this, whatever the plan. */
+export const MAX_SINGLE_QUERY_COST = 1_000;
+
+/** How many ladder reads a capture of these wholesale prices takes, by list. */
+export function ladderReadsFor(pricesPerList: Iterable<number>): number {
+  let reads = 0;
+  for (const prices of pricesPerList) reads += Math.ceil(prices / LADDER_READ_VARIANTS);
+  return reads;
+}
 
 export interface QuantityRow {
   variantGid: string;
@@ -224,36 +283,99 @@ export async function readLadders(
   priceListGid: string,
   variantGids: readonly string[],
 ): Promise<Map<string, Array<{ minimumQuantity: number; amount: string }>>> {
-  const wanted = new Set(variantGids);
+  const wanted = [...new Set(variantGids)];
   const found = new Map<string, Array<{ minimumQuantity: number; amount: string }>>();
+  // Ladders with more rungs than one read carries, and where the read stopped.
+  const longer = new Map<string, string>();
 
-  let after: string | null = null;
-  for (let page = 0; page < 50; page += 1) {
-    const response: { data?: BreaksResponse } = await withRetry(
-      () => client.request<BreaksResponse>(PRICE_LIST_QUANTITY_BREAKS, { id: priceListGid, after }),
-      isThrottledError,
-    );
+  for (let at = 0; at < wanted.length; at += LADDER_READ_VARIANTS) {
+    const batch = wanted.slice(at, at + LADDER_READ_VARIANTS);
+    const asked = new Set(batch);
 
-    const prices = response.data?.priceList?.prices;
-    for (const node of prices?.nodes ?? []) {
-      const id = node?.variant?.id;
-      if (!id || !wanted.has(id)) continue;
+    // Every page, however many: a search over 25 variants answers at most 25 prices, but a
+    // read that stopped early would call the rest "no ladder", which is the bug this fixes.
+    let after: string | null = null;
+    do {
+      const prices = await readPrices(client, priceListGid, {
+        query: variantQuery(batch),
+        first: batch.length,
+        after,
+        rungs: RUNGS_PER_READ,
+        rungsAfter: null,
+      });
 
-      const rungs = (node.quantityPriceBreaks?.nodes ?? [])
-        .filter(Boolean)
-        .map((tier) => ({ minimumQuantity: tier!.minimumQuantity, amount: tier!.price.amount }))
-        .sort((a, b) => a.minimumQuantity - b.minimumQuantity);
+      for (const node of prices?.nodes ?? []) {
+        const id = node.variant?.id;
+        // The search names these variants, but a node is still checked against them: an
+        // answer about a variant nobody asked about is not this read's to record.
+        if (!id || !asked.has(id)) continue;
+        const rungs = rungsOf(node);
+        if (rungs.length > 0) found.set(id, rungs);
+        const more = node.quantityPriceBreaks?.pageInfo;
+        if (more?.hasNextPage && more.endCursor) longer.set(id, more.endCursor);
+      }
 
-      // An empty ladder is left out rather than recorded as an empty one: "no breaks" is
-      // the absence of a row here, and the baseline column says the same with null.
-      if (rungs.length > 0) found.set(id, rungs);
-    }
-
-    if (!prices?.pageInfo?.hasNextPage) break;
-    after = prices.pageInfo.endCursor ?? null;
+      after = prices?.pageInfo?.hasNextPage ? (prices.pageInfo.endCursor ?? null) : null;
+    } while (after);
   }
 
+  // A long ladder, followed to its last rung.
+  for (const [variantGid, cursor] of longer) {
+    let rungsAfter: string | null = cursor;
+    while (rungsAfter) {
+      const prices = await readPrices(client, priceListGid, {
+        query: variantQuery([variantGid]),
+        first: 1,
+        after: null,
+        rungs: RUNGS_PER_FOLLOW_UP,
+        rungsAfter,
+      });
+      const node = prices?.nodes.find((entry) => entry.variant?.id === variantGid);
+      // Read once in full or not at all: a ladder that came back shorter than it was is a
+      // claim the revert would act on, so a follow-up that lost the price fails the read.
+      if (!node) throw new Error(`The quantity breaks for ${variantGid} could not be read to the end.`);
+      found.set(variantGid, [...(found.get(variantGid) ?? []), ...rungsOf(node)]);
+      const more = node.quantityPriceBreaks?.pageInfo;
+      rungsAfter = more?.hasNextPage ? (more.endCursor ?? null) : null;
+    }
+  }
+
+  // An empty ladder is left out rather than recorded as an empty one: "no breaks" is the
+  // absence of an entry here, and the baseline column says the same with null.
+  for (const [variantGid, rungs] of found) {
+    found.set(variantGid, [...rungs].sort((a, b) => a.minimumQuantity - b.minimumQuantity));
+  }
   return found;
+}
+
+type PriceNode = NonNullable<NonNullable<AnchorPriceListQuantityBreaksQuery["priceList"]>["prices"]>["nodes"][number];
+
+async function readPrices(
+  client: AdminClient,
+  priceListGid: string,
+  page: Omit<AnchorPriceListQuantityBreaksQueryVariables, "id">,
+) {
+  const response: { data?: AnchorPriceListQuantityBreaksQuery } = await withRetry(
+    () =>
+      client.request<AnchorPriceListQuantityBreaksQuery>(PRICE_LIST_QUANTITY_BREAKS, {
+        id: priceListGid,
+        ...page,
+      } satisfies AnchorPriceListQuantityBreaksQueryVariables),
+    isThrottledError,
+  );
+  return response.data?.priceList?.prices;
+}
+
+/** The search filter for these variants. It takes numeric ids, not gids. */
+function variantQuery(variantGids: readonly string[]): string {
+  return variantGids.map((gid) => `variant_id:${gid.split("/").pop()}`).join(" OR ");
+}
+
+function rungsOf(node: PriceNode): Array<{ minimumQuantity: number; amount: string }> {
+  return (node.quantityPriceBreaks?.nodes ?? []).map((tier) => ({
+    minimumQuantity: tier.minimumQuantity,
+    amount: tier.price.amount,
+  }));
 }
 
 /**
@@ -363,20 +485,6 @@ function compareLadder(
   }
 
   return null;
-}
-
-interface BreaksResponse {
-  priceList?: {
-    prices?: {
-      nodes?: Array<{
-        variant?: { id: string } | null;
-        quantityPriceBreaks?: {
-          nodes?: Array<{ minimumQuantity: number; price: { amount: string } } | null> | null;
-        } | null;
-      } | null> | null;
-      pageInfo?: { hasNextPage?: boolean; endCursor?: string | null } | null;
-    } | null;
-  } | null;
 }
 
 /**

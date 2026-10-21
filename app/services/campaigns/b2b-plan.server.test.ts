@@ -10,7 +10,14 @@ import { describe, expect, it } from "vitest";
 
 import { money } from "../../lib/money/money";
 import { parseSurfaces } from "./market-surfaces.server";
-import { planQuantityBreaks, type B2BVariantInput } from "./b2b-plan.server";
+import {
+  ladderOwner,
+  planLadderRevert,
+  planQuantityBreaks,
+  type B2BVariantInput,
+  type LadderBaselineInput,
+  type TieredCampaign,
+} from "./b2b-plan.server";
 import type { QuantityTier, WholesaleGuardrail } from "../../lib/pricing/quantity-breaks";
 
 const gbp = (minor: number) => money(minor, "GBP");
@@ -128,5 +135,84 @@ describe("reading tiers off a campaign row", () => {
 
     expect(surfaces.base).toBe(false);
     expect(surfaces.priceLists).toEqual(["a", "b"]);
+  });
+});
+
+/**
+ * A revert's ladders are `resolve(without C)` (rule 6, #704): the next tiered campaign's, by
+ * the resolver's own ranking, scope and exclusions, or the merchant's own from the baseline.
+ */
+describe("recomputing a catalogue's ladders without the campaign that ends", () => {
+  const tiered = (id: string, priority: number, tiers: QuantityTier[], over: Partial<TieredCampaign> = {}): TieredCampaign => ({
+    id,
+    name: `Sale ${id}`,
+    priority,
+    startAt: 0,
+    ruleRows: [],
+    compareAtPolicy: { kind: "leave" },
+    compareAtViolationPolicy: "clear",
+    roundingPolicy: { default: "none", byCurrency: {} } as never,
+    guardrailViolationPolicy: "clamp",
+    tiers,
+    ...over,
+  });
+  const anchored = (n: number, ladder: LadderBaselineInput["ladder"] = null, over: Partial<LadderBaselineInput> = {}): LadderBaselineInput => ({
+    ...variant(n),
+    ladder,
+    ...over,
+  });
+  const SIX_FOR_20: QuantityTier[] = [
+    { minimumQuantity: 1, discountBps: 0 },
+    { minimumQuantity: 6, discountBps: 2000 },
+  ];
+  const OWN = [{ minimumQuantity: 24, price: gbp(3500) }];
+  const ladderOf = (plan: ReturnType<typeof planLadderRevert>, n: number) =>
+    plan.rows.find((row) => row.variantGid === variant(n).variantGid)?.breaks.map((b) => [b.minimumQuantity, b.price.amount]);
+
+  it("hands a variant to the next tiered campaign, priced from its own baseline", () => {
+    const plan = planLadderRevert([anchored(1, OWN, { baseline: gbp(5000) })], [tiered("low", 100, LADDER)], permissive);
+
+    expect(ladderOf(plan, 1), "the next campaign's ladder was not written").toEqual([[1, 5000], [12, 4500]]);
+    expect(plan.handedTo.get(variant(1).variantGid)).toBe("low");
+  });
+
+  it("gives a variant nobody else prices its own ladder back, or none", () => {
+    const plan = planLadderRevert([anchored(1, OWN), anchored(2)], [], permissive);
+
+    expect(ladderOf(plan, 1)).toEqual([[24, 3500]]);
+    expect(ladderOf(plan, 2), "a variant with no ladder before kept one").toEqual([]);
+    expect(plan.handedTo.size).toBe(0);
+  });
+
+  it("picks the highest-ranked campaign, and the later of two at one priority", () => {
+    const low = tiered("low", 100, LADDER);
+    const high = tiered("high", 200, SIX_FOR_20);
+    expect(ladderOwner(variant(1).variantGid, [low, high])?.id).toBe("high");
+
+    const earlier = tiered("earlier", 100, LADDER, { startAt: 1 });
+    const later = tiered("later", 100, SIX_FOR_20, { startAt: 2 });
+    expect(ladderOwner(variant(1).variantGid, [later, earlier])?.id).toBe("later");
+  });
+
+  it("offers a variant only to campaigns whose scope covers it and that have not let it go", () => {
+    const gid = variant(1).variantGid;
+    const outOfScope = tiered("elsewhere", 300, SIX_FOR_20, { scope: new Set([variant(2).variantGid]) });
+    const letGo = tiered("let-go", 200, SIX_FOR_20, { scope: new Set([gid]), excludedVariantGids: [gid] });
+    const covering = tiered("covering", 100, LADDER, { scope: new Set([gid]) });
+
+    const plan = planLadderRevert([anchored(1, OWN)], [outOfScope, letGo, covering], permissive);
+
+    expect(plan.handedTo.get(gid)).toBe("covering");
+    expect(ladderOf(plan, 1)).toEqual([[1, 4000], [12, 3600]]);
+  });
+
+  it("puts the merchant's own ladder back where the next campaign refuses, and says why", () => {
+    const strict: WholesaleGuardrail = { minMarginPercent: 20, missingCost: "refuse" };
+
+    const plan = planLadderRevert([anchored(1, OWN), anchored(2, null, { cost: gbp(1000) })], [tiered("low", 100, LADDER)], strict);
+
+    expect(ladderOf(plan, 1), "a refused variant kept the ending campaign's ladder").toEqual([[24, 3500]]);
+    expect(ladderOf(plan, 2)).toEqual([[1, 4000], [12, 3600]]);
+    expect(plan.messages.join(" ")).toMatch(/1 product could not take "Sale low"'s quantity breaks.*no cost is recorded/i);
   });
 });

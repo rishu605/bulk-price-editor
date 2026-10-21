@@ -128,6 +128,9 @@ export async function recapture(shopId: string, options: RecaptureOptions = {}) 
         captured: result.captured,
         superseded: result.superseded,
         alreadyCurrent: result.alreadyCurrent,
+        // Whether its wholesale prices came with it, ladders and all, or were left (#1092).
+        wholesale: result.wholesale,
+        wholesaleLeft: result.wholesaleLeft,
         overActiveCampaigns: plan.overlaps.map((o) => ({ id: o.campaignId, variants: o.variants })),
       },
     },

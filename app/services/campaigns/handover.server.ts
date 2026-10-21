@@ -149,12 +149,62 @@ export async function marketsHandedTo(
 }
 
 /**
+ * The wholesale ladders another campaign's revert handed this one on a catalogue (#704).
+ *
+ * The same handover again, for a ladder: B ends, and its revert writes A's ladder on the
+ * variants they share -- `resolve(without B)` -- ledgered under B's revert. A never wrote
+ * those, so A's own revert, taking back the ladders of A's runs, would leave A's there after
+ * A ended. Each variant whose newest landed ladder write on this list is another campaign's
+ * revert since this one last ended, and that write gave a ladder rather than cleared one.
+ *
+ * Not narrowed to the ones the planner would credit to this campaign, as `marketsHandedTo` is
+ * not: the revert recomputes each one without it (rule 6), so a ladder that was another
+ * campaign's, or the merchant's, is written as it already is.
+ */
+export async function laddersHandedTo(
+  shopId: string,
+  campaignId: string,
+  priceListGid: string,
+  among: readonly string[],
+  /** The revert asking: "since it last ended" means before this one, finished or not. */
+  revertRunId: string,
+): Promise<string[]> {
+  if (among.length === 0) return [];
+  const campaign = await prisma.campaign.findFirst({ where: { id: campaignId, shopId }, select: { id: true, createdAt: true } });
+  if (!campaign) return [];
+  const since = await sinceLastEnded(campaign, revertRunId);
+  const rows = await prisma.$queryRaw<Array<{ variantGid: string }>>`
+    SELECT c."variantGid"
+    FROM "variant_changes" c
+    JOIN "campaign_runs" r ON r."id" = c."runId"
+    WHERE r."shopId" = ${shopId} AND r."kind" = 'REVERT' AND r."campaignId" <> ${campaignId}
+      AND r."createdAt" > (${since}::timestamptz AT TIME ZONE 'UTC')
+      AND c."shopId" = ${shopId} AND c."surfaceKind" = 'B2B' AND c."priceListGid" = ${priceListGid}
+      AND c."variantGid" = ANY(${[...among]})
+      AND c."status" IN ('VERIFIED', 'CLAMPED') AND jsonb_typeof(c."quantityBreaks") = 'array'
+      AND NOT EXISTS (
+        SELECT 1 FROM "variant_changes" n
+        WHERE n."shopId" = c."shopId" AND n."variantGid" = c."variantGid"
+          AND n."surfaceKind" = 'B2B' AND n."priceListGid" = c."priceListGid"
+          AND n."status" IN ('VERIFIED', 'CLAMPED')
+          AND (n."createdAt" > c."createdAt" OR (n."createdAt" = c."createdAt" AND n."id" > c."id"))
+      )`;
+  return rows.map((row) => row.variantGid);
+}
+
+/**
  * Since this campaign last finished ending, as for what it wrote (`pricesWrittenBy`):
  * nothing handed to it before then is still its own.
  */
-async function sinceLastEnded(campaign: { id: string; createdAt: Date }): Promise<Date> {
+async function sinceLastEnded(campaign: { id: string; createdAt: Date }, besidesRunId?: string): Promise<Date> {
   const lastRevert = await prisma.campaignRun.findFirst({
-    where: { campaignId: campaign.id, kind: "REVERT", status: "COMPLETED", NOT: { occurrenceKey: { startsWith: "VARIANT-" } } },
+    where: {
+      campaignId: campaign.id,
+      kind: "REVERT",
+      status: "COMPLETED",
+      NOT: { occurrenceKey: { startsWith: "VARIANT-" } },
+      ...(besidesRunId ? { id: { not: besidesRunId } } : {}),
+    },
     orderBy: { createdAt: "desc" },
     select: { createdAt: true },
   });

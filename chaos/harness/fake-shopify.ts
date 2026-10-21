@@ -399,6 +399,9 @@ export class FakeShopify {
     if (query.includes("AnchorFixedPriceVariants")) {
       return this.fixedPrices(variables) as { data?: T; extensions?: { cost?: QueryCost } };
     }
+    if (query.includes("AnchorPriceListQuantityBreaks")) {
+      return this.ladderRead(query, variables) as { data?: T; extensions?: { cost?: QueryCost } };
+    }
     if (query.includes("AnchorContextualPrices")) {
       return this.contextualPrices(variables) as { data?: T; extensions?: { cost?: QueryCost } };
     }
@@ -1187,6 +1190,79 @@ export class FakeShopify {
         },
       },
       extensions: this.cost(10 * Math.max(1, touched.length)),
+    };
+  }
+
+  /** Ladder reads answered, for a scenario that counts what a capture costs (#704). */
+  ladderReads = 0;
+
+  /**
+   * A list's prices with their quantity breaks, as Shopify answers the ladder read (#704).
+   *
+   * Searchable by `variant_id`, paged by `first` and `after` at most 250 at a time, and each
+   * price's rungs paged the same way: a fake that answered everything in one page let a read
+   * that stopped after 5,000 prices pass. And a query whose requested cost is over 1,000
+   * points is refused before it runs, as Shopify refuses it -- the read that asked for 100
+   * prices with 20 rungs each cost about 4,400 and failed on every store, while this fake
+   * answered it.
+   */
+  private ladderRead(query: string, variables: Record<string, unknown>) {
+    this.ladderReads += 1;
+    // A literal in the query text, for a read that does not pass these as variables.
+    const literal = (field: string) => Number(new RegExp(`${field}\\([^)]*first:\\s*(\\d+)`).exec(query)?.[1] ?? 250);
+    const first = Number(variables.first ?? literal("prices"));
+    const rungs = Number(variables.rungs ?? literal("quantityPriceBreaks"));
+    const rungPageInfo = /quantityPriceBreaks\([^)]*\)\s*{[^}]*}[^}]*pageInfo/.test(query) ? 1 : 0;
+    // Shopify's requested cost: an object is 1, a connection 2 plus `first` times its node.
+    const cost = 1 + 2 + first * (1 + 1 + (2 + rungs * 2) + rungPageInfo) + 1;
+    if (cost > 1_000) {
+      return {
+        errors: [
+          {
+            message: `Query cost is ${cost}, which exceeds the single query max cost limit (1000).`,
+            extensions: { code: "MAX_COST_EXCEEDED", cost, maxCost: 1_000 },
+          },
+        ],
+        extensions: this.cost(0),
+      };
+    }
+
+    const list = this.priceLists.find((l) => l.id === String(variables.id ?? ""));
+    if (!list) return { data: { priceList: null }, extensions: this.cost(1) };
+
+    const searched = String(variables.query ?? "")
+      .split(" OR ")
+      .map((term) => term.replace("variant_id:", "").trim())
+      .filter(Boolean);
+    const wanted = new Set(searched);
+    const matching = list.prices.filter((entry) => wanted.size === 0 || wanted.has(entry.variantGid.split("/").pop() ?? ""));
+    const from = variables.after ? Number(variables.after) : 0;
+    const page = matching.slice(from, from + Math.min(first, 250));
+    const rungsFrom = variables.rungsAfter ? Number(variables.rungsAfter) : 0;
+
+    return {
+      data: {
+        priceList: {
+          prices: {
+            nodes: page.map((entry) => {
+              const ladder = this.ladders.get(`${list.id}|${entry.variantGid}`) ?? [];
+              const shown = ladder.slice(rungsFrom, rungsFrom + rungs);
+              return {
+                variant: { id: entry.variantGid },
+                quantityPriceBreaks: {
+                  nodes: shown.map((rung) => ({
+                    minimumQuantity: rung.minimumQuantity,
+                    price: { amount: rung.amount, currencyCode: list.currency },
+                  })),
+                  pageInfo: { hasNextPage: rungsFrom + shown.length < ladder.length, endCursor: String(rungsFrom + shown.length) },
+                },
+              };
+            }),
+            pageInfo: { hasNextPage: from + page.length < matching.length, endCursor: String(from + page.length) },
+          },
+        },
+      },
+      extensions: this.cost(3 + page.length * 5),
     };
   }
 

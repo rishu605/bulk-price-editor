@@ -125,13 +125,15 @@ async function syncJob(ref: JobRef): Promise<void> {
   });
   if (!shop || shop.uninstalledAt) return;
 
+  const client = await adminClientForShop(shop.domain);
+
+  // Flow's large capture (#773), with the shop's client for its wholesale prices' quantity
+  // ladders, as the recapture page captures them (#1092).
   if (ref.recaptureSegmentId) {
     const { captureForFlow } = await import("../services/flow/flow-capture.server");
-    await captureForFlow(ref.shopId, ref.recaptureSegmentId);
+    await captureForFlow(ref.shopId, ref.recaptureSegmentId, client);
     return;
   }
-
-  const client = await adminClientForShop(shop.domain);
 
   // The whole catalogue, from Home's Sync button (#801). Thrown rather than returned on a
   // missing session, like a queued run (#707): a job that returns has succeeded, and Home

@@ -84,20 +84,38 @@ export function replaceLabel(scope: number): string {
   return `Replace ${countOf(scope, "baseline")}`;
 }
 
-/** What a recapture did, in grouped counts that agree with one (#759). */
+/**
+ * What a recapture did, in grouped counts that agree with one (#759). The recapture page
+ * and Flow's Capture baselines both answer with it, so the two say the same thing about the
+ * same capture -- the wholesale prices included (#1092).
+ */
 export function recapturedMessage(result: {
   captured: number;
   scope: number;
   superseded: number;
   alreadyCurrent: number;
+  /** Of `captured`, wholesale prices recorded with their quantity breaks. */
+  wholesale?: number;
+  /** Wholesale prices left as they were: their quantity breaks could not be read. */
+  wholesaleLeft?: number;
 }): string {
+  const wholesale = result.wholesale ?? 0;
+  const left = result.wholesaleLeft ?? 0;
   return (
     `Recaptured ${countOf(result.captured, "baseline")} across ${countOf(result.scope, "variant")}` +
     (result.superseded > 0 ? `, superseding ${formatCount(result.superseded)}` : "") +
+    (wholesale > 0
+      ? `, including ${countOf(wholesale, "wholesale price")} with ${wholesale === 1 ? "its" : "their"} quantity breaks`
+      : "") +
     (result.alreadyCurrent > 0
       ? `. ${formatCount(result.alreadyCurrent)} ${result.alreadyCurrent === 1 ? "was" : "were"} already correct`
       : "") +
-    "."
+    "." +
+    // Every merchant-visible error names the object, the cause and the next action.
+    (left > 0
+      ? ` ${countOf(left, "wholesale price")} ${left === 1 ? "was" : "were"} left as ${left === 1 ? "it was" : "they were"}: ` +
+        `${left === 1 ? "its" : "their"} quantity breaks could not be read from Shopify. Recapture again to include ${left === 1 ? "it" : "them"}.`
+      : "")
   );
 }
 

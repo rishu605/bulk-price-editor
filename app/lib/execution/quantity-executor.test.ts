@@ -12,6 +12,10 @@ import { describe, expect, it } from "vitest";
 import { money } from "../money/money";
 import {
   chunkQuantityRows,
+  LADDER_READ_VARIANTS,
+  ladderReadCost,
+  ladderReadsFor,
+  MAX_SINGLE_QUERY_COST,
   readBaselineLadders,
   readLadders,
   writeQuantityBreaks,
@@ -434,5 +438,121 @@ describe("reading the ladders a catalogue already holds", () => {
 
       await expect(readBaselineLadders(client, "gid://PriceList/1", "USD", ["gid://v/1"])).rejects.toThrow(/Service Unavailable/);
     });
+  });
+});
+
+/**
+ * A wholesale catalogue as Shopify serves it (#704): one price per variant, relative ones
+ * included, paged by `first` and `after`, searchable by `variant_id`, each price's rungs paged
+ * the same way -- and a query over Shopify's single-query cost refused before it runs.
+ */
+function shopifyList(ladders: ReadonlyMap<number, Array<{ minimumQuantity: number; amount: string }>>, size: number) {
+  const ids = Array.from({ length: size }, (_, n) => n + 1);
+  const requests: Array<Record<string, unknown>> = [];
+
+  /** Shopify's requested cost: an object is 1, a connection 2 plus `first` times its node. */
+  const requestedCost = (query: string, first: number, rungs: number) => {
+    const rungPageInfo = /quantityPriceBreaks\([^)]*\)\s*{[^}]*}[^}]*pageInfo/.test(query) ? 1 : 0;
+    return 1 + 2 + first * (1 + 1 + (2 + rungs * 2) + rungPageInfo) + 1;
+  };
+  const literal = (query: string, field: string) => Number(new RegExp(`${field}\\([^)]*first:\\s*(\\d+)`).exec(query)?.[1]);
+
+  return {
+    requests,
+    async request<T>(query: string, variables: Record<string, unknown>) {
+      requests.push(variables);
+      const first = Number(variables.first ?? literal(query, "prices"));
+      const rungs = Number(variables.rungs ?? literal(query, "quantityPriceBreaks"));
+      const cost = requestedCost(query, first, rungs);
+      if (cost > 1_000 || first > 250 || rungs > 250) {
+        throw new Error(`Query cost is ${cost}, which exceeds the single query max cost limit (1000).`);
+      }
+
+      const searched = typeof variables.query === "string" && variables.query
+        ? new Set(variables.query.split(" OR ").map((term) => Number(term.replace("variant_id:", ""))))
+        : null;
+      const matching = ids.filter((id) => !searched || searched.has(id));
+      const from = variables.after ? Number(variables.after) : 0;
+      const page = matching.slice(from, from + first);
+      const rungsFrom = variables.rungsAfter ? Number(variables.rungsAfter) : 0;
+
+      return {
+        data: {
+          priceList: {
+            prices: {
+              nodes: page.map((id) => {
+                const ladder = ladders.get(id) ?? [];
+                const shown = ladder.slice(rungsFrom, rungsFrom + rungs);
+                return {
+                  variant: { id: `gid://shopify/ProductVariant/${id}` },
+                  quantityPriceBreaks: {
+                    nodes: shown.map((rung) => ({ minimumQuantity: rung.minimumQuantity, price: { amount: rung.amount, currencyCode: "USD" } })),
+                    pageInfo: {
+                      hasNextPage: rungsFrom + rungs < ladder.length,
+                      endCursor: String(rungsFrom + shown.length),
+                    },
+                  },
+                };
+              }),
+              pageInfo: { hasNextPage: from + first < matching.length, endCursor: String(from + page.length) },
+            },
+          },
+        } as T,
+      };
+    },
+  };
+}
+
+const variant = (n: number) => `gid://shopify/ProductVariant/${n}`;
+
+describe("reading the ladders of a catalogue over 5,000 prices (#704)", () => {
+  const LADDER = [
+    { minimumQuantity: 12, amount: "36.00" },
+    { minimumQuantity: 48, amount: "32.00" },
+  ];
+
+  it("finds a ladder past the list's 5,000th price", async () => {
+    const client = shopifyList(new Map([[5_500, LADDER], [10, LADDER]]), 5_600);
+
+    const ladders = await readLadders(client, "gid://PriceList/1", [variant(10), variant(5_500)]);
+
+    expect(ladders.get(variant(10)), "a ladder near the start of the list was not read").toEqual(LADDER);
+    expect(ladders.get(variant(5_500)), "a ladder past the 5,000th price was recorded as none").toEqual(LADDER);
+  });
+
+  it("asks Shopify about the variants it wants, not the whole list", async () => {
+    const client = shopifyList(new Map([[5_500, LADDER]]), 5_600);
+
+    await readLadders(client, "gid://PriceList/1", [variant(3), variant(2_000), variant(5_500)]);
+
+    expect(client.requests, "three variants cost more than one read").toHaveLength(1);
+    expect(client.requests[0]!.query).toBe("variant_id:3 OR variant_id:2000 OR variant_id:5500");
+  });
+
+  it("reads many variants a batch at a time, every batch within Shopify's cost limit", async () => {
+    const wanted = Array.from({ length: 60 }, (_, n) => n * 90 + 1);
+    const client = shopifyList(new Map(wanted.map((id) => [id, LADDER])), 5_600);
+
+    const ladders = await readLadders(client, "gid://PriceList/1", wanted.map(variant));
+
+    expect(ladders.size).toBe(60);
+    expect(client.requests).toHaveLength(Math.ceil(60 / LADDER_READ_VARIANTS));
+    expect(ladderReadCost(LADDER_READ_VARIANTS, 5)).toBeLessThanOrEqual(MAX_SINGLE_QUERY_COST);
+  });
+
+  it("follows a ladder longer than one read carries to its last rung", async () => {
+    const long = Array.from({ length: 12 }, (_, n) => ({ minimumQuantity: (n + 1) * 10, amount: `${50 - n}.00` }));
+    const client = shopifyList(new Map([[7, long], [8, LADDER]]), 20);
+
+    const ladders = await readLadders(client, "gid://PriceList/1", [variant(7), variant(8)]);
+
+    expect(ladders.get(variant(7)), "a long ladder was cut short").toEqual(long);
+    expect(ladders.get(variant(8))).toEqual(LADDER);
+  });
+
+  it("counts the reads a capture of wholesale prices takes, by list", () => {
+    expect(ladderReadsFor([])).toBe(0);
+    expect(ladderReadsFor([1])).toBe(1);
+    expect(ladderReadsFor([LADDER_READ_VARIANTS, LADDER_READ_VARIANTS + 1, 3])).toBe(4);
   });
 });

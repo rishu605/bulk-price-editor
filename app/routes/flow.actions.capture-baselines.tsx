@@ -15,20 +15,24 @@ import type { ActionFunctionArgs } from "react-router";
 
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
+import { toAdminClient } from "../services/admin-client.server";
 import { planRecapture } from "../services/recapture.server";
-import { captureForFlow, captureRefusal } from "../services/flow/flow-capture.server";
+import { captureForFlow, captureRefusal, ladderReadsToCapture } from "../services/flow/flow-capture.server";
 import {
   answerForError,
+  FLOW_INLINE_LADDER_READS,
   FLOW_INLINE_ROWS,
   recordFlowRequest,
   respond,
   type FlowAnswer,
 } from "../services/flow/flow-answer.server";
 import { enqueueWithin, webQueue } from "../worker/web-queue.server";
+import { recapturedMessage } from "../lib/baselines/recapture";
+import type { AdminClient } from "../lib/execution/sync-executor";
 import { formatCount } from "../lib/format/display";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { session, payload } = await authenticate.flow(request);
+  const { session, payload, admin } = await authenticate.flow(request);
 
   const shop = await prisma.shop.findUnique({
     where: { domain: session.shop },
@@ -39,12 +43,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const segmentId = String(
     (payload as { properties?: Record<string, unknown> }).properties?.["segment-id"] ?? "",
   );
-  const answer = await capture(shop.id, segmentId);
+  // For the wholesale prices' quantity ladders, read as the recapture page reads them (#1092).
+  const answer = await capture(shop.id, segmentId, admin ? toAdminClient(admin) : undefined);
   await recordFlowRequest(shop.id, "capture-baselines", { kind: "Segment", id: segmentId }, answer);
   return respond(answer);
 };
 
-async function capture(shopId: string, segmentId: string): Promise<FlowAnswer> {
+async function capture(shopId: string, segmentId: string, client: AdminClient | undefined): Promise<FlowAnswer> {
   // A 409, not the 200 it was: Flow showed a capture that never happened as a success.
   const refusal = await captureRefusal(shopId);
   if (refusal) return { status: 409, outcome: "refused", message: refusal };
@@ -65,8 +70,13 @@ async function capture(shopId: string, segmentId: string): Promise<FlowAnswer> {
     const plan = await planRecapture(shopId, { segmentId });
 
     // Ten seconds is Flow's whole wait (#773). A capture larger than a run Flow may make
-    // goes to the worker and is answered at once; with no worker queue it runs here.
-    const queue = plan.variantGids.length > FLOW_INLINE_ROWS ? webQueue() : null;
+    // goes to the worker and is answered at once; with no worker queue it runs here. So does
+    // one whose wholesale prices need more ladder reads from Shopify than the wait has room
+    // for (#1092): each is baselined with its ladder or not at all.
+    const large =
+      plan.variantGids.length > FLOW_INLINE_ROWS ||
+      (await ladderReadsToCapture(shopId, plan.variantGids)) > FLOW_INLINE_LADDER_READS;
+    const queue = large ? webQueue() : null;
     if (queue) {
       try {
         await enqueueWithin(queue, "sync", { shopId, recaptureSegmentId: segmentId });
@@ -85,8 +95,17 @@ async function capture(shopId: string, segmentId: string): Promise<FlowAnswer> {
       };
     }
 
-    const captured = await captureForFlow(shopId, segmentId);
-    return { status: 200, outcome: "done", message: `Captured baselines for ${formatCount(captured)} variants.` };
+    const captured = await captureForFlow(shopId, segmentId, client);
+    // A campaign went live between the check above and the capture.
+    if (!captured) return { status: 409, outcome: "refused", message: (await captureRefusal(shopId)) ?? "Nothing was captured." };
+    // The page's sentence, wholesale prices counted (#1092). Wholesale prices whose ladders
+    // could not be read are left as they were, and said so: the capture happened, so not a
+    // 5xx Flow would resend, and running it again is the merchant's to decide.
+    return {
+      status: 200,
+      outcome: captured.wholesaleLeft > 0 ? "partial" : "done",
+      message: recapturedMessage(captured),
+    };
   } catch (error) {
     return answerForError(error, "Baselines were not captured");
   }

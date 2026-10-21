@@ -25,6 +25,13 @@ export interface CaptureResult {
   captured: number;
   alreadyCurrent: number;
   superseded: number;
+  /** Of `captured`, wholesale prices, each recorded with its quantity ladder (#1092). */
+  wholesale: number;
+  /**
+   * Wholesale prices this capture would have recorded and left as they were: it had no
+   * Admin client, or Shopify could not be read for their ladders. See `client`.
+   */
+  wholesaleLeft: number;
 }
 
 export interface CaptureOptions {
@@ -68,7 +75,7 @@ export async function captureBaselines(
   shopId: string,
   options: CaptureOptions = {},
 ): Promise<CaptureResult> {
-  const result: CaptureResult = { captured: 0, alreadyCurrent: 0, superseded: 0 };
+  const result: CaptureResult = { captured: 0, alreadyCurrent: 0, superseded: 0, wholesale: 0, wholesaleLeft: 0 };
 
   const entries = options.variantGids
     ? await inChunks(options.variantGids, (batch) =>
@@ -149,7 +156,10 @@ export async function captureBaselines(
   }
 
   // Wholesale prices with their ladders, or not at all: see `client`.
-  if (options.client) planned.push(...(await withLadders(shopId, options.client, wholesale)));
+  const laddered = options.client ? await withLadders(shopId, options.client, wholesale) : [];
+  planned.push(...laddered);
+  result.wholesale = laddered.length;
+  result.wholesaleLeft = wholesale.length - laddered.length;
 
   // Supersede and create together per chunk. The partial unique index allows only
   // one current baseline per variant per surface, so the old row must be retired in
@@ -179,6 +189,25 @@ export async function captureBaselines(
   }
 
   return result;
+}
+
+/**
+ * The wholesale prices among these variants that a capture records with their quantity
+ * ladders, counted by price list: the mirror's wholesale rows with a live price, as
+ * `captureBaselines` reads them. For deciding, before a capture, how many ladder reads it
+ * will make (#1092).
+ */
+export async function wholesalePricesIn(shopId: string, variantGids: readonly string[]): Promise<Map<string, number>> {
+  const rows = await inChunks([...variantGids], (batch) =>
+    prisma.priceSurfaceEntry.groupBy({
+      by: ["priceListGid"],
+      where: { shopId, surfaceKind: "B2B", variantGid: { in: batch }, livePrice: { not: null } },
+      _count: { _all: true },
+    }),
+  );
+  const byList = new Map<string, number>();
+  for (const row of rows) byList.set(row.priceListGid, (byList.get(row.priceListGid) ?? 0) + row._count._all);
+  return byList;
 }
 
 /**
