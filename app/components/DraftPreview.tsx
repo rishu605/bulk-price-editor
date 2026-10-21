@@ -63,19 +63,33 @@ export function previewAnnouncement(preview: Preview | null, pending: boolean): 
   if (preview.matched === 0 && preview.leftOutByStatus > 0) return "Only draft or archived products match.";
   if (preview.matched === 0) return "Nothing matches this scope.";
 
-  const sentences = [
-    `${formatCount(preview.changing)} of ${countOf(preview.matched, "variant")} would change price.`,
-  ];
+  const changing = changingLine(preview);
+  const sentences = [`${changing.figure}${changing.rest}`];
   const example = exampleRowFrom(preview.rows);
   if (example?.before && example.after) {
     sentences.push(`${example.title} would go from ${example.before} to ${example.after}.`);
   }
   if (preview.skipped > 0) sentences.push(`${formatCount(preview.skipped)} would be left alone.`);
-  if (preview.withoutBaseline === 1) sentences.push("1 has no baseline yet, so it cannot be priced.");
-  if (preview.withoutBaseline > 1) {
-    sentences.push(`${formatCount(preview.withoutBaseline)} have no baseline yet, so they cannot be priced.`);
-  }
+  if (preview.withoutBaseline > 0) sentences.push(withoutBaselineLine(preview.withoutBaseline));
   return sentences.join(" ");
+}
+
+/**
+ * The count lines, worded once for the panel that shows them and the region that says them
+ * (#1097), each agreeing with its own number. The panel wrote "1 of 1 variants" and "1 have no
+ * baseline yet" while the region said them in the singular: two wordings of one answer, and
+ * only the spoken one had been brought into line with #759.
+ *
+ * The figure apart from the rest, because the panel sets it in bold.
+ */
+function changingLine(preview: Pick<Preview, "changing" | "matched">): { figure: string; rest: string } {
+  return { figure: formatCount(preview.changing), rest: ` of ${countOf(preview.matched, "variant")} would change price.` };
+}
+
+function withoutBaselineLine(count: number): string {
+  return count === 1
+    ? "1 has no baseline yet, so it cannot be priced at all."
+    : `${formatCount(count)} have no baseline yet, so they cannot be priced at all.`;
 }
 
 interface DraftPreviewProps {
@@ -165,6 +179,7 @@ function PreviewBody({ preview, pending = false, surface, fullPreviewHref }: Dra
   }
 
   const example = exampleRowFrom(preview.rows);
+  const changing = changingLine(preview);
 
   return (
     <s-stack gap={SPACE.section}>
@@ -180,8 +195,8 @@ function PreviewBody({ preview, pending = false, surface, fullPreviewHref }: Dra
 
       <s-paragraph>
         <s-text>
-          <strong>{formatCount(preview.changing)}</strong> of {formatCount(preview.matched)}{" "}
-          variants would change price.
+          <strong>{changing.figure}</strong>
+          {changing.rest}
         </s-text>
         {/* The previous answer stays while a new one is computed, marked as stale rather
             than replaced by a placeholder. Blanking the panel on every keystroke would
@@ -208,8 +223,8 @@ function PreviewBody({ preview, pending = false, surface, fullPreviewHref }: Dra
       {preview.withoutBaseline > 0 ? (
         <s-paragraph>
           <s-text tone="caution">
-            {formatCount(preview.withoutBaseline)} have no baseline yet, so they cannot be
-            priced at all. Sync your catalogue to capture them.
+            {withoutBaselineLine(preview.withoutBaseline)} Sync your catalogue to capture{" "}
+            {preview.withoutBaseline === 1 ? "it" : "them"}.
           </s-text>
         </s-paragraph>
       ) : null}

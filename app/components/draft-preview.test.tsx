@@ -16,7 +16,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { DraftPreview } from "./DraftPreview";
+import { DraftPreview, previewAnnouncement } from "./DraftPreview";
 import type { DraftPreview as Preview, DraftPreviewRow } from "../services/campaigns/draft-preview.server";
 
 const row = (over: Partial<DraftPreviewRow> = {}): DraftPreviewRow => ({
@@ -232,5 +232,49 @@ describe("draft and archived products left out (#751)", () => {
   it("says nothing when none are", () => {
     const html = render(preview());
     expect(html).not.toContain("left out");
+  });
+});
+
+/**
+ * The words on the panel, as a sighted merchant reads them: the markup without its tags, and
+ * without the live region, which is said rather than shown -- so a sentence found here was
+ * drawn by the panel itself, not only spoken.
+ */
+const shown = (value: Preview) =>
+  render(value)
+    .replace(/<div[^>]*\brole="status"[^>]*>[\s\S]*?<\/div>/, "")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&#x27;|&#39;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ");
+
+describe("counts agree with one, shown and said (#1097)", () => {
+  const one = preview({ matched: 1, changing: 1, withoutBaseline: 1 });
+  const many = preview({ matched: 3, changing: 2, withoutBaseline: 2 });
+
+  it("says one variant would change price, not one variants", () => {
+    expect(shown(preview({ matched: 1, changing: 1 }))).toContain("1 of 1 variant would change price.");
+    expect(shown(preview({ matched: 1, changing: 0 }))).toContain("0 of 1 variant would change price.");
+  });
+
+  it("says the one with no baseline has none, and cannot be priced", () => {
+    expect(shown(one)).toContain("1 has no baseline yet, so it cannot be priced at all. Sync your catalogue to capture it.");
+  });
+
+  it("keeps the plural for many", () => {
+    expect(shown(many)).toContain("2 of 3 variants would change price.");
+    expect(shown(many)).toContain("2 have no baseline yet, so they cannot be priced at all. Sync your catalogue to capture them.");
+  });
+
+  it("says aloud the sentences it shows, for one and for many", () => {
+    for (const [value, sentences] of [
+      [one, ["1 of 1 variant would change price.", "1 has no baseline yet, so it cannot be priced at all."]],
+      [many, ["2 of 3 variants would change price.", "2 have no baseline yet, so they cannot be priced at all."]],
+    ] as const) {
+      for (const sentence of sentences) {
+        expect(shown(value), "shown").toContain(sentence);
+        expect(previewAnnouncement(value, false), "said").toContain(sentence);
+      }
+    }
   });
 });
