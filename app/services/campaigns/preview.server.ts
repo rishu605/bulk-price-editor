@@ -384,7 +384,9 @@ async function marketPathPreview(
     try {
       plan = await planMarket(shopId, list, variantGids, resolvable, options.client);
       if (!plan) continue;
-      decision = await decideMarketPath(plan, options.client);
+      // The campaign's surfaces, as the run hands them over: a campaign that also moves the
+      // base price is never offered the market-wide change, here or there (#1109).
+      decision = await decideMarketPath(plan, options.client, surfaces);
     } catch (error) {
       if (!(error instanceof UnconvertedMarketError)) throw error;
 

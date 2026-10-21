@@ -370,6 +370,11 @@ export async function applyMarketSurfaces(
       continue;
     }
 
+    // The decision the review step showed the merchant, taken by the same function with the
+    // same inputs, so the run cannot quietly do something else (#1109). First, so the path
+    // this market is reported under is that one whether or not anything is left to write.
+    const decision = await decideMarketPath(plan, client, surfaces, { perProductOnly: options.perProductOnly });
+
     // What this market already shows, before deciding to write anything.
     //
     // A relative price list tracks the base price, and the base surface was written
@@ -423,41 +428,21 @@ export async function applyMarketSurfaces(
             `the base price. ${settled.size} verified, nothing written.`,
           ...skipNotes,
         ],
-        path: "market-wide",
-        pathReason: "this market follows the base price and was already correct",
+        // Per product when the base price carried the campaign here (#1109), as the card
+        // said: no percentage was set, and the revert's sweep settles these rows.
+        path: decision.path,
+        pathReason: decision.path === "per-product" ? decision.reason : undefined,
       });
       continue;
     }
 
-    // The same decision the review step showed the merchant, taken by the same
-    // function, so the run cannot quietly do something else.
-    const decision = await decideMarketPath(plan, client);
-
-    // A parent adjustment cannot express these prices once the base surface has moved.
-    //
-    // The shortcut works by setting one percentage and letting Shopify derive every
-    // price. But Shopify derives from the *current* base price, which this campaign has
-    // already changed by its own percentage — so the only parent adjustment that
-    // reproduces the intended prices is the list's existing one, unchanged. Writing
-    // anything else applies the campaign twice, which is what put a European shopper on a
-    // 36% discount off a 20% sale (#260).
-    //
-    // And leaving it unchanged is what `alreadyCorrect` above has just tested against.
-    // Whatever it did not settle differs by rounding — our intended price comes from a
-    // baseline that was rounded once already, Shopify's comes from rounding the whole
-    // conversion at the end — and a percentage cannot close a one-minor-unit gap. Those
-    // rows need explicit prices, and a parent write before them is a wrong price briefly
+    // The base price moved this list already (`decideMarketPath`), and what `alreadyCorrect`
+    // did not settle differs by rounding or by the currency it was read in -- our intended
+    // price comes from a baseline rounded once already, Shopify's from rounding the whole
+    // conversion at the end, and a percentage cannot close a one-minor-unit gap. Those rows
+    // need explicit prices, and a parent write before them would be a wrong price briefly
     // live for no benefit.
-    //
-    // The shortcut keeps its whole value for a markets-only campaign, which is the case
-    // it was designed for and the case where the base price has not moved underneath it.
-    // That holds because the planner plans no base price for one (#1094). It used to plan,
-    // write and revert the base price like any campaign's, so this composed the campaign's
-    // percentage onto a base price it had already moved: #260's double discount, which the
-    // read-back then put right one exact price at a time.
-    const baseAlreadyMoved = surfaces.base;
-
-    if (decision.path === "market-wide" && baseAlreadyMoved) {
+    if (decision.path === "per-product" && decision.followsBase) {
       logger.info("market-wide skipped: base surface moved this list already", {
         runId,
         priceListGid: list.priceListGid,
@@ -466,7 +451,7 @@ export async function applyMarketSurfaces(
       });
     }
 
-    if (decision.path === "market-wide" && !baseAlreadyMoved && !options.perProductOnly) {
+    if (decision.path === "market-wide") {
       // Write-ahead for every row first, exactly as the chunked path does. The
       // shortcut is in the number of requests, not in the ledger.
       await ledgerChunk(runId, shopId, list, rows, 0);
@@ -522,12 +507,7 @@ export async function applyMarketSurfaces(
       // and matched, which is the same evidence a written row needs.
       verified: summary.verified + settled.size,
       path: "per-product",
-      pathReason:
-        decision.path === "market-wide" && options.perProductOnly
-          ? "only some variants are being priced, and a percentage would move the whole market"
-          : decision.path === "market-wide"
-            ? "this market already follows the base price, so a percentage would apply the campaign twice"
-            : decision.reason,
+      pathReason: decision.reason,
     });
   }
 
