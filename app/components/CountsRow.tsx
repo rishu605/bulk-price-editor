@@ -145,10 +145,15 @@ function Tile({ item }: { item: CountItem }) {
   // lines that happen to be near each other. It is the only spacing this needs: the
   // grid's gap separates one figure from the next, and the column edges are what say
   // where a pair begins.
+  //
+  // The figure is drawn by `s-heading` for its size and weight, and nothing else: with its
+  // role left as a heading, every tile put a bare number in the page's outline, so heading
+  // navigation on Home read "3,669", "0", "12" as the page's sections (#798). `none` keeps
+  // the type and drops the role; the label above it already says what the number is.
   return (
     <s-stack gap={SPACE.tight}>
       <s-text color="subdued">{item.label}</s-text>
-      <s-heading>{display(item.value)}</s-heading>
+      <s-heading accessibilityRole="none">{display(item.value)}</s-heading>
     </s-stack>
   );
 }

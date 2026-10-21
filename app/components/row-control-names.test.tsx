@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 
 import { sourceOf } from "../lib/testing/source";
 import { choiceName } from "../lib/drift/choice-name";
+import { newTabName } from "../lib/ui/new-tab";
 import { BaselineTable } from "./BaselineTable";
 import { RollbackReportTable } from "./RollbackReportTable";
 import { runLedgerName } from "./RunHistoryTable";
@@ -62,7 +63,10 @@ describe("per-row controls name their row", () => {
       adminUrl: "https://example.invalid",
     });
     const names = controlNames(renderToStaticMarkup(<BaselineTable rows={[row(1), row(2)]} onShowHistory={() => {}} />));
-    expect(names).toEqual(expect.arrayContaining(["Baseline history of Boots 1", "Open Boots 2 in Shopify"]));
+    // The Shopify link opens a new tab, and its name says so (#798).
+    expect(names).toEqual(
+      expect.arrayContaining(["Baseline history of Boots 1", newTabName("Open Boots 2 in Shopify")]),
+    );
     unique(names);
   });
 

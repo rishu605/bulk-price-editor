@@ -71,9 +71,34 @@ import { PAD, SPACE } from "../lib/ui/spacing";
  * `control-vocabulary.test.ts` exempts exactly that: a bare `{identifier}` inside an
  * `s-button` is a domain value reaching the screen unless its name says a caller wrote the
  * words. Calling this what it is keeps that exemption a distinction rather than a hole.
+ *
+ * ## `name`, for a label that repeats
+ *
+ * The onboarding checklist has a "Why?" on every step, and three buttons called "Why?"
+ * are three identical entries in a screen reader's list of controls (#798). `name` is the
+ * button's accessible name when the label alone does not say which note it opens — "Why
+ * capture your baselines?" — and it keys the id, so three notes on one page are three
+ * popovers rather than one id claimed three times. It should start with the label, so a
+ * merchant who says "click Why" to voice control is still understood.
+ *
+ * That checklist is also why it became a note at all. Its "Why?" was a React-state toggle
+ * that inserted the text under the row, and nothing told a screen reader the text had
+ * appeared or that the button was now "expanded": `s-button` has no attribute for it, and
+ * the element that takes focus is inside its shadow root, out of reach of one. With
+ * `commandFor` naming a popover, Polaris sets `aria-expanded` on that inner button from
+ * the popover's open state itself.
  */
-export function HelpNote({ label, children }: { label: string; children: ReactNode }) {
-  const id = idFor(label);
+export function HelpNote({
+  label,
+  name,
+  children,
+}: {
+  label: string;
+  /** The button's accessible name, when `label` alone repeats on the page. */
+  name?: string;
+  children: ReactNode;
+}) {
+  const id = idFor(name ?? label);
 
   return (
     <ActionRow>
@@ -82,7 +107,13 @@ export function HelpNote({ label, children }: { label: string; children: ReactNo
           definition is not one of them — but the icon still has to say at a glance that
           the line is help, because a merchant who does not know what "baseline" means is
           not scanning the page for the word "what". */}
-      <s-button variant="tertiary" icon="question-circle" commandFor={id} command="--toggle">
+      <s-button
+        variant="tertiary"
+        icon="question-circle"
+        commandFor={id}
+        command="--toggle"
+        accessibilityLabel={name}
+      >
         {label}
       </s-button>
 

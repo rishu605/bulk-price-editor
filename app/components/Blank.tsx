@@ -15,7 +15,21 @@
  * An em dash and not "None" or an empty cell. Empty reads as a rendering failure — the
  * merchant cannot tell a missing value from a broken page — and a word in every gap is
  * more noise than the dash it replaces.
+ *
+ * ## What it says aloud
+ *
+ * To the eye, that is. A screen reader read the dash as "em dash", or skipped it — and in
+ * the plan table's Markets and Wholesale columns, where "—" stands for *No*, skipping it
+ * left a listener with "Free" and then the next plan's name (#798). So the dash is hidden
+ * from screen readers and a visually hidden word stands in for it: "None" by default,
+ * which is what an empty cell means, and whatever `means` says where the column is a
+ * question with a different answer.
  */
-export function Blank() {
-  return <s-text color="subdued">—</s-text>;
+export function Blank({ means = "None" }: { means?: string }) {
+  return (
+    <s-text color="subdued">
+      <s-text accessibilityVisibility="hidden">—</s-text>
+      <s-text accessibilityVisibility="exclusive">{means}</s-text>
+    </s-text>
+  );
 }

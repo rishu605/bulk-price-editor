@@ -15,6 +15,7 @@ import { ActionRow } from "./ActionRow";
 import { PageShell } from "./PageShell";
 import type { ReferenceState } from "../lib/errors/browser-report";
 import { helpLabelFor, helpPathFor } from "../lib/errors/help-links";
+import { newTabName } from "../lib/ui/new-tab";
 import { SPACE } from "../lib/ui/spacing";
 
 export interface ErrorScreenProps {
@@ -70,7 +71,13 @@ export function ErrorScreen({
               Try again
             </s-button>
             <s-button href="/app">Back to dashboard</s-button>
-            <s-button variant="secondary" href={helpPathFor(code)} target="_blank">
+            {/* A new tab, which nothing on the button showed (#798): the name says so. */}
+            <s-button
+              variant="secondary"
+              href={helpPathFor(code)}
+              target="_blank"
+              accessibilityLabel={newTabName(helpLabelFor(code))}
+            >
               {helpLabelFor(code)}
             </s-button>
           </ActionRow>

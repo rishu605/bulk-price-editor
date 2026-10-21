@@ -1,10 +1,10 @@
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 
 import { QueryContainer } from "./QueryContainer";
 import type { OnboardingState, OnboardingStep, StepId } from "../lib/onboarding/steps";
 import { SPACE } from "../lib/ui/spacing";
 import { ActionRow } from "./ActionRow";
-import { Secondary } from "./Type";
+import { HelpNote } from "./HelpNote";
 import { Card } from "./Card";
 
 /**
@@ -99,8 +99,9 @@ export function OnboardingCard({
             a column.
 
             Four columns: the status glyph, the title, the disclosure, the action. Each
-            step contributes exactly four cells, and the two things that span the row —
-            the rule between steps and the opened explanation — say so.
+            step contributes exactly four cells, and the one thing that spans the row —
+            the rule between steps — says so. (The opened explanation used to span it too;
+            it is an overlay now, in no row at all. See the disclosure below.)
 
             Four at every width (#725). There was a two-column branch below 500px, and it
             never took effect: the `span 4` rows created the two missing tracks, so the
@@ -153,6 +154,15 @@ function StatusIcon({ done, isNext }: { done: boolean; isNext: boolean }) {
   return <s-icon type="circle-dashed" color="subdued" />;
 }
 
+/**
+ * The "Why?" button's name: the question it answers, so three of them are not three
+ * identical "Why?"s in a screen reader's list of controls (#798). It starts with the
+ * label, so a merchant who says "click Why" to voice control is still understood.
+ */
+export function whyName(title: string): string {
+  return `Why ${title.charAt(0).toLowerCase()}${title.slice(1)}?`;
+}
+
 function Step({
   step,
   isNext,
@@ -165,8 +175,6 @@ function Step({
   /** A rule above this step, for every row but the first. */
   divided: boolean;
 }) {
-  const [why, setWhy] = useState(false);
-
   return (
     <>
       {/* A rule between steps rather than a border around each. The separator is the same
@@ -197,6 +205,12 @@ function Step({
             evidence the checklist is being honest — without competing with the step the
             merchant is actually being asked to do. */}
         <s-text type={step.done ? undefined : "strong"} color={step.done ? "subdued" : undefined}>
+          {/* The glyph's meaning, in words (#798). `s-icon` takes no label, so the checked
+              circle and the dashed one said nothing to a screen reader, and the greying
+              that marks a finished step is colour alone. Inside the title rather than in
+              the glyph's cell, so it is read with the step it describes. "Next" needs no
+              hidden twin: its badge is text already. */}
+          <s-text accessibilityVisibility="exclusive">{step.done ? "Done: " : "To do: "}</s-text>
           {step.title}
         </s-text>
         {isNext ? <s-badge tone="info">Next</s-badge> : <s-box />}
@@ -209,19 +223,21 @@ function Step({
           Not on a finished step: the reasoning for work already done is the one thing on
           this card nobody needs.
 
-          An icon on the toggle, because a tertiary control is text with no border and
-          "Why?" beside a real button read as a caption for it. The same question mark
-          `HelpNote` uses, so the two say "this is help" the same way. */}
+          It *is* a `HelpNote` now (#798), and so says "this is help" the same way. It was a
+          React-state toggle that inserted the explanation under the row, and nothing told
+          a screen reader either that the text had appeared or that the button had opened
+          it: `s-button` takes no expanded state, and the element that takes focus is in
+          its shadow root, out of reach of an attribute. A popover opened by `commandFor`
+          is the one disclosure Polaris reports itself — it sets `aria-expanded` on that
+          button from the popover's open state — and, an overlay, it opens without
+          pushing the rows below it down the card. Each is named for its step, so three
+          "Why?"s are three different questions. */}
       {step.done ? (
         <s-box />
       ) : (
-        <s-button
-          variant="tertiary"
-          icon="question-circle"
-          onClick={() => setWhy((open) => !open)}
-        >
-          {why ? "Hide why" : "Why?"}
-        </s-button>
+        <HelpNote label="Why?" name={whyName(step.title)}>
+          <s-paragraph>{step.detail}</s-paragraph>
+        </HelpNote>
       )}
 
       <ActionRow>
@@ -240,17 +256,6 @@ function Step({
           </s-button>
         ) : null}
       </ActionRow>
-
-      {/* Progressive disclosure, not a link away. The reasoning belongs next to the step
-          it explains — sending a merchant to a docs page to find out why they are being
-          asked to sync is how they end up not syncing.
-
-          Spanning the row: it explains the whole step, not the column it opened from. */}
-      {why ? (
-        <s-grid-item gridColumn="span 4">
-          <Secondary>{step.detail}</Secondary>
-        </s-grid-item>
-      ) : null}
     </>
   );
 }

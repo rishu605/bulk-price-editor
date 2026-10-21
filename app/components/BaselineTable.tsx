@@ -1,4 +1,5 @@
 import { humanise } from "../lib/format/label";
+import { newTabName } from "../lib/ui/new-tab";
 import { Blank } from "./Blank";
 import { ActionRow } from "./ActionRow";
 import type { BaselineRow } from "../services/baseline-browser.server";
@@ -64,13 +65,14 @@ export function BaselineTable({
                 </s-button>
                 {/* The same treatment as History beside it, which it was not: one cell
                     held a tertiary button and a blue link doing the same kind of job.
-                    The icon is what says this one leaves the app. */}
+                    The icon is what says this one leaves the app, to the eye; the name
+                    says it to a screen reader, which is told nothing by an icon (#798). */}
                 <s-button
                   variant="tertiary"
                   icon="external"
                   href={row.adminUrl}
                   target="_blank"
-                  accessibilityLabel={`Open ${row.title} in Shopify`}
+                  accessibilityLabel={newTabName(`Open ${row.title} in Shopify`)}
                 >
                   Shopify
                 </s-button>
