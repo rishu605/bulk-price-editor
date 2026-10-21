@@ -112,14 +112,18 @@ export type AnchorQuantityPricingUpdateMutation = { quantityPricingByVariantUpda
 
 export type AnchorPriceListQuantityBreaksQueryVariables = AdminTypes.Exact<{
   id: AdminTypes.Scalars['ID']['input'];
+  query: AdminTypes.Scalars['String']['input'];
+  first: AdminTypes.Scalars['Int']['input'];
   after?: AdminTypes.InputMaybe<AdminTypes.Scalars['String']['input']>;
+  rungs: AdminTypes.Scalars['Int']['input'];
+  rungsAfter?: AdminTypes.InputMaybe<AdminTypes.Scalars['String']['input']>;
 }>;
 
 
 export type AnchorPriceListQuantityBreaksQuery = { priceList?: AdminTypes.Maybe<{ prices: { nodes: Array<{ variant: Pick<AdminTypes.ProductVariant, 'id'>, quantityPriceBreaks: { nodes: Array<(
             Pick<AdminTypes.QuantityPriceBreak, 'minimumQuantity'>
             & { price: Pick<AdminTypes.MoneyV2, 'amount' | 'currencyCode'> }
-          )> } }>, pageInfo: Pick<AdminTypes.PageInfo, 'hasNextPage' | 'endCursor'> } }> };
+          )>, pageInfo: Pick<AdminTypes.PageInfo, 'hasNextPage' | 'endCursor'> } }>, pageInfo: Pick<AdminTypes.PageInfo, 'hasNextPage' | 'endCursor'> } }> };
 
 export type AnchorProductVariantsBulkUpdateMutationVariables = AdminTypes.Exact<{
   productId: AdminTypes.Scalars['ID']['input'];
@@ -459,7 +463,7 @@ interface GeneratedQueryTypes {
   "#graphql\n  query AnchorFixedPriceVariants($priceListId: ID!, $query: String!, $first: Int!, $after: String) {\n    priceList(id: $priceListId) {\n      prices(originType: FIXED, query: $query, first: $first, after: $after) {\n        nodes { variant { id } }\n        pageInfo { hasNextPage endCursor }\n      }\n    }\n  }\n": {return: AnchorFixedPriceVariantsQuery, variables: AnchorFixedPriceVariantsQueryVariables},
   "#graphql\n  query AnchorContextualPrices($ids: [ID!]!, $context: ContextualPricingContext!) {\n    nodes(ids: $ids) {\n      ... on ProductVariant {\n        id\n        contextualPricing(context: $context) {\n          price { amount currencyCode }\n          compareAtPrice { amount currencyCode }\n        }\n      }\n    }\n  }\n": {return: AnchorContextualPricesQuery, variables: AnchorContextualPricesQueryVariables},
   "#graphql\n  query AnchorPriceListParent($id: ID!) {\n    priceList(id: $id) {\n      id\n      currency\n      parent {\n        adjustment { type value }\n        settings { compareAtMode }\n      }\n      fixed: prices(originType: FIXED, first: 1) {\n        nodes { variant { id } }\n      }\n    }\n  }\n": {return: AnchorPriceListParentQuery, variables: AnchorPriceListParentQueryVariables},
-  "#graphql\n  query AnchorPriceListQuantityBreaks($id: ID!, $after: String) {\n    priceList(id: $id) {\n      prices(first: 100, after: $after) {\n        nodes {\n          variant { id }\n          quantityPriceBreaks(first: 20) {\n            nodes { minimumQuantity price { amount currencyCode } }\n          }\n        }\n        pageInfo { hasNextPage endCursor }\n      }\n    }\n  }\n": {return: AnchorPriceListQuantityBreaksQuery, variables: AnchorPriceListQuantityBreaksQueryVariables},
+  "#graphql\n  query AnchorPriceListQuantityBreaks(\n    $id: ID!\n    $query: String!\n    $first: Int!\n    $after: String\n    $rungs: Int!\n    $rungsAfter: String\n  ) {\n    priceList(id: $id) {\n      prices(query: $query, first: $first, after: $after) {\n        nodes {\n          variant { id }\n          quantityPriceBreaks(first: $rungs, after: $rungsAfter) {\n            nodes { minimumQuantity price { amount currencyCode } }\n            pageInfo { hasNextPage endCursor }\n          }\n        }\n        pageInfo { hasNextPage endCursor }\n      }\n    }\n  }\n": {return: AnchorPriceListQuantityBreaksQuery, variables: AnchorPriceListQuantityBreaksQueryVariables},
   "#graphql\n  query AnchorVariantPrices($ids: [ID!]!) {\n    nodes(ids: $ids) {\n      ... on ProductVariant { id price compareAtPrice }\n    }\n  }\n": {return: AnchorVariantPricesQuery, variables: AnchorVariantPricesQueryVariables},
   "#graphql\n      query AnchorProbeMarkets {\n        markets(first: 1) { nodes { id } }\n      }\n    ": {return: AnchorProbeMarketsQuery, variables: AnchorProbeMarketsQueryVariables},
   "#graphql\n      query AnchorProbeCompanies {\n        companies(first: 1) { nodes { id } }\n      }\n    ": {return: AnchorProbeCompaniesQuery, variables: AnchorProbeCompaniesQueryVariables},

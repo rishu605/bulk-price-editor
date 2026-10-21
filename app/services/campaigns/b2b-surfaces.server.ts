@@ -17,13 +17,25 @@ import { Prisma } from "@prisma/client";
 import prisma from "../../db.server";
 import { writeQuantityBreaks, type QuantityRow } from "../../lib/execution/quantity-executor";
 import type { AdminClient } from "../../lib/execution/sync-executor";
+import { countOf } from "../../lib/format/display";
+import { money } from "../../lib/money/money";
 import { parseLadder, serialiseLadder } from "../../lib/pricing/ladder-baseline";
 import type { WholesaleGuardrail } from "../../lib/pricing/quantity-breaks";
 import type { QuantityTier } from "../../lib/pricing/quantity-breaks";
 import { logger } from "../../lib/logging/logger";
 import { metric } from "../../lib/telemetry/metrics";
-import { planQuantityBreaks, type B2BVariantInput } from "./b2b-plan.server";
+import {
+  planLadderRevert,
+  planQuantityBreaks,
+  type B2BVariantInput,
+  type LadderBaselineInput,
+  type TieredCampaign,
+} from "./b2b-plan.server";
 import { inChunks } from "../../lib/db/chunk";
+import { laddersHandedTo } from "./handover.server";
+import { recordedCosts } from "./market-plan.server";
+import { parseSurfaces } from "./market-surfaces.server";
+import { competingCampaigns, withScopes } from "./model.server";
 
 export interface B2BSurfaceOutcome {
   priceListGid: string;
@@ -185,11 +197,16 @@ async function recordLadderResults(
 /**
  * Takes a campaign's ladders back off a catalogue.
  *
- * Rule 6: revert recomputes rather than restores. For a ladder that means writing the one
- * the baseline holds — the merchant's own, captured before any campaign touched it — and
- * for a variant whose baseline holds none, it means clearing the ladder entirely. Both
- * are the same operation: write what `resolve(without C)` says, which here is simply the
- * baseline, because no other campaign writes ladders yet.
+ * Rule 6: revert recomputes rather than restores (#704). Each ladder this campaign holds is
+ * written as `resolve(without C)` has it: the ladder of the next tiered campaign that prices
+ * the variant on this catalogue, from the variant's own baseline price; or, where none does,
+ * the merchant's own from the baseline, or none at all. It used to write the baseline back
+ * whatever else was running, so ending one of two tiered sales wiped the other's ladder
+ * rather than handing the variants to it.
+ *
+ * And only the ladders this campaign holds: those its runs wrote, and those another
+ * campaign's revert handed it. It used to take every ladder any campaign had written on the
+ * catalogue, so ending one sale cleared another's.
  *
  * Clearing is a real instruction, not a no-op. The campaign's ladder is live on the
  * catalogue and a buyer is being quoted from it, so "there is nothing to write" would
@@ -197,17 +214,21 @@ async function recordLadderResults(
  */
 export async function revertQuantityBreaks(
   shopId: string,
+  /** The revert run, which holds the claim and ledgers every write (rules 2 and 3). */
   runId: string,
   list: { priceListGid: string; name: string; currency: string },
   variantGids: readonly string[],
+  /** The wholesale floor the next campaign's ladder is held to, as its apply holds it. */
+  guardrail: WholesaleGuardrail,
   client: AdminClient,
 ): Promise<B2BSurfaceOutcome | null> {
   if (variantGids.length === 0) return null;
+  const run = await prisma.campaignRun.findFirst({ where: { id: runId, shopId }, select: { campaignId: true } });
+  if (!run) return null;
+  const { campaignId } = run;
 
-  // Only variants this campaign actually gave a ladder to. Clearing one it never touched
-  // would take away a ladder somebody else set.
-  // Chunked: `quantityBreaks: { not: … }` is a negation, and Prisma will not split a
-  // query that has one -- it fails outright rather than degrading (#346).
+  // The ladders this campaign's runs gave. Chunked: `quantityBreaks: { not: … }` is a
+  // negation, and Prisma will not split a query that has one -- it fails outright (#346).
   const written = await inChunks([...variantGids], (batch) =>
     prisma.variantChange.findMany({
       where: {
@@ -216,6 +237,9 @@ export async function revertQuantityBreaks(
         surfaceKind: "B2B",
         variantGid: { in: batch },
         status: { in: ["VERIFIED", "CLAMPED"] },
+        // This campaign's, not any campaign's: clearing a ladder it never wrote would take
+        // away one another campaign, or the merchant, set.
+        run: { campaignId },
         // Rows that *gave* a ladder. A clearing row from an earlier revert carries none,
         // and re-clearing would be a harmless no-op — this narrows the write rather than
         // guarding correctness, which is why removing it fails no test.
@@ -225,39 +249,30 @@ export async function revertQuantityBreaks(
       distinct: ["variantGid"],
     }),
   );
+  const own = new Set(written.map((row) => row.variantGid));
 
-  const ours = [...new Set(written.map((row) => row.variantGid))];
+  // And the ladders another campaign's revert handed this one, which no run of its wrote.
+  const handed = await laddersHandedTo(shopId, campaignId, list.priceListGid, variantGids.filter((gid) => !own.has(gid)), runId);
+
+  const ours = [...own, ...handed];
   if (ours.length === 0) return null;
 
-  const baselines = await prisma.baseline.findMany({
-    where: {
-      shopId,
-      priceListGid: list.priceListGid,
-      variantGid: { in: ours },
-      supersededAt: null,
-    },
-    select: { variantGid: true, currency: true, quantityBreaks: true },
-  });
+  const others = await tieredCampaignsOn(shopId, list.priceListGid, ours, campaignId);
 
-  const byVariant = new Map(baselines.map((row) => [row.variantGid, row]));
+  const { variants, unanchored } = await ladderBaselines(shopId, list, ours);
+  const plan = planLadderRevert(variants, others, guardrail);
 
-  const rows: QuantityRow[] = ours.map((variantGid) => {
-    const baseline = byVariant.get(variantGid);
-    const ladder = baseline
-      ? parseLadder(baseline.quantityBreaks, baseline.currency || list.currency)
-      : null;
-
-    // No baseline ladder means the merchant had none, so the correct end state is none.
-    return { variantGid, breaks: ladder ?? [] };
-  });
-
-  const result = await writeQuantityBreaks(client, list.priceListGid, rows, async (chunk, index) => {
-    await ledgerLadderChunk(runId, shopId, list, chunk, index);
-  });
+  const result = plan.rows.length > 0
+    ? await writeQuantityBreaks(client, list.priceListGid, plan.rows, async (chunk, index) => {
+        await ledgerLadderChunk(runId, shopId, list, chunk, index);
+      })
+    : { rows: [], verified: 0, failed: 0, chunks: 0, clean: true };
 
   await recordLadderResults(runId, shopId, list.priceListGid, result.rows);
 
-  const cleared = rows.filter((row) => row.breaks.length === 0).length;
+  const verified = new Set(result.rows.filter((row) => row.status === "verified").map((row) => row.variantGid));
+  const cleared = plan.rows.filter((row) => row.breaks.length === 0 && verified.has(row.variantGid)).length;
+  const handedOn = [...plan.handedTo.keys()].filter((gid) => verified.has(gid)).length;
   const messages: string[] = [];
 
   if (result.failed > 0) {
@@ -265,11 +280,23 @@ export async function revertQuantityBreaks(
       `${list.name}: ${result.failed} product${result.failed === 1 ? "" : "s"} still have this campaign's quantity breaks. Each batch is all-or-nothing, so nothing in a failed batch changed.`,
     );
   }
-  if (cleared > 0 && result.clean) {
+  // Rule 5: a ladder with nothing to go back to stays, and says so rather than going quiet.
+  if (unanchored.length > 0) {
+    messages.push(
+      `${list.name}: ${countOf(unanchored.length, "product")} still ${unanchored.length === 1 ? "has" : "have"} this campaign's quantity breaks, because no baseline records the price there before it. Capture baselines on Prices → Baselines, then resume to finish the revert.`,
+    );
+  }
+  if (handedOn > 0) {
+    messages.push(
+      `${list.name}: ${countOf(handedOn, "product")} now ${handedOn === 1 ? "has" : "have"} the quantity breaks of the next campaign that prices ${handedOn === 1 ? "it" : "them"} there.`,
+    );
+  }
+  if (cleared > 0) {
     messages.push(
       `${list.name}: ${cleared} product${cleared === 1 ? "" : "s"} had no quantity breaks before this campaign, so they have none now.`,
     );
   }
+  messages.push(...plan.messages.map((message) => `${list.name}: ${message}`));
 
   metric("run.rows", result.verified, { runId, surface: "b2b", outcome: "reverted" });
 
@@ -277,10 +304,81 @@ export async function revertQuantityBreaks(
     priceListGid: list.priceListGid,
     name: list.name,
     verified: result.verified,
-    failed: result.failed,
+    failed: result.failed + unanchored.length,
     refused: 0,
     chunks: result.chunks,
     messages,
-    clean: result.clean,
+    clean: result.clean && unanchored.length === 0,
   };
+}
+
+/**
+ * The campaigns still pricing ladders on this catalogue: running, not being ended (#805),
+ * with quantity tiers and this price list among their surfaces, each scoped over these
+ * variants as the resolver scopes it (#752). Every one but `besides`, the one ending.
+ */
+async function tieredCampaignsOn(
+  shopId: string,
+  priceListGid: string,
+  variantGids: readonly string[],
+  besides: string,
+): Promise<TieredCampaign[]> {
+  const pricing = await competingCampaigns(shopId, besides);
+  const tiered = pricing.flatMap((campaign) => {
+    const surfaces = parseSurfaces(campaign.surfaces);
+    return surfaces.quantityTiers !== undefined && surfaces.priceLists.includes(priceListGid)
+      ? [{ campaign, tiers: surfaces.quantityTiers }]
+      : [];
+  });
+  if (tiered.length === 0) return [];
+
+  const scoped = await withScopes(shopId, tiered.map((entry) => entry.campaign), variantGids);
+  return scoped.map((resolvable, index) => ({ ...resolvable, name: tiered[index]!.campaign.name, tiers: tiered[index]!.tiers }));
+}
+
+/**
+ * Each variant's reference on the catalogue -- its baseline price and the ladder the
+ * merchant had -- with its recorded cost, for the floor. The baseline is the one every
+ * campaign reads, filed as MARKET (#1071). A variant with none has nothing to recompute
+ * from, and is returned apart rather than given an empty ladder: "no baseline" is not "no
+ * ladder", and clearing on it would delete the merchant's own.
+ */
+async function ladderBaselines(
+  shopId: string,
+  list: { priceListGid: string; currency: string },
+  variantGids: readonly string[],
+): Promise<{ variants: LadderBaselineInput[]; unanchored: string[] }> {
+  const [baselines, titles] = await Promise.all([
+    inChunks([...variantGids], (batch) =>
+      prisma.baseline.findMany({
+        where: { shopId, surfaceKind: "MARKET", priceListGid: list.priceListGid, variantGid: { in: batch }, supersededAt: null },
+        select: { variantGid: true, currency: true, basePrice: true, quantityBreaks: true },
+      }),
+    ),
+    inChunks([...variantGids], (batch) =>
+      prisma.variantIndex.findMany({ where: { shopId, variantGid: { in: batch } }, select: { variantGid: true, title: true } }),
+    ),
+  ]);
+  const byVariant = new Map(baselines.map((row) => [row.variantGid, row]));
+  const titleOf = new Map(titles.map((row) => [row.variantGid, row.title]));
+  const costs = await recordedCosts(shopId, list.currency, [...byVariant.keys()]);
+
+  const variants: LadderBaselineInput[] = [];
+  const unanchored: string[] = [];
+  for (const variantGid of variantGids) {
+    const baseline = byVariant.get(variantGid);
+    if (!baseline) {
+      unanchored.push(variantGid);
+      continue;
+    }
+    const currency = baseline.currency || list.currency;
+    variants.push({
+      variantGid,
+      title: titleOf.get(variantGid) ?? variantGid,
+      baseline: money(Number(baseline.basePrice), currency),
+      cost: costs.get(variantGid),
+      ladder: parseLadder(baseline.quantityBreaks, currency),
+    });
+  }
+  return { variants, unanchored };
 }

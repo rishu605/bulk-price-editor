@@ -13,10 +13,12 @@
 import { describe, expect, it } from "vitest";
 
 import prisma from "../../app/db.server";
-import { withChaos } from "../harness/scenario";
+import { withChaos, type ChaosContext } from "../harness/scenario";
 import { chaosAdminClient } from "../harness/http-client";
 import { money } from "../../app/lib/money/money";
 import type { B2BVariantInput } from "../../app/services/campaigns/b2b-plan.server";
+import { createCampaign } from "../../app/services/campaigns/model.server";
+import { runCampaign } from "../../app/services/campaigns/run.server";
 
 const TIERS = [
   { minimumQuantity: 1, discountBps: 0 },
@@ -252,7 +254,7 @@ describe("chaos: wholesale quantity breaks", () => {
         await chaos.revert();
         const revertRunId = await chaos.latestRunId("REVERT");
 
-        const outcome = await revertQuantityBreaks(shopId, revertRunId, LIST, variantGids, client);
+        const outcome = await revertQuantityBreaks(shopId, revertRunId, LIST, variantGids, FLOOR, client);
 
         expect(outcome!.clean).toBe(true);
         expect(outcome!.messages.join(" ")).toMatch(/had no quantity breaks before/);
@@ -311,6 +313,7 @@ describe("chaos: wholesale quantity breaks", () => {
           revertRunId,
           LIST,
           variantGids,
+          FLOOR,
           chaosAdminClient(chaos.server.endpoint()),
         );
 
@@ -319,4 +322,269 @@ describe("chaos: wholesale quantity breaks", () => {
       },
     );
   });
+
+  // "No baseline" is not "no ladder" (#704). The revert used to clear a ladder whose variant
+  // had no baseline at all, which on a merchant's own tiers deletes them. With nothing to
+  // recompute from, the campaign's ladder stays and the revert says so: visibly unfinished.
+  it("leaves a ladder with no baseline to go back to, and says the revert is not finished", async () => {
+    await withChaos(
+      "b2b-quantity-unanchored",
+      { catalog: { products: 2, variantsPerProduct: 1 }, percent: -20 },
+      async (chaos) => {
+        const { shopId, variantGids } = chaos.fixture;
+        const [unanchored, anchored] = variantGids as [string, string];
+        const { applyQuantityBreaks, revertQuantityBreaks } = await import("../../app/services/campaigns/b2b-surfaces.server");
+        const client = chaosAdminClient(chaos.server.endpoint());
+        chaos.fake.addPriceList(wholesaleList());
+
+        await chaos.apply();
+        await applyQuantityBreaks(shopId, await chaos.latestRunId("APPLY"), LIST, catalogue(variantGids), TIERS, FLOOR, client);
+        await prisma.baseline.create({
+          data: { shopId, variantGid: anchored, surfaceKind: "MARKET", priceListGid: LIST.priceListGid, currency: "USD", basePrice: 4_000n, source: "AUTO_ENROLL" },
+        });
+
+        await chaos.revert();
+        const outcome = await revertQuantityBreaks(shopId, await chaos.latestRunId("REVERT"), LIST, variantGids, FLOOR, client);
+
+        expect(ladderOn(chaos, unanchored), "a ladder with no baseline was cleared as if the merchant had none").toEqual([["1", "40.00"], ["12", "36.00"]]);
+        expect(ladderOn(chaos, anchored)).toEqual([]);
+        expect(outcome, "a revert that left a campaign's ladder in place called itself clean").toMatchObject({ clean: false, verified: 1, failed: 1 });
+        expect(outcome!.messages.join(" ")).toMatch(/1 product still has this campaign's quantity breaks, because no baseline records the price there before it/);
+      },
+    );
+  });
+
+  // A catalogue over 5,000 prices (#704). The ladder read walked the whole list, 50 pages of
+  // 100, so a price past the 5,000th had "no ladder" -- and the read asked Shopify for a
+  // query costing about 4,400 points, which Shopify refuses outright. The capture is the
+  // campaign's own, as it runs before a campaign first writes a catalogue.
+  it("captures, verifies and puts back a ladder past the catalogue's 5,000th price", async () => {
+    await withChaos(
+      "b2b-quantity-5000",
+      { catalog: { products: 2, variantsPerProduct: 1 }, percent: -20 },
+      async (chaos) => {
+        const { shopId, variantGids } = chaos.fixture;
+        const [withLadder, withoutLadder] = variantGids as [string, string];
+        const { applyQuantityBreaks, revertQuantityBreaks } = await import("../../app/services/campaigns/b2b-surfaces.server");
+        const { marketBaselines } = await import("../../app/services/campaigns/market-plan.server");
+        const { syncMarkets } = await import("../../app/services/markets-sync.server");
+        const client = chaosAdminClient(chaos.server.endpoint());
+
+        // 5,200 prices the list derives, then the two the merchant set by hand, then 100 more.
+        const derived = (from: number, count: number) =>
+          Array.from({ length: count }, (_, n) => ({
+            variantGid: `gid://shopify/ProductVariant/elsewhere-${from + n}`,
+            amount: "10.00",
+            compareAt: null,
+            originType: "RELATIVE" as const,
+          }));
+        chaos.fake.addPriceList({
+          ...wholesaleList(),
+          prices: [
+            ...derived(0, 5_200),
+            { variantGid: withLadder, amount: "50.00", compareAt: null, originType: "FIXED" as const },
+            { variantGid: withoutLadder, amount: "40.00", compareAt: null, originType: "FIXED" as const },
+            ...derived(5_200, 100),
+          ],
+        });
+        chaos.fake.ladders.set(`${LIST.priceListGid}|${withLadder}`, MERCHANTS.map((rung) => ({ ...rung })));
+        await prisma.variantIndex.updateMany({ where: { shopId }, data: { cost: 1_000n } });
+
+        await syncMarkets(client, shopId);
+        chaos.fake.ladderReads = 0;
+        await marketBaselines(shopId, MARKET_LIST, [...variantGids], client);
+
+        const captured = await prisma.baseline.findMany({
+          where: { shopId, priceListGid: LIST.priceListGid, supersededAt: null },
+          select: { variantGid: true, surfaceKind: true, basePrice: true, quantityBreaks: true },
+          orderBy: { basePrice: "desc" },
+        });
+        expect(captured, "the campaign's capture did not record the ladder past the 5,000th price").toEqual([
+          { variantGid: withLadder, surfaceKind: "MARKET", basePrice: 5_000n, quantityBreaks: [{ minimumQuantity: 1, amount: 5_000 }, { minimumQuantity: 24, amount: 4_500 }] },
+          { variantGid: withoutLadder, surfaceKind: "MARKET", basePrice: 4_000n, quantityBreaks: null },
+        ]);
+        expect(chaos.fake.ladderReads, "two variants' ladders took more than one read of a 5,302-price list").toBe(1);
+
+        await chaos.apply();
+        const runId = await chaos.latestRunId("APPLY");
+        const applied = await applyQuantityBreaks(shopId, runId, LIST, await inputsFor(shopId, variantGids), TIERS, FLOOR, client);
+        // Read back past the 5,000th price: before, the read-back found nothing there.
+        expect(applied, "the read-back did not find the ladders it wrote").toMatchObject({ clean: true, verified: 2 });
+        expect(ladderOn(chaos, withLadder)).toEqual([["1", "50.00"], ["12", "45.00"]]);
+
+        await chaos.revert();
+        const reverted = await revertQuantityBreaks(shopId, await chaos.latestRunId("REVERT"), LIST, variantGids, FLOOR, client);
+
+        expect(reverted!.clean).toBe(true);
+        expect(ladderOn(chaos, withLadder), "the revert deleted the merchant's own ladder").toEqual([["1", "50.00"], ["24", "45.00"]]);
+        expect(ladderOn(chaos, withoutLadder)).toEqual([]);
+      },
+    );
+  });
+
+  // Two tiered sales on one catalogue (#704). The revert wrote the baseline back whatever
+  // else was running, so ending one sale wiped the other's ladders; and it took back every
+  // ladder any campaign had written there, so ending the lower sale cleared the higher one's.
+  // Revert is `resolve(without C)` (rule 6), as on every other surface.
+  describe("with a second tiered sale on the catalogue", () => {
+    it("hands the higher sale's ladders to the lower when it ends, and the merchant's back when that ends", async () => {
+      await withChaos("b2b-quantity-two-sales", { catalog: { products: 2, variantsPerProduct: 1 }, percent: -20 }, async (chaos) => {
+        const { shopId, variantGids } = chaos.fixture;
+        const [a, b] = variantGids as [string, string];
+        const { lower, higher, client, inputs } = await twoSales(chaos);
+        const { applyQuantityBreaks, revertQuantityBreaks } = await import("../../app/services/campaigns/b2b-surfaces.server");
+
+        // The lower sale gave A its ladder before the higher one existed; it never wrote B.
+        await applyQuantityBreaks(shopId, lower.runId, LIST, inputs.filter((input) => input.variantGid === a), TIERS, FLOOR, client);
+        await applyQuantityBreaks(shopId, higher.runId, LIST, inputs, SIX_FOR_20, FLOOR, client);
+        expect(ladderOn(chaos, a)).toEqual([["1", "50.00"], ["6", "40.00"]]);
+
+        const endHigher = await runCampaign(shopId, higher.id, client, { actor: "chaos", revert: true, verifySampleRate: 1 });
+        const handed = await revertQuantityBreaks(shopId, endHigher.runId, LIST, variantGids, FLOOR, client);
+
+        expect(handed!.clean).toBe(true);
+        expect(ladderOn(chaos, a), "ending the higher sale did not hand A to the lower one").toEqual([["1", "50.00"], ["12", "45.00"]]);
+        expect(ladderOn(chaos, b), "ending the higher sale did not hand B to the lower one").toEqual([["1", "40.00"], ["12", "36.00"]]);
+        expect(handed!.messages.join(" ")).toMatch(/2 products now have the quantity breaks of the next campaign/);
+
+        // B is the lower sale's now, though no run of the lower sale's wrote it.
+        await chaos.revert();
+        const ended = await revertQuantityBreaks(shopId, await chaos.latestRunId("REVERT"), LIST, variantGids, FLOOR, client);
+
+        expect(ended!.clean).toBe(true);
+        expect(ladderOn(chaos, a), "the merchant's own ladder did not come back").toEqual([["1", "50.00"], ["24", "45.00"]]);
+        expect(ladderOn(chaos, b), "the ladder the lower sale was handed outlived it").toEqual([]);
+      });
+    });
+
+    it("leaves the higher sale's ladders alone when the lower one ends", async () => {
+      await withChaos("b2b-quantity-lower-ends", { catalog: { products: 2, variantsPerProduct: 1 }, percent: -20 }, async (chaos) => {
+        const { shopId, variantGids } = chaos.fixture;
+        const [a, b] = variantGids as [string, string];
+        const { lower, higher, client, inputs } = await twoSales(chaos);
+        const { applyQuantityBreaks, revertQuantityBreaks } = await import("../../app/services/campaigns/b2b-surfaces.server");
+
+        await applyQuantityBreaks(shopId, lower.runId, LIST, inputs.filter((input) => input.variantGid === a), TIERS, FLOOR, client);
+        await applyQuantityBreaks(shopId, higher.runId, LIST, inputs, SIX_FOR_20, FLOOR, client);
+
+        await chaos.revert();
+        const revertRunId = await chaos.latestRunId("REVERT");
+        const outcome = await revertQuantityBreaks(shopId, revertRunId, LIST, variantGids, FLOOR, client);
+
+        expect(outcome!.clean).toBe(true);
+        // A was the lower sale's to take back, and the higher sale still prices it.
+        expect(ladderOn(chaos, a), "ending the lower sale took the higher one's ladder off A").toEqual([["1", "50.00"], ["6", "40.00"]]);
+        expect(ladderOn(chaos, b), "ending the lower sale cleared a ladder only the higher one wrote").toEqual([["1", "40.00"], ["6", "32.00"]]);
+        expect(
+          await prisma.variantChange.count({ where: { runId: revertRunId, variantGid: b, surfaceKind: "B2B" } }),
+          "the lower sale's revert wrote a ladder it never held",
+        ).toBe(0);
+      });
+    });
+  });
 });
+
+/** The wholesale floor every apply and revert here is held to: 20% over a $10.00 cost. */
+const FLOOR = { minMarginPercent: 20, missingCost: "refuse" as const };
+
+/** 1+ at full price, 6+ at 20% off: the higher sale's ladder. */
+const SIX_FOR_20 = [
+  { minimumQuantity: 1, discountBps: 0 },
+  { minimumQuantity: 6, discountBps: 2000 },
+];
+
+/** The merchant's own ladder on the first variant: $50.00, and $45.00 for 24 or more. */
+const MERCHANTS = [
+  { minimumQuantity: 1, amount: "50.00" },
+  { minimumQuantity: 24, amount: "45.00" },
+];
+
+/** LIST as the campaign's market planner names it: a company-location catalogue, no country. */
+const MARKET_LIST = { ...LIST, adjustmentBps: null, contextCountry: null };
+
+function wholesaleList() {
+  return {
+    id: LIST.priceListGid,
+    name: LIST.name,
+    currency: LIST.currency,
+    adjustment: null,
+    catalog: { id: "gid://shopify/CompanyLocationCatalog/1", title: "Wholesale", __typename: "CompanyLocationCatalog" },
+    prices: [],
+  };
+}
+
+/** The ladder a variant has on the catalogue now, as `[minimum, amount]` pairs. */
+function ladderOn(chaos: ChaosContext, variantGid: string): Array<[string, string]> {
+  return (chaos.fake.ladders.get(`${LIST.priceListGid}|${variantGid}`) ?? [])
+    .map((rung): [string, string] => [String(rung.minimumQuantity), rung.amount])
+    .sort((x, y) => Number(x[0]) - Number(y[0]));
+}
+
+/** What a run hands the ladder writer: each variant's catalogue baseline and its cost. */
+async function inputsFor(shopId: string, variantGids: readonly string[]): Promise<B2BVariantInput[]> {
+  const baselines = await prisma.baseline.findMany({
+    where: { shopId, priceListGid: LIST.priceListGid, surfaceKind: "MARKET", supersededAt: null, variantGid: { in: [...variantGids] } },
+  });
+  return baselines.map((row) => ({
+    variantGid: row.variantGid,
+    title: row.variantGid,
+    baseline: money(Number(row.basePrice), row.currency),
+    cost: money(1_000, row.currency),
+  }));
+}
+
+/**
+ * A wholesale catalogue with two tiered sales on it: the fixture's campaign at priority 100
+ * with 12+ at 10% off, and a second at priority 200 with 6+ at 20% off. The first variant is
+ * set by hand at $50.00 with the merchant's own ladder; the second at $40.00 with none.
+ *
+ * Both are applied as the run applies them, then given the catalogue and their tiers: the
+ * ladder writer is called here as the run will call it, and the run's own market path is not
+ * what these scenarios test.
+ */
+async function twoSales(chaos: ChaosContext) {
+  const { shopId, campaignId, variantGids } = chaos.fixture;
+  const [a, b] = variantGids as [string, string];
+  const client = chaosAdminClient(chaos.server.endpoint());
+
+  chaos.fake.addPriceList({
+    ...wholesaleList(),
+    prices: [
+      { variantGid: a, amount: "50.00", compareAt: null, originType: "FIXED" as const },
+      { variantGid: b, amount: "40.00", compareAt: null, originType: "FIXED" as const },
+    ],
+  });
+  chaos.fake.ladders.set(`${LIST.priceListGid}|${a}`, MERCHANTS.map((rung) => ({ ...rung })));
+  await prisma.variantIndex.updateMany({ where: { shopId }, data: { cost: 1_000n } });
+  await prisma.baseline.createMany({
+    data: [
+      { shopId, variantGid: a, surfaceKind: "MARKET" as const, priceListGid: LIST.priceListGid, currency: "USD", basePrice: 5_000n, handSet: true, source: "AUTO_ENROLL" as const, quantityBreaks: [{ minimumQuantity: 1, amount: 5_000 }, { minimumQuantity: 24, amount: 4_500 }] },
+      { shopId, variantGid: b, surfaceKind: "MARKET" as const, priceListGid: LIST.priceListGid, currency: "USD", basePrice: 4_000n, handSet: true, source: "AUTO_ENROLL" as const },
+    ],
+  });
+
+  await prisma.campaign.update({ where: { id: campaignId }, data: { priority: 100 } });
+  await chaos.apply();
+  const lowerRun = await chaos.latestRunId("APPLY");
+
+  const second = await createCampaign(shopId, {
+    name: "chaos/higher-wholesale-sale",
+    priority: 200,
+    rule: { kind: "percent-change", percent: -30 },
+    compareAtPolicy: { kind: "leave" },
+    rounding: { default: "none", byCurrency: {} },
+    ast: { groups: [{ conditions: [{ field: "tag", value: "chaos" }] }] },
+    schedule: { kind: "manual" },
+  } as never);
+  const higherRun = (await runCampaign(shopId, second.id, client, { actor: "chaos", verifySampleRate: 1 })).runId;
+
+  await prisma.campaign.update({ where: { id: campaignId }, data: { surfaces: { base: true, priceLists: [LIST.priceListGid], quantityTiers: TIERS } as never } });
+  await prisma.campaign.update({ where: { id: second.id }, data: { surfaces: { base: true, priceLists: [LIST.priceListGid], quantityTiers: SIX_FOR_20 } as never } });
+
+  return {
+    client,
+    inputs: await inputsFor(shopId, variantGids),
+    lower: { id: campaignId, runId: lowerRun },
+    higher: { id: second.id, runId: higherRun },
+  };
+}

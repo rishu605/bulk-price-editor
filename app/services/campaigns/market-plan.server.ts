@@ -149,7 +149,7 @@ export async function planMarket(
 }
 
 /** Each variant's recorded cost, the way the base surface reads it: baseline first, then mirror. */
-async function recordedCosts(
+export async function recordedCosts(
   shopId: string,
   currency: string,
   variantGids: string[],
