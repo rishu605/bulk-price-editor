@@ -52,8 +52,11 @@ describe("whether an overlap has ended", () => {
 
 describe("the sentence after the two names", () => {
   it("is in the past once the overlap has ended", () => {
-    expect(overlapSentence(overlap({ ended: true }))).toBe("ran together and shared 3 products.");
-    expect(overlapSentence(overlap({ ended: true, sharedVariants: 0 }))).toBe("ran together, but had no products in common.");
+    // Not a past count (#1058): the number is the scopes as they are now, and says so.
+    expect(overlapSentence(overlap({ ended: true }))).toBe("ran together. As they are set up now, 3 products are in both.");
+    expect(overlapSentence(overlap({ ended: true, sharedVariants: 1 }))).toBe("ran together. As they are set up now, 1 product is in both.");
+    expect(overlapSentence(overlap({ ended: true, sharedVariants: 4_200 }))).toBe("ran together. As they are set up now, 4,200 products are in both.");
+    expect(overlapSentence(overlap({ ended: true, sharedVariants: 0 }))).toBe("ran together. As they are set up now, they have no products in common.");
   });
 
   it("is in the present while it goes on or is still to come", () => {

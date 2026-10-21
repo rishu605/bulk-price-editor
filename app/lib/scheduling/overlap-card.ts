@@ -3,6 +3,8 @@
  * link goes (#979, #1016).
  */
 
+import { countOf } from "../format/display";
+
 /**
  * A campaign in an overlap: whether its price is the one other campaigns plan against,
  * and whether it is still to come.
@@ -53,16 +55,23 @@ export function overlapEnded(
  *
  * In the past tense once their overlap has ended (#979, #1016). "Run together and share"
  * over two campaigns completed months ago read as a collision on the storefront now.
+ *
+ * But not a past count (#1058). The shared number is what both campaigns' scopes match
+ * today, and nothing records what they matched while they ran: a segment edited, products
+ * added or deleted since, all change it. So an ended overlap says the count is as the two
+ * are set up now, rather than presenting it as history. Recording a scope at apply time
+ * would let it say more; until there is a reason to, it says only what it knows.
  */
 export function overlapSentence(overlap: Pick<Overlap, "ended" | "sharedVariants">): string {
-  const past = overlap.ended;
-  const together = past ? "ran together" : "run together";
-  const products = overlap.sharedVariants === 1 ? "product" : "products";
-
-  if (overlap.sharedVariants > 0) {
-    return `${together} and ${past ? "shared" : "share"} ${overlap.sharedVariants} ${products}.`;
+  const shared = overlap.sharedVariants;
+  if (overlap.ended) {
+    return shared > 0
+      ? `ran together. As they are set up now, ${countOf(shared, "product")} ${shared === 1 ? "is" : "are"} in both.`
+      : "ran together. As they are set up now, they have no products in common.";
   }
-  return `${together}, but ${past ? "had" : "have"} no products in common.`;
+  return shared > 0
+    ? `run together and share ${countOf(shared, "product")}.`
+    : "run together, but have no products in common.";
 }
 
 /**
