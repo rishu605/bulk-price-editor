@@ -26,6 +26,7 @@ import { money, parseMoney, type Money } from "../../lib/money/money";
 import { planRun } from "../../lib/planning/plan";
 import type { PlanOutcome } from "../../lib/planning/types";
 import type { ResolvableCampaign } from "../../lib/pricing/types";
+import type { CampaignSurfaces } from "../../lib/campaigns/surfaces";
 import { marketGuardrails } from "../../lib/markets/guardrails";
 import { guardrailsFor, shopCurrency } from "../settings.server";
 import { inChunks } from "../../lib/db/chunk";
@@ -180,10 +181,26 @@ export async function recordedCosts(
 
 export type MarketPathDecision =
   | { path: "market-wide"; bps: number; parent: ParentState }
-  | { path: "per-product"; reason: string };
+  | {
+      path: "per-product";
+      reason: string;
+      /**
+       * The campaign moves the base price this market's prices follow, so the base price
+       * carries the campaign there and a percentage would apply it a second time (#260).
+       * The run writes only what is not already at the campaign's price once it has.
+       */
+      followsBase?: true;
+    };
 
 /**
  * Whether this market can be repriced with one mutation.
+ *
+ * The one answer to that question, for the review step and the run alike: each takes the
+ * path this returns and says the reason it gives. The base-price check used to live in the
+ * run, after this, so the Markets card promised a storewide sale "a single market-wide
+ * change" that the run then never made (#1109). Rule 4: a preview that can disagree with
+ * execution is worthless, and the way to make sure it cannot is one function with the same
+ * inputs -- the campaign's surfaces, which both read from the campaign row.
  *
  * Live state, not the mirror. The mirror refreshes on a schedule and by webhook, and a
  * merchant who set a price by hand five minutes ago is exactly the merchant whose whole
@@ -192,9 +209,21 @@ export type MarketPathDecision =
 export async function decideMarketPath(
   plan: MarketPlan,
   client: AdminClient,
+  surfaces: Pick<CampaignSurfaces, "base">,
+  options: {
+    /** A run over named variants, which a percentage on the whole list would overreach (#763). */
+    perProductOnly?: boolean;
+  } = {},
 ): Promise<MarketPathDecision> {
   if (plan.outcome.kind !== "ok") {
     return { path: "per-product", reason: "the plan did not complete" };
+  }
+
+  // Whatever the market's settings say, so they are not read: the run asks this before it
+  // checks what the market already shows, and "Revert this variant" should not read the
+  // whole catalogue to price one variant.
+  if (options.perProductOnly) {
+    return { path: "per-product", reason: "only some variants are being priced, and a percentage would move the whole market" };
   }
 
   const parent = await readParentState(client, plan.list.priceListGid);
@@ -212,9 +241,30 @@ export async function decideMarketPath(
     hasFixedOverrides: parent.hasFixedOverrides,
   });
 
-  return verdict.eligible
-    ? { path: "market-wide", bps: verdict.bps, parent }
-    : { path: "per-product", reason: verdict.reason };
+  // Before the base-price check, whose reason says the market follows the base price: one
+  // with prices set by hand does not, and is told the reason that is true of it.
+  if (!verdict.eligible) return { path: "per-product", reason: verdict.reason };
+
+  // A parent adjustment cannot express these prices once the base price has moved.
+  //
+  // The shortcut sets one percentage and lets Shopify derive every price, from the *current*
+  // base price -- which a campaign that prices the base price moves by its own percentage
+  // before the market step begins. The only adjustment that reproduces the intended prices
+  // is then the list's existing one, unchanged, and anything else applies the campaign
+  // twice: a European shopper on 36% off a 20% sale (#260). The run settles what the base
+  // price already carried to the campaign's price, and writes an exact price for the rest.
+  //
+  // The shortcut keeps its whole value for a campaign that prices only its markets, which
+  // leaves the base price where it is: the planner plans no base price for one (#1094).
+  if (surfaces.base) {
+    return {
+      path: "per-product",
+      reason: "this market follows your base prices, which this campaign also changes, so changing the market's own percentage would apply the campaign twice",
+      followsBase: true,
+    };
+  }
+
+  return { path: "market-wide", bps: verdict.bps, parent };
 }
 
 /** Plain-language explanation of a chosen path, for the review step and run report. */
@@ -226,6 +276,18 @@ export function describePath(decision: MarketPathDecision, marketName: string): 
       `${marketName} will be repriced with a single market-wide ${rounded}% change ` +
       `rather than a price per product. Prices there keep following your base prices, ` +
       `and undoing the campaign restores this market's own percentage.`
+    );
+  }
+
+  // Not "will get a price per product": a price the base price already carried to the
+  // campaign's is confirmed and left alone, and on a list in the store's currency that can
+  // be every one of them.
+  if (decision.followsBase) {
+    return (
+      `${marketName} will not be repriced with a market-wide change, because ${decision.reason}. ` +
+      `Your new base prices carry the campaign there, and any price that cannot then be ` +
+      `confirmed at the campaign's price gets a price of its own. Undoing the campaign removes ` +
+      `those prices and the market goes back to following your base prices.`
     );
   }
 
