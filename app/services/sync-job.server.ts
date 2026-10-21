@@ -22,7 +22,7 @@
 import { Prisma } from "@prisma/client";
 
 import prisma from "../db.server";
-import { unpricedCurrencyFailure } from "../lib/dashboard/sync-failure";
+import { unpricedCurrencyFailure, unstatedCurrencyFailure } from "../lib/dashboard/sync-failure";
 import { syncMessage } from "../lib/dashboard/sync-message";
 import { AppError } from "../lib/errors/app-error";
 import type { AdminClient } from "../lib/execution/sync-executor";
@@ -267,6 +267,13 @@ export async function runFullSync(shopId: string, client: AdminClient, actor: st
     // Through the one writer of the zone, which records what campaigns were typed in (#799).
     // Left alone when Shopify did not say, rather than reset to a guess.
     if (basics.timezone) await recordShopTimezone(shopId, basics.timezone, actor);
+
+    // No currency at all from Shopify stops it too, rather than syncing in a guessed one (#1101).
+    if (!basics.currency) {
+      const failure = unstatedCurrencyFailure();
+      await releaseSync(shopId, failure);
+      return { message: failure, errors: [failure] };
+    }
 
     // A currency with no known precision stops the sync before any product is read (#1089).
     // Every price would throw `UnknownCurrencyError`: the bulk read stopped on the first one,

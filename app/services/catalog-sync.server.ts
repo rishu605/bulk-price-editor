@@ -414,9 +414,18 @@ export async function fetchPartnerDevelopment(client: GraphQLRunner): Promise<bo
   return typeof flag === "boolean" ? flag : null;
 }
 
+/**
+ * The store's currency, or null when Shopify did not say (#1101). For a products webhook that
+ * arrives before anything is mirrored, which used to guess US dollars.
+ */
+export async function fetchShopCurrency(client: GraphQLRunner): Promise<string | null> {
+  const body = (await (await client.graphql(SHOP_CURRENCY)).json()) as { data?: { shop?: { currencyCode?: string } } };
+  return body.data?.shop?.currencyCode ?? null;
+}
+
 export async function fetchShopBasics(
   client: GraphQLRunner,
-): Promise<{ currency: string; timezone: string | null; developerStore: boolean }> {
+): Promise<{ currency: string | null; timezone: string | null; developerStore: boolean }> {
   const response = await client.graphql(SHOP_CURRENCY);
   const body = (await response.json()) as {
     data?: {
@@ -429,7 +438,9 @@ export async function fetchShopBasics(
   };
   const zone = body.data?.shop?.ianaTimezone;
   return {
-    currency: body.data?.shop?.currencyCode ?? "USD",
+    // Null rather than "USD" when Shopify did not say (#1101): a guessed currency syncs a yen
+    // store's ¥1,200 as $1,200.00. The sync stops on it instead.
+    currency: body.data?.shop?.currencyCode ?? null,
     // Null rather than "UTC" when Shopify did not say (#799). A guessed zone is recorded as
     // if it were the store's, and every time typed against it is hours out.
     timezone: isTimeZone(zone) ? zone : null,
