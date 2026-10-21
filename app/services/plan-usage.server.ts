@@ -22,34 +22,69 @@
  * hundred thousand rows per campaign, on a page that has to render in under a second.
  * The catalogue size is one indexed count, it is an upper bound on every campaign, and
  * being under it is a guarantee rather than an estimate.
+ *
+ * ## Which catalogue
+ *
+ * The one a campaign can reach, compiled by `astToWhere` as every campaign's scope is:
+ * live variants that are not gift cards (#1075). Counting every row the shop had -- deleted
+ * variants and gift cards too -- told a shop near its limit that it could exceed it by
+ * variants no campaign would ever count, and stopped the guarantee being one: the gate
+ * counts through the same filter, so it can only ever count fewer than this.
  */
 
 import prisma from "../db.server";
 import { billingFor } from "./billing.server";
+import { astToWhere, type FilterAst } from "./segments.server";
 
 export interface PlanUsage {
   planName: string;
   /** Null on the tier with no cap, which is a different sentence rather than a big number. */
   variantLimit: number | null;
-  /** Variants in the shop's catalogue — the upper bound on any campaign's scope. */
+  /** Variants a campaign could cover — the upper bound on any campaign's scope. */
   catalogueVariants: number;
+  /** Live gift cards, which no campaign prices, left out of `catalogueVariants`. */
+  giftCards: number;
   /** Whether the catalogue alone could exceed what one campaign may cover. */
   couldExceed: boolean;
   /** A development store: every feature, nothing charged, whatever plan it is on. */
   exempt: boolean;
 }
 
-export async function planUsage(shopId: string): Promise<PlanUsage> {
-  const [{ plan, exempt }, catalogueVariants] = await Promise.all([
-    billingFor(shopId),
-    prisma.variantIndex.count({ where: { shopId } }),
+/** The widest scope a campaign can have: no conditions, and every product status. */
+const EVERY_VARIANT: FilterAst = { groups: [] };
+
+export interface CoverableCatalogue {
+  /** What the widest campaign would cover. */
+  variants: number;
+  /** Live gift cards: the one floor of `astToWhere` a merchant would otherwise miss. */
+  giftCards: number;
+}
+
+/**
+ * How much of the catalogue a campaign could cover, for the meter on Home and on
+ * Settings → Plan alike, so the two cannot name different numbers.
+ *
+ * Through `astToWhere`, not a copy of its floors. The gift cards are the same filter with
+ * its one gift-card clause turned round, so a deleted gift card is in neither count.
+ */
+export async function coverableCatalogue(shopId: string): Promise<CoverableCatalogue> {
+  const coverable = astToWhere(shopId, EVERY_VARIANT);
+  const [variants, giftCards] = await Promise.all([
+    prisma.variantIndex.count({ where: coverable }),
+    prisma.variantIndex.count({ where: { ...coverable, isGiftCard: true } }),
   ]);
+  return { variants, giftCards };
+}
+
+export async function planUsage(shopId: string): Promise<PlanUsage> {
+  const [{ plan, exempt }, catalogue] = await Promise.all([billingFor(shopId), coverableCatalogue(shopId)]);
 
   return {
     planName: plan.name,
     variantLimit: plan.variantLimit,
-    catalogueVariants,
-    couldExceed: plan.variantLimit !== null && catalogueVariants > plan.variantLimit,
+    catalogueVariants: catalogue.variants,
+    giftCards: catalogue.giftCards,
+    couldExceed: plan.variantLimit !== null && catalogue.variants > plan.variantLimit,
     exempt,
   };
 }

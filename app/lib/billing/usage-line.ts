@@ -22,10 +22,31 @@ export interface UsageLine {
   attention: boolean;
 }
 
+/**
+ * Where the gift cards went, when there are any (#1075).
+ *
+ * The count is what a campaign can cover, and no campaign prices a gift card -- its price
+ * is its face value. Left unsaid, a merchant who knows their catalogue is 3,669 variants
+ * reads 3,665 as the app having lost four.
+ */
+export function giftCardNote(giftCards: number): string {
+  if (giftCards <= 0) return "";
+  return giftCards === 1
+    ? "1 gift card is not counted: no campaign prices a gift card."
+    : `${formatCount(giftCards)} gift cards are not counted: no campaign prices a gift card.`;
+}
+
 export function usageLine(usage: {
   planName: string;
   variantLimit: number | null;
+  /**
+   * Variants a campaign could cover: live, and not gift cards (#1075). Deleted variants
+   * and gift cards are in no campaign's scope, so counting them told a shop near its limit
+   * that it could exceed it by variants no campaign would ever count.
+   */
   catalogueVariants: number;
+  /** Live gift cards, left out of `catalogueVariants` and said so. */
+  giftCards?: number;
   couldExceed: boolean;
   /**
    * Whether the catalogue has been read at all.
@@ -70,10 +91,13 @@ export function usageLine(usage: {
     };
   }
 
+  const giftCards = giftCardNote(usage.giftCards ?? 0);
+  const withGiftCards = (detail: string) => (giftCards ? `${detail} ${giftCards}` : detail);
+
   if (usage.variantLimit === null) {
     return {
       headline: `${usage.planName} · no variant limit`,
-      detail: `Your catalogue is ${catalogue}. A campaign can cover all of it.`,
+      detail: withGiftCards(`Your catalogue is ${catalogue}. A campaign can cover all of it.`),
       attention: false,
     };
   }
@@ -81,7 +105,7 @@ export function usageLine(usage: {
   if (!usage.couldExceed) {
     return {
       headline: `${usage.planName} · campaigns up to ${cap} variants`,
-      detail: `Your whole catalogue is ${catalogue}, so no campaign can reach the limit.`,
+      detail: withGiftCards(`Your whole catalogue is ${catalogue}, so no campaign can reach the limit.`),
       attention: false,
     };
   }
@@ -90,7 +114,9 @@ export function usageLine(usage: {
     headline: `${usage.planName} · campaigns up to ${cap} variants`,
     // Says what happens, not that something is wrong. A campaign over the cap is refused
     // before it writes anything, which is the same promise the rest of the app makes.
-    detail: `Your catalogue is ${catalogue}, so a campaign covering all of it would need a larger plan. Anything over the limit is refused before it writes a price.`,
+    detail: withGiftCards(
+      `Your catalogue is ${catalogue}, so a campaign covering all of it would need a larger plan. Anything over the limit is refused before it writes a price.`,
+    ),
     attention: true,
   };
 }
