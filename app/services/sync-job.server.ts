@@ -29,7 +29,7 @@ import { logger } from "../lib/logging/logger";
 import { enqueueWithin, webQueue } from "../worker/web-queue.server";
 import { captureBaselines } from "./baselines.server";
 import { syncCatalogViaBulk } from "./catalog-bulk-sync.server";
-import { fetchShopBasics, syncCatalog, type GraphQLRunner } from "./catalog-sync.server";
+import { fetchPartnerDevelopment, fetchShopBasics, syncCatalog, type GraphQLRunner } from "./catalog-sync.server";
 import { recordShopTimezone } from "./shop-timezone.server";
 import { syncMarkets } from "./markets-sync.server";
 import { markSyncComplete } from "./shop.server";
@@ -171,6 +171,45 @@ function tracker(shopId: string, everyMs = 2_000) {
       logger.warn("could not record sync progress", { shopId, error: error instanceof Error ? error.message : String(error) });
     }
   };
+}
+
+/**
+ * Whether the shop is still a development store, asked again (#713).
+ *
+ * A development store gets the top tier free (`billingFrom`), and only a full sync set the
+ * flag. An agency that installed and synced on a development store and then transferred it to
+ * a paying merchant left it set for good -- webhooks keep the mirror current, so the merchant
+ * never needs to press Sync -- and every tier stayed free. Asked once a day by the scheduler,
+ * beside the mirror audit; a change is recorded. Unlike the sync, a failed read changes nothing.
+ */
+export async function refreshDeveloperStore(client: AdminClient, shopId: string): Promise<boolean | null> {
+  const shop = await prisma.shop.findUnique({ where: { id: shopId }, select: { developerStore: true } });
+  if (!shop) return null;
+  let developerStore: boolean | null;
+  try {
+    developerStore = await fetchPartnerDevelopment(runnerFor(client));
+  } catch (error) {
+    developerStore = null;
+    logger.warn("could not ask whether the shop is still a development store", {
+      shopId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  if (developerStore === null || developerStore === shop.developerStore) return shop.developerStore;
+
+  await prisma.shop.update({ where: { id: shopId }, data: { developerStore } });
+  await prisma.auditLogEntry.create({
+    data: {
+      shopId,
+      actor: "shopify",
+      action: "shop.developer-store",
+      entity: "Shop",
+      entityId: shopId,
+      before: { developerStore: shop.developerStore } as never,
+      after: { developerStore } as never,
+    },
+  });
+  return developerStore;
 }
 
 /** The route-style GraphQL runner the catalogue reads take, over the worker's client. */

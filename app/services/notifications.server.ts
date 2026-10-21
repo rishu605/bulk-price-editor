@@ -70,6 +70,16 @@ export function parsePreferences(raw: unknown): NotificationPreferences {
   };
 }
 
+/** Where `writePreferences` records when the weekly digest was turned on, in the shop's settings. */
+export const DIGEST_ENABLED_AT = "digestEnabledAt";
+
+/** When the weekly digest was turned on, or null when that was never recorded. */
+export function digestEnabledAt(settings: unknown): Date | null {
+  const value = ((settings ?? {}) as Record<string, unknown>)[DIGEST_ENABLED_AT];
+  const at = typeof value === "string" ? new Date(value) : null;
+  return at && !Number.isNaN(at.getTime()) ? at : null;
+}
+
 export async function readPreferences(shopId: string): Promise<NotificationPreferences> {
   const shop = await prisma.shop.findUnique({ where: { id: shopId }, select: { settings: true } });
   const settings = (shop?.settings ?? {}) as { notifications?: unknown };
@@ -90,9 +100,16 @@ export async function writePreferences(
     select: { settings: true },
   });
 
+  // When the weekly digest was turned on (#713): the first one is a week after it, not on the
+  // next tick, which sent a digest of the day it was switched on as an empty welcome.
+  const settings = { ...((shop.settings ?? {}) as Record<string, unknown>) };
+  const before = parsePreferences(settings.notifications);
+  if (parsed.weeklyDigest && !before.weeklyDigest) settings[DIGEST_ENABLED_AT] = new Date().toISOString();
+  if (!parsed.weeklyDigest) delete settings[DIGEST_ENABLED_AT];
+
   await prisma.shop.update({
     where: { id: shopId },
-    data: { settings: { ...((shop.settings ?? {}) as object), notifications: parsed } as never },
+    data: { settings: { ...settings, notifications: parsed } as never },
   });
 
   return parsed;
