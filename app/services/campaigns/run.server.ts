@@ -736,6 +736,8 @@ async function executeCampaignRun(
         campaigns: resolvable,
         candidates,
         storeGuardrails,
+        // Whose run: one that prices only its markets plans no base price (#1094).
+        campaignId,
         excludeCampaignId: options.revert ? campaignId : undefined,
         heldEdits,
       }),

@@ -184,6 +184,15 @@ export interface ResolvableCampaign {
    * execution cannot disagree.
    */
   scope?: ReadonlySet<string>;
+  /**
+   * True for a campaign that prices its markets and not the base price: `surfaces.base`
+   * off, a sale for Europe and nowhere else (#1094).
+   *
+   * The planner never offers it a base price, in its own plans or anyone else's, and plans
+   * none for it: its apply, revert, resume and preview leave every base price as it is.
+   * Absent means it prices the base price, as every campaign did before markets existed.
+   */
+  marketsOnly?: boolean;
 }
 
 // ------------------------------------------------------------------ results

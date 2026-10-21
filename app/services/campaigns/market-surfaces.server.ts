@@ -42,7 +42,6 @@ import {
   type MarketWriteResult,
 } from "../../lib/execution/market-executor";
 import type { AdminClient } from "../../lib/execution/sync-executor";
-import type { QuantityTier } from "../../lib/pricing/quantity-breaks";
 import type { ResolvableCampaign } from "../../lib/pricing/types";
 import { describeMarketSkips, describeMovedMarket, describeStaleSettingMarket } from "../../lib/markets/guardrails";
 import { logger } from "../../lib/logging/logger";
@@ -54,67 +53,10 @@ import type { PlannedRow } from "../../lib/planning/types";
 import { marketsHandedTo } from "./handover.server";
 import { describeBlocked } from "./blocked.server";
 import { mirrorMarketDelete, mirrorMarketWrite } from "./mirror.server";
+import { parseSurfaces } from "../../lib/campaigns/surfaces";
 
-/** Which surfaces a campaign writes to. Stored on the campaign as JSON. */
-export interface CampaignSurfaces {
-  base: boolean;
-  /** Price list gids this campaign also prices. Empty means base only. */
-  priceLists: string[];
-  /**
-   * Wholesale quantity tiers, for the B2B price lists among `priceLists`.
-   *
-   * Absent means a single price per variant, which is what every campaign written before
-   * this existed meant and must keep meaning. Only B2B catalogues have ladders — a market
-   * price list has no concept of ordering twelve — so this is ignored for market lists
-   * rather than refused, and the planner is where that distinction is made.
-   */
-  quantityTiers?: QuantityTier[];
-}
-
-/**
- * Reads the surfaces blob defensively.
- *
- * It is JSON on a row, so it can be anything: written by an older version, hand-edited,
- * or half-migrated. A tier list that cannot be understood becomes no tiers rather than a
- * crash — but never a *different* ladder, because silently pricing wholesale differently
- * from what the merchant configured is the failure this whole surface has to avoid.
- */
-export function parseSurfaces(raw: unknown): CampaignSurfaces {
-  const value = (raw ?? {}) as {
-    base?: unknown;
-    priceLists?: unknown;
-    quantityTiers?: unknown;
-  };
-
-  const tiers = Array.isArray(value.quantityTiers)
-    ? value.quantityTiers.filter(isQuantityTier)
-    : undefined;
-
-  return {
-    // Base is on unless explicitly turned off. A campaign targeting only a market is
-    // legitimate but unusual, and defaulting it off would silently narrow every
-    // campaign created before markets existed.
-    base: value.base !== false,
-    priceLists: Array.isArray(value.priceLists)
-      ? value.priceLists.filter((entry): entry is string => typeof entry === "string")
-      : [],
-    // A list that had entries and lost them all to validation is not the same as no list.
-    // Reporting it as `[]` lets the planner refuse loudly instead of pricing at one tier.
-    ...(tiers === undefined ? {} : { quantityTiers: tiers }),
-  };
-}
-
-function isQuantityTier(entry: unknown): entry is QuantityTier {
-  if (typeof entry !== "object" || entry === null) return false;
-  const tier = entry as { minimumQuantity?: unknown; discountBps?: unknown };
-
-  return (
-    typeof tier.minimumQuantity === "number" &&
-    Number.isFinite(tier.minimumQuantity) &&
-    typeof tier.discountBps === "number" &&
-    Number.isFinite(tier.discountBps)
-  );
-}
+// Read here and by the planner's input alike (#1094), so it lives where both can reach it.
+export { parseSurfaces, type CampaignSurfaces } from "../../lib/campaigns/surfaces";
 
 export interface MarketSurfaceOutcome {
   priceListGid: string;
@@ -509,6 +451,10 @@ export async function applyMarketSurfaces(
     //
     // The shortcut keeps its whole value for a markets-only campaign, which is the case
     // it was designed for and the case where the base price has not moved underneath it.
+    // That holds because the planner plans no base price for one (#1094). It used to plan,
+    // write and revert the base price like any campaign's, so this composed the campaign's
+    // percentage onto a base price it had already moved: #260's double discount, which the
+    // read-back then put right one exact price at a time.
     const baseAlreadyMoved = surfaces.base;
 
     if (decision.path === "market-wide" && baseAlreadyMoved) {

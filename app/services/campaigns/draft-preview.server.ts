@@ -232,7 +232,7 @@ export async function previewDraft(
     return { ...EMPTY, matched, withoutBaseline: matched, leftOutByStatus };
   }
 
-  const outcome = planRun({ campaigns: resolvable, candidates, storeGuardrails, heldEdits });
+  const outcome = planRun({ campaigns: resolvable, candidates, storeGuardrails, heldEdits, campaignId: DRAFT_ID });
 
   if (outcome.kind === "blocked") {
     return {

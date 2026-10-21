@@ -270,7 +270,8 @@ describe("chaos: a campaign's market prices in the mirror and on What's live (#7
   it("mirrors the exact prices a market-wide percentage needed, and nothing it derives", async () => {
     // A markets-only campaign moves the list's own percentage, and Shopify derives every price
     // from it -- those are not fixed prices and get no row, exactly as the sync stores them.
-    // The ones Shopify rounded a minor unit away get an exact price, and those are.
+    // The ones the read-back could not confirm get an exact price, and those are: in euros,
+    // every one, since a percentage list answers in the shop's currency (#257, #1094).
     const WIDE = "gid://shopify/PriceList/eu-wide-mirror-writes";
     await withChaos("market-mirror-wide", { catalog: { products: 12, variantsPerProduct: 1 }, percent: -20 }, async (chaos) => {
       const { shopId, campaignId } = chaos.fixture;

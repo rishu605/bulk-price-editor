@@ -20,7 +20,7 @@
 
 import { equals, type Money } from "../money/money";
 import { resolve } from "../pricing/resolver";
-import type { Resolution } from "../pricing/types";
+import type { ResolvableCampaign, Resolution } from "../pricing/types";
 import type {
   BlockedVariant,
   PlanCandidate,
@@ -43,6 +43,12 @@ export function refKey(ref: {
 
 export function planRun(input: PlanInput): PlanOutcome {
   const { candidates, storeGuardrails, excludeCampaignId, heldEdits } = input;
+
+  // The plan of a campaign that prices only its markets, its revert's included (#1094):
+  // looked up before a revert takes it out of `campaigns` below.
+  const planned = input.campaignId ?? excludeCampaignId;
+  const marketsOnlyPlan =
+    planned !== undefined && input.campaigns.some((campaign) => campaign.id === planned && campaign.marketsOnly === true);
 
   // Revert is resolution with the ending campaign removed, not a restore of saved
   // numbers (invariant I3).
@@ -106,16 +112,56 @@ export function planRun(input: PlanInput): PlanOutcome {
         !exclusions.get(campaign.id)?.has(variantGid),
     );
 
+    const onBase = candidate.ref.surfaceKind === "base" && candidate.ref.priceListGid === "";
+    const resolveAmong = (among: ResolvableCampaign[]) =>
+      resolve({
+        baseline: candidate.baseline,
+        surface: {
+          kind: candidate.ref.surfaceKind,
+          priceListId: candidate.ref.priceListGid || undefined,
+          currency: candidate.ref.currency,
+        },
+        // Callers pass campaigns already filtered to active, targeting this surface,
+        // and with this variant enrolled -- matching the resolver's documented
+        // contract. Enrollment in particular is pinned at plan time, so a product
+        // tagged mid-campaign is not priced by a run that never planned for it, and
+        // one untagged mid-campaign is still reverted (edge cases E5, E6). Those
+        // decisions need the clock and the database, so they live in the caller.
+        campaigns: among,
+        storeGuardrails,
+        variantSegmentIds: candidate.segmentIds,
+        importedPrices: candidate.importedPrices,
+        importedCompareAts: candidate.importedCompareAts,
+      });
+
+    // A campaign that prices only its markets plans nothing on the base price (#1094). It was
+    // planned, ledgered, written and reverted there like any other, so a sale for Europe ran
+    // storewide. Each base candidate is left as it is and credited to whoever wins the variant
+    // with every campaign on it -- what each market's own plan resolves -- so its markets are
+    // planned over the variants it wins (`marketScope`). Before the hold and the guardrails:
+    // both are about a base price this plan never writes, and each market checks its own.
+    if (onBase && marketsOnlyPlan) {
+      const winner = resolveAmong(applicable).meta.controlledBy;
+      for (const campaign of applicable) share(campaign.id).covers++;
+      if (winner) won(winner, applicable);
+      counts.noop++;
+      unchanged.push({ ref: candidate.ref, campaignId: winner });
+      continue;
+    }
+
+    // And in every other plan, it is not on the base price at all: it neither wins one nor is
+    // handed one by another campaign's revert. Its markets are unaffected.
+    const pricing = onBase ? applicable.filter((campaign) => !campaign.marketsOnly) : applicable;
+
     // Who covers this variant and who prices it, counted before any row is dropped as
     // already correct -- see `PlanCoverage`. The base price only, so the counts are variants.
-    const onBase = candidate.ref.surfaceKind === "base" && candidate.ref.priceListGid === "";
-    if (onBase) for (const campaign of applicable) share(campaign.id).covers++;
+    if (onBase) for (const campaign of pricing) share(campaign.id).covers++;
 
     // A hand edit another campaign is holding (#821): the merchant's price stays until they
     // decide, whichever campaign would otherwise win the variant.
     const heldBy = onBase ? heldEdits?.get(variantGid) : undefined;
     if (heldBy) {
-      won(heldBy, applicable);
+      won(heldBy, pricing);
       counts.skipped++;
       rows.push({
         ref: candidate.ref,
@@ -129,27 +175,9 @@ export function planRun(input: PlanInput): PlanOutcome {
       continue;
     }
 
-    const resolution = resolve({
-      baseline: candidate.baseline,
-      surface: {
-        kind: candidate.ref.surfaceKind,
-        priceListId: candidate.ref.priceListGid || undefined,
-        currency: candidate.ref.currency,
-      },
-      // Callers pass campaigns already filtered to active, targeting this surface,
-      // and with this variant enrolled -- matching the resolver's documented
-      // contract. Enrollment in particular is pinned at plan time, so a product
-      // tagged mid-campaign is not priced by a run that never planned for it, and
-      // one untagged mid-campaign is still reverted (edge cases E5, E6). Those
-      // decisions need the clock and the database, so they live in the caller.
-      campaigns: applicable,
-      storeGuardrails,
-      variantSegmentIds: candidate.segmentIds,
-      importedPrices: candidate.importedPrices,
-      importedCompareAts: candidate.importedCompareAts,
-    });
+    const resolution = resolveAmong(pricing);
 
-    if (onBase && resolution.meta.controlledBy) won(resolution.meta.controlledBy, applicable);
+    if (onBase && resolution.meta.controlledBy) won(resolution.meta.controlledBy, pricing);
 
     // A blocking policy stops the whole run. Returning partial rows here would let
     // a caller write some of them, which is exactly what "block" must prevent. Every

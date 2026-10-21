@@ -125,6 +125,8 @@ export async function previewCampaign(
     campaigns: resolvable,
     candidates,
     storeGuardrails,
+    // As the run names it, so a campaign that prices only its markets previews no base price (#1094).
+    campaignId,
     excludeCampaignId: options.revert ? campaignId : undefined,
     heldEdits,
   });

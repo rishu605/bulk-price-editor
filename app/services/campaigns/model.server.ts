@@ -26,6 +26,7 @@ import type { AdjustmentRule,
 import { PRICING_STATES } from "../../lib/lifecycle/transitions";
 import { productStatusesOf, type ProductStatus } from "../../lib/campaigns/product-status";
 import { START_CONFIRMED_KEY } from "../../lib/campaigns/start-confirmation";
+import { parseSurfaces } from "../../lib/campaigns/surfaces";
 import { astToWhere, segmentToAst, type FilterAst } from "../segments.server";
 import { readSettings } from "../settings.server";
 import type { CampaignInput } from "./types";
@@ -186,6 +187,7 @@ export type PlannableCampaign = Pick<
   | "schedule"
   | "createdAt"
   | "excludedVariantGids"
+  | "surfaces"
 >;
 
 /** Not a cuid, and never persisted: only distinct from every campaign that exists. */
@@ -210,6 +212,7 @@ export async function unsavedCampaign(shopId: string, input: CampaignInput): Pro
     schedule: row.schedule,
     createdAt: new Date(),
     excludedVariantGids: [],
+    surfaces: row.surfaces,
   };
 }
 
@@ -355,20 +358,7 @@ export async function scopeOf(
 }
 
 /** Rehydrates a stored campaign into the shape the pure resolver expects. */
-export function toResolvable(
-  campaign: Pick<
-    Campaign,
-    | "id"
-    | "priority"
-    | "ruleRows"
-    | "compareAtPolicy"
-    | "guardrails"
-    | "guardrailViolationPolicy"
-    | "schedule"
-    | "createdAt"
-    | "excludedVariantGids"
-  >,
-): ResolvableCampaign {
+export function toResolvable(campaign: PlannableCampaign): ResolvableCampaign {
   const schedule = (campaign.schedule ?? {}) as { rounding?: string };
 
   return {
@@ -392,6 +382,9 @@ export function toResolvable(
     // rather than filtered out beforehand, so an excluded variant falls through to
     // whatever else still controls it instead of jumping to full price.
     excludedVariantGids: campaign.excludedVariantGids,
+    // Off the base price only when its surfaces say so, as the market writer reads them
+    // (#1094). Left out otherwise, so a campaign that prices it looks as it always did.
+    ...(parseSurfaces(campaign.surfaces).base ? {} : { marketsOnly: true }),
   };
 }
 

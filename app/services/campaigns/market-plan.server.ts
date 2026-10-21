@@ -338,8 +338,11 @@ async function staleSetting<T extends { id: string; variantGid: string; handSet:
   list: MarketList,
   stored: readonly T[],
 ): Promise<{ refresh: T[]; unreadable: T[] }> {
-  if (list.adjustmentBps === null) return { refresh: [], unreadable: [] };
-  const derived = stored.filter((row) => row.handSet !== true && row.listAdjustmentBps !== list.adjustmentBps);
+  // The merchant's setting, which is not the list's while a campaign's percentage is on it.
+  const wide = await campaignPercentageOn(shopId, list.priceListGid);
+  const setting = wide ? wide.merchants : list.adjustmentBps;
+  if (setting === null) return { refresh: [], unreadable: [] };
+  const derived = stored.filter((row) => row.handSet !== true && row.listAdjustmentBps !== setting);
   if (derived.length === 0) return { refresh: [], unreadable: [] };
 
   const gids = derived.map((row) => row.variantGid);
@@ -354,13 +357,35 @@ async function staleSetting<T extends { id: string; variantGid: string; handSet:
     baseOnSale(shopId, gids),
   ]);
   const fixed = new Set(fixedRows.map((row) => row.variantGid));
-  const readable = (row: T) => !fixed.has(row.variantGid) && !moved.has(row.variantGid) && !onSale.has(row.variantGid);
+  const readable = (row: T) =>
+    !wide && !fixed.has(row.variantGid) && !moved.has(row.variantGid) && !onSale.has(row.variantGid);
 
   return {
     refresh: derived.filter(readable),
     // Unknown setting and unreadable now: trusted, as every baseline was before this.
     unreadable: derived.filter((row) => !readable(row) && row.listAdjustmentBps !== null),
   };
+}
+
+/**
+ * A campaign's market-wide percentage on this list now, and the merchant's own setting it
+ * recorded before writing it (#1094). Null when none is on it: the list's setting is the
+ * merchant's.
+ *
+ * A campaign that prices only its markets moves the list's percentage and leaves the store
+ * price alone, so nothing else here says a sale is on the prices the list derives: the store
+ * price is not on sale, and once synced the mirror reports the campaign's percentage as the
+ * list's. A baseline read again "at today's setting" (#1093), or first captured during the
+ * sale, was then the sale price, and the next apply took its discount a second time.
+ */
+async function campaignPercentageOn(shopId: string, priceListGid: string): Promise<{ merchants: number | null } | null> {
+  const live = await prisma.priceListChange.findFirst({
+    where: { shopId, priceListGid, status: { in: ["WRITING", "APPLIED", "VERIFIED"] } },
+    // The earliest still on the list, which read the merchant's setting off the list itself.
+    orderBy: { createdAt: "asc" },
+    select: { priorAdjustmentBps: true },
+  });
+  return live ? { merchants: live.priorAdjustmentBps } : null;
 }
 
 /**
@@ -407,6 +432,11 @@ async function movedSinceBaseline(
   ]);
 
   const fixed = new Set(handSet.map((row) => row.variantGid));
+  // A campaign's percentage on the list moves every price it derives, the store price aside,
+  // and baseline or none (#1094).
+  if (await campaignPercentageOn(shopId, list.priceListGid)) {
+    return new Set(variantGids.filter((gid) => !fixed.has(gid)));
+  }
   const livePrice = new Map(live.map((row) => [row.variantGid, row.price]));
   const moved = new Set<string>();
   for (const row of base) {

@@ -57,7 +57,7 @@ async function planApply(shopId: string, campaign: PlannableCampaign): Promise<S
   const importIds = importIdsOf(resolvable);
   const [scoped, storeGuardrails] = await Promise.all([loadCandidates(shopId, ast, undefined, importIds), guardrailsFor(shopId)]);
   const candidates = await withWritten(shopId, scoped, [], importIds);
-  const outcome = planRun({ campaigns: resolvable, candidates, storeGuardrails, heldEdits });
+  const outcome = planRun({ campaigns: resolvable, candidates, storeGuardrails, heldEdits, campaignId: campaign.id });
   return outcome.kind === "ok" ? { rows: outcome.rows, counts: outcome.counts, candidates } : null;
 }
 
