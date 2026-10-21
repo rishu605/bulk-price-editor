@@ -77,7 +77,7 @@ describe("chaos: an apply whose market prices fail (#1001)", () => {
       const told = runResponse(applied, "Applied");
       expect(told.ok).toBe(false);
       expect(told.message).toMatch(/with 3 failures .* resume to retry/);
-      expect(told.details.join(" ")).toMatch(/DE hand-set \(EUR\): 3 price\(s\) did not apply/);
+      expect(told.details.join(" ")).toMatch(/DE hand-set \(EUR\): 3 prices did not apply/);
       expect((await partialProgress(shopId, campaignId)).resumes, "Resume would not continue this apply").toBe("APPLY");
 
       // Resume: only the euro prices are sent.

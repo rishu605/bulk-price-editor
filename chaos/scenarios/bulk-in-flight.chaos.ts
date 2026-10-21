@@ -84,7 +84,7 @@ describe("chaos: a bulk run whose process stops after Shopify accepted the opera
       );
       // This run's own counts are zero; it says what it read rather than "0 verified".
       expect(finished.messages[0]).toBe(
-        `Shopify had finished bulk operation ${operation.shopifyGid}: 4 price(s) read back from its result file.`,
+        `Shopify had finished bulk operation ${operation.shopifyGid}: 4 prices read back from its result file.`,
       );
       expect(await prisma.bulkOperationRecord.count({ where: { shopId } })).toBe(operationsBefore);
       for (const gid of variantGids) expect(chaos.fake.priceOf(gid)).toBe(dollars(Math.round(baseline.get(gid)! * 0.8)));

@@ -12,7 +12,7 @@
 import { BulkSubmissionError, type BulkOperationState } from "../../lib/execution/bulk-executor";
 
 import prisma from "../../db.server";
-import { formatAgo, formatCount } from "../../lib/format/display";
+import { countOf, formatAgo, formatCount } from "../../lib/format/display";
 import { CLAMP_REASONS } from "../../lib/campaigns/clamp-reasons";
 import { unappliableRule } from "../../lib/campaigns/rule-limits";
 import { marketScope } from "../../lib/planning/market-scope";
@@ -460,10 +460,10 @@ function stoppedPartWay(error: unknown, failed: FailedRun, options: RunOptions):
   const changed = failed.verified + failed.applied;
   const what =
     changed > 0
-      ? `${formatCount(changed)} of ${formatCount(failed.planned)} prices were changed before it did, so your storefront ` +
-        "has some of this campaign's prices and not others."
+      ? `${formatCount(changed)} of ${countOf(failed.planned, "price")} ${changed === 1 ? "was" : "were"} changed before it did, so your ` +
+        "storefront has some of this campaign's prices and not others."
       : failed.sent > 0
-        ? `${formatCount(failed.sent)} prices were sent to Shopify in bulk and may already be live.`
+        ? `${countOf(failed.sent, "price")} ${failed.sent === 1 ? "was" : "were"} sent to Shopify in bulk and may already be live.`
         : "Some prices may have changed before it did.";
   return new AppError({
     code: app.code,
@@ -576,7 +576,7 @@ async function executeCampaignRun(
       // 0 verified" straight after reading four verified prices from Shopify read as if
       // nothing had happened.
       settledNote =
-        `Shopify had finished bulk operation ${bulk.operation}: ${formatCount(bulk.landed.length)} price(s) read back from its result file` +
+        `Shopify had finished bulk operation ${bulk.operation}: ${countOf(bulk.landed.length, "price")} read back from its result file` +
         (bulk.failed > 0 ? `, ${formatCount(bulk.failed)} failed` : "") +
         (bulk.unreported > 0 ? `, ${formatCount(bulk.unreported)} not in it` : "") +
         ".";
@@ -1162,7 +1162,7 @@ async function executeCampaignRun(
     for (const market of markets) {
       if (market.failed > 0) {
         messages.push(
-          `${market.name} (${market.currency}): ${market.failed} price(s) did not apply.`,
+          `${market.name} (${market.currency}): ${countOf(market.failed, "price")} did not apply.`,
         );
       }
       messages.push(...market.messages);
@@ -1405,11 +1405,11 @@ async function syncTags(
 
       const notes: string[] = [];
       if (outcome.failed > 0) {
-        notes.push(`${outcome.failed} product(s) kept their campaign tags — see the run for why.`);
+        notes.push(`${countOf(outcome.failed, "product")} kept ${outcome.failed === 1 ? "its" : "their"} campaign tags — see the run for why.`);
       }
       if (handedOver.failed > 0) {
         notes.push(
-          `${handedOver.failed} product(s) now priced by another campaign could not get its tags.`,
+          `${countOf(handedOver.failed, "product")} now priced by another campaign could not get ${handedOver.failed === 1 ? "its" : "their"} tags.`,
         );
       }
       return { messages: notes };
@@ -1433,13 +1433,15 @@ async function syncTags(
 
     const notes: string[] = [];
     if (outcome.failed > 0) {
-      notes.push(`${outcome.failed} product(s) could not be tagged — prices were still applied.`);
+      notes.push(`${countOf(outcome.failed, "product")} could not be tagged — prices were still applied.`);
     }
     if (outcome.leftAlone > 0) {
       // Said out loud, because the alternative reading is that the app failed to tag
       // them. It did not: they were already tagged, and they are the merchant's.
       notes.push(
-        `${outcome.leftAlone} tag(s) were already on their products and were left as they are.`,
+        outcome.leftAlone === 1
+          ? "1 tag was already on its product and was left as it is."
+          : `${countOf(outcome.leftAlone, "tag")} were already on their products and were left as they are.`,
       );
     }
     return { messages: notes };

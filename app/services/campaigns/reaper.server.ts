@@ -24,6 +24,7 @@
 import { SCHEDULER_ACTOR } from "../../lib/audit/actor";
 import prisma from "../../db.server";
 import { logger } from "../../lib/logging/logger";
+import { countOf } from "../../lib/format/display";
 import { transitionCampaign } from "./lifecycle.server";
 import { settleMirror } from "./mirror.server";
 import { LANDED } from "../../lib/execution/landed";
@@ -222,11 +223,11 @@ export async function reclaimStaleRuns(
               (operation.status === "CREATED" || operation.status === "RUNNING"
                 ? `while Shopify was still running its bulk operation ${operation.shopifyGid}. `
                 : `after Shopify finished its bulk operation ${operation.shopifyGid}, before its results were read. `) +
-              `${sent} prices were sent to Shopify and may already be live; ` +
-              `${verified} rows were verified before it stopped. Resume asks Shopify how that operation ended ` +
+              `${countOf(sent, "price")} ${sent === 1 ? "was" : "were"} sent to Shopify and may already be live; ` +
+              `${countOf(verified, "row")} ${verified === 1 ? "was" : "were"} verified before it stopped. Resume asks Shopify how that operation ended ` +
               `before sending anything again.`
             : `Run ${run.id} stopped responding and was reclaimed. ` +
-              `${verified} rows verified before it stopped; the rest are unchanged and can be resumed.`,
+              `${countOf(verified, "row")} verified before it stopped; the rest are unchanged and can be resumed.`,
           runId: run.id,
         });
       } catch (error) {
