@@ -44,7 +44,7 @@ import {
 import type { AdminClient } from "../../lib/execution/sync-executor";
 import type { QuantityTier } from "../../lib/pricing/quantity-breaks";
 import type { ResolvableCampaign } from "../../lib/pricing/types";
-import { describeMarketSkips, describeMovedMarket } from "../../lib/markets/guardrails";
+import { describeMarketSkips, describeMovedMarket, describeStaleSettingMarket } from "../../lib/markets/guardrails";
 import { logger } from "../../lib/logging/logger";
 import { metric } from "../../lib/telemetry/metrics";
 import { LANDED } from "../../lib/execution/landed";
@@ -408,6 +408,7 @@ export async function applyMarketSurfaces(
     const skipNotes = [
       ...describeMarketSkips(priceListLabel(list), list.currency, outcome.rows, plan.inStoreCurrency),
       ...describeMovedMarket(priceListLabel(list), plan.moved.length),
+      ...describeStaleSettingMarket(priceListLabel(list), plan.stale.length),
     ];
 
     if (rows.length === 0) {

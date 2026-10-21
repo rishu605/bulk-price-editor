@@ -29,6 +29,8 @@ import type { ResolvableCampaign } from "../../lib/pricing/types";
 import { marketGuardrails } from "../../lib/markets/guardrails";
 import { guardrailsFor, shopCurrency } from "../settings.server";
 import { inChunks } from "../../lib/db/chunk";
+import { LANDED } from "../../lib/execution/landed";
+import { PRICES_MAY_BE_LIVE, type CampaignState } from "../../lib/lifecycle/transitions";
 
 export interface MarketList {
   priceListGid: string;
@@ -61,6 +63,11 @@ export interface MarketPlan {
    * a campaign had already moved, so no baseline could be recorded for them (#841).
    */
   moved: string[];
+  /**
+   * Variants this market is not priced for because its percentage has moved since their
+   * price here was recorded, and a campaign's price on them hides today's (#1093).
+   */
+  stale: string[];
   /**
    * The market is priced in the store's own currency, so recorded costs and the store's
    * minimum price apply to it as they do to the base price. In any other currency they
@@ -104,8 +111,8 @@ export async function planMarket(
   campaigns: readonly ResolvableCampaign[],
   client: AdminClient,
 ): Promise<MarketPlan | null> {
-  const { prices: baselines, compareAts, moved } = await marketBaselines(shopId, list, [...variantGids], client);
-  if (baselines.size === 0 && moved.length === 0) return null;
+  const { prices: baselines, compareAts, moved, stale } = await marketBaselines(shopId, list, [...variantGids], client);
+  if (baselines.size === 0 && moved.length === 0 && stale.length === 0) return null;
 
   const inStoreCurrency = list.currency === (await shopCurrency(shopId));
   const costs = inStoreCurrency ? await recordedCosts(shopId, list.currency, [...baselines.keys()]) : new Map();
@@ -138,7 +145,7 @@ export async function planMarket(
     })),
   });
 
-  return { shopId, list, baselines, outcome, moved, inStoreCurrency };
+  return { shopId, list, baselines, outcome, moved, stale, inStoreCurrency };
 }
 
 /** Each variant's recorded cost, the way the base surface reads it: baseline first, then mirror. */
@@ -251,7 +258,7 @@ export async function marketBaselines(
   list: MarketList,
   variantGids: string[],
   client: AdminClient,
-): Promise<{ prices: Map<string, Money>; compareAts: Map<string, Money>; moved: string[] }> {
+): Promise<{ prices: Map<string, Money>; compareAts: Map<string, Money>; moved: string[]; stale: string[] }> {
   const stored = await prisma.baseline.findMany({
     where: {
       shopId,
@@ -260,11 +267,22 @@ export async function marketBaselines(
       supersededAt: null,
       variantGid: { in: variantGids },
     },
-    select: { variantGid: true, basePrice: true, baseCompareAt: true, currency: true },
+    select: { id: true, variantGid: true, basePrice: true, baseCompareAt: true, currency: true, handSet: true, listAdjustmentBps: true },
   });
 
+  // Read again when the list's percentage has moved since (#1093), as far as it can be.
+  const { refresh, unreadable } = await staleSetting(shopId, list, stored);
+  if (refresh.length > 0) {
+    await prisma.baseline.updateMany({
+      where: { id: { in: refresh.map((row) => row.id) }, supersededAt: null },
+      data: { supersededAt: new Date() },
+    });
+  }
+  const dropped = new Set([...refresh, ...unreadable].map((row) => row.variantGid));
+  const current = stored.filter((row) => !dropped.has(row.variantGid));
+
   const out = new Map<string, Money>(
-    stored.map((row) => [
+    current.map((row) => [
       row.variantGid,
       money(Number(row.basePrice), row.currency || list.currency),
     ]),
@@ -272,13 +290,15 @@ export async function marketBaselines(
   // Only a fixed price carries one -- see `captureMarketBaselines`. One a campaign captured
   // before #1039 has none, and its revert clears the strike-through as it always did.
   const compareAts = new Map<string, Money>(
-    stored
+    current
       .filter((row) => row.baseCompareAt !== null)
       .map((row) => [row.variantGid, money(Number(row.baseCompareAt), row.currency || list.currency)]),
   );
 
-  const missing = variantGids.filter((gid) => !out.has(gid));
-  if (missing.length === 0) return { prices: out, compareAts, moved: [] };
+  const stale = unreadable.map((row) => row.variantGid);
+  const unread = new Set(stale);
+  const missing = variantGids.filter((gid) => !out.has(gid) && !unread.has(gid));
+  if (missing.length === 0) return { prices: out, compareAts, moved: [], stale };
 
   const moved = await movedSinceBaseline(shopId, list, missing);
   const captured = await captureMarketBaselines(
@@ -292,7 +312,55 @@ export async function marketBaselines(
     if (baseline.compareAt) compareAts.set(variantGid, baseline.compareAt);
   }
 
-  return { prices: out, compareAts, moved: [...moved] };
+  return { prices: out, compareAts, moved: [...moved], stale };
+}
+
+/**
+ * Derived baselines this list's percentage has moved past since they were read (#1093).
+ *
+ * A percentage market's baseline was read once, the first time a campaign priced it, and
+ * never again. A merchant who then moved the list from 10% to 30% off had every later sale
+ * there computed from the 10%-off price: 20% off it was about 3% *above* the market's new
+ * regular price, verified clean, with nothing said.
+ *
+ * `refresh`: read again now, superseded so the capture below records the price at today's
+ * setting -- possible where the list derives the price right now (no fixed price on it) and
+ * the store price is the one it was before any sale. A baseline with no recorded setting,
+ * captured before this, is refreshed the same way when it can be, and trusted otherwise.
+ *
+ * `unreadable`: recorded at a different setting, and a campaign's price is on the variant
+ * now, so today's regular price cannot be read. Left out of the market and said, as a
+ * variant whose store price was already moved is (#841), rather than priced from a regular
+ * price the market no longer has.
+ */
+async function staleSetting<T extends { id: string; variantGid: string; handSet: boolean | null; listAdjustmentBps: number | null }>(
+  shopId: string,
+  list: MarketList,
+  stored: readonly T[],
+): Promise<{ refresh: T[]; unreadable: T[] }> {
+  if (list.adjustmentBps === null) return { refresh: [], unreadable: [] };
+  const derived = stored.filter((row) => row.handSet !== true && row.listAdjustmentBps !== list.adjustmentBps);
+  if (derived.length === 0) return { refresh: [], unreadable: [] };
+
+  const gids = derived.map((row) => row.variantGid);
+  const [fixedRows, moved, onSale] = await Promise.all([
+    inChunks(gids, (batch) =>
+      prisma.priceSurfaceEntry.findMany({
+        where: { shopId, priceListGid: list.priceListGid, variantGid: { in: batch }, livePrice: { not: null } },
+        select: { variantGid: true },
+      }),
+    ),
+    movedSinceBaseline(shopId, list, gids),
+    baseOnSale(shopId, gids),
+  ]);
+  const fixed = new Set(fixedRows.map((row) => row.variantGid));
+  const readable = (row: T) => !fixed.has(row.variantGid) && !moved.has(row.variantGid) && !onSale.has(row.variantGid);
+
+  return {
+    refresh: derived.filter(readable),
+    // Unknown setting and unreadable now: trusted, as every baseline was before this.
+    unreadable: derived.filter((row) => !readable(row) && row.listAdjustmentBps !== null),
+  };
 }
 
 /**
@@ -347,6 +415,35 @@ async function movedSinceBaseline(
     if (now !== null && now !== undefined && now !== row.basePrice) moved.add(row.variantGid);
   }
   return moved;
+}
+
+/**
+ * Variants whose store price a campaign that may still be live has written, by the ledger
+ * (#1093). The mirror catches up only as a run settles, so mid-run it can still show the price
+ * from before the run's own write -- and a market price read then would be the sale's, derived,
+ * taken for the regular one. The newest landed or in-flight base write decides: an apply's
+ * means a sale is on the store price; a revert's means it is back.
+ */
+async function baseOnSale(shopId: string, variantGids: readonly string[]): Promise<Set<string>> {
+  const rows = await inChunks([...variantGids], (batch) =>
+    prisma.variantChange.findMany({
+      where: {
+        shopId,
+        surfaceKind: "BASE",
+        priceListGid: "",
+        variantGid: { in: batch },
+        status: { in: ["WRITING", "APPLIED", ...LANDED] },
+      },
+      orderBy: [{ variantGid: "asc" }, { createdAt: "desc" }],
+      distinct: ["variantGid"],
+      select: { variantGid: true, run: { select: { kind: true, campaign: { select: { status: true } } } } },
+    }),
+  );
+  return new Set(
+    rows
+      .filter((row) => row.run.kind !== "REVERT" && PRICES_MAY_BE_LIVE.has(row.run.campaign.status as CampaignState))
+      .map((row) => row.variantGid),
+  );
 }
 
 /**
@@ -542,6 +639,8 @@ async function captureMarketBaselines(
         quantityBreaks: (serialiseLadder(ladders.get(variantGid) ?? []) ??
           undefined) as Prisma.InputJsonValue | undefined,
         handSet: handSet.has(variantGid),
+        // The setting a derived price was read at (#1093); a fixed price has none to go stale.
+        listAdjustmentBps: handSet.has(variantGid) ? null : list.adjustmentBps,
         source: "AUTO_ENROLL" as const,
       })),
       skipDuplicates: true,
