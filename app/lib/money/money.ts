@@ -325,6 +325,12 @@ export function formatMoney(m: Money): string {
 /** Human-readable, locale-aware. For UI only — never for API payloads. */
 export function formatMoneyForDisplay(m: Money, locale = "en-US"): string {
   const exp = exponentOf(m.currency);
+  // Intl takes only a three-letter code and throws a RangeError on USDC, which the Admin
+  // schema lists (#1089). The number in its own precision, with the code after it.
+  if (!/^[A-Z]{3}$/.test(m.currency)) {
+    const number = new Intl.NumberFormat(locale, { minimumFractionDigits: exp, maximumFractionDigits: exp });
+    return `${number.format(m.amount / 10 ** exp)} ${m.currency}`;
+  }
   return new Intl.NumberFormat(locale, {
     style: "currency",
     currency: m.currency,

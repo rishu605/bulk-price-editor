@@ -45,6 +45,7 @@ import { SPACE } from "../lib/ui/spacing";
 import { planUsage } from "../services/plan-usage.server";
 import { usageLine } from "../lib/billing/usage-line";
 import { staleSync } from "../lib/dashboard/stale-sync";
+import { syncFailureHeading } from "../lib/dashboard/sync-failure";
 import { Caption, Secondary } from "../components/Type";
 import { Card } from "../components/Card";
 import { Fact } from "../components/Fact";
@@ -497,11 +498,11 @@ export default function Dashboard() {
   }
 
   // A sync that stopped says where, and how to carry on (#801). Not while one is running:
-  // the running one is the answer.
+  // the running one is the answer. A currency Anchor cannot price is said as that (#1089).
   if (!syncing && syncNow.failure) {
     attention.push({
       id: "sync-stopped",
-      heading: "The last sync did not finish cleanly",
+      heading: syncFailureHeading(syncNow.failure),
       tone: "warning",
       body: (
         <>

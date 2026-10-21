@@ -4,9 +4,9 @@
  * Services read `bigint` columns, not `Money`, so they need a formatter that takes
  * the raw value. Three separate copies of this had grown across the service layer,
  * each hardcoding `["JPY", "KRW"]` as the zero-decimal list -- which is wrong: the
- * real table has seventeen zero-decimal currencies and seven three-decimal ones, so
+ * real table has twenty zero-decimal currencies and seven three-decimal ones, so
  * those copies would render BHD and KWD with two decimals instead of three and put a
- * spurious decimal point on fifteen currencies that have none.
+ * spurious decimal point on eighteen currencies that have none.
  *
  * This delegates to the single currency table so there is one answer.
  */
