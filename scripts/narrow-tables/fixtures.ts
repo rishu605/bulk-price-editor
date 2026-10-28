@@ -261,6 +261,8 @@ export const runs: RunSummary[] = [
     skipped: 0,
     startedAt: "2026-09-25T10:00:00.000Z",
     finishedAt: "2026-09-25T10:04:00.000Z",
+    // The longest sentence the Email column says, with its link (#1123).
+    email: { text: "No email: “A campaign was reverted” is switched off", toSettings: true },
   },
   {
     id: "r1",
@@ -272,5 +274,6 @@ export const runs: RunSummary[] = [
     skipped: 0,
     startedAt: "2026-09-24T10:00:00.000Z",
     finishedAt: "2026-09-24T10:06:00.000Z",
+    email: { text: "Emailed merchandising-team@dartmode-labs.example", toSettings: false },
   },
 ];
