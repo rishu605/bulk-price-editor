@@ -362,7 +362,7 @@ export function testEmailMessage(result: DeliveryResult): string {
     case "no-recipient":
       return "Save an address first. A test goes to the saved address.";
     case "unconfigured":
-      return "Anchor can't send email right now, so nothing was sent. This is on our side; your address is saved.";
+      return "Anchor can't send email right now, so nothing was sent. This is on our side, not a setting you've missed.";
     case "failed":
       return `The mail provider refused it${result.status ? ` (status ${result.status})` : ""}, so nothing was sent. Check the address and try again.`;
     default:
