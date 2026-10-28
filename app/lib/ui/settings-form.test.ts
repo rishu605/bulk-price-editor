@@ -70,3 +70,37 @@ describe("the save bar", () => {
     expect(saveBar).toContain("if (!control) return");
   });
 });
+
+describe("a save that registers (#1119, #1120)", () => {
+  const start = route.indexOf("export const action");
+  const action = route.slice(start, route.indexOf("\n});", start));
+
+  it("refuses a malformed address before anything is written", () => {
+    // "ops" used to be saved as no address under "Settings saved."
+    const checked = action.indexOf("notificationInputProblems(");
+    expect(checked, "the address is not checked").toBeGreaterThan(-1);
+    expect(checked).toBeLessThan(action.indexOf("writeSettings("));
+    expect(checked).toBeLessThan(action.indexOf("writePreferences("));
+  });
+
+  it("says the result in a toast, where the merchant is looking", () => {
+    // The banner is at the top of a long page; Notifications is the last card on it.
+    expect(route).toContain("showToast(");
+    expect(route).toContain('"Settings saved"');
+  });
+
+  it("reads the stored address back, and asks the sender whether it can send", () => {
+    expect(route).toContain("savedAddressLine(notifications.email)");
+    expect(route).toContain("mailConfigured()");
+    expect(route).not.toContain("process.env.RESEND_API_KEY");
+  });
+
+  it("no longer tells the merchant their deployment is not configured", () => {
+    // App Review read this, above the field they had just filled in, as their save failing.
+    expect(route).not.toContain("not configured on this deployment");
+  });
+
+  it("names who changed the notification preferences", () => {
+    expect(action).toMatch(/writePreferences\([\s\S]*actor,\s*\)/);
+  });
+});

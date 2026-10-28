@@ -244,7 +244,7 @@ export async function runCampaign(
     // "This apply stopped part-way. Some prices may have changed" over it was untrue.
     const writing = started.writing === true && !(error instanceof BulkSubmissionError);
     const failed = await failRun(started.runId, error, writing);
-    if (failed?.ended) await notifyRunFailed(shopId, campaignId, options, failed, error, writing);
+    if (failed?.ended) await notifyRunFailed(shopId, campaignId, options, failed, error, writing, started.runId);
 
     // It wrote, then threw (#802). Handing the campaign back to where it started -- Draft,
     // for a manual apply -- told the merchant "nothing has been written to your storefront"
@@ -424,6 +424,7 @@ async function notifyRunFailed(
   failed: FailedRun,
   error: unknown,
   writing: boolean,
+  runId: string | undefined,
 ): Promise<void> {
   try {
     const campaign = await prisma.campaign.findUnique({ where: { id: campaignId }, select: { name: true } });
@@ -440,7 +441,7 @@ async function notifyRunFailed(
         clamped: 0,
       },
       reasons: [writing ? stoppedPartWay(error, failed, options).userMessage : toAppError(error).userMessage],
-    });
+    }, { runId });
   } catch {
     // Never let telling the merchant about a failure become a second one.
   }
@@ -1288,7 +1289,7 @@ async function executeCampaignRun(
       clamped: outcome.counts.clamped,
     },
     reasons: messages.slice(0, 5),
-  });
+  }, { runId: run.id });
 
   // Told after the fact, never awaited for correctness. A campaign must not fail because
   // an automation could not be notified about it.

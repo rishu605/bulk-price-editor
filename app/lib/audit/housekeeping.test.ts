@@ -21,6 +21,13 @@ describe("what counts as the app talking to itself", () => {
     expect(isHousekeeping("mirror.audited")).toBe(true);
   });
 
+  it("hides each email's outcome, one per run, which Settings and the run itself say (#1121)", () => {
+    expect(isHousekeeping("notification.delivery")).toBe(true);
+    // The rest of the namespace is an email a merchant was sent, once, and stays.
+    expect(isHousekeeping("notification.drift")).toBe(false);
+    expect(isHousekeeping("notification.digest")).toBe(false);
+  });
+
   it("keeps everything a merchant did or decided", () => {
     for (const action of [
       "campaign.transition",

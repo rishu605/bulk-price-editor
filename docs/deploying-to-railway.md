@@ -91,13 +91,25 @@ values, so a credential rotation does not need a redeploy.
 | `TOKEN_ENCRYPTION_KEY` | 32+ random bytes | secret — see below |
 | `NODE_ENV` | `production` | set by the Dockerfile; override only to debug |
 | `RESEND_API_KEY` | from Resend | secret — support requests and notification emails |
-| `NOTIFICATION_FROM_EMAIL` | a sender on a domain verified in Resend | |
+| `NOTIFICATION_FROM_EMAIL` | a sender on a domain verified in Resend | never `onboarding@resend.dev` — see below |
 | `SUPPORT_EMAIL` | where support requests arrive | |
 
 **The three mail variables are required in production.** Without them Contact support
 cannot send: the page says so and shows the support address instead, and `/healthz` reads
 `"degraded"` with a `mail` entry naming them. Shopify's review expects a working support
 contact, and a merchant at an error page is the worst person to send on a detour.
+
+**Set them on both services, as shared variables.** The web service sends what a merchant
+presses — Apply, Revert, Contact support, Send test email — and the worker sends what a
+schedule or the queue runs, so a variable on the web service alone leaves every scheduled
+end silent. Production went from #758 to App Review with none of them set: the reviewer
+saved an address, reverted a campaign to trigger its email, and none came (#1118).
+
+**The sender must be on a domain verified in Resend.** `onboarding@resend.dev`, or any
+unverified domain, is delivered only to the Resend account owner's own address. Everything
+looks configured, `/healthz` reads `ok`, and a merchant's or a reviewer's address receives
+nothing. Settings → Notifications → **Send test email** to an address outside the Resend
+account is the check.
 
 **`TOKEN_ENCRYPTION_KEY` is not optional in a deployed environment.** Access tokens are
 encrypted at the session-storage layer, and without the key the worker reads ciphertext and

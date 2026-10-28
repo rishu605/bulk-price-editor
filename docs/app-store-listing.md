@@ -178,18 +178,35 @@ English only (App Store 4.3.2). The app's interface is in English and nothing el
 
 ## Testing instructions for App Review
 
-No credentials are needed: Anchor has no account of its own and runs entirely inside the
-Shopify admin (4.5.4).
+Pasted into Partner Dashboard → listing → App testing information → Instruction notes,
+exactly as below, with "My app doesn't require an account to use it" ticked. The field takes
+2,800 characters; `review-instructions.test.ts` fails if this stops fitting.
 
-1. Install from the listing. You land on Home, and the catalogue sync starts. A small store
-   finishes in a minute or two.
-2. **Campaigns → Create campaign**: 20% off, all variants. **Create and preview**, then
-   **Apply to storefront**. Prices change, and the Ledger tab lists every row.
-3. **Revert**: every price goes back to its baseline.
-4. **Settings → Plan → Switch to Markets**: Shopify's approval screen opens. On a
-   development store it's a test charge and no money moves. After approval, the page reads
-   *You're on Markets*. **Switch to Free** cancels the subscription. Uninstalling and
-   reinstalling asks for approval again.
+Rewritten for #1125 after the review of 2026-10-29 paused the submission. The version then in
+the dashboard told the reviewer to open a campaign called "Sale", which existed only on our
+store, and never mentioned email, which is the flow the reviewer then tested and failed
+(2.1.4). So these name nothing that only exists on our stores, and walk the email flow.
+
+```text
+No credentials are needed. Anchor has no account or login of its own: it runs inside the Shopify admin on your store's own session, so installing it is the whole set-up. Every feature works on a development store, where the paid plans are test charges.
+
+1. Install. Home opens and the catalogue sync starts; a small store finishes in a minute or two.
+
+2. Email: Settings → Notifications. Type an address in "Send to" and press Save in the top bar. A "Settings saved" toast appears and the card reads "Emails go to <your address>". Press "Send test email": it arrives within a minute (check spam).
+On by default: a run did not finish cleanly, a price was changed outside the app, a campaign was reverted. "A run finished cleanly" is off by default; tick it to be emailed on Apply too.
+
+3. Campaigns → Create campaign: 20% off, all variants → Create and preview. The preview shows the exact prices the campaign will write, computed from each variant's baseline.
+
+4. Apply to storefront. The Runs tab shows the rows written and read back from Shopify, and whether that run's email was sent. The Ledger tab lists every variant.
+
+5. Revert, at any time, including before an end date. Prices go back to their baselines, the "has been reverted" email goes to the address from step 2, the run shows "Emailed <your address>", and Settings → Notifications shows it as the last email.
+
+6. Settings → Plan → Switch to Markets. Shopify's approval screen opens; on a development store it is a test charge. Markets lets a campaign set each market's own price, which needs a market with its own currency (Shopify admin → Settings → Payments → activate the test gateway, then Markets → add a market). Wholesale adds B2B catalogues on Plus stores. Switch to Free cancels.
+
+7. Prices → What's live → Check against Shopify reads every price back from the Admin API.
+
+Any error shows a code like ANC-XXXX-XXXX; Settings → Diagnostics explains it.
+```
 
 ---
 

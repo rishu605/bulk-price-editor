@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { copyText } from "../lib/ui/clipboard";
+import { showToast } from "../lib/ui/toast";
 import { SPACE } from "../lib/ui/spacing";
 import { Caption } from "./Type";
 
@@ -57,7 +58,7 @@ export function CopyableId({
   const copy = async () => {
     const ok = await copyText(value);
     setCopied(ok);
-    toast(
+    showToast(
       ok
         ? `${what.charAt(0).toUpperCase()}${what.slice(1)} copied`
         : `The browser blocked copying the ${what}. Select it and press Ctrl+C, or ⌘C on a Mac.`,
@@ -80,8 +81,3 @@ export function CopyableId({
   );
 }
 
-/** The admin's toast, when App Bridge is there to show it. It is not during a render test. */
-function toast(message: string, isError: boolean) {
-  if (typeof shopify === "undefined") return;
-  shopify.toast.show(message, { isError });
-}

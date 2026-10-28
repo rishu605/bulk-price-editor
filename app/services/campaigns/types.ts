@@ -298,6 +298,11 @@ export interface RunSummary {
   skipped: number;
   startedAt: string | null;
   finishedAt: string | null;
+  /**
+   * Whether this run's email went out, in a sentence (#1123). Null for a run with no record,
+   * which is every run from before the record existed.
+   */
+  email?: { text: string; toSettings: boolean } | null;
 }
 
 export interface LedgerRow {

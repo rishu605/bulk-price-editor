@@ -59,3 +59,25 @@ describe("View ledger", () => {
     expect(html).toContain("Nothing written");
   });
 });
+
+describe("each run's email (#1123)", () => {
+  it("says where a run's email went", () => {
+    const html = rendered("/app/campaigns/c1?tab=runs", [run({ email: { text: "Emailed ops@shop.com", toSettings: false } })], null);
+    expect(html).toContain("Emailed ops@shop.com");
+  });
+
+  it("links to Settings when the reason is one the merchant can change there", () => {
+    const html = rendered(
+      "/app/campaigns/c1?tab=runs",
+      [run({ email: { text: "No email: no address was saved", toSettings: true } })],
+      null,
+    );
+    expect(html).toMatch(/No email: no address was saved[^<]*<[^>]*>?.*href="\/app\/settings"/s);
+  });
+
+  it("shows a run from before the record as blank, not as unsent", () => {
+    const html = rendered("/app/campaigns/c1?tab=runs", [run({ email: null })], null);
+    expect(html).not.toContain("No email");
+    expect(html).not.toContain("Emailed");
+  });
+});

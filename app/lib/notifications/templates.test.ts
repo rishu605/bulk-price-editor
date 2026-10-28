@@ -166,6 +166,24 @@ describe("compose", () => {
   });
 });
 
+describe("the test email (#1122)", () => {
+  it("says it is a test, names the store, and lists what the merchant will be emailed about", () => {
+    const email = compose({
+      kind: "test",
+      shopName: "boltify-apps.myshopify.com",
+      switchedOn: ["A run did not finish cleanly", "A campaign was reverted"],
+    });
+    expect(email.subject).toBe("Test email from Anchor for boltify-apps.myshopify.com");
+    expect(email.text).toContain("Settings → Notifications");
+    expect(email.text).toContain("  - A run did not finish cleanly\n  - A campaign was reverted");
+  });
+
+  it("says so when every notification is off, rather than listing nothing", () => {
+    const email = compose({ kind: "test", shopName: "DartMode", switchedOn: [] });
+    expect(email.text).toContain("Every notification is switched off");
+  });
+});
+
 describe("no price values in any email body", () => {
   /**
    * Anything that reads as money. Deliberately broad — a decimal, a currency symbol,
@@ -213,6 +231,12 @@ describe("no price values in any email body", () => {
     expect(email.subject).toContain("$5 off everything");
     // Everything the app itself generated is still clean.
     expect(email.text.replace("$5 off everything", "")).not.toMatch(MONEY);
+  });
+
+  it("holds for a test email", () => {
+    const email = compose({ kind: "test", shopName: "DartMode", switchedOn: ["A campaign was reverted"] });
+    expect(email.subject).not.toMatch(MONEY);
+    expect(email.text).not.toMatch(MONEY);
   });
 
   it("holds for a digest", () => {
