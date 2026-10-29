@@ -61,11 +61,40 @@ function drawn(host: Element): HTMLElement | null {
   return (host.shadowRoot?.firstElementChild as HTMLElement | null) ?? null;
 }
 
+/**
+ * Content drawn for screen readers only.
+ *
+ * `Blank` puts a visually hidden word beside its dash -- "None", or what `means` says --
+ * so a listener hears an answer rather than nothing (#798). Polaris clips that word to
+ * nothing on purpose, but its text still has a box, and the box reaches past the cell: so
+ * every empty cell measured as "—None" losing 33px, and the check was red on every page
+ * with a gap in it (#1127). Nobody can see it, so it is not content a merchant can lose.
+ */
+function screenReaderOnly(element: Element): boolean {
+  return element.getAttribute("accessibilityVisibility") === "exclusive";
+}
+
+/** The rendered boxes of a node and what is in it, leaving out what nobody sees. */
+function visibleRects(node: Node): DOMRect[] {
+  if (node.nodeType === Node.TEXT_NODE) {
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    return [...range.getClientRects()];
+  }
+  if (!(node instanceof Element) || screenReaderOnly(node)) return [];
+  return [...node.getClientRects(), ...[...node.childNodes].flatMap(visibleRects)];
+}
+
+/** The text a merchant can see, which is what a clipped cell is reported as. */
+function visibleText(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
+  if (!(node instanceof Element) || screenReaderOnly(node)) return "";
+  return [...node.childNodes].map(visibleText).join("");
+}
+
 /** The rendered extent of a cell's own content: its text and elements, not its padding. */
 function contentBox(cell: Element): DOMRect | null {
-  const range = document.createRange();
-  range.selectNodeContents(cell);
-  const rects = [...range.getClientRects()].filter((rect) => rect.width > 0 && rect.height > 0);
+  const rects = [...cell.childNodes].flatMap(visibleRects).filter((rect) => rect.width > 0 && rect.height > 0);
   if (rects.length === 0) return null;
 
   const left = Math.min(...rects.map((rect) => rect.left));
@@ -120,7 +149,7 @@ export function measureTable(table: Element): TableReport {
       const entry = {
         column: columns[index] ?? `column ${index + 1}`,
         row: rowIndex + 1,
-        text: cell.textContent?.replace(/\s+/g, " ").trim() ?? "",
+        text: visibleText(cell).replace(/\s+/g, " ").trim(),
         hidden: round(hidden),
       };
       clipped.push(entry);
