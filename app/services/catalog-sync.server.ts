@@ -181,6 +181,8 @@ export async function syncCatalog(
   let hasNext = true;
 
   while (hasNext) {
+    // Before the page is read: the earliest it can describe a product (#1107).
+    const readAt = new Date();
     const response = await client.graphql(PRODUCTS_PAGE, { variables: { cursor } });
     const body = (await response.json()) as {
       data?: { products?: { pageInfo?: { hasNextPage?: boolean; endCursor?: string | null }; nodes?: ProductNode[] } };
@@ -246,7 +248,7 @@ export async function syncCatalog(
       }
 
       try {
-        await writeCatalogRows(shopId, shopCurrency, rows);
+        await writeCatalogRows(shopId, shopCurrency, rows, readAt);
         result.variants += rows.length;
       } catch (error) {
         result.errors.push(

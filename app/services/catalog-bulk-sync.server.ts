@@ -179,6 +179,10 @@ export async function syncCatalogViaBulk(
     return result;
   }
 
+  // Before Shopify reads anything into the file: the earliest the file can describe a
+  // product, which is what a price the mirror has since said it does not know is weighed
+  // against (#1107).
+  const readAt = new Date();
   const submitted = await withRetry(
     () => client.request<AnchorCatalogBulkQueryMutation>(BULK_QUERY_RUN, { query: CATALOG_BULK_QUERY }),
     isThrottledError,
@@ -260,7 +264,7 @@ export async function syncCatalogViaBulk(
   if (!finished.url) return result;
 
   const source = options.fetchResult ?? streamHttp;
-  await ingest(source(finished.url), shopId, currency, result, options.onProgress);
+  await ingest(source(finished.url), shopId, currency, readAt, result, options.onProgress);
   // Shopify's costs onto the current baselines, which the guardrails read (#737).
   await carryShopifyCosts(shopId);
 
@@ -309,6 +313,7 @@ async function ingest(
   chunks: AsyncIterable<string>,
   shopId: string,
   currency: string,
+  readAt: Date,
   result: BulkSyncResult,
   onProgress?: BulkSyncOptions["onProgress"],
 ): Promise<void> {
@@ -320,7 +325,7 @@ async function ingest(
     batch = [];
 
     try {
-      const { kept } = await writeCatalogRows(shopId, currency, rows);
+      const { kept } = await writeCatalogRows(shopId, currency, rows, readAt);
       result.written += rows.length;
       result.kept += kept;
     } catch (error) {
