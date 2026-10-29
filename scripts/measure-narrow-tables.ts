@@ -218,13 +218,25 @@ class Browser {
     });
   }
 
-  /** Resolves once Chrome has exited, so its profile can be removed. */
-  close(): Promise<void> {
+  /**
+   * Resolves once Chrome has exited, so its profile can be removed.
+   *
+   * Asked to close rather than killed. Killed, the browser process exits while its helpers
+   * are still writing to the profile, and on a CI runner removing the profile then failed
+   * with ENOTEMPTY in most runs: a red check after every table had measured ok (#1127).
+   * Killed only if it has not gone in ten seconds.
+   */
+  async close(): Promise<void> {
+    if (this.child.exitCode !== null) return;
+    const exited = new Promise<"exited">((resolve) => this.child.once("exit", () => resolve("exited")));
+    // No reply is awaited: Chrome may close the socket before it sends one.
+    this.socket.send(JSON.stringify({ id: this.next++, method: "Browser.close" }));
+    const late = new Promise<"late">((resolve) => setTimeout(() => resolve("late"), 10_000).unref());
+    if ((await Promise.race([exited, late])) === "late") {
+      this.child.kill();
+      await exited;
+    }
     this.socket.close();
-    if (this.child.exitCode !== null) return Promise.resolve();
-    const exited = new Promise<void>((resolve) => this.child.once("exit", () => resolve()));
-    this.child.kill();
-    return exited;
   }
 }
 
@@ -268,6 +280,18 @@ async function measureAt(browser: Browser, dir: string, width: number): Promise<
     }
   }
   throw new Error(`No report at ${width}px within 90 seconds.`);
+}
+
+/**
+ * Removes what a run made in the temp folder. Said, not thrown: the exit code is the
+ * verdict on the tables, and a folder left behind is not one (#1127).
+ */
+function tidy(path: string) {
+  try {
+    rmSync(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  } catch (error) {
+    console.warn(`Could not remove ${path}: ${String(error)}`);
+  }
 }
 
 async function main() {
@@ -320,8 +344,8 @@ async function main() {
     }
   } finally {
     await browser.close();
-    rmSync(join(dir, "profile"), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-    if (!out) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    tidy(join(dir, "profile"));
+    if (!out) tidy(dir);
   }
 
   if (unmeasured > 0) process.exit(2);
