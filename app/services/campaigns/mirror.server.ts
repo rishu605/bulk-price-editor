@@ -36,6 +36,25 @@ export async function settleMirror(runId: string): Promise<void> {
   // and syncs stamp (#911). Converted to UTC explicitly.
   const now = Prisma.sql`(${new Date()}::timestamptz AT TIME ZONE 'UTC')`;
 
+  // Not over a newer version of the variant (#1106). A run settles once, at its end, and
+  // a products webhook for an edit the merchant made after this write -- minutes into a
+  // sync run, an hour into a bulk one -- is newer than the mirror and was applied. The
+  // campaign was still Applying, so no drift was recorded, and settling then wrote the
+  // ledger's price over the edit: What's live showed the sale on a variant whose live
+  // price was the merchant's. So a row stamped by Shopify later than this write is left
+  // as it is. A row without that stamp, or a write without one, is settled as before.
+  //
+  // Later, strictly, and not `heldIsNewer`'s same-second rule, which the webhook and the
+  // syncs decide by (#1087). That rule calls a read stale when it shows, in the second a
+  // landed write of ours was stamped, the price that write replaced. A revert in the same
+  // second as its apply is a write of exactly that price, and was left unsettled with the
+  // sale in the mirror.
+  //
+  // Asked of the index row in both statements. The first leaves a later row as it found
+  // it, and a row it settled is stamped no later than its own write, so the second sees
+  // the same answer -- and sees a webhook that lands between the two as later, too.
+  const notNewer = Prisma.sql`NOT COALESCE(v."remoteUpdatedAt" > c."remoteUpdatedAt", false)`;
+
   // The version of the variant this write produced, as far as webhooks and catalogue syncs
   // are concerned (#828, #1087). The products webhook skips a delivery older than
   // `remoteUpdatedAt`, and a sync a read older than it; left where
@@ -56,7 +75,7 @@ export async function settleMirror(runId: string): Promise<void> {
         ),
         "syncedAt" = ${now}
     FROM "variant_changes" c
-    WHERE ${landed} AND v."shopId" = c."shopId" AND v."variantGid" = c."variantGid"`;
+    WHERE ${landed} AND v."shopId" = c."shopId" AND v."variantGid" = c."variantGid" AND ${notNewer}`;
   // After the stamp above, never before it. A catalogue sync writes a row only where the
   // stamp is older than its read (#1087), so once it has moved, a sync that read the product
   // before this write leaves both rows alone. In the other order there was a moment when
@@ -67,9 +86,10 @@ export async function settleMirror(runId: string): Promise<void> {
     SET "livePrice" = c."intendedPrice",
         "liveCompareAt" = CASE WHEN c."intendedCompareAtSet" THEN c."intendedCompareAt" ELSE e."liveCompareAt" END,
         "syncedAt" = ${now}
-    FROM "variant_changes" c
+    FROM "variant_changes" c, "variant_index" v
     WHERE ${landed} AND e."shopId" = c."shopId" AND e."variantGid" = c."variantGid"
-      AND e."surfaceKind" = 'BASE' AND e."priceListGid" = ''`;
+      AND e."surfaceKind" = 'BASE' AND e."priceListGid" = ''
+      AND v."shopId" = c."shopId" AND v."variantGid" = c."variantGid" AND ${notNewer}`;
   await prisma.$executeRaw`
     UPDATE "price_surface_entries" e
     SET "livePrice" = NULL, "liveCompareAt" = NULL, "syncedAt" = ${now}
