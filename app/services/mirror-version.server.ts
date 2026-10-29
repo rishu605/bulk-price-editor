@@ -26,6 +26,14 @@
  *     is applied (#932); so is the same price, which changes nothing. The one case this
  *     cannot tell apart is an edit within that second back to the very price the write
  *     replaced.
+ *   - A price the mirror has said it does not know since the read was taken: newer in the
+ *     mirror (#1107). A run that cannot vouch for a write settles that price to null and
+ *     leaves the version from before the run, having no stamp of Shopify's for a write it
+ *     never heard back about. By the version alone, a catalogue read begun before the run,
+ *     or a webhook delayed from before the write, was no older, and filled the null with
+ *     the price from before the run while the sale may have been live. So the null's own
+ *     moment, `syncedAt`, is the version here, against when the read was taken: a sync's
+ *     start on our clock, a webhook's stamp. A read that began after it fills it.
  *   - Otherwise, and whenever either side has no stamp: not newer, and the read is written.
  *     A mirror nobody has written since the read is exactly what a read is for correcting.
  */
@@ -49,14 +57,20 @@ const LANDED_SQL = Prisma.raw(LANDED.map((status) => `'${status}'`).join(", "));
 /**
  * The rule, as a SQL condition that is true or false and never null: the `variant_index` row
  * `held` holds a newer version of its variant than a read stamped `read.stamp`, showing
- * `read.price`.
+ * `read.price`, and taken at `read.takenAt`.
  *
- * `held` names the row (a table name or alias); `read.stamp` is a `timestamp` in UTC, as the
- * mirror's columns hold it, and `read.price` a `bigint`.
+ * `held` names the row (a table name or alias); `read.stamp` and `read.takenAt` are
+ * `timestamp`s in UTC, as the mirror's columns hold them, and `read.price` a `bigint`.
+ * `read.takenAt` is the earliest the read can describe the product: a sync's start, before
+ * Shopify read anything into it, or a webhook's stamp.
  */
-export function heldIsNewer(held: Prisma.Sql, read: { stamp: Prisma.Sql; price: Prisma.Sql }): Prisma.Sql {
+export function heldIsNewer(
+  held: Prisma.Sql,
+  read: { stamp: Prisma.Sql; price: Prisma.Sql; takenAt: Prisma.Sql },
+): Prisma.Sql {
   return Prisma.sql`COALESCE(
     ${held}."remoteUpdatedAt" > ${read.stamp}
+    OR (${held}."price" IS NULL AND ${held}."syncedAt" > ${read.takenAt})
     OR (
       ${held}."remoteUpdatedAt" = ${read.stamp}
       AND ${read.price} IS DISTINCT FROM ${held}."price"
@@ -91,6 +105,8 @@ export async function newerInMirror(shopId: string, reads: readonly VariantRead[
     WHERE ${heldIsNewer(Prisma.raw("v"), {
       stamp: Prisma.raw(`(r.stamp::timestamptz AT TIME ZONE 'UTC')`),
       price: Prisma.raw("r.price::bigint"),
+      // A delivery describes its product as it was at its own stamp.
+      takenAt: Prisma.raw(`(r.stamp::timestamptz AT TIME ZONE 'UTC')`),
     })}`;
   return new Set(rows.map((row) => row.variantGid));
 }

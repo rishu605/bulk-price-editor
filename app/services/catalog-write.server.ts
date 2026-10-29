@@ -57,6 +57,8 @@ export async function writeCatalogRows(
   shopId: string,
   currency: string,
   rows: readonly CatalogRow[],
+  /** When the read began, before Shopify read anything into it (#1107). */
+  readAt: Date,
 ): Promise<{ kept: number }> {
   if (rows.length === 0) return { kept: 0 };
 
@@ -162,7 +164,11 @@ export async function writeCatalogRows(
             "syncedAt" = ${now}
         FROM incoming i
         WHERE v."shopId" = ${shopId} AND v."variantGid" = i."variantGid"
-          AND NOT ${heldIsNewer(Prisma.raw("v"), { stamp: Prisma.raw("i.stamp"), price: Prisma.raw(`i."price"`) })}
+          AND NOT ${heldIsNewer(Prisma.raw("v"), {
+            stamp: Prisma.raw("i.stamp"),
+            price: Prisma.raw(`i."price"`),
+            takenAt: Prisma.sql`(${readAt}::timestamptz AT TIME ZONE 'UTC')`,
+          })}
         RETURNING v."variantGid"
       ),
       surfaced AS (
