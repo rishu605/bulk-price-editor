@@ -279,10 +279,16 @@ export function describePath(decision: MarketPathDecision, marketName: string): 
   if (decision.path === "market-wide") {
     const percent = Math.abs(decision.bps) / 100;
     const rounded = Number.isInteger(percent) ? String(percent) : percent.toFixed(2);
+    // And the products it does not land on exactly: the percentage is rounded once, at the
+    // end, and the campaign's price per product is not, so some come out a cent apart and
+    // get an exact price (#1110). Said here, because "keep following your base prices" is
+    // not true of those.
     return (
       `${marketName} will be repriced with a single market-wide ${rounded}% change ` +
       `rather than a price per product. Prices there keep following your base prices, ` +
-      `and undoing the campaign restores this market's own percentage.`
+      `and undoing the campaign restores this market's own percentage. A product the ` +
+      `percentage rounds a cent away from the campaign's price gets an exact price instead, ` +
+      `which undoing the campaign removes.`
     );
   }
 

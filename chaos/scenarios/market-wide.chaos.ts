@@ -22,6 +22,8 @@ import { describe, expect, it } from "vitest";
 import prisma from "../../app/db.server";
 import { describeCorrections } from "../../app/lib/markets/uniform";
 import { parseMoney } from "../../app/lib/money/money";
+import { previewCampaign } from "../../app/services/campaigns/preview.server";
+import { chaosAdminClient } from "../harness/http-client";
 import { withChaos, type ChaosContext } from "../harness/scenario";
 
 const EU = "gid://shopify/PriceList/eu";
@@ -101,6 +103,15 @@ describe("chaos: repricing a market with one mutation", () => {
         );
         const base = await baseOf(chaos);
 
+        // What the Markets card promises before Apply, which the run below has to keep
+        // (#1110): one percentage the prices go on following, and an exact price only for a
+        // product it rounds a cent away.
+        const card = (await previewCampaign(chaos.fixture.shopId, campaignId, { client: chaosAdminClient(chaos.server.endpoint()) }))
+          .markets.find((market) => market.priceListGid === EU)!;
+        expect(card.path).toBe("market-wide");
+        expect(card.explanation).toMatch(/Prices there keep following your base prices/);
+        expect(card.explanation).toMatch(/A product the percentage rounds a cent away from the campaign's price gets an exact price instead/);
+
         const applied = await chaos.apply();
         await chaos.expectHonest(applied.runId);
 
@@ -125,33 +136,33 @@ describe("chaos: repricing a market with one mutation", () => {
           expect(parseMoney(chaos.fake.priceOf(gid, EU)!, "EUR").amount).toBe(expected);
         }
 
-        // Rows are corrected rather than marked verified on trust: for a market in another
-        // currency, every one of them, and not because of rounding.
+        // Rows are corrected rather than marked verified on trust -- and only the ones the
+        // percentage put a minor unit off (#1110).
         //
-        // This said rounding was why, and so did the run, in a sentence to the merchant.
-        // Rounding does put some rows a minor unit apart -- our price rounds the recorded
-        // baseline into euros before the campaign's percentage, Shopify rounds one composed
-        // percentage at the end, and `round(round(x × 0.9) × 0.8)` and `round(x × 0.72)` agree
-        // only by luck -- but it is not what makes every row need one. A list priced by a
-        // percentage answers in the shop's currency (#257), so the read-back has no euro
-        // price to check any row against. And until #1094 the corrections hid something
-        // worse: the run moved the base price too, so the percentage derived every euro price
-        // from a base already 20% off, 0.8 × 0.72 of it, until each row was pinned.
+        // Rounding does put some rows a cent apart: our price rounds the recorded baseline
+        // into euros before the campaign's percentage, Shopify rounds one composed percentage
+        // at the end, and `round(round(x × 0.9) × 0.8)` and `round(x × 0.72)` agree only by
+        // luck. Those need an exact price, and the run says rounding is why. Every other row
+        // is verified as the percentage left it, and keeps following the store price, as the
+        // Markets card said it would.
         //
-        // So what is asserted is the thing the corrections cannot hide: the percentage itself
-        // lands within a cent of every price the ledger promised, composed onto a base price
-        // that did not move. And the run names the cause it had.
+        // Every row used to get one. The read-back asked the list for its `RELATIVE` prices,
+        // which answer in the shop's currency (#257), so no row had a euro price to be checked
+        // against. It now asks what a shopper in Germany pays, as the baselines are read.
         const corrected = chaos.fake.fixedPricesOn(EU);
-        expect(corrected.size).toBe(variantGids.length);
+        const apart: string[] = [];
         for (const gid of variantGids) {
           const derived = parseMoney(chaos.fake.derivedPriceOf(gid, euList)!, "EUR").amount;
-          expect(
-            Math.abs(derived - Math.round(before.get(gid)! * 0.8)),
-            `${gid}: the percentage alone does not give the campaign's price`,
-          ).toBeLessThanOrEqual(1);
+          const off = Math.abs(derived - Math.round(before.get(gid)! * 0.8));
+          expect(off, `${gid}: the percentage alone does not give the campaign's price`).toBeLessThanOrEqual(1);
+          expect(corrected.has(gid), `${gid}: ${off === 1 ? "a cent off, and not corrected" : "at the campaign's price, and pinned anyway"}`).toBe(off === 1);
+          if (off === 1) apart.push(gid);
         }
-        expect(applied.messages).toContain(describeCorrections("Europe", { unchecked: variantGids.length })[0]);
-        expect(applied.messages.join(" "), "named rounding as the cause").not.toContain("rounded");
+        expect(corrected.size, "every product was given an exact price, as if none could be checked").toBeLessThan(variantGids.length);
+        if (apart.length > 0) {
+          expect(applied.messages).toContain(describeCorrections("Europe", { rounding: apart.length })[0]);
+        }
+        expect(applied.messages.join(" "), "said the euro prices could not be checked").not.toContain("could not be checked");
 
         // The campaign's 20% composed with the merchant's own 10%, not replacing it.
         // Writing 20% here would raise every European price by 8% while reporting the
@@ -190,6 +201,8 @@ describe("chaos: repricing a market with one mutation", () => {
         });
         // And nothing to put back on the base price, because nothing moved it.
         expect(await baseOf(chaos), "the revert wrote a base price").toEqual(base);
+        // The exact prices the rounding needed are the campaign's, and go with it.
+        expect(chaos.fake.fixedPricesOn(EU).size, "the revert left an exact price behind").toBe(0);
       },
     );
   });

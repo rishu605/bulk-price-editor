@@ -18,6 +18,7 @@ import type { Prisma } from "@prisma/client";
 
 import prisma from "../../db.server";
 import {
+  readContextualPrices,
   readDerivedPrices,
   writeMarketPrices,
   type MarketPriceRow,
@@ -50,7 +51,8 @@ export interface MarketWideInputs {
   shopId: string;
   campaignId: string;
   runId: string;
-  list: { priceListGid: string; name: string; currency: string };
+  /** `contextCountry`: a country the list's market serves, which verification asks after (#1110). */
+  list: { priceListGid: string; name: string; currency: string; contextCountry?: string | null };
   rows: readonly PlannedRow[];
   /** The campaign's own percentage, before composing with the market's. */
   campaignBps: number;
@@ -125,11 +127,18 @@ export async function applyMarketWide(
   });
 
   // --------------------------------------------------------- read back and verify
-  const derived = await readDerivedPrices(
-    client,
-    list.priceListGid,
-    rows.map((row) => row.ref.variantGid),
-  );
+  //
+  // What a shopper in the market pays, where the list has a market (#1110): asked as the
+  // baselines are, through `contextualPricing` for one of its countries, which answers in the
+  // market's currency with the percentage applied. The list's own `RELATIVE` prices answer in
+  // the shop's currency (#257), so on a list in any other currency no row could be verified,
+  // every one was given an exact price, and the market stopped following the store price the
+  // Markets card had said it would keep following. A list with no market -- a B2B catalogue
+  // -- has no country to ask for, and is read as before.
+  const gids = rows.map((row) => row.ref.variantGid);
+  const derived = list.contextCountry
+    ? await readContextualPrices(client, gids, list.contextCountry)
+    : await readDerivedPrices(client, list.priceListGid, gids);
 
   const drifted: MarketPriceRow[] = [];
   const verified: string[] = [];

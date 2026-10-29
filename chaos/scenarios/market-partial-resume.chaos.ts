@@ -147,9 +147,11 @@ describe("chaos: an apply whose market prices fail (#1001)", () => {
       });
       await syncMarkets(chaosAdminClient(chaos.server.endpoint()), chaos.fixture.shopId);
       await prisma.campaign.update({ where: { id: campaignId }, data: { surfaces: { base: false, priceLists: [WIDE] } as never } });
-      // The first read of what the list derives is before anything is written; the second is
-      // the read-back after the percentage moved.
-      chaos.arm([{ fault: "server-error", after: 1, match: (query) => query.includes("AnchorPriceListDerivedPrices") }]);
+      // The read-back after the percentage moved: what a shopper in Germany pays, asked as the
+      // baselines are (#1110). Any such read once the percentage has moved is that one.
+      chaos.arm([
+        { fault: "server-error", match: (query) => query.includes("AnchorContextualPrices") && chaos.fake.parentWrites.length > 0 },
+      ]);
 
       const applied = await chaos.apply();
       chaos.heal();
