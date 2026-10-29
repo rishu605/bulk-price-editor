@@ -433,11 +433,12 @@ describe("chaos: wholesale quantity breaks", () => {
       await withChaos("b2b-quantity-two-sales", { catalog: { products: 2, variantsPerProduct: 1 }, percent: -20 }, async (chaos) => {
         const { shopId, variantGids } = chaos.fixture;
         const [a, b] = variantGids as [string, string];
-        const { lower, higher, client, inputs } = await twoSales(chaos);
+        const { lower, higher, client, inputs, tierHigher } = await twoSales(chaos);
         const { applyQuantityBreaks, revertQuantityBreaks } = await import("../../app/services/campaigns/b2b-surfaces.server");
 
         // The lower sale gave A its ladder before the higher one existed; it never wrote B.
         await applyQuantityBreaks(shopId, lower.runId, LIST, inputs.filter((input) => input.variantGid === a), TIERS, FLOOR, client);
+        await tierHigher();
         await applyQuantityBreaks(shopId, higher.runId, LIST, inputs, SIX_FOR_20, FLOOR, client);
         expect(ladderOn(chaos, a)).toEqual([["1", "50.00"], ["6", "40.00"]]);
 
@@ -463,10 +464,12 @@ describe("chaos: wholesale quantity breaks", () => {
       await withChaos("b2b-quantity-lower-ends", { catalog: { products: 2, variantsPerProduct: 1 }, percent: -20 }, async (chaos) => {
         const { shopId, variantGids } = chaos.fixture;
         const [a, b] = variantGids as [string, string];
-        const { lower, higher, client, inputs } = await twoSales(chaos);
+        const { lower, higher, client, inputs, tierHigher } = await twoSales(chaos);
         const { applyQuantityBreaks, revertQuantityBreaks } = await import("../../app/services/campaigns/b2b-surfaces.server");
 
+        // As above: A was the lower sale's before the higher one was a tiered sale.
         await applyQuantityBreaks(shopId, lower.runId, LIST, inputs.filter((input) => input.variantGid === a), TIERS, FLOOR, client);
+        await tierHigher();
         await applyQuantityBreaks(shopId, higher.runId, LIST, inputs, SIX_FOR_20, FLOOR, client);
 
         await chaos.revert();
@@ -481,6 +484,37 @@ describe("chaos: wholesale quantity breaks", () => {
           await prisma.variantChange.count({ where: { runId: revertRunId, variantGid: b, surfaceKind: "B2B" } }),
           "the lower sale's revert wrote a ladder it never held",
         ).toBe(0);
+      });
+    });
+
+    // Apply is the other half of rule 4 (#1104). It planned its own tiers alone, so the
+    // lower sale applied after the higher one wrote its ladder over the higher one's, and
+    // a buyer was quoted the lower sale while the higher ran.
+    it("leaves the higher sale's ladders in place when the lower one is applied after it", async () => {
+      await withChaos("b2b-quantity-lower-after", { catalog: { products: 2, variantsPerProduct: 1 }, percent: -20 }, async (chaos) => {
+        const { shopId, variantGids } = chaos.fixture;
+        const [a, b] = variantGids as [string, string];
+        const { lower, higher, client, inputs, tierHigher } = await twoSales(chaos);
+        const { applyQuantityBreaks, revertQuantityBreaks } = await import("../../app/services/campaigns/b2b-surfaces.server");
+
+        await tierHigher();
+        await applyQuantityBreaks(shopId, higher.runId, LIST, inputs, SIX_FOR_20, FLOOR, client);
+        const applied = await applyQuantityBreaks(shopId, lower.runId, LIST, inputs, TIERS, FLOOR, client);
+
+        expect(applied!.clean).toBe(true);
+        expect(ladderOn(chaos, a), "applying the lower sale wrote its ladder over the higher one's on A").toEqual([["1", "50.00"], ["6", "40.00"]]);
+        expect(ladderOn(chaos, b), "applying the lower sale wrote its ladder over the higher one's on B").toEqual([["1", "40.00"], ["6", "32.00"]]);
+        expect(
+          await prisma.variantChange.count({ where: { runId: lower.runId, surfaceKind: "B2B" } }),
+          "the lower sale ledgered a ladder it did not write",
+        ).toBe(0);
+        expect(applied!.messages.join(" ")).toMatch(/2 products keep "chaos\/higher-wholesale-sale"'s quantity breaks/);
+
+        // Ending the higher sale then hands both to the lower one, as before.
+        const endHigher = await runCampaign(shopId, higher.id, client, { actor: "chaos", revert: true, verifySampleRate: 1 });
+        await revertQuantityBreaks(shopId, endHigher.runId, LIST, variantGids, FLOOR, client);
+        expect(ladderOn(chaos, a)).toEqual([["1", "50.00"], ["12", "45.00"]]);
+        expect(ladderOn(chaos, b)).toEqual([["1", "40.00"], ["12", "36.00"]]);
       });
     });
   });
@@ -540,9 +574,11 @@ async function inputsFor(shopId: string, variantGids: readonly string[]): Promis
  * with 12+ at 10% off, and a second at priority 200 with 6+ at 20% off. The first variant is
  * set by hand at $50.00 with the merchant's own ladder; the second at $40.00 with none.
  *
- * Both are applied as the run applies them, then given the catalogue and their tiers: the
- * ladder writer is called here as the run will call it, and the run's own market path is not
- * what these scenarios test.
+ * Both are applied as the run applies them, then given the catalogue: the ladder writer is
+ * called here as the run will call it, and the run's own market path is not what these
+ * scenarios test. The lower sale gets its tiers here; the higher one when the scenario calls
+ * `tierHigher`, so a scenario can have the lower sale write before the higher one is a
+ * tiered sale at all (#1104).
  */
 async function twoSales(chaos: ChaosContext) {
   const { shopId, campaignId, variantGids } = chaos.fixture;
@@ -581,10 +617,12 @@ async function twoSales(chaos: ChaosContext) {
   const higherRun = (await runCampaign(shopId, second.id, client, { actor: "chaos", verifySampleRate: 1 })).runId;
 
   await prisma.campaign.update({ where: { id: campaignId }, data: { surfaces: { base: true, priceLists: [LIST.priceListGid], quantityTiers: TIERS } as never } });
-  await prisma.campaign.update({ where: { id: second.id }, data: { surfaces: { base: true, priceLists: [LIST.priceListGid], quantityTiers: SIX_FOR_20 } as never } });
 
   return {
     client,
+    tierHigher: async () => {
+      await prisma.campaign.update({ where: { id: second.id }, data: { surfaces: { base: true, priceLists: [LIST.priceListGid], quantityTiers: SIX_FOR_20 } as never } });
+    },
     inputs: await inputsFor(shopId, variantGids),
     lower: { id: campaignId, runId: lowerRun },
     higher: { id: second.id, runId: higherRun },

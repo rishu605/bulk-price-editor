@@ -25,6 +25,7 @@ import type { QuantityTier } from "../../lib/pricing/quantity-breaks";
 import { logger } from "../../lib/logging/logger";
 import { metric } from "../../lib/telemetry/metrics";
 import {
+  ladderOwner,
   planLadderRevert,
   planQuantityBreaks,
   type B2BVariantInput,
@@ -35,7 +36,7 @@ import { inChunks } from "../../lib/db/chunk";
 import { laddersHandedTo } from "./handover.server";
 import { recordedCosts } from "./market-plan.server";
 import { parseSurfaces } from "./market-surfaces.server";
-import { competingCampaigns, withScopes } from "./model.server";
+import { competingCampaigns, toResolvable, withScopes } from "./model.server";
 
 export interface B2BSurfaceOutcome {
   priceListGid: string;
@@ -61,7 +62,12 @@ export async function applyQuantityBreaks(
   // Not a tiered campaign. Distinct from an empty ladder, which the planner reports.
   if (tiers === undefined) return null;
 
-  const plan = planQuantityBreaks(variants, tiers, guardrail);
+  const { mine, kept } = await rankedLadders(shopId, runId, list.priceListGid, variants, tiers);
+  const plan = planQuantityBreaks(mine, tiers, guardrail);
+  const keptMessages = [...kept.values()].map(
+    ({ name, count }) =>
+      `${list.name}: ${countOf(count, "product")} keep${count === 1 ? "s" : ""} "${name}"'s quantity breaks, which ranks above this campaign there.`,
+  );
 
   const empty: B2BSurfaceOutcome = {
     priceListGid: list.priceListGid,
@@ -70,7 +76,7 @@ export async function applyQuantityBreaks(
     failed: 0,
     refused: plan.refused.length,
     chunks: 0,
-    messages: plan.messages,
+    messages: [...plan.messages, ...keptMessages],
     clean: true,
   };
 
@@ -89,7 +95,7 @@ export async function applyQuantityBreaks(
 
   await recordLadderResults(runId, shopId, list.priceListGid, result.rows);
 
-  const messages = [...plan.messages];
+  const messages = [...plan.messages, ...keptMessages];
   if (result.failed > 0) {
     messages.unshift(
       `${list.name}: ${result.failed} product${result.failed === 1 ? "" : "s"} did not get their quantity breaks. Each batch is all-or-nothing, so nothing in a failed batch was written.`,
@@ -323,6 +329,47 @@ export async function revertQuantityBreaks(
  * with quantity tiers and this price list among their surfaces, each scoped over these
  * variants as the resolver scopes it (#752). Every one but `besides`, the one ending.
  */
+/**
+ * Which of these variants this campaign's ladder is for: rule 4, one resolution whichever
+ * mode (#1104).
+ *
+ * Every running tiered campaign on the catalogue competes, as `revertQuantityBreaks` has
+ * them compete (#704), and a variant goes to the one `ladderOwner` ranks first. Apply used to
+ * plan this campaign's tiers alone, so applying the lower of two tiered sales wrote its
+ * ladder over the higher one's, and a buyer was quoted the lower sale while the higher ran.
+ *
+ * A variant another campaign wins keeps that campaign's ladder, and nothing is written to
+ * it: that ladder is what `resolve(with C)` leaves there, and it is live. Counted per
+ * campaign, for the message. A variant nobody wins -- this campaign let it go -- is planned
+ * as before: which variants a run hands the writer is the run's to decide.
+ */
+async function rankedLadders(
+  shopId: string,
+  runId: string,
+  priceListGid: string,
+  variants: readonly B2BVariantInput[],
+  tiers: QuantityTier[],
+): Promise<{ mine: B2BVariantInput[]; kept: Map<string, { name: string; count: number }> }> {
+  const kept = new Map<string, { name: string; count: number }>();
+  const run = await prisma.campaignRun.findFirst({ where: { id: runId, shopId }, select: { campaign: true } });
+  if (!run || variants.length === 0) return { mine: [...variants], kept };
+
+  const others = await tieredCampaignsOn(shopId, priceListGid, variants.map((variant) => variant.variantGid), run.campaign.id);
+  if (others.length === 0) return { mine: [...variants], kept };
+
+  // No scope: the variants a run hands in are this campaign's own.
+  const self: TieredCampaign = { ...toResolvable(run.campaign), name: run.campaign.name, tiers };
+  const mine = variants.filter((variant) => {
+    const owner = ladderOwner(variant.variantGid, [self, ...others]);
+    if (!owner || owner.id === self.id) return true;
+    const entry = kept.get(owner.id) ?? { name: owner.name, count: 0 };
+    entry.count += 1;
+    kept.set(owner.id, entry);
+    return false;
+  });
+  return { mine, kept };
+}
+
 async function tieredCampaignsOn(
   shopId: string,
   priceListGid: string,
