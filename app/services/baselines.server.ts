@@ -47,6 +47,13 @@ export interface CaptureOptions {
   /** Called after each chunk is written: surfaces captured so far, of how many (#801). */
   onProgress?: (done: number, total: number) => void | Promise<void>;
   /**
+   * Called as the wholesale prices' quantity ladders are read, before anything is written:
+   * prices read so far, of how many (#1105). Once with none read when the reads begin, then
+   * after each read. A recapture in the worker says so on the page following it, because
+   * 10,000 wholesale prices are 400 reads and minutes of a step that writes nothing.
+   */
+  onLadders?: (read: number, total: number) => void | Promise<void>;
+  /**
    * Shopify, for a wholesale catalogue's quantity ladders (#1071).
    *
    * A wholesale price is baselined with its ladder or not at all, because a baseline's null
@@ -156,7 +163,7 @@ export async function captureBaselines(
   }
 
   // Wholesale prices with their ladders, or not at all: see `client`.
-  const laddered = options.client ? await withLadders(shopId, options.client, wholesale) : [];
+  const laddered = options.client ? await withLadders(shopId, options.client, wholesale, options.onLadders) : [];
   planned.push(...laddered);
   result.wholesale = laddered.length;
   result.wholesaleLeft = wholesale.length - laddered.length;
@@ -258,6 +265,7 @@ async function withLadders(
   shopId: string,
   client: AdminClient,
   wholesale: readonly PlannedBaseline[],
+  onLadders: CaptureOptions["onLadders"],
 ): Promise<PlannedBaseline[]> {
   const byList = new Map<string, PlannedBaseline[]>();
   for (const baseline of wholesale) {
@@ -267,7 +275,12 @@ async function withLadders(
   }
 
   const out: PlannedBaseline[] = [];
+  // Counted across every list, so the page following a recapture sees one step (#1105).
+  let read = 0;
+  if (wholesale.length > 0) await onLadders?.(0, wholesale.length);
   for (const [priceListGid, baselines] of byList) {
+    const before = read;
+    read += baselines.length;
     let ladders: Map<string, LadderRung[]>;
     try {
       ladders = await readBaselineLadders(
@@ -275,6 +288,7 @@ async function withLadders(
         priceListGid,
         baselines[0]!.row.currency,
         baselines.map((baseline) => baseline.row.variantGid),
+        (asked) => onLadders?.(before + asked, wholesale.length),
       );
     } catch (error) {
       logger.warn("wholesale prices not baselined: their quantity ladders could not be read", {
@@ -283,6 +297,8 @@ async function withLadders(
         variants: baselines.length,
         error: error instanceof Error ? error.message : String(error),
       });
+      // Past, as far as the count goes: a list that could not be read is not still being read.
+      await onLadders?.(read, wholesale.length);
       continue;
     }
 

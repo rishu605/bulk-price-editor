@@ -38,7 +38,8 @@ describe("forms that ask the loader", () => {
     expect(page).toMatch(/<s-select ref=\{scopeField\} name="segment"/);
     // Natively: React 18 never delivers onChange from a Polaris field (#863).
     expect(page).toMatch(/field\.addEventListener\("change", changed\)/);
-    expect(page).toMatch(/disabled=\{assessment\.scope === 0 \|\| unchecked \|\| undefined\}/);
+    // And not while a recapture the worker has is still running: one per shop (#1105).
+    expect(page).toMatch(/disabled=\{assessment\.scope === 0 \|\| unchecked \|\| recapturing \|\| undefined\}/);
     expect(page).toContain("The scope you picked has not been checked yet.");
   });
 });

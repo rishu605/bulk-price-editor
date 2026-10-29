@@ -540,6 +540,18 @@ describe("reading the ladders of a catalogue over 5,000 prices (#704)", () => {
     expect(ladderReadCost(LADDER_READ_VARIANTS, 5)).toBeLessThanOrEqual(MAX_SINGLE_QUERY_COST);
   });
 
+  it("says how many variants it has asked about after each read, for a recapture the page follows (#1105)", async () => {
+    const wanted = Array.from({ length: 60 }, (_, n) => n * 90 + 1);
+    const client = shopifyList(new Map(wanted.map((id) => [id, LADDER])), 5_600);
+    const heard: number[] = [];
+
+    await readLadders(client, "gid://PriceList/1", wanted.map(variant), (asked) => {
+      heard.push(asked);
+    });
+
+    expect(heard).toEqual([LADDER_READ_VARIANTS, LADDER_READ_VARIANTS * 2, 60]);
+  });
+
   it("follows a ladder longer than one read carries to its last rung", async () => {
     const long = Array.from({ length: 12 }, (_, n) => ({ minimumQuantity: (n + 1) * 10, amount: `${50 - n}.00` }));
     const client = shopifyList(new Map([[7, long], [8, LADDER]]), 20);

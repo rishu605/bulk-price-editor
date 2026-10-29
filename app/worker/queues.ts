@@ -86,6 +86,12 @@ export interface JobRef {
    * inside Flow's ten seconds (#773). Carried on the sync queue.
    */
   recaptureSegmentId?: string;
+  /**
+   * A recapture the recapture page started whose wholesale prices need more quantity-ladder
+   * reads than the page can wait on (#1105): its row, which holds the scope, the count the
+   * merchant was shown and what they confirmed, and which the page follows. On the sync queue.
+   */
+  recaptureId?: string;
   /** A whole catalogue sync, started from Home and followed there (#801). On the sync queue. */
   fullSync?: boolean;
   /** An execution job that continues a partial run rather than starting fresh (#790). */

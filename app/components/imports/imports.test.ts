@@ -127,7 +127,8 @@ describe("every capability the Imports section had still exists", () => {
 
   it("recaptures baselines, with the scope assessment intact", () => {
     expect(RECAPTURE).toContain("planRecapture(");
-    expect(RECAPTURE).toContain("recapture(");
+    // Here or in the worker, the checks first either way (#1105).
+    expect(RECAPTURE).toContain("recaptureFromPage(");
   });
 
   it("writes the compare-at a price file gave, rather than checking it and dropping it (#766)", () => {

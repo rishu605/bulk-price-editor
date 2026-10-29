@@ -277,11 +277,16 @@ export async function writeQuantityBreaks(
  * Used twice, for opposite reasons: to verify what a run just wrote, and to capture what
  * a catalogue had *before* a campaign touched it. Same read, because a ladder observed
  * after the write and a ladder observed before it are the same kind of fact.
+ *
+ * `onRead` hears how many of the variants have been asked about, after each read: a
+ * recapture in the worker says how far its reads have got, because they come before it
+ * writes anything and can take minutes (#1105).
  */
 export async function readLadders(
   client: AdminClient,
   priceListGid: string,
   variantGids: readonly string[],
+  onRead?: (asked: number) => void | Promise<void>,
 ): Promise<Map<string, Array<{ minimumQuantity: number; amount: string }>>> {
   const wanted = [...new Set(variantGids)];
   const found = new Map<string, Array<{ minimumQuantity: number; amount: string }>>();
@@ -317,6 +322,7 @@ export async function readLadders(
 
       after = prices?.pageInfo?.hasNextPage ? (prices.pageInfo.endCursor ?? null) : null;
     } while (after);
+    await onRead?.(at + batch.length);
   }
 
   // A long ladder, followed to its last rung.
@@ -385,18 +391,19 @@ function rungsOf(node: PriceNode): Array<{ minimumQuantity: number; amount: stri
  * One reading for every capture that records a wholesale baseline -- the campaign's, before
  * it writes, and the catalogue sync's (#1071) -- so the two cannot record the same ladder
  * differently. Throws when Shopify cannot be read: what an unread ladder means is the
- * caller's to decide.
+ * caller's to decide. `onRead` as `readLadders`.
  */
 export async function readBaselineLadders(
   client: AdminClient,
   priceListGid: string,
   currency: string,
   variantGids: readonly string[],
+  onRead?: (asked: number) => void | Promise<void>,
 ): Promise<Map<string, LadderRung[]>> {
   if (variantGids.length === 0) return new Map();
 
   const ladders = new Map<string, LadderRung[]>();
-  for (const [variantGid, rungs] of await readLadders(client, priceListGid, variantGids)) {
+  for (const [variantGid, rungs] of await readLadders(client, priceListGid, variantGids, onRead)) {
     const parsed = parseLadder(
       rungs.map((rung) => ({ minimumQuantity: rung.minimumQuantity, amount: parseMoney(rung.amount, currency).amount })),
       currency,
