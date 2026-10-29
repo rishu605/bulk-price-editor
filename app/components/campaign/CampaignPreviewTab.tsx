@@ -144,7 +144,9 @@ export function CampaignPreviewTab({ preview, approval, fetcher, busy }: Campaig
         <PreviewTable
           rows={preview.rows}
           markets={preview.markets}
-          total={preview.counts.planned}
+          // A campaign for its markets alone writes no base price, so its rows are counted
+          // apart (#1111): "6 of 0" otherwise.
+          total={preview.marketsOnlyVariants ?? preview.counts.planned}
           alreadyCorrect={preview.counts.noop}
           blocked={Boolean(preview.blocked)}
         />

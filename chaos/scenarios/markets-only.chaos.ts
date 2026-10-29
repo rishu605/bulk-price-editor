@@ -72,12 +72,31 @@ describe("chaos: a campaign for Europe alone (#1094)", () => {
 
       // The review step: nothing on the base price, and Europe still priced.
       const preview = await previewCampaign(shopId, campaignId, { client });
-      expect(preview.rows, "the preview showed base prices this campaign never writes").toEqual([]);
-      expect(preview.counts.planned).toBe(0);
+      expect(preview.counts.planned, "the preview planned base prices this campaign never writes").toBe(0);
       expect(preview.markets.map((market) => [market.priceListGid, market.path])).toEqual([[EU, "market-wide"]]);
+      // And it lists what it does price (#1111): every variant, its base price as it is, and
+      // Europe's price beside it. It used to list nothing, so the euro prices had nowhere to go.
+      expect(preview.marketsOnlyVariants).toBe(chaos.fixture.variantGids.length);
+      expect(preview.rows.map((row) => row.variantGid).sort()).toEqual([...chaos.fixture.variantGids].sort());
+      for (const row of preview.rows) {
+        expect(row.before, `${row.variantGid}: no base price shown`).not.toBeNull();
+        expect(row.after, `${row.variantGid}: the preview moved the base price`).toBe(row.before);
+        expect(row.surfaces?.[EU]?.after, `${row.variantGid}: no price shown for Europe`).toBeTruthy();
+      }
 
       const applied = await chaos.apply();
       await chaos.expectHonest(applied.runId);
+      // What it verified is Europe's prices, which are all it writes (#1111): "0 verified" in
+      // its outcome, its run row and its history, under six verified euro prices.
+      const euroRows = await prisma.variantChange.count({ where: { runId: applied.runId, priceListGid: EU, status: "VERIFIED" } });
+      expect(euroRows, "the premise: Europe's prices were ledgered and verified").toBe(chaos.fixture.variantGids.length);
+      expect(applied.verified, "the outcome counted no verified prices").toBe(euroRows);
+      expect((await prisma.campaignRun.findUniqueOrThrow({ where: { id: applied.runId } })).verifiedRows).toBe(euroRows);
+      const transition = await prisma.auditLogEntry.findFirstOrThrow({
+        where: { shopId, entityId: campaignId, action: "campaign.transition" },
+        orderBy: { createdAt: "desc" },
+      });
+      expect(JSON.stringify(transition.after), "the history said nothing was verified").toContain(`apply finished: ${euroRows} verified`);
 
       expect(basePrices(chaos), "a sale for Europe moved the price every shopper pays").toEqual(start);
       expect(await baseTouched(chaos)).toEqual({ writes: 0, rows: 0 });
@@ -168,6 +187,12 @@ describe("chaos: a campaign for Europe alone (#1094)", () => {
         await prisma.baseline.count({ where: { shopId, variantGid, priceListGid: EU, supersededAt: null } }),
         "recorded the sale price as the market's regular one",
       ).toBe(0);
+      // Said with its cause: the list's percentage is the campaign's, and the store price never
+      // moved (#1111). It was described as following "the store price, which a campaign had
+      // already changed".
+      const said = enrolled.messages.join(" ");
+      expect(said).toMatch(/follows this market's percentage, which a campaign had already changed/);
+      expect(said).not.toMatch(/follows the store price/);
     });
   });
 

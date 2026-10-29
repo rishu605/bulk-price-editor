@@ -354,7 +354,7 @@ export async function applyMarketSurfaces(
     // (#691).
     const skipNotes = [
       ...describeMarketSkips(priceListLabel(list), list.currency, outcome.rows, plan.inStoreCurrency),
-      ...describeMovedMarket(priceListLabel(list), plan.moved.length),
+      ...describeMovedMarket(priceListLabel(list), plan.moved.length, plan.movedBy),
       ...describeStaleSettingMarket(priceListLabel(list), plan.stale.length),
       ...describeLadderUnread(priceListLabel(list), plan.ladderUnread),
     ];
@@ -764,19 +764,21 @@ async function releaseFixedPrices(
 }
 
 /**
- * A run's market rows that did not land: refused, or never confirmed (#1001).
+ * A run's market rows that did not land: refused, or never confirmed (#1001). And the ones
+ * that did, read back, which a campaign that prices only its markets counts as its verified
+ * prices: it has no others (#1111).
  *
  * Bucketed by `tallyStatuses`, the one classification the run summary and the Partial banner
  * use, so the run's status cannot disagree with the page that explains it.
  */
-export async function outstandingMarketRows(runId: string): Promise<{ failed: number; unverified: number }> {
+export async function outstandingMarketRows(runId: string): Promise<{ verified: number; failed: number; unverified: number }> {
   const byStatus = await prisma.variantChange.groupBy({
     by: ["status"],
     where: { runId, surfaceKind: { not: "BASE" }, priceListGid: { not: "" } },
     _count: { _all: true },
   });
   const counts = tallyStatuses(byStatus.map((entry) => ({ status: entry.status, count: entry._count._all })));
-  return { failed: counts.failed, unverified: counts.unverified + counts.sent + counts.pending };
+  return { verified: counts.verified + counts.clamped, failed: counts.failed, unverified: counts.unverified + counts.sent + counts.pending };
 }
 
 /**

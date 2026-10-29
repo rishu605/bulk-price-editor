@@ -38,18 +38,31 @@ export function marketGuardrails(store: Guardrails, currency: string): Guardrail
  */
 /**
  * The variants a market cannot be priced for because its price there follows a store price
- * a campaign has already changed (#841). Their price before the campaign is gone, and
- * recording what they cost now as "before" would discount them twice.
+ * a campaign has already changed (#841), or this market's percentage a campaign has set
+ * (#1111). Their price before the campaign is gone, and recording what they cost now as
+ * "before" would discount them twice.
  */
-export function describeMovedMarket(market: string, count: number): string[] {
+export function describeMovedMarket(market: string, count: number, cause: MovedCause = "store-price"): string[] {
   if (count === 0) return [];
   const variants = `${count} ${count === 1 ? "variant" : "variants"}`;
+  // A campaign that prices only its markets moves the market's percentage and never the
+  // store price, so "the store price, which a campaign had already changed" named a change
+  // nobody made (#1111).
+  const follows =
+    cause === "list-percentage"
+      ? "Their price here follows this market's percentage, which a campaign had already changed"
+      : "Their price here follows the store price, which a campaign had already changed";
   return [
-    `${market}: ${variants} not priced separately. Their price here follows the store price, which a campaign ` +
-      `had already changed before this market was priced, so what they cost here before it can no longer be read. ` +
-      `Revert the campaign and apply it again to price them.`,
+    `${market}: ${variants} not priced separately. ${follows} before this market was priced, so what they cost ` +
+      `here before it can no longer be read. Revert the campaign and apply it again to price them.`,
   ];
 }
+
+/**
+ * Why a market's derived prices can no longer be read (#841, #1111): the store price they
+ * follow was moved by a campaign, or the market's own percentage is a campaign's.
+ */
+export type MovedCause = "store-price" | "list-percentage";
 
 /**
  * The variants a market is not priced for because its percentage has moved since their price

@@ -42,6 +42,7 @@ import prisma from "../../db.server";
 import {
   type CampaignPreview,
   type MarketPreview,
+  type PreviewRow,
   type SurfaceCell,
 } from "./types";
 import { rowsThatFit } from "../../lib/ui/table-budget";
@@ -158,7 +159,15 @@ export async function previewCampaign(
   const surfaceCount = await targetedMarketCount(shopId, campaignId);
   const limit = options.limit ?? rowsThatFit(BASE_PREVIEW_COLUMNS + surfaceCount);
   const shown = outcome.rows.slice(0, limit);
-  const titles = await titleMapFor(shopId, shown.map((row) => row.ref.variantGid));
+  // A campaign that prices only its markets plans no base row, and the rows are where the
+  // market prices hang: its preview listed nothing at all, so the euro prices it would write
+  // had nowhere to appear (#1111). Its rows are the variants its markets are priced over,
+  // with the base price as it is. Not on a revert, which keeps the rows it plans.
+  const marketsOnlyScope = resolvable.some((entry) => entry.id === campaignId && entry.marketsOnly) && !options.revert
+    ? marketScope(campaignId, outcome.rows, outcome.unchanged)
+    : null;
+  const shownGids = marketsOnlyScope ? marketsOnlyScope.slice(0, limit) : shown.map((row) => row.ref.variantGid);
+  const titles = await titleMapFor(shopId, shownGids);
 
   const fmt = (value?: Money | null) => (value ? format(value) : null);
   // Costs for every variant in the plan, not just the shown page. Read from the current
@@ -169,13 +178,7 @@ export async function previewCampaign(
     outcome.rows.map((row) => row.ref.variantGid),
   );
 
-  const marketCells = await marketCellsFor(
-    shopId,
-    campaignId,
-    resolvable,
-    shown.map((row) => row.ref.variantGid),
-    options,
-  );
+  const marketCells = await marketCellsFor(shopId, campaignId, resolvable, shownGids, options);
   const decision = selectWritePath(outcome.rows.length);
   // Over the same variants the run prices markets for: the already-correct ones the rows
   // leave out included (#841).
@@ -241,19 +244,22 @@ export async function previewCampaign(
     name: campaign.name,
     status: campaign.status,
     counts: outcome.counts,
-    rows: shown.map((row) => ({
-      variantGid: row.ref.variantGid,
-      title: titles.get(row.ref.variantGid) ?? row.ref.variantGid,
-      before: fmt(row.beforePrice),
-      after: fmt(row.intendedPrice),
-      compareAt: row.intendedCompareAtSet ? fmt(row.intendedCompareAt) : null,
-      status: row.status,
-      reason: row.reason,
-      campaignId: row.campaignId,
-      ...(marketCells.size > 0
-        ? { surfaces: marketCells.get(row.ref.variantGid) ?? {} }
-        : {}),
-    })),
+    rows: marketsOnlyScope
+      ? marketsOnlyRows(shownGids, candidates, campaignId, titles, marketCells)
+      : shown.map((row) => ({
+          variantGid: row.ref.variantGid,
+          title: titles.get(row.ref.variantGid) ?? row.ref.variantGid,
+          before: fmt(row.beforePrice),
+          after: fmt(row.intendedPrice),
+          compareAt: row.intendedCompareAtSet ? fmt(row.intendedCompareAt) : null,
+          status: row.status,
+          reason: row.reason,
+          campaignId: row.campaignId,
+          ...(marketCells.size > 0
+            ? { surfaces: marketCells.get(row.ref.variantGid) ?? {} }
+            : {}),
+        })),
+    ...(marketsOnlyScope ? { marketsOnlyVariants: marketsOnlyScope.length } : {}),
     writePath: decision.path,
     writePathReason: decision.reason,
     tagKit: campaign.tagKit,
@@ -274,6 +280,40 @@ export async function previewCampaign(
   };
 }
 
+
+/** Said on each row of a campaign that prices only its markets: why its base price stays. */
+export const MARKETS_ONLY_ROW_REASON = "Base price unchanged: this campaign prices its markets only";
+
+/**
+ * The rows of a campaign that prices only its markets (#1111): each variant its markets are
+ * priced over, at the base price it has now, before and after, with what each market gets.
+ */
+function marketsOnlyRows(
+  variantGids: readonly string[],
+  candidates: readonly PlanCandidate[],
+  campaignId: string,
+  titles: ReadonlyMap<string, string>,
+  marketCells: ReadonlyMap<string, Record<string, SurfaceCell>>,
+): PreviewRow[] {
+  const base = new Map(
+    candidates.filter((candidate) => candidate.ref.priceListGid === "").map((candidate) => [candidate.ref.variantGid, candidate.livePrice]),
+  );
+  return variantGids.map((variantGid) => {
+    const live = base.get(variantGid);
+    const price = live ? format(live) : null;
+    return {
+      variantGid,
+      title: titles.get(variantGid) ?? variantGid,
+      before: price,
+      after: price,
+      compareAt: null,
+      status: "pending",
+      reason: MARKETS_ONLY_ROW_REASON,
+      campaignId,
+      surfaces: marketCells.get(variantGid) ?? {},
+    };
+  });
+}
 
 /**
  * What the typed confirmation reads from a plan (#818): how many prices it writes, which
@@ -413,7 +453,7 @@ async function marketPathPreview(
       ...(plan.outcome.kind === "ok"
         ? describeMarketSkips(list.name, list.currency, plan.outcome.rows, plan.inStoreCurrency)
         : []),
-      ...describeMovedMarket(list.name, plan.moved.length),
+      ...describeMovedMarket(list.name, plan.moved.length, plan.movedBy),
       ...describeStaleSettingMarket(list.name, plan.stale.length),
       ...describeLadderUnread(list.name, plan.ladderUnread),
     ];
