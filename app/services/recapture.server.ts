@@ -24,7 +24,7 @@ import {
   type RecaptureAssessment,
 } from "../lib/baselines/recapture";
 import { PRICES_MAY_BE_LIVE } from "../lib/lifecycle/transitions";
-import { captureBaselines } from "./baselines.server";
+import { captureBaselines, type CaptureOptions } from "./baselines.server";
 import { astToWhere, type FilterAst } from "./segments.server";
 import { scopeOf } from "./campaigns/model.server";
 import type { RecaptureScope } from "../lib/baselines/recapture-scope";
@@ -32,16 +32,16 @@ import { staleBaselineVariants } from "./reconciliation.server";
 
 export type { RecaptureScope } from "../lib/baselines/recapture-scope";
 
+/** A recapture worked out: the assessment the page shows, and the variants it rewrites. */
+export type RecapturePlan = RecaptureAssessment & { variantGids: string[] };
+
 /**
  * Works out what a recapture would do, without doing any of it.
  *
  * The same resolution the recapture itself uses, so the number the merchant confirms is
  * the number that gets rewritten.
  */
-export async function planRecapture(
-  shopId: string,
-  scope: RecaptureScope = {},
-): Promise<RecaptureAssessment & { variantGids: string[] }> {
+export async function planRecapture(shopId: string, scope: RecaptureScope = {}): Promise<RecapturePlan> {
   const variantGids = await resolveScope(shopId, scope);
   const overlaps = await activeOverlaps(shopId, variantGids);
 
@@ -62,14 +62,54 @@ export interface RecaptureOptions extends RecaptureScope {
    */
   expectedScope?: number;
   /**
+   * The running campaigns the merchant confirmed this over, when it was confirmed before it
+   * runs: a recapture the page handed to the worker (#1105). A campaign that has gone live on
+   * the scope since is refused, as Flow's capture refuses one (#773). The typed phrase alone
+   * would let it through -- it is the same words whichever campaigns it was typed over -- and
+   * the merchant was never shown this one.
+   */
+  confirmedOver?: readonly string[];
+  /**
    * Shopify, to read a wholesale price's quantity ladder with it. Without one a wholesale
    * price's baseline is left as it is: see `CaptureOptions.client` (#1071).
    */
   client?: AdminClient;
+  /** How far the capture has got, for a page following it (#1105): see `CaptureOptions`. */
+  onLadders?: CaptureOptions["onLadders"];
+  onProgress?: CaptureOptions["onProgress"];
 }
 
 export async function recapture(shopId: string, options: RecaptureOptions = {}) {
+  return recaptureChecked(shopId, await checkRecapture(shopId, options), options);
+}
+
+/**
+ * The plan a recapture runs on, once it has passed every check its confirmation stands for,
+ * or an `AppError` saying which it failed and nothing done.
+ *
+ * Its own step, because the page's request makes these checks before it hands a recapture to
+ * the worker -- a typed phrase that does not match, a count nobody was shown, is refused
+ * while the merchant is looking, not minutes later -- and the worker makes them again before
+ * it writes, because the scope and the running campaigns may have moved in between (#1105).
+ */
+export async function checkRecapture(shopId: string, options: RecaptureOptions = {}): Promise<RecapturePlan> {
   const plan = await planRecapture(shopId, options);
+
+  if (options.confirmedOver) {
+    const confirmed = new Set(options.confirmedOver);
+    const since = plan.overlaps.filter((overlap) => !confirmed.has(overlap.campaignId));
+    if (since.length > 0) {
+      const names = since.map((overlap) => `"${overlap.campaignName}" (${countOf(overlap.variants, "variant")})`).join(", ");
+      throw new AppError({
+        code: "VALIDATION",
+        userMessage:
+          `Nothing was recaptured: ${names} went live on this scope after you confirmed the recapture, and recapturing ` +
+          `now would make ${since.length === 1 ? "its" : "their"} sale prices the normal ones. Check the scope again, ` +
+          `and revert ${since.length === 1 ? "the campaign" : "the campaigns"} first unless that is what you want.`,
+        context: { shopId, scope: plan.scope, since: since.map((overlap) => overlap.campaignId) },
+      });
+    }
+  }
 
   if (!confirmationMatches(options.confirmation ?? "", plan.confirmationPhrase)) {
     throw new AppError({
@@ -98,17 +138,24 @@ export async function recapture(shopId: string, options: RecaptureOptions = {}) 
     });
   }
 
+  return plan;
+}
+
+/** The recapture itself, on a plan `checkRecapture` passed, and its audit entry. */
+export async function recaptureChecked(shopId: string, plan: RecapturePlan, options: RecaptureOptions = {}) {
   const result = await captureBaselines(shopId, {
     variantGids: plan.variantGids,
     // The flag that makes this a recapture rather than a no-op. `captureBaselines`
     // leaves existing baselines alone by default — it runs after every sync, and
     // silently re-anchoring to live prices each time would destroy the whole
-    // guarantee. Replacing them is the entire point here, which is why everything
-    // above this line exists.
+    // guarantee. Replacing them is the entire point here, which is why every check in
+    // `checkRecapture` exists.
     recapture: true,
     source: "RECAPTURE",
     capturedBy: options.actor,
     client: options.client,
+    onLadders: options.onLadders,
+    onProgress: options.onProgress,
   });
 
   // Written whatever the outcome, and written with the overlaps. Six weeks later the

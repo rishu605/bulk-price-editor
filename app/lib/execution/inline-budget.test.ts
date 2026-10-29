@@ -14,6 +14,7 @@ import {
   MS_PER_SYNC_PRODUCT,
   MS_PER_TAGGED_PRODUCT,
   PAGE_INLINE_BUDGET_MS,
+  PAGE_INLINE_LADDER_READS,
   REQUEST_CEILING_MS,
   estimateMs,
   overBudget,
@@ -27,6 +28,14 @@ describe("the inline budget", () => {
     // The per-product figures came from one store; a shop being throttled by the Admin
     // API is slower, and planning and read-back share the same five minutes.
     expect(PAGE_INLINE_BUDGET_MS).toBeLessThanOrEqual(REQUEST_CEILING_MS * 0.5);
+  });
+
+  it("keeps a recapture's ladder reads to half the page's budget at three times their usual pace (#1105)", () => {
+    // About half a second a read on a Plus store, as Flow's four take a second or two; the
+    // other half is the planning and the baseline writes in the same request.
+    expect(PAGE_INLINE_LADDER_READS * 3 * 500).toBeLessThanOrEqual(PAGE_INLINE_BUDGET_MS / 2);
+    // And more than none: a scope with one wholesale catalogue still recaptures while you wait.
+    expect(PAGE_INLINE_LADDER_READS).toBeGreaterThanOrEqual(4);
   });
 
   it("never fits a run that takes the bulk path, whatever the budget (#790)", () => {

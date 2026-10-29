@@ -117,6 +117,7 @@ model Shop {
   bulkOps          BulkOperationRecord[]
   auditEntries     AuditLogEntry[]
   errorEvents      ErrorEvent[]
+  recaptures       BaselineRecapture[]
 
   @@index([uninstalledAt])
   @@map("shops")
@@ -318,6 +319,56 @@ model Baseline {
   @@index([shopId, variantGid, surfaceKind])
   @@index([shopId, supersededAt])
   @@map("baselines")
+}
+
+/// A recapture the recapture page started (#1105): what it covers, what the merchant
+/// confirmed, which step it is on and how far that step has got, and how it ended.
+///
+/// A recapture whose wholesale prices need more quantity-ladder reads from Shopify than the
+/// page can wait on is run by the worker, and the page follows it here, as Home follows a
+/// sync on the shop row. A row of its own rather than more columns on the shop, for two
+/// things a sync does not have: an outcome the page shows once it ends -- the sentence it
+/// used to answer with -- and what the merchant confirmed, which the worker checks again
+/// before it writes anything: the scope, the count they were shown, what they typed and
+/// the campaigns they typed it over.
+///
+/// One unfinished row per shop, enforced by a partial unique index in the migration (Prisma
+/// cannot express that declaratively): two recaptures of the same baselines at once collide
+/// on the one-current-baseline index part-way through, and one of them stops half-written.
+model BaselineRecapture {
+  id     String @id @default(cuid())
+  shopId String
+
+  /// The scope, as `RecaptureScope` names it: a saved segment, the baselines changed outside
+  /// a campaign, or the whole catalogue when neither is set.
+  segmentId     String?
+  stale         Boolean  @default(false)
+  /// How many variants the page said this would rewrite, checked again when it runs (#716).
+  scope         Int
+  /// What the merchant typed to confirm, checked again against the phrase the scope demands.
+  confirmation  String?
+  /// The running campaigns it was confirmed over. One gone live on the scope since is
+  /// refused, as Flow's capture refuses it (#773): the merchant was never shown it.
+  confirmedOver String[] @default([])
+  actor         String?
+
+  /// `queued`, `checking`, `ladders` or `baselines`; `progress` is `{ done, total }` within it.
+  phase       String
+  progress    Json?
+  startedAt   DateTime  @default(now())
+  /// Stamped while it runs. A row quiet past `RECAPTURE_STALE_AFTER_MS` has stopped.
+  heartbeatAt DateTime  @default(now())
+  /// Set when it ends, however it ends; null while it is waiting or running.
+  finishedAt  DateTime?
+  /// What it did, once it finished: `CaptureResult` and the scope, counts only.
+  outcome     Json?
+  /// Why it stopped or was refused, in a sentence for the merchant.
+  failure     String?
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, startedAt])
+  @@map("baseline_recaptures")
 }
 
 // -------------------------------------------------------------------- segments

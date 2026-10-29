@@ -16,20 +16,27 @@
  * and `planRecapture` — which counts a scope that can be half a million variants and
  * cross-references every running campaign. Paying for that on every visit to a page a
  * merchant opens to look something up is not a trade worth making for one fewer URL.
+ *
+ * A recapture whose wholesale prices need more quantity-ladder reads from Shopify than this
+ * request can wait on is handed to the worker once its checks pass, and the page follows it
+ * step by step, as Home follows a sync (#1105): `recaptureFromPage`, `useRecapturePolling`.
  */
 
 import { useEffect, useRef, useState, type ElementRef } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { Form, useFetcher, useLoaderData } from "react-router";
+import { Form, useFetcher, useLoaderData, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { ensureShop } from "../services/shop.server";
 import { toAdminClient } from "../services/admin-client.server";
-import { planRecapture, recapture } from "../services/recapture.server";
+import { planRecapture } from "../services/recapture.server";
+import { recaptureFromPage, recaptureOnPage } from "../services/recapture-job.server";
 import { recaptureScopeFrom, STALE_SCOPE } from "../lib/baselines/recapture-scope";
-import { recapturedMessage, replaceLabel, scopeSentence } from "../lib/baselines/recapture";
+import { replaceLabel, scopeSentence } from "../lib/baselines/recapture";
+import { runningSentence } from "../lib/baselines/recapture-progress";
+import { useRecapturePolling } from "../components/useRecapturePolling";
 import { formatCount } from "../lib/format/display";
 import { actorFor } from "../lib/audit/actor";
 import { RouteBoundary } from "../components/RouteBoundary";
@@ -46,14 +53,17 @@ export const loader = withGuard("/app/prices/baselines/recapture", async ({ requ
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
 
-  const segmentId = new URL(request.url).searchParams.get("segment") ?? undefined;
-  const [plan, segments] = await Promise.all([
+  const url = new URL(request.url);
+  const segmentId = url.searchParams.get("segment") ?? undefined;
+  const [plan, segments, background] = await Promise.all([
     planRecapture(shop.id, recaptureScopeFrom(segmentId)),
     prisma.segment.findMany({
       where: { shopId: shop.id },
       select: { id: true, name: true, kind: true },
       orderBy: { name: "asc" },
     }),
+    // The recapture in the URL, or the shop's running one: the worker's, followed (#1105).
+    recaptureOnPage(shop.id, url.searchParams.get("recapture")),
   ]);
 
   // The variant list itself never reaches the browser — it is up to half a million ids
@@ -65,10 +75,10 @@ export const loader = withGuard("/app/prices/baselines/recapture", async ({ requ
     confirmationPhrase: plan.confirmationPhrase,
     warning: plan.warning,
   };
-  return { assessment, segments, segmentId: segmentId ?? "" };
+  return { assessment, segments, segmentId: segmentId ?? "", background };
 });
 
-type ActionData = { ok: boolean; message: string; errorId?: string };
+type ActionData = { ok: boolean; message: string; errorId?: string; recapture?: string };
 
 export const action = withGuard("/app/prices/baselines/recapture", async ({ request }: ActionFunctionArgs) => {
   const { admin, session, sessionToken } = await authenticate.admin(request);
@@ -87,16 +97,18 @@ export const action = withGuard("/app/prices/baselines/recapture", async ({ requ
   }
 
   try {
-    const result = await recapture(shop.id, {
-      ...recaptureScopeFrom(String(form.get("segment") ?? "")),
-      confirmation: String(form.get("confirmation") ?? ""),
-      actor: actorFor(sessionToken, session.shop),
-      expectedScope: Number(shown),
-      // For a wholesale price's quantity ladder, which is recaptured with it (#1071).
-      client: toAdminClient(admin),
-    });
-
-    return { ok: true, message: recapturedMessage(result) };
+    return await recaptureFromPage(
+      shop.id,
+      {
+        ...recaptureScopeFrom(String(form.get("segment") ?? "")),
+        confirmation: String(form.get("confirmation") ?? ""),
+        actor: actorFor(sessionToken, session.shop),
+        expectedScope: Number(shown),
+      },
+      // For a wholesale price's quantity ladder, which is recaptured with it (#1071): read
+      // here, or by the worker when there are more than this request can wait on (#1105).
+      toAdminClient(admin),
+    );
   } catch (error) {
     const reported = await reportError(error, {
       shopId: shop.id,
@@ -108,10 +120,29 @@ export const action = withGuard("/app/prices/baselines/recapture", async ({ requ
 });
 
 export default function Recapture() {
-  const { assessment, segments, segmentId } = useLoaderData<typeof loader>();
+  const { assessment, segments, segmentId, background } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
   const busy = fetcher.state !== "idle";
   const data = fetcher.data;
+
+  // A recapture the worker has (#1105): the page follows it through its URL, so a reload keeps
+  // following, and asks every few seconds how far it has got until it ends.
+  const [, setSearchParams] = useSearchParams();
+  const handedOff = data?.recapture;
+  useEffect(() => {
+    if (!handedOff) return;
+    setSearchParams((next) => {
+      next.set("recapture", handedOff);
+      return next;
+    });
+  }, [handedOff, setSearchParams]);
+  const followed = useRecapturePolling(background);
+  // One recapture per shop at a time: while one runs, Replace is not offered.
+  const recapturing = followed?.running === true;
+  // The answer to the last press, unless it was handing over the recapture now followed below;
+  // and the followed one while it runs, or when there is no fresher answer to show instead.
+  const showAnswer = data && !(handedOff && followed?.id === handedOff);
+  const showFollowed = followed && (followed.running || !data || followed.id === handedOff);
 
   // What the Scope field shows, against the scope the page has assessed. They differ
   // between picking a segment and pressing "Check this scope" -- and in that gap the count,
@@ -139,10 +170,18 @@ export default function Recapture() {
       heading="Recapture baselines"
       backTo={{ href: "/app/prices/baselines", label: "Baselines" }}
     >
-      {data ? (
-        <s-banner tone={data.ok ? "success" : "critical"}>
+      {showAnswer ? (
+        <s-banner tone={data.ok ? (handedOff ? "info" : "success") : "critical"}>
           <s-paragraph>{data.message}</s-paragraph>
           {data.errorId ? <s-paragraph>Reference {data.errorId}</s-paragraph> : null}
+        </s-banner>
+      ) : null}
+
+      {showFollowed ? (
+        <s-banner
+          tone={followed.running ? "info" : followed.failure ? "critical" : followed.partial ? "warning" : "success"}
+        >
+          <s-paragraph>{followed.running ? runningSentence(followed) : (followed.outcome ?? followed.failure)}</s-paragraph>
         </s-banner>
       ) : null}
 
@@ -252,7 +291,7 @@ export default function Recapture() {
               tone="critical"
               variant="primary"
               loading={busy || undefined}
-              disabled={assessment.scope === 0 || unchecked || undefined}
+              disabled={assessment.scope === 0 || unchecked || recapturing || undefined}
             >
               {replaceLabel(assessment.scope)}
             </s-button>

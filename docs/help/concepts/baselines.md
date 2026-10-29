@@ -33,6 +33,12 @@ the new normal, and every future discount would come off the discounted number. 
 asks you to type a confirmation for exactly this reason, and tells you which campaigns are
 live at the time.
 
+A wholesale price is recaptured with its quantity breaks, which are read from Shopify first.
+When a scope has more wholesale prices than the page can read while you wait, the recapture
+runs in the background once you have confirmed it: the page says which step it is on and how
+far it has got, and you can leave it. If a campaign goes live on the scope, or the scope
+changes, before it starts writing, nothing is recaptured and the page says why.
+
 ## Related
 
 - [Why revert recomputes](./revert.md)

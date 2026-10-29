@@ -127,6 +127,15 @@ async function syncJob(ref: JobRef): Promise<void> {
 
   const client = await adminClientForShop(shop.domain);
 
+  // The recapture page's, too many ladder reads for its request (#1105). Handed the client
+  // or null alike: a missing session is recorded on the recapture, where the page following
+  // it says so, rather than thrown for a retry of a recapture the page has called stopped.
+  if (ref.recaptureId) {
+    const { runQueuedRecapture } = await import("../services/recapture-job.server");
+    await runQueuedRecapture(ref.shopId, ref.recaptureId, client);
+    return;
+  }
+
   // Flow's large capture (#773), with the shop's client for its wholesale prices' quantity
   // ladders, as the recapture page captures them (#1092).
   if (ref.recaptureSegmentId) {

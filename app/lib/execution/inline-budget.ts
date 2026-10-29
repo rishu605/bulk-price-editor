@@ -68,6 +68,30 @@ export const MS_PER_TAGGED_PRODUCT = 600;
  */
 export const PAGE_INLINE_BUDGET_MS = 2 * 60 * 1000;
 
+/**
+ * How many Shopify reads the recapture page makes for wholesale quantity ladders while the
+ * merchant waits (#1105). A recapture needing more is handed to the worker, and the page
+ * follows it there step by step, as Home follows a sync.
+ *
+ * A wholesale price is recaptured with its quantity ladder or not at all, and the ladder is
+ * read from Shopify, 25 prices a read (`LADDER_READ_VARIANTS`), one read after another --
+ * before a single baseline is written. Flow's four reads take a second or two
+ * (`FLOW_INLINE_LADDER_READS`): about half a second a read on a Plus store, whose bucket and
+ * restore rate leave a read of this cost unthrottled, and B2B catalogues are a Plus feature.
+ * Forty reads, a thousand wholesale prices, is then about twenty seconds. Even at three times
+ * that pace it is half of `PAGE_INLINE_BUDGET_MS`, which leaves the other half for what the
+ * same request does around the reads: counting the scope against every running campaign, and
+ * writing a baseline for every surface in it. Not measured on a store with a large wholesale
+ * catalogue; inferred from Flow's figure, and set low because the cost of being wrong is
+ * lopsided -- a recapture sent to the worker that could have run here costs a few seconds of
+ * polling, and one kept here that could not is a "502" over a recapture still writing.
+ *
+ * Reads rather than prices, because reads are what take the time: a list of three prices
+ * costs a read as one of twenty-five does. Counted as Flow counts them, by
+ * `ladderReadsToCapture`.
+ */
+export const PAGE_INLINE_LADDER_READS = 40;
+
 /** What a run will do, counted before it starts. */
 export interface InlineWork {
   /** Variants in scope. Over `DEFAULT_THRESHOLD` the run takes the bulk path. */
