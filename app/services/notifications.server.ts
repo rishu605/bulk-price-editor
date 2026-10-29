@@ -21,13 +21,36 @@ import prisma from "../db.server";
 import { logger } from "../lib/logging/logger";
 import { compose, type Notification } from "../lib/notifications/templates";
 import { campaignUrl, driftUrl } from "../lib/notifications/campaign-link";
+import { preferenceFor, switchedOn } from "../lib/notifications/choices";
+import {
+  deliveryEntry,
+  NOTIFICATION_DELIVERY,
+  readDelivery,
+  type Delivery,
+  type DeliveryOutcome,
+} from "../lib/notifications/delivery";
 
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
 
 export interface DeliveryResult {
   sent: boolean;
   /** Why nothing was sent, when nothing was. Never an error the caller must handle. */
-  reason?: "unconfigured" | "no-recipient" | "muted" | "failed";
+  reason?: Exclude<DeliveryOutcome, "sent">;
+  /** Where it went, or would have gone. */
+  to?: string;
+  /** The mail provider's HTTP status, when it refused. */
+  status?: number;
+}
+
+/**
+ * Whether this install can send email at all.
+ *
+ * One function, because two places ask: `notify`, which gives up without it, and Settings,
+ * which says so to the merchant. Each used to read the environment itself, and the page
+ * could then promise what the sender would not do.
+ */
+export function mailConfigured(): boolean {
+  return Boolean(process.env.RESEND_API_KEY && process.env.NOTIFICATION_FROM_EMAIL);
 }
 
 /** Which notifications a shop wants. Stored alongside the other shop settings. */
@@ -89,6 +112,8 @@ export async function readPreferences(shopId: string): Promise<NotificationPrefe
 export async function writePreferences(
   shopId: string,
   preferences: NotificationPreferences,
+  /** Who changed them, so "who turned the emails off?" is answerable (#1119). */
+  actor?: string,
 ): Promise<NotificationPreferences> {
   const parsed = parsePreferences(preferences);
 
@@ -112,24 +137,31 @@ export async function writePreferences(
     data: { settings: { ...settings, notifications: parsed } as never },
   });
 
+  // Only what moved, and only when something did, as the typed-confirmation thresholds do
+  // (#818). Every guardrail save writes an entry; these never did, so nothing could say who
+  // switched a merchant's emails off, or to which address they now go.
+  const moved = (Object.keys(parsed) as (keyof NotificationPreferences)[]).filter((key) => before[key] !== parsed[key]);
+  if (moved.length > 0) {
+    await prisma.auditLogEntry.create({
+      data: {
+        shopId,
+        actor: actor ?? null,
+        action: "settings.notifications.update",
+        entity: "Shop",
+        entityId: shopId,
+        before: Object.fromEntries(moved.map((key) => [key, before[key]])) as never,
+        after: Object.fromEntries(moved.map((key) => [key, parsed[key]])) as never,
+      },
+    });
+  }
+
   return parsed;
 }
 
 /** Whether this shop asked to hear about this kind of thing. */
 export function wants(preferences: NotificationPreferences, notification: Notification): boolean {
-  switch (notification.kind) {
-    case "run-completed":
-      return preferences.onCompletion;
-    case "run-partial":
-    case "run-failed":
-      return preferences.onPartialOrFailure;
-    case "revert-completed":
-      return preferences.onRevert;
-    case "drift-hold":
-      return preferences.onDrift;
-    case "weekly-digest":
-      return preferences.weeklyDigest;
-  }
+  const key = preferenceFor(notification.kind);
+  return key === null ? true : preferences[key];
 }
 
 /**
@@ -142,15 +174,23 @@ export function wants(preferences: NotificationPreferences, notification: Notifi
 export async function notify(
   shopId: string,
   notification: Notification,
+  /** The run it reports on, so the campaign page can say whether that run's email went (#1123). */
+  context: { runId?: string } = {},
 ): Promise<DeliveryResult> {
+  const result = await deliver(shopId, notification);
+  await recordDelivery(shopId, notification, result, context.runId);
+  return result;
+}
+
+async function deliver(shopId: string, notification: Notification): Promise<DeliveryResult> {
   try {
+    if (!mailConfigured()) return { sent: false, reason: "unconfigured" };
     const apiKey = process.env.RESEND_API_KEY;
     const from = process.env.NOTIFICATION_FROM_EMAIL;
-    if (!apiKey || !from) return { sent: false, reason: "unconfigured" };
 
     const preferences = await readPreferences(shopId);
     if (!preferences.email) return { sent: false, reason: "no-recipient" };
-    if (!wants(preferences, notification)) return { sent: false, reason: "muted" };
+    if (!wants(preferences, notification)) return { sent: false, reason: "muted", to: preferences.email };
 
     const email = compose(await withLink(shopId, notification));
 
@@ -176,11 +216,11 @@ export async function notify(
         kind: notification.kind,
         status: response.status,
       });
-      return { sent: false, reason: "failed" };
+      return { sent: false, reason: "failed", to: preferences.email, status: response.status };
     }
 
     logger.info("notification sent", { shopId, kind: notification.kind });
-    return { sent: true };
+    return { sent: true, to: preferences.email };
   } catch (error) {
     logger.warn("notification threw", {
       shopId,
@@ -204,7 +244,7 @@ export async function notify(
  * link and one line fewer in the email. See `campaign-link.ts` for why a guess is worse.
  */
 async function withLink(shopId: string, notification: Notification): Promise<Notification> {
-  if (notification.kind === "weekly-digest") return notification;
+  if (notification.kind === "weekly-digest" || notification.kind === "test") return notification;
 
   const shop = await prisma.shop.findUnique({ where: { id: shopId }, select: { domain: true } });
   if (!shop) return notification;
@@ -217,4 +257,115 @@ async function withLink(shopId: string, notification: Notification): Promise<Not
       : campaignUrl(shop.domain, notification.campaignId, apiKey);
 
   return { ...notification, campaignUrl: url };
+}
+
+/**
+ * Keeps what happened to one email (#1121): sent, or which of the reasons it was not.
+ *
+ * Best-effort like the send. A record that cannot be written is logged and dropped; it
+ * must never become the reason a run, or the email it reports on, failed.
+ */
+async function recordDelivery(
+  shopId: string,
+  notification: Notification,
+  result: DeliveryResult,
+  runId: string | undefined,
+): Promise<void> {
+  try {
+    const campaignId = "campaignId" in notification ? notification.campaignId : null;
+    await prisma.auditLogEntry.create({
+      data: {
+        shopId,
+        action: NOTIFICATION_DELIVERY,
+        entity: campaignId ? "campaign" : "shop",
+        entityId: campaignId ?? shopId,
+        after: deliveryEntry(notification, result.sent ? "sent" : (result.reason ?? "failed"), {
+          to: result.to,
+          status: result.status,
+          runId,
+        }) as never,
+      },
+    });
+  } catch (error) {
+    logger.warn("notification outcome not recorded", {
+      shopId,
+      kind: notification.kind,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/** The shop's most recent email outcomes, newest first. */
+export async function recentDeliveries(shopId: string, take = 25): Promise<Delivery[]> {
+  const entries = await prisma.auditLogEntry.findMany({
+    where: { shopId, action: NOTIFICATION_DELIVERY },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take,
+    select: { after: true, createdAt: true },
+  });
+  return entries.flatMap((entry) => readDelivery(entry.after, entry.createdAt) ?? []);
+}
+
+/**
+ * A campaign's runs' email outcomes, by run id, from `since` -- the oldest run being shown,
+ * so the read is bounded by the runs on the page rather than by a count. The newest wins
+ * if a run has two.
+ */
+export async function deliveriesByRun(shopId: string, campaignId: string, since: Date): Promise<Map<string, Delivery>> {
+  const entries = await prisma.auditLogEntry.findMany({
+    where: { shopId, action: NOTIFICATION_DELIVERY, entityId: campaignId, createdAt: { gte: since } },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    select: { after: true, createdAt: true },
+  });
+  const byRun = new Map<string, Delivery>();
+  for (const entry of entries) {
+    const delivery = readDelivery(entry.after, entry.createdAt);
+    if (delivery?.runId) byRun.set(delivery.runId, delivery);
+  }
+  return byRun;
+}
+
+/** How long a shop waits between test emails. */
+export const TEST_EMAIL_INTERVAL_MS = 30_000;
+
+/**
+ * Sends a test to the saved address, from Settings (#1122), and says what happened.
+ *
+ * Through `notify`, so it proves the path real notifications take -- same sender, same
+ * provider, same record -- rather than a second path that could work while the first does
+ * not. One per shop per thirty seconds: the button is the one way a merchant can make
+ * Anchor send mail on demand.
+ */
+export async function sendTestEmail(shopId: string, shopName: string): Promise<{ ok: boolean; message: string }> {
+  const recent = await prisma.auditLogEntry.findFirst({
+    where: {
+      shopId,
+      action: NOTIFICATION_DELIVERY,
+      entity: "shop",
+      createdAt: { gte: new Date(Date.now() - TEST_EMAIL_INTERVAL_MS) },
+      after: { path: ["kind"], equals: "test" },
+    },
+    select: { id: true },
+  });
+  if (recent) {
+    return { ok: false, message: "A test email was sent less than 30 seconds ago. Give it a minute to arrive before sending another." };
+  }
+
+  const preferences = await readPreferences(shopId);
+  const result = await notify(shopId, { kind: "test", shopName, switchedOn: switchedOn(preferences) });
+  return { ok: result.sent, message: testEmailMessage(result) };
+}
+
+export function testEmailMessage(result: DeliveryResult): string {
+  if (result.sent) return `Sent to ${result.to}. It should arrive within a minute; if it doesn't, check spam.`;
+  switch (result.reason) {
+    case "no-recipient":
+      return "Save an address first. A test goes to the saved address.";
+    case "unconfigured":
+      return "Anchor can't send email right now, so nothing was sent. This is on our side, not a setting you've missed.";
+    case "failed":
+      return `The mail provider refused it${result.status ? ` (status ${result.status})` : ""}, so nothing was sent. Check the address and try again.`;
+    default:
+      return "Nothing was sent.";
+  }
 }

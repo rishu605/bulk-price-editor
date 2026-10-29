@@ -23,7 +23,8 @@ export type NotificationKind =
   | "run-failed"
   | "revert-completed"
   | "drift-hold"
-  | "weekly-digest";
+  | "weekly-digest"
+  | "test";
 
 export interface RunCounts {
   verified: number;
@@ -34,7 +35,7 @@ export interface RunCounts {
 }
 
 export interface RunNotification {
-  kind: Exclude<NotificationKind, "weekly-digest" | "drift-hold">;
+  kind: Exclude<NotificationKind, "weekly-digest" | "drift-hold" | "test">;
   /**
    * Which campaign, so the email can link to it.
    *
@@ -97,7 +98,19 @@ export interface DigestNotification {
   partialRuns: number;
 }
 
-export type Notification = RunNotification | DriftNotification | DigestNotification;
+/**
+ * Sent from Settings → Notifications on request (#1122), so a merchant can see the address
+ * works without applying and reverting a campaign to find out -- which is what App Review
+ * had to do, on live prices.
+ */
+export interface TestNotification {
+  kind: "test";
+  shopName: string;
+  /** The labels of the notifications switched on, as Settings words them. */
+  switchedOn: string[];
+}
+
+export type Notification = RunNotification | DriftNotification | DigestNotification | TestNotification;
 
 export interface Email {
   subject: string;
@@ -119,6 +132,8 @@ export function compose(notification: Notification): Email {
       return driftHold(notification);
     case "weekly-digest":
       return digest(notification);
+    case "test":
+      return test(notification);
   }
 }
 
@@ -304,6 +319,22 @@ function digest(n: DigestNotification): Email {
       n.partialRuns > 0 || n.driftOpen > 0
         ? "Anything above zero on the last two lines is waiting for you."
         : "Nothing is waiting for you.",
+    ].join("\n"),
+  };
+}
+
+function test(n: TestNotification): Email {
+  return {
+    subject: `Test email from Anchor for ${n.shopName}`,
+    text: [
+      `This is the test you sent from Settings → Notifications in Anchor on ${n.shopName}.`,
+      "Getting it means notification emails reach this address.",
+      "",
+      ...(n.switchedOn.length > 0
+        ? ["You'll be emailed when:", ...n.switchedOn.map((label) => `  - ${label}`)]
+        : ["Every notification is switched off, so this is the only email you'll get until you switch one on."]),
+      "",
+      "No prices are ever included in these emails, only counts.",
     ].join("\n"),
   };
 }

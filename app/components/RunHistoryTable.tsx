@@ -38,6 +38,26 @@ export function ledgerHref(current: URLSearchParams, runId: string): string {
 /** Whether a run left ledger rows: planned or skipped, every row it considered is one. */
 const hasLedger = (run: RunSummary) => run.planned + run.skipped > 0;
 
+/**
+ * Whether the run's email went out (#1123). A merchant waiting on "has been reverted" could
+ * not tell sent from switched off from never possible -- App Review reverted a campaign to
+ * trigger the email, and the page gave them nothing to look at when none came.
+ */
+function RunEmail({ email }: { email: RunSummary["email"] }) {
+  if (!email) return <Blank />;
+  return (
+    <s-text>
+      {email.text}
+      {email.toSettings ? (
+        <>
+          {" · "}
+          <s-link href="/app/settings">Settings</s-link>
+        </>
+      ) : null}
+    </s-text>
+  );
+}
+
 /** Every apply and revert for a campaign, newest first. */
 export function RunHistoryTable({ runs, selectedRunId, timeZone }: Props) {
   const [params] = useSearchParams();
@@ -50,6 +70,7 @@ export function RunHistoryTable({ runs, selectedRunId, timeZone }: Props) {
         <s-table-header listSlot="labeled" format="numeric">Verified</s-table-header>
         <s-table-header listSlot="labeled" format="numeric">Failed</s-table-header>
         <s-table-header listSlot="kicker">Finished</s-table-header>
+        <s-table-header listSlot="labeled">Email</s-table-header>
         <s-table-header listSlot="inline">Ledger</s-table-header>
       </s-table-header-row>
       <s-table-body>
@@ -64,6 +85,9 @@ export function RunHistoryTable({ runs, selectedRunId, timeZone }: Props) {
             <s-table-cell>{run.failed}</s-table-cell>
             <s-table-cell>
               {run.finishedAt ? formatWhen(run.finishedAt, timeZone) : <Blank />}
+            </s-table-cell>
+            <s-table-cell>
+              <RunEmail email={run.email} />
             </s-table-cell>
             <s-table-cell>
               {run.id === selectedRunId ? (

@@ -9,6 +9,8 @@ import prisma from "../../db.server";
 import { labelled, priceListLabel } from "../../lib/markets/display-name";
 import { ROWS_PER_VIEW } from "../../lib/ui/table-budget";
 import { formatMinorUnits } from "../../lib/money/format";
+import { runEmailLine } from "../../lib/notifications/delivery";
+import { deliveriesByRun } from "../notifications.server";
 import { titleMapFor } from "./candidates.server";
 import type { LedgerRow, RunSummary } from "./types";
 
@@ -22,6 +24,9 @@ export async function campaignRuns(
     orderBy: { createdAt: "desc" },
     take: limit,
   });
+  // Each run's email is recorded after the run row, so the oldest run shown bounds them all.
+  const oldest = runs.at(-1)?.createdAt;
+  const emails = oldest ? await deliveriesByRun(shopId, campaignId, oldest) : new Map();
 
   return runs.map((run) => ({
     id: run.id,
@@ -33,6 +38,7 @@ export async function campaignRuns(
     skipped: run.skippedRows,
     startedAt: run.startedAt?.toISOString() ?? null,
     finishedAt: run.finishedAt?.toISOString() ?? null,
+    email: runEmailLine(emails.get(run.id)),
   }));
 }
 

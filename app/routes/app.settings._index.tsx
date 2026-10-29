@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
@@ -16,7 +16,16 @@ import {
   confirmVariantsFrom,
   guardrailInputProblems,
 } from "../lib/settings/guardrail-input";
-import { readPreferences, writePreferences } from "../services/notifications.server";
+import {
+  mailConfigured,
+  readPreferences,
+  recentDeliveries,
+  writePreferences,
+} from "../services/notifications.server";
+import { notificationEmailFrom, notificationInputProblems, SEND_TO_LABEL } from "../lib/settings/notification-input";
+import { NOTIFICATION_CHOICES } from "../lib/notifications/choices";
+import { lastEmailLines, savedAddressLine } from "../lib/notifications/delivery";
+import { showToast } from "../lib/ui/toast";
 import { actorFor } from "../lib/audit/actor";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
@@ -44,7 +53,7 @@ export const loader = withGuard("/app/settings", async ({ request }: LoaderFunct
   const { session } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
 
-  const [settings, currency, withCost, variants, notifications, marketCurrencies] =
+  const [settings, currency, withCost, variants, notifications, marketCurrencies, deliveries] =
     await Promise.all([
       readSettings(shop.id),
       shopCurrency(shop.id),
@@ -58,6 +67,7 @@ export const loader = withGuard("/app/settings", async ({ request }: LoaderFunct
         select: { currency: true },
         distinct: ["currency"],
       }),
+      recentDeliveries(shop.id),
     ]);
 
   // Every currency this store actually prices in. Only these are offered: a list of
@@ -77,9 +87,12 @@ export const loader = withGuard("/app/settings", async ({ request }: LoaderFunct
     withCost,
     variants,
     notifications,
-    // Whether the deployment can actually send. Shown rather than hidden: a merchant
-    // ticking boxes that silently do nothing is worse than being told why.
-    mailConfigured: Boolean(process.env.RESEND_API_KEY && process.env.NOTIFICATION_FROM_EMAIL),
+    // Whether this install can actually send, asked of the same function `notify` asks.
+    // Shown rather than hidden: a merchant ticking boxes that silently do nothing is worse
+    // than being told why.
+    mailConfigured: mailConfigured(),
+    // What happened to the last email, so a saved address can be seen to work (#1121).
+    lastEmail: lastEmailLines(deliveries, shop.timezone),
   };
 });
 
@@ -99,13 +112,21 @@ export const action = withGuard("/app/settings", async ({ request }: ActionFunct
   const existing = await readSettings(shop.id);
 
   // Checked before anything is written, settings or notifications, so a refused save
-  // changes nothing and the form keeps every edit for the merchant to correct (#739).
-  const problems = guardrailInputProblems((name) => form.get(name), await shopCurrency(shop.id));
+  // changes nothing and the form keeps every edit for the merchant to correct (#739). The
+  // address too (#1120): "ops" used to be saved as no address under "Settings saved."
+  const read = (name: string) => form.get(name);
+  const problems = [
+    ...guardrailInputProblems(read, await shopCurrency(shop.id)),
+    ...notificationInputProblems(read),
+  ];
   if (problems.length > 0) {
     return {
       ok: false,
       message: "Nothing was saved. Correct this and save again:",
       problems: problems.map((problem) => problem.message),
+      // Each refusal beside its own field too. The banner is at the top of a long page,
+      // and the field may be the last one on it.
+      fieldErrors: Object.fromEntries(problems.map((problem) => [problem.field, problem.message])),
     };
   }
 
@@ -135,16 +156,31 @@ export const action = withGuard("/app/settings", async ({ request }: ActionFunct
     actor,
   );
 
-  await writePreferences(shop.id, {
-    email: String(form.get("email") ?? ""),
-    onCompletion: form.get("onCompletion") === "on",
-    onPartialOrFailure: form.get("onPartialOrFailure") === "on",
-    onDrift: form.get("onDrift") === "on",
-    onRevert: form.get("onRevert") === "on",
-    weeklyDigest: form.get("weeklyDigest") === "on",
-  });
+  await writePreferences(
+    shop.id,
+    {
+      // Missing is not blank, as for the approval threshold (#788): a post without the field
+      // is not the merchant clearing it. Anything else was refused above if it was not one
+      // address.
+      email: form.has("email")
+        ? (notificationEmailFrom(form.get("email")) ?? null)
+        : (await readPreferences(shop.id)).email,
+      onCompletion: form.get("onCompletion") === "on",
+      onPartialOrFailure: form.get("onPartialOrFailure") === "on",
+      onDrift: form.get("onDrift") === "on",
+      onRevert: form.get("onRevert") === "on",
+      weeklyDigest: form.get("weeklyDigest") === "on",
+    },
+    actor,
+  );
 
-  return { ok: true, message: "Settings saved.", saved, problems: [] as string[] };
+  return {
+    ok: true,
+    message: "Settings saved.",
+    saved,
+    problems: [] as string[],
+    fieldErrors: {} as Record<string, string>,
+  };
 });
 
 function emptyToNull(value: FormDataEntryValue | null): number | null {
@@ -157,7 +193,15 @@ function asPolicy(value: FormDataEntryValue | null): "clamp" | "skip" | "block" 
   return text === "skip" || text === "block" ? text : "clamp";
 }
 
-type ActionData = { ok: boolean; message: string; problems?: string[] };
+type ActionData = {
+  ok: boolean;
+  message: string;
+  problems?: string[];
+  /** A refusal by field name, shown on the field it is about. */
+  fieldErrors?: Record<string, string>;
+};
+
+type TestResult = { ok: boolean; message: string };
 
 export default function Settings() {
   const {
@@ -170,10 +214,45 @@ export default function Settings() {
     variants,
     notifications,
     mailConfigured,
+    lastEmail,
   } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
+  const tester = useFetcher<TestResult>();
   const formRef = useRef<HTMLFormElement>(null);
   const busy = fetcher.state !== "idle";
+  const errors = fetcher.data && !fetcher.data.ok ? (fetcher.data.fieldErrors ?? {}) : {};
+
+  // Said where the merchant is looking (#1119). The banner below is at the top of the page;
+  // the save bar is pressed from anywhere on it, often while reading the last card.
+  useEffect(() => {
+    if (!fetcher.data) return;
+    const count = fetcher.data.problems?.length ?? 0;
+    showToast(
+      fetcher.data.ok
+        ? "Settings saved"
+        : `Nothing was saved. ${count === 1 ? "One setting needs" : `${count} settings need`} correcting.`,
+      !fetcher.data.ok,
+    );
+  }, [fetcher.data]);
+
+  // A test goes to the saved address, never to one still being typed (#1122): a test that
+  // reached an unsaved address would prove nothing about where real emails go.
+  const [testNote, setTestNote] = useState<string | null>(null);
+  const sendTest = () => {
+    const typed = formRef.current ? String(new FormData(formRef.current).get("email") ?? "").trim() : "";
+    if (typed !== (notifications.email ?? "")) {
+      setTestNote("Save first. A test goes to the saved address, and the one above has changed.");
+      return;
+    }
+    setTestNote(null);
+    tester.submit({}, { method: "post", action: "/app/settings/email-check" });
+  };
+  const testing = tester.state !== "idle";
+  const testResult: TestResult | null = testNote
+    ? { ok: false, message: testNote }
+    : !testing && tester.data
+      ? tester.data
+      : null;
 
   const costCoverage = variants === 0 ? 0 : Math.round((withCost / variants) * 100);
 
@@ -239,6 +318,7 @@ export default function Settings() {
                 name="minMarginPercent"
                 label="Minimum margin (%)"
                 value={settings.minMarginPercent?.toString() ?? ""}
+                error={errors.minMarginPercent}
                 details="Share of the selling price. 25 means a price of at least cost ÷ 0.75. Leave blank for none."
               />
 
@@ -250,6 +330,7 @@ export default function Settings() {
                 name="minPrice"
                 label={`Minimum price (${currency})`}
                 value={settings.minPrice?.toString() ?? ""}
+                error={errors.minPrice}
                 details="An absolute floor, whatever the rule computes. Leave blank for none."
               />
 
@@ -293,12 +374,14 @@ export default function Settings() {
               name="confirmAboveVariants"
               label={CONFIRM_VARIANTS_LABEL}
               value={settings.confirmAboveVariants.toString()}
+              error={errors.confirmAboveVariants}
               details={`A whole number. ${formatCount(DEFAULT_CONFIRM_ABOVE_VARIANTS)} means a campaign writing ${formatCount(DEFAULT_CONFIRM_ABOVE_VARIANTS + 1)} prices or more asks.`}
             />
             <s-number-field
               name="confirmAboveChangePercent"
               label={CONFIRM_CHANGE_LABEL}
               value={settings.confirmAboveChangePercent.toString()}
+              error={errors.confirmAboveChangePercent}
               details={`1 to 100, from each price's baseline, or that far below its cost. ${DEFAULT_CONFIRM_ABOVE_CHANGE_PERCENT} means 60% off asks and 40% off does not.`}
             />
           </FieldGrid>
@@ -318,6 +401,7 @@ export default function Settings() {
               name="approvalThreshold"
               label={APPROVAL_THRESHOLD_LABEL}
               value={settings.approvalThreshold?.toString() ?? ""}
+              error={errors.approvalThreshold}
               details="A whole number: 500 means a campaign changing 501 variants or more waits for approval. Leave blank for off."
             />
           </Field>
@@ -406,54 +490,60 @@ export default function Settings() {
             </s-text>
           </s-paragraph>
 
+          {/* Anchor's problem, said as Anchor's (#1119). "Email is not configured on this
+              deployment" sat above the field App Review had just filled in, and read as the
+              app telling them their own setting had not taken. */}
           {!mailConfigured ? (
             <s-banner tone="warning">
               <s-paragraph>
-                Email is not configured on this deployment, so nothing is sent yet. Your
-                preferences are saved and take effect once it is.
+                Anchor can&rsquo;t send email right now. This is on our side, not a setting
+                you&rsquo;ve missed: your address and choices below are saved, and emails
+                start as soon as sending is back.
               </s-paragraph>
             </s-banner>
           ) : null}
 
             <s-stack gap={SPACE.section}>
               <Field width="medium">
-                <s-text-field
+                {/* An email field, for the keyboard and autofill a phone offers it (#1120). */}
+                <s-email-field
                   name="email"
-                  label="Send to"
+                  label={SEND_TO_LABEL}
                   placeholder="ops@yourshop.com"
                   value={notifications.email ?? ""}
-                  details="Leave blank to turn notifications off entirely."
+                  error={errors.email}
+                  details="One address. Leave blank to turn notifications off entirely."
                 />
               </Field>
 
-              <s-checkbox
-                name="onPartialOrFailure"
-                label="A run did not finish cleanly"
-                details="Something needs you: rows failed, or the run stopped early."
-                checked={notifications.onPartialOrFailure || undefined}
-              />
-              <s-checkbox
-                name="onDrift"
-                label="Someone changed a price outside the app"
-                details="Those edits are held for your decision rather than overwritten."
-                checked={notifications.onDrift || undefined}
-              />
-              <s-checkbox
-                name="onRevert"
-                label="A campaign was reverted"
-                checked={notifications.onRevert || undefined}
-              />
-              <s-checkbox
-                name="onCompletion"
-                label="A run finished cleanly"
-                details="Off by default. Being emailed about every success is how the one email that mattered gets skimmed past."
-                checked={notifications.onCompletion || undefined}
-              />
-              <s-checkbox
-                name="weeklyDigest"
-                label="Weekly summary"
-                checked={notifications.weeklyDigest || undefined}
-              />
+              {/* What is stored, read back after every save (#1119). The field shows what
+                  was typed, which looks the same before a save and after one. */}
+              <s-stack gap={SPACE.tight}>
+                <s-text>{savedAddressLine(notifications.email)}</s-text>
+                <Secondary>{lastEmail.sent}</Secondary>
+                {lastEmail.problem ? <s-text tone="caution">{lastEmail.problem}</s-text> : null}
+              </s-stack>
+
+              {/* Checked without touching a price (#1122). App Review applied and reverted a
+                  campaign on live prices to find out whether email worked. */}
+              <s-stack direction="inline" gap={SPACE.item} alignItems="center">
+                <s-button type="button" onClick={sendTest} loading={testing || undefined}>
+                  Send test email
+                </s-button>
+                {testResult ? (
+                  <s-text tone={testResult.ok ? "success" : "critical"}>{testResult.message}</s-text>
+                ) : null}
+              </s-stack>
+
+              {NOTIFICATION_CHOICES.map((choice) => (
+                <s-checkbox
+                  key={choice.key}
+                  name={choice.key}
+                  label={choice.label}
+                  details={choice.details}
+                  checked={notifications[choice.key] || undefined}
+                />
+              ))}
             </s-stack>
 
           <s-paragraph>

@@ -34,9 +34,20 @@
  */
 const HOUSEKEEPING = ["mirror"];
 
+/**
+ * Single actions that are upkeep in a namespace that otherwise is not.
+ *
+ * `notification.delivery` is every email's outcome (#1121), written after every run. It is
+ * read back where it answers a question -- Settings → Notifications, and the run's own row
+ * (#1123) -- and on Home it would sit on top of the run it reports on, one per run, until
+ * the feed was nothing else. The drift and digest entries in the same namespace stay: each
+ * is one email a merchant was actually sent, once.
+ */
+const HOUSEKEEPING_ACTIONS = ["notification.delivery"];
+
 /** True when this entry is the app talking to itself rather than to the merchant. */
 export function isHousekeeping(action: string): boolean {
-  return HOUSEKEEPING.includes(action.split(".")[0]);
+  return HOUSEKEEPING.includes(action.split(".")[0]) || HOUSEKEEPING_ACTIONS.includes(action);
 }
 
 /** The entries worth putting on the dashboard, newest first, at most `limit`. */
