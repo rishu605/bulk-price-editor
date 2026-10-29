@@ -1167,6 +1167,13 @@ async function executeCampaignRun(
           `${market.name} (${market.currency}): ${countOf(market.failed, "price")} did not apply.`,
         );
       }
+      // How a market written product by product was written, and why, with the reason the
+      // Markets card gave before Apply (#1115). A market repriced market-wide says so, and so
+      // does one the base price carried, where nothing was written (no chunks); this one
+      // said nothing unless a price failed.
+      if (market.path === "per-product" && market.pathReason && market.chunks > 0) {
+        messages.push(`${market.name}: priced product by product rather than with one market-wide change, because ${market.pathReason}.`);
+      }
       messages.push(...market.messages);
     }
   } catch (error) {
