@@ -15,7 +15,9 @@
  *   back off, turning one slow run into two slower ones.
  *
  *   `webhooks` and `planning` are database-bound and cheap, so they are wide. A webhook
- *   backlog after a large catalogue edit should drain, not trickle.
+ *   backlog after a large catalogue edit should drain, not trickle. Wide across shops, not
+ *   within one: a `webhooks` job drains one shop's deliveries, and there is at most one
+ *   running per shop (#811) -- see `jobOptionsFor`.
  *
  *   `sync` is deliberately one: Shopify permits a single bulk operation per shop, and
  *   queueing more only discovers that later and less clearly.
@@ -116,13 +118,53 @@ export interface JobRef {
 }
 
 /**
+ * What a handler may answer besides finishing: `"again"` asks for another turn of the same
+ * job, behind whatever else is waiting (#811). A shop's webhook drain says it when it
+ * stopped with deliveries still waiting, so one shop's echo storm is drained a turn at a
+ * time between other shops' turns rather than holding a slot until it is done.
+ */
+export type JobResult = void | "again";
+
+/**
+ * How long a shop's first waiting delivery waits for others before the worker drains them
+ * (#811). A product written in several calls -- a variant page at a time, a market at a
+ * time, its tags after its prices -- sends a webhook per call within seconds, and only the
+ * newest of them needs handling. Under a backlog the wait is moot: everything queued for a
+ * product when its turn comes is coalesced, however old.
+ */
+export const WEBHOOK_COALESCE_MS = 5_000;
+
+/** The one key a shop's webhook jobs share, so there is never more than one per shop (#811). */
+export function webhookDrainKey(shopId: string): string {
+  return `webhooks:${shopId}`;
+}
+
+/**
  * BullMQ's options for a queue, derived from its policy.
  *
  * Kept as a function rather than a literal so the policy stays the single place the
  * numbers live, and a queue cannot quietly be given different retry behaviour from the
  * one documented above it.
+ *
+ * A `webhooks` job is a shop's drain, not a delivery (#811). Shopify can send thousands of
+ * deliveries for one shop in a minute -- every price a large run writes echoes back -- and
+ * a job per delivery put all of them ahead of the next shop's one merchant edit, ten at a
+ * time on every slot the queue has. So the shop's deliveries wait in `webhook_events` and
+ * the queue holds one job per shop, deduplicated on the shop's key. BullMQ's open-source
+ * deduplication, not Pro's groups:
+ *
+ *   - A job waiting or delayed for the shop absorbs every later one: it will read the
+ *     deliveries they were rung for.
+ *   - One running stores the latest as its successor (`keepLastIfActive`), created when it
+ *     finishes. So a delivery persisted while the drain is reading never waits for a
+ *     drain that has already looked, and a shop never has two drains at once -- which is
+ *     also what keeps one product's deliveries in order.
+ *
+ * The first is delayed by `WEBHOOK_COALESCE_MS`, so a burst for one product lands before
+ * it is read. A drain asking for another turn (`again`) is not: its successor goes to the
+ * back of the queue at once, behind the shops that were waiting.
  */
-export function jobOptionsFor(policy: QueuePolicy) {
+export function jobOptionsFor(policy: QueuePolicy, ref?: JobRef, { again = false }: { again?: boolean } = {}) {
   return {
     attempts: policy.attempts,
     ...(policy.backoffMs > 0
@@ -132,6 +174,12 @@ export function jobOptionsFor(policy: QueuePolicy) {
     // "what happened last night" has something to look at beyond a log line.
     removeOnComplete: { count: 100 },
     removeOnFail: { age: 7 * 24 * 60 * 60 },
+    ...(policy.name === "webhooks" && ref
+      ? {
+          delay: again ? 0 : WEBHOOK_COALESCE_MS,
+          deduplication: { id: webhookDrainKey(ref.shopId), keepLastIfActive: true },
+        }
+      : {}),
   };
 }
 

@@ -49,6 +49,17 @@ describe("running without Redis", () => {
     expect(Object.keys(depths).length).toBeGreaterThan(0);
   });
 
+  it("gives a job that asks for another turn its turns before returning (#811)", async () => {
+    // A shop's webhook drain answers "again" when it stopped with deliveries waiting. Inline
+    // there is nobody else's turn to go behind, and the caller is promised the work is done.
+    let turns = 0;
+    const runtime = inlineRuntime(async () => (++turns < 3 ? "again" : undefined));
+
+    await runtime.enqueue("webhooks", { shopId: "s1" });
+
+    expect(turns).toBe(3);
+  });
+
   it("propagates a handler failure to the caller", async () => {
     // Inline means inline. Swallowing here would make a failure invisible in exactly
     // the deployment that has no queue to inspect.
@@ -159,6 +170,17 @@ describe("a job's log lines carry the ids the job was asked for", () => {
    * so the check that the Redis worker hands it over is over the source. Comments are
    * stripped by `sourceOf`, so the note beside the call cannot satisfy this on its own.
    */
+  it("queues a job's next turn when its handler asks for one (#811)", () => {
+    const source = sourceOf("app/worker/queue-runtime.server.ts");
+
+    expect(source, "the Redis worker ignores a handler asking for another turn").toMatch(
+      /if \(result === "again"\) await add\(name, job\.data, \{ again: true \}\)/,
+    );
+    expect(source, "jobs are added without the per-job options a shop's drain needs").toMatch(
+      /queue\.add\(name, ref, jobOptionsFor\(QUEUE_POLICIES\[name\], ref, \{ again \}\)\)/,
+    );
+  });
+
   it("hands the queue worker's job id to the same wrapper", () => {
     const source = sourceOf("app/worker/queue-runtime.server.ts");
 

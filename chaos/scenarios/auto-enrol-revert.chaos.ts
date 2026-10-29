@@ -33,6 +33,15 @@ vi.mock("../../app/shopify.server", () => ({
   authenticate: { webhook: async () => pending },
 }));
 
+// No worker queue, so the route handles each delivery in the request -- its fallback, and
+// the same `processProductsWebhook` the worker drains with (#811). REDIS_URL is set in CI's
+// chaos job, so without this the route would hand the delivery to a queue nothing here
+// consumes. The queued path itself is `webhook-queue.chaos.ts`'s.
+vi.mock("../../app/worker/web-queue.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../app/worker/web-queue.server")>()),
+  webQueue: () => null,
+}));
+
 vi.mock("../../app/services/admin-client.server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../app/services/admin-client.server")>();
   return { ...actual, adminClientForShop: async (domain: string) => fixtureAdminClient(domain, endpoint) };

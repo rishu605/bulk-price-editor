@@ -28,6 +28,7 @@ import {
   QUEUE_NAMES,
   QUEUE_POLICIES,
   type JobRef,
+  type JobResult,
   type QueueName,
 } from "./queues";
 
@@ -37,7 +38,7 @@ export interface QueueRuntime {
   close(): Promise<void>;
 }
 
-export type Handler = (name: QueueName, ref: JobRef) => Promise<void>;
+export type Handler = (name: QueueName, ref: JobRef) => Promise<JobResult>;
 
 /**
  * A runtime that runs everything inline.
@@ -49,7 +50,9 @@ export type Handler = (name: QueueName, ref: JobRef) => Promise<void>;
 export function inlineRuntime(handler: Handler): QueueRuntime {
   return {
     async enqueue(name, ref) {
-      await traced(name, ref, () => handler(name, ref));
+      // A turn that asks for another gets it here and now: inline, there is nobody else's
+      // turn to go behind, and the caller is promised the work is done when this returns.
+      while ((await traced(name, ref, () => handler(name, ref))) === "again");
     },
     async depths() {
       return Object.fromEntries(QUEUE_NAMES.map((name) => [name, 0])) as Record<
@@ -84,7 +87,10 @@ export function redisRuntime(handler: Handler, options: RedisRuntimeOptions): Qu
       const worker = new Worker(
         name,
         async (job: Job<JobRef>) => {
-          await traced(name, job.data, () => handler(name, job.data), job.id);
+          const result = await traced(name, job.data, () => handler(name, job.data), job.id);
+          // Another turn, asked for while this one still holds its key (#811): stored as its
+          // successor and created behind everything already waiting when this one finishes.
+          if (result === "again") await add(name, job.data, { again: true });
         },
         { connection, concurrency: policy.concurrency },
       );
@@ -107,10 +113,15 @@ export function redisRuntime(handler: Handler, options: RedisRuntimeOptions): Qu
     }
   }
 
+  async function add(name: QueueName, ref: JobRef, { again = false }: { again?: boolean } = {}): Promise<void> {
+    const queue = queues.get(name);
+    if (!queue) throw new Error(`No such queue: ${name}`);
+    await queue.add(name, ref, jobOptionsFor(QUEUE_POLICIES[name], ref, { again }));
+  }
+
   return {
     async enqueue(name, ref) {
-      const queue = queues.get(name);
-      if (!queue) throw new Error(`No such queue: ${name}`);
+      if (!queues.has(name)) throw new Error(`No such queue: ${name}`);
 
       // Spanned, not only counted. The execution side has had a span since it was
       // written, so a trace showed a job appearing from nowhere and taking however long
@@ -128,7 +139,7 @@ export function redisRuntime(handler: Handler, options: RedisRuntimeOptions): Qu
           ...(ref.revert === undefined ? {} : { "job.revert": ref.revert }),
         },
         async () => {
-          await queue.add(name, ref, jobOptionsFor(QUEUE_POLICIES[name]));
+          await add(name, ref);
         },
       );
 
@@ -206,19 +217,19 @@ export async function reportDepths(runtime: QueueRuntime): Promise<void> {
  * deployment running inline looks the same as one from a deployment with a queue. A
  * degraded mode that is invisible in tracing is a degraded mode nobody notices.
  */
-async function traced(
+async function traced<T>(
   name: QueueName,
   ref: JobRef,
-  work: () => Promise<void>,
+  work: () => Promise<T>,
   jobId?: string,
-): Promise<void> {
+): Promise<T> {
   // The same ids on the log lines as on the span. They were on the span from the day it
   // was written and on exactly one log line — `job failed` — so a failing job could be
   // seen but the handler output explaining it could not be filtered back to it.
   //
   // Outside the span rather than inside, so a handler that throws still logs with its
   // ids while `span()` is recording the exception.
-  await withLogContext(
+  return withLogContext(
     {
       shopId: ref.shopId,
       campaignId: ref.campaignId,

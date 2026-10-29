@@ -13,6 +13,8 @@ import {
   jobOptionsFor,
   QUEUE_NAMES,
   QUEUE_POLICIES,
+  WEBHOOK_COALESCE_MS,
+  webhookDrainKey,
 } from "./queues";
 
 describe("the job classes", () => {
@@ -80,6 +82,33 @@ describe("job options", () => {
 
     expect(options.removeOnComplete).toMatchObject({ count: expect.any(Number) });
     expect(options.removeOnFail).toMatchObject({ age: expect.any(Number) });
+  });
+});
+
+describe("a webhooks job is a shop's drain (#811)", () => {
+  it("is deduplicated on the shop, so a storm of deliveries is one job, never two at once", () => {
+    // Open-source BullMQ's deduplication, not Pro's groups: one job waiting absorbs the
+    // rest, and one running keeps the latest as its successor rather than dropping it.
+    expect(jobOptionsFor(QUEUE_POLICIES.webhooks, { shopId: "s1" })).toMatchObject({
+      deduplication: { id: webhookDrainKey("s1"), keepLastIfActive: true },
+    });
+    expect(webhookDrainKey("s1")).not.toBe(webhookDrainKey("s2"));
+  });
+
+  it("waits for a product's burst to land before draining, but not when it is asking for its next turn", () => {
+    expect(jobOptionsFor(QUEUE_POLICIES.webhooks, { shopId: "s1" }).delay).toBe(WEBHOOK_COALESCE_MS);
+    expect(jobOptionsFor(QUEUE_POLICIES.webhooks, { shopId: "s1" }, { again: true }).delay).toBe(0);
+    expect(WEBHOOK_COALESCE_MS).toBeGreaterThan(0);
+    // Seconds, not minutes: drift is detected after this.
+    expect(WEBHOOK_COALESCE_MS).toBeLessThanOrEqual(10_000);
+  });
+
+  it("leaves every other class's jobs as they were", () => {
+    for (const name of QUEUE_NAMES.filter((queue) => queue !== "webhooks")) {
+      const options = jobOptionsFor(QUEUE_POLICIES[name], { shopId: "s1" });
+      expect(options, `${name} jobs became deduplicated`).not.toHaveProperty("deduplication");
+      expect(options).not.toHaveProperty("delay");
+    }
   });
 });
 

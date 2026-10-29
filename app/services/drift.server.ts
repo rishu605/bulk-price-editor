@@ -136,6 +136,131 @@ export async function ourEchoes(
   );
 }
 
+/** One products delivery, as the mirror would record it, for `deliveryIsOurEcho`. */
+export interface DeliveryEchoCheck {
+  productGid: string;
+  /** The product's own fields, as the webhook would write them to every variant's row. */
+  status: string;
+  vendor: string | null;
+  productType: string | null;
+  tags: readonly string[];
+  variants: ReadonlyArray<{
+    variantGid: string;
+    price: bigint | null;
+    compareAt: bigint | null;
+    title: string | null;
+    sku: string | null;
+    barcode: string | null;
+    inventoryQty: number | null;
+  }>;
+  /** Every variant the delivery says the product still has, or null when it cannot say (#729). */
+  stillThere: ReadonlySet<string> | null;
+}
+
+/**
+ * Whether a whole products delivery is nothing but the echo of Anchor's own writes (#811),
+ * so the worker can drop it before any mirror, drift or enrolment work.
+ *
+ * A campaign's write produces one `products/update` per product it touched, and a 100k run
+ * produces thousands; each used to cost a mirror upsert per variant, a drift lookup per
+ * variant and an enrolment pass, which is the flood that kept the app at its pool timeout
+ * (#803). Asked here in one statement instead.
+ *
+ * "Ours" is `ourEchoes`' rule exactly -- the same two hashes, the same fifteen minutes --
+ * because a looser one would drop a merchant's price edit as ours. But a delivery whose
+ * prices are ours can still carry something else: the merchant retagging, retitling or
+ * removing a variant in the minutes after a run wrote it, or the run's own tag kit. Those
+ * the mirror has to learn, so a delivery is dropped only when it would change nothing but
+ * prices that are ours:
+ *
+ *   - at least one variant's price and compare-at match a recent write of ours;
+ *   - every variant it describes is mirrored, live, on this product, with the title, SKU,
+ *     barcode, stock, status, vendor, type and tags it shows, and is either ours or at the
+ *     price and compare-at the mirror already holds;
+ *   - where it lists the product's variants, they are the ones the mirror has live, so no
+ *     tombstone or new variant is waiting in it.
+ *
+ * Anything else is handled in full, as before: the safe answer when in doubt is "not ours",
+ * which costs the work this exists to save and never a merchant's edit. Spelling is not a
+ * change -- an empty SKU and none, tags in another order -- so a mirror the catalogue sync
+ * wrote compares equal to the webhook's view of the same product. Anything that still
+ * differs sends the first echo of a product the long way, and that one leaves the row as
+ * the webhook spells it, so the rest drop.
+ *
+ * The price is left as the mirror had it. The run settles the mirror from its ledger when it
+ * finishes (`settleMirror`), stamped with the version its write produced, so the echo's copy
+ * of the same price was only ever an earlier arrival of that.
+ */
+export async function deliveryIsOurEcho(shopId: string, delivery: DeliveryEchoCheck): Promise<boolean> {
+  if (delivery.variants.length === 0) return false;
+
+  const since = new Date(Date.now() - INTENT_TTL_MS);
+  const variants = delivery.variants;
+  const text = (value: bigint | number | null) => (value === null ? null : String(value));
+  const still = delivery.stillThere ? [...delivery.stillThere] : null;
+
+  const rows = await prisma.$queryRaw<Array<{ echo: boolean }>>`
+    WITH d AS (
+      SELECT * FROM unnest(
+        ${variants.map((v) => v.variantGid)}::text[],
+        ${variants.map((v) => hashValue(v.price, v.compareAt))}::text[],
+        ${variants.map((v) => hashValue(v.price, ANY_COMPARE_AT))}::text[],
+        ${variants.map((v) => text(v.price))}::text[],
+        ${variants.map((v) => text(v.compareAt))}::text[],
+        ${variants.map((v) => v.title)}::text[],
+        ${variants.map((v) => v.sku)}::text[],
+        ${variants.map((v) => v.barcode)}::text[],
+        ${variants.map((v) => text(v.inventoryQty))}::text[]
+      ) AS d(gid, exact, "anyCompareAt", price, compare, title, sku, barcode, qty)
+    ),
+    judged AS (
+      SELECT
+        d.price IS NOT NULL AND EXISTS (
+          SELECT 1 FROM "write_intents" w
+          WHERE w."shopId" = ${shopId} AND w."variantGid" = d.gid
+            AND w."valueHash" IN (d.exact, d."anyCompareAt")
+            AND w."writtenAt" >= (${since}::timestamptz AT TIME ZONE 'UTC')
+        ) AS ours,
+        COALESCE(
+          v."variantGid" IS NOT NULL
+          AND v."deletedAt" IS NULL
+          AND v."productGid" = ${delivery.productGid}
+          AND NULLIF(v."title", '') IS NOT DISTINCT FROM NULLIF(d.title, '')
+          AND NULLIF(v."sku", '') IS NOT DISTINCT FROM NULLIF(d.sku, '')
+          AND NULLIF(v."barcode", '') IS NOT DISTINCT FROM NULLIF(d.barcode, '')
+          AND v."inventoryQty" IS NOT DISTINCT FROM d.qty::int
+          AND v."status"::text = ${delivery.status}
+          AND NULLIF(v."vendor", '') IS NOT DISTINCT FROM NULLIF(${delivery.vendor}::text, '')
+          AND NULLIF(v."productType", '') IS NOT DISTINCT FROM NULLIF(${delivery.productType}::text, '')
+          AND v."tags" @> ${[...delivery.tags]}::text[] AND v."tags" <@ ${[...delivery.tags]}::text[],
+          false) AS unchanged,
+        COALESCE(
+          v."price" IS NOT DISTINCT FROM d.price::bigint
+          AND v."compareAt" IS NOT DISTINCT FROM d.compare::bigint,
+          false) AS "samePrice"
+      FROM d
+      LEFT JOIN "variant_index" v ON v."shopId" = ${shopId} AND v."variantGid" = d.gid
+    )
+    SELECT COALESCE(bool_or(ours) AND bool_and(unchanged AND (ours OR "samePrice")), false)
+      AND (
+        ${still}::text[] IS NULL
+        OR (
+          NOT EXISTS (
+            SELECT 1 FROM "variant_index" x
+            WHERE x."shopId" = ${shopId} AND x."productGid" = ${delivery.productGid}
+              AND x."deletedAt" IS NULL AND NOT (x."variantGid" = ANY(${still}::text[]))
+          )
+          AND (
+            SELECT count(*) FROM "variant_index" x
+            WHERE x."shopId" = ${shopId} AND x."productGid" = ${delivery.productGid}
+              AND x."deletedAt" IS NULL AND x."variantGid" = ANY(${still}::text[])
+          ) = cardinality(${still}::text[])
+        )
+      ) AS echo
+    FROM judged`;
+  return rows[0]?.echo === true;
+}
+
 /**
  * Examines an incoming price for a variant and records drift if warranted.
  *

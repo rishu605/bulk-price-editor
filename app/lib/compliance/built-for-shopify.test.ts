@@ -334,6 +334,21 @@ describe("integration — API, auth and webhooks", () => {
     }
   });
 
+  it("verifies a delivery it hands to the worker before persisting it (#811)", () => {
+    // The products route's queued path verifies the raw body itself, without the session
+    // load `authenticate.webhook` adds; the check above passes on its inline fallback alone.
+    // So the order is checked here: nothing reaches `webhook_events` unverified.
+    const queued = routes.filter((file) => file.includes("/webhooks.") && /persistDelivery\(/.test(sourceOf(file)));
+
+    expect(queued.length).toBeGreaterThan(0);
+    for (const file of queued) {
+      const source = sourceOf(file);
+      const verified = source.search(/await verifyWebhook\(/);
+      expect(verified, `${file} persists a delivery it never verifies`).toBeGreaterThan(-1);
+      expect(verified, `${file} persists a delivery before verifying it`).toBeLessThan(source.search(/persistDelivery\(\w/));
+    }
+  });
+
   it("authenticates every embedded route", () => {
     const embedded = routes.filter(
       (file) => /\/app\./.test(file) && !file.includes("webhooks") && !file.endsWith("app.tsx"),
