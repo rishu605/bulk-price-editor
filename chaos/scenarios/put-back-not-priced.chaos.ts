@@ -99,7 +99,11 @@ describe("chaos: putting back a price the campaign no longer sets", () => {
       await prisma.campaign.update({ where: { id: campaignId }, data: { excludedVariantGids: [excluded] } });
       const events = [await handEdit(chaos, archived, 123), await handEdit(chaos, priced, 124), await handEdit(chaos, excluded, 125)];
 
-      const decided = await decideDrift(shopId, { campaignId, resolution: "reassert", asOf: new Date().toISOString() }, "staff:1", client);
+      // The page the merchant decided on was loaded after all three edits. Not `new Date()`:
+      // `detectedAt` is stored to the millisecond, rounded, so the last edit can land after a
+      // clock read straight after it, and the decision then leaves it out (#1128).
+      const asOf = new Date(events.at(-1)!.detectedAt.getTime() + 1).toISOString();
+      const decided = await decideDrift(shopId, { campaignId, resolution: "reassert", asOf }, "staff:1", client);
       expect(decided.ok).toBe(false);
       expect(decided.message).toMatch(/Put back 1 price/);
       expect(decided.message).toMatch(/2 prices weren't put back/);
