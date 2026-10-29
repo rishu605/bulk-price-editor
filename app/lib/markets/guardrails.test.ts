@@ -83,4 +83,12 @@ describe("describeMovedMarket", () => {
     expect(sentence).toMatch(/Revert the campaign and apply it again to price them\.$/);
     expect(describeMovedMarket("Europe", 1)[0]).toMatch(/^Europe: 1 variant not priced/);
   });
+
+  it("names the market's own percentage when that is what a campaign moved, not the store price (#1111)", () => {
+    const [sentence] = describeMovedMarket("Europe", 3, "list-percentage");
+    expect(sentence).toMatch(/^Europe: 3 variants not priced separately\./);
+    expect(sentence).toMatch(/follows this market's percentage, which a campaign had already changed/);
+    expect(sentence).not.toMatch(/store price/);
+    expect(sentence).toMatch(/Revert the campaign and apply it again to price them\.$/);
+  });
 });

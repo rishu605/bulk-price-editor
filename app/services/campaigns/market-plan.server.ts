@@ -27,7 +27,7 @@ import { planRun } from "../../lib/planning/plan";
 import type { PlanOutcome } from "../../lib/planning/types";
 import type { ResolvableCampaign } from "../../lib/pricing/types";
 import type { CampaignSurfaces } from "../../lib/campaigns/surfaces";
-import { marketGuardrails } from "../../lib/markets/guardrails";
+import { marketGuardrails, type MovedCause } from "../../lib/markets/guardrails";
 import { guardrailsFor, shopCurrency } from "../settings.server";
 import { inChunks } from "../../lib/db/chunk";
 import { LANDED } from "../../lib/execution/landed";
@@ -64,6 +64,8 @@ export interface MarketPlan {
    * a campaign had already moved, so no baseline could be recorded for them (#841).
    */
   moved: string[];
+  /** What moved under `moved`: the store price they follow, or this market's percentage (#1111). */
+  movedBy: MovedCause;
   /**
    * Variants this market is not priced for because its percentage has moved since their
    * price here was recorded, and a campaign's price on them hides today's (#1093).
@@ -117,7 +119,7 @@ export async function planMarket(
   campaigns: readonly ResolvableCampaign[],
   client: AdminClient,
 ): Promise<MarketPlan | null> {
-  const { prices: baselines, compareAts, moved, stale, ladderUnread } = await marketBaselines(shopId, list, [...variantGids], client);
+  const { prices: baselines, compareAts, moved, movedBy, stale, ladderUnread } = await marketBaselines(shopId, list, [...variantGids], client);
   if (baselines.size === 0 && moved.length === 0 && stale.length === 0 && !ladderUnread) return null;
 
   const inStoreCurrency = list.currency === (await shopCurrency(shopId));
@@ -151,7 +153,7 @@ export async function planMarket(
     })),
   });
 
-  return { shopId, list, baselines, outcome, moved, stale, ladderUnread, inStoreCurrency };
+  return { shopId, list, baselines, outcome, moved, movedBy, stale, ladderUnread, inStoreCurrency };
 }
 
 /** Each variant's recorded cost, the way the base surface reads it: baseline first, then mirror. */
@@ -325,7 +327,7 @@ export async function marketBaselines(
   list: MarketList,
   variantGids: string[],
   client: AdminClient,
-): Promise<{ prices: Map<string, Money>; compareAts: Map<string, Money>; moved: string[]; stale: string[]; ladderUnread: boolean }> {
+): Promise<{ prices: Map<string, Money>; compareAts: Map<string, Money>; moved: string[]; movedBy: MovedCause; stale: string[]; ladderUnread: boolean }> {
   const stored = await prisma.baseline.findMany({
     where: {
       shopId,
@@ -364,9 +366,9 @@ export async function marketBaselines(
   const stale = unreadable.map((row) => row.variantGid);
   const unread = new Set(stale);
   const missing = variantGids.filter((gid) => !out.has(gid) && !unread.has(gid));
-  if (missing.length === 0) return { prices: out, compareAts, moved: [], stale, ladderUnread: false };
+  if (missing.length === 0) return { prices: out, compareAts, moved: [], movedBy: "store-price", stale, ladderUnread: false };
 
-  const moved = await movedSinceBaseline(shopId, list, missing);
+  const { moved, cause: movedBy } = await movedSinceBaseline(shopId, list, missing);
   const { captured, ladderUnread } = await captureMarketBaselines(
     shopId,
     list,
@@ -379,7 +381,7 @@ export async function marketBaselines(
     if (baseline.compareAt) compareAts.set(variantGid, baseline.compareAt);
   }
 
-  return { prices: out, compareAts, moved: [...moved], stale, ladderUnread };
+  return { prices: out, compareAts, moved: [...moved], movedBy, stale, ladderUnread };
 }
 
 /**
@@ -420,7 +422,7 @@ async function staleSetting<T extends { id: string; variantGid: string; handSet:
         select: { variantGid: true },
       }),
     ),
-    movedSinceBaseline(shopId, list, gids),
+    movedSinceBaseline(shopId, list, gids).then((found) => found.moved),
     baseOnSale(shopId, gids),
   ]);
   const fixed = new Set(fixedRows.map((row) => row.variantGid));
@@ -469,13 +471,16 @@ async function campaignPercentageOn(shopId: string, priceListGid: string): Promi
  * A hand-set price on the list does not follow the store price and is always safe. So is
  * a variant whose store price still equals its baseline, or that has no baseline at all
  * (no campaign can have moved it).
+ *
+ * With the cause, which is one per list: a campaign's percentage on the list moves every
+ * derived price on it, and is said as that rather than as a store price nobody moved (#1111).
  */
 async function movedSinceBaseline(
   shopId: string,
   list: MarketList,
   variantGids: readonly string[],
-): Promise<Set<string>> {
-  if (variantGids.length === 0) return new Set();
+): Promise<{ moved: Set<string>; cause: MovedCause }> {
+  if (variantGids.length === 0) return { moved: new Set(), cause: "store-price" };
 
   const [handSet, live, base] = await Promise.all([
     inChunks(variantGids, (batch) =>
@@ -502,7 +507,7 @@ async function movedSinceBaseline(
   // A campaign's percentage on the list moves every price it derives, the store price aside,
   // and baseline or none (#1094).
   if (await campaignPercentageOn(shopId, list.priceListGid)) {
-    return new Set(variantGids.filter((gid) => !fixed.has(gid)));
+    return { moved: new Set(variantGids.filter((gid) => !fixed.has(gid))), cause: "list-percentage" };
   }
   const livePrice = new Map(live.map((row) => [row.variantGid, row.price]));
   const moved = new Set<string>();
@@ -511,7 +516,7 @@ async function movedSinceBaseline(
     const now = livePrice.get(row.variantGid);
     if (now !== null && now !== undefined && now !== row.basePrice) moved.add(row.variantGid);
   }
-  return moved;
+  return { moved, cause: "store-price" };
 }
 
 /**

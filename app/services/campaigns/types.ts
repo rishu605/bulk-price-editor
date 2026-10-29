@@ -176,6 +176,12 @@ export interface CampaignPreview {
   status: string;
   counts: { planned: number; noop: number; skipped: number; clamped: number; clampedToMinimum: number };
   rows: PreviewRow[];
+  /**
+   * For a campaign that prices only its markets: every variant its markets are priced over,
+   * which `rows` lists with the base price left as it is (#1111). `counts.planned` is the
+   * base prices it writes, none, so it cannot be the table's total.
+   */
+  marketsOnlyVariants?: number;
   /** The first blocking variant, and every one of them in the merchant's words (#1076). */
   blocked?: { reason: string; variantGid: string; message: string };
   writePath: string;

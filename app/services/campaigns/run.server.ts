@@ -1186,7 +1186,7 @@ async function executeCampaignRun(
   //
   // Not a whole-campaign revert: its market deletes settle the apply's rows rather than its
   // own, and Resume does not retry them yet (#706).
-  const markets = wholeRevert ? { failed: 0, unverified: 0 } : await outstandingMarketRows(run.id);
+  const markets = wholeRevert ? { verified: 0, failed: 0, unverified: 0 } : await outstandingMarketRows(run.id);
   if (marketsStopped && !wholeRevert) result.clean = false;
   if (markets.failed + markets.unverified > 0) result.clean = false;
   // Every surface, for what the merchant reads: "Partial · 0 failed" over three euro prices
@@ -1194,6 +1194,12 @@ async function executeCampaignRun(
   // the market writer reports its own.
   const failedRows = result.failed + markets.failed;
   const unverifiedRows = result.unverified + markets.unverified;
+  // And its verified prices, where the market prices are all it writes (#1111). A campaign
+  // for Europe alone that verified every euro price said "apply finished: 0 verified" -- in
+  // its history, its run row, its outcome and its email. A campaign that also prices the base
+  // price still counts that one: its "N verified" has always been the store prices.
+  const marketsOnly = resolvable.some((campaign) => campaign.id === campaignId && campaign.marketsOnly);
+  const verifiedRows = result.verified + (marketsOnly ? markets.verified : 0);
 
   // The mirror, before anything says this run is over (#906). It was refreshed row by row
   // -- two queries a variant, 204,000 for a 102,132-variant apply -- *after* the campaign
@@ -1208,7 +1214,7 @@ async function executeCampaignRun(
     where: { id: run.id },
     data: {
       status: result.clean ? "COMPLETED" : "PARTIAL",
-      verifiedRows: result.verified,
+      verifiedRows,
       failedRows,
       skippedRows: outcome.counts.skipped,
       finishedAt: new Date(),
@@ -1233,7 +1239,7 @@ async function executeCampaignRun(
   }
     const unchanged = outcome.kind === "ok" ? outcome.unchanged.filter(({ ref }) => ref.priceListGid === "").map(({ ref }) => ref.variantGid) : [];
     return {
-      ...scopedOutcome(run.id, outcome.counts.planned, { ...result, failed: failedRows, unverified: unverifiedRows }, messages),
+      ...scopedOutcome(run.id, outcome.counts.planned, { ...result, verified: verifiedRows, failed: failedRows, unverified: unverifiedRows }, messages),
       unchanged,
     };
   }
@@ -1251,7 +1257,7 @@ async function executeCampaignRun(
 
   await transitionCampaign(shopId, campaignId, finalState, {
     reason:
-      `${options.revert ? "revert" : "apply"} finished: ${result.verified} verified, ${failedRows} failed` +
+      `${options.revert ? "revert" : "apply"} finished: ${verifiedRows} verified, ${failedRows} failed` +
       (settledNote ? `. ${settledNote}` : ""),
     runId: run.id,
     actor: options.actor,
@@ -1282,7 +1288,7 @@ async function executeCampaignRun(
     revert: options.revert === true,
     campaignName: campaignName ?? "Your campaign",
     counts: {
-      verified: result.verified,
+      verified: verifiedRows,
       failed: failedRows,
       unverified: unverifiedRows,
       skipped: outcome.counts.skipped,
@@ -1298,7 +1304,7 @@ async function executeCampaignRun(
   return {
     runId: run.id,
     planned: outcome.counts.planned,
-    verified: result.verified,
+    verified: verifiedRows,
     failed: failedRows,
     unverified: unverifiedRows,
     clean: result.clean,
