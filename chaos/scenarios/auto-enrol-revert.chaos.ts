@@ -197,7 +197,7 @@ describe("chaos: auto-enrol and a campaign being ended", () => {
       await chaos.apply();
       chaos.heal();
       expect((await campaignOf(campaignId)).status).toBe("PARTIAL");
-      expect(await prisma.variantChange.count({ where: { variantGid: failed, status: "FAILED" } })).toBe(1);
+      expect(await prisma.variantChange.count({ where: { shopId, variantGid: failed, status: "FAILED" } })).toBe(1);
 
       // The merchant edits that product -- stock, a title -- and its price is what it was.
       await deliver(domain, "PRODUCTS_UPDATE", productOf.get(failed)!, [{ gid: failed, price: dollars(baseline.get(failed)!) }]);

@@ -95,7 +95,7 @@ describe("chaos: Apply prices a market once the store price is already right", (
       for (const gid of variantGids) {
         expect(chaos.fake.priceOf(gid, EUR), "the sale price was recorded as 'before' and discounted again").toBe(following.get(gid));
       }
-      expect(await prisma.baseline.count({ where: { priceListGid: EUR, variantGid: { in: variantGids } } }), "a sale price was stored as a baseline").toBe(0);
+      expect(await prisma.baseline.count({ where: { shopId: chaos.fixture.shopId, priceListGid: EUR, variantGid: { in: variantGids } } }), "a sale price was stored as a baseline").toBe(0);
       expect(second.messages.join("\n")).toMatch(
         new RegExp(`Europe: ${variantGids.length} variants not priced separately\\. Their price here follows the store price`),
       );
