@@ -84,13 +84,18 @@ describe("chaos: the Markets card and the run take the same path (#1109)", () =>
     await withChaos("market-path-agrees-eur", { catalog: { products: 4, variantsPerProduct: 1 }, percent: -20 }, async (chaos) => {
       const list = await percentageMarket(chaos, { currency: "EUR", country: "DE", base: true });
 
-      const { card, ran } = await cardThenRun(chaos);
+      const { card, ran, applied } = await cardThenRun(chaos);
 
       expect(card.path, `the card said: ${card.explanation}`).toBe(ran.path);
       expect(ran.path).toBe("per-product");
       expect(ran.pathReason, "the run gave no reason for the path it took").toBeTruthy();
       expect(card.explanation, "the card gave a different reason from the run's").toContain(ran.pathReason!);
       expect(card.explanation, "the card promised a change the run does not make").not.toMatch(/single market-wide/);
+      // And the run report says it, with the card's reason (#1115). It said nothing about
+      // Europe unless a price there failed.
+      expect(applied.messages, "the run report did not say how Europe was priced, or why").toContain(
+        `Europe: priced product by product rather than with one market-wide change, because ${ran.pathReason}.`,
+      );
 
       // The path itself, from the store: no percentage on the list, a price on every product.
       expect(parentWritesOn(chaos), "the run set a percentage after all").toEqual([]);
@@ -122,6 +127,8 @@ describe("chaos: the Markets card and the run take the same path (#1109)", () =>
       expect(chaos.fake.fixedPricesOn(LIST).size).toBe(0);
       expect(card.explanation, "the card promised a price per product the run never writes").not.toMatch(/will get a price per product/);
       expect(applied.messages.join("\n")).toMatch(/Europe: already at the campaign's prices/);
+      // Nothing was written here, so nothing was priced product by product (#1115).
+      expect(applied.messages.join("\n")).not.toMatch(/priced product by product/);
       for (const gid of chaos.fixture.variantGids) {
         const cents = Math.round(Number(before.get(gid)!) * 100 * 0.8);
         expect(chaos.fake.priceOf(gid, LIST), `${gid} is not at the campaign's price in this market`).toBe((cents / 100).toFixed(2));
@@ -133,11 +140,14 @@ describe("chaos: the Markets card and the run take the same path (#1109)", () =>
     await withChaos("market-path-agrees-markets-only", { catalog: { products: 4, variantsPerProduct: 1 }, percent: -20 }, async (chaos) => {
       await percentageMarket(chaos, { currency: "EUR", country: "DE", base: false });
 
-      const { card, ran } = await cardThenRun(chaos);
+      const { card, ran, applied } = await cardThenRun(chaos);
 
       expect(card.path, `the card said: ${card.explanation}`).toBe(ran.path);
       expect(ran.path).toBe("market-wide");
       expect(card.explanation).toMatch(/Europe will be repriced with a single market-wide 20% change/);
+      // The report's own sentence for this path, unchanged by #1115's.
+      expect(applied.messages.join("\n")).toMatch(/Europe: repriced with one market-wide change of/);
+      expect(applied.messages.join("\n")).not.toMatch(/priced product by product/);
       expect(parentWritesOn(chaos)).toEqual([{ priceListGid: LIST, type: "PERCENTAGE_DECREASE", value: 28 }]);
     });
   });
