@@ -92,7 +92,14 @@ function selection(shopId: string, filters: DriftFilters, asOf?: string): Prisma
     conditions.push(Prisma.sql`(v."title" ILIKE ${pattern} OR v."sku" ILIKE ${pattern} OR d."variantGid" = ${gid})`);
   }
   // In UTC, like every Prisma write to these columns (see `settleMirror`).
-  if (asOf) conditions.push(Prisma.sql`d."detectedAt" <= (${new Date(asOf)}::timestamptz AT TIME ZONE 'UTC')`);
+  //
+  // A millisecond past `asOf`, because the two are not cut the same way (#1134). `asOf` is
+  // our clock truncated to the millisecond; `detectedAt` is the database's `CURRENT_TIMESTAMP`
+  // rounded to it, up to half a millisecond later than the write. An event written in the
+  // millisecond before the page was loaded could compare later than it, be shown on the page
+  // and be left out of the decision -- "Putting back 2 prices" under three. Every event
+  // written before `asOf` was taken is stored at most one millisecond past it.
+  if (asOf) conditions.push(Prisma.sql`d."detectedAt" <= (${new Date(asOf)}::timestamptz AT TIME ZONE 'UTC') + interval '1 millisecond'`);
 
   return Prisma.sql`
     FROM "drift_events" d
