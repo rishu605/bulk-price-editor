@@ -160,7 +160,7 @@ currently satisfied; none of them is enforced, so any of them can regress silent
 | One pinned API version, no override | `pins one API version, with no environment override` | met |
 | That version is still supported | `pins an API version Shopify still supports` | met until 2027-07 |
 | Session-token auth on every embedded route | `authenticates every embedded route` | met |
-| Webhook authenticity checked | `authenticates every webhook route` | met |
+| Webhook authenticity checked | `authenticates every webhook route`, `verifies a delivery it hands to the worker before persisting it (#811)` | met |
 | All three mandatory GDPR topics | `registers all three mandatory GDPR topics` | met |
 | Scopes limited to what the app uses | `keeps requested scopes to the ones the app demonstrably uses` | met |
 | No write access the app does not exercise | `sends no mutation that would need write access to markets` | met |

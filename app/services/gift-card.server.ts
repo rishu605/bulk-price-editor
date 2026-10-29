@@ -40,12 +40,14 @@ export const PRODUCT_GIFT_CARD_QUERY = `#graphql
  * the mirror's value as it is.
  *
  * `client` is null when the shop has no usable offline session, which is treated like
- * any other failed lookup.
+ * any other failed lookup. It may be asked for lazily: the worker handling a shop's
+ * deliveries has no request's session to hand, and opening one for a product the mirror
+ * already knows would spend a session load to learn nothing (#811).
  */
 export async function giftCardFlagFor(
   shopId: string,
   productGid: string,
-  client: AdminClient | null,
+  client: AdminClient | null | (() => Promise<AdminClient | null>),
 ): Promise<boolean | undefined> {
   const known = await prisma.variantIndex.findFirst({
     where: { shopId, productGid },
@@ -54,8 +56,9 @@ export async function giftCardFlagFor(
   if (known && !known.isGiftCard) return undefined;
 
   try {
-    if (!client) throw new Error("no admin session for this shop");
-    const response = await client.request<AnchorProductGiftCardQuery>(PRODUCT_GIFT_CARD_QUERY, {
+    const admin = typeof client === "function" ? await client() : client;
+    if (!admin) throw new Error("no admin session for this shop");
+    const response = await admin.request<AnchorProductGiftCardQuery>(PRODUCT_GIFT_CARD_QUERY, {
       id: productGid,
     });
     const isGiftCard = response.data?.product?.isGiftCard;

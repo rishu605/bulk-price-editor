@@ -15,9 +15,9 @@ import { SCHEDULER_ACTOR } from "../lib/audit/actor";
 import type { CampaignState } from "../lib/lifecycle/transitions";
 import prisma from "../db.server";
 import { adminClientForShop } from "../services/admin-client.server";
-import type { JobRef, QueueName } from "./queues";
+import type { JobRef, JobResult, QueueName } from "./queues";
 
-export async function handleJob(name: QueueName, ref: JobRef): Promise<void> {
+export async function handleJob(name: QueueName, ref: JobRef): Promise<JobResult> {
   switch (name) {
     case "execution":
       // A drift decision over many prices is execution too: a put-back is a run, and
@@ -27,12 +27,14 @@ export async function handleJob(name: QueueName, ref: JobRef): Promise<void> {
       return auditJob(ref);
     case "sync":
       return syncJob(ref);
-    // Planning, verification and webhook ingestion are performed inside the run and the
-    // webhook route today. They have queues so the topology is complete and so moving
-    // them is a change of caller rather than a change of design.
+    // A shop's products webhooks, persisted by the route and drained here (#811): the
+    // queue's first move from the web process, a change of caller as this said it would be.
+    case "webhooks":
+      return webhooksJob(ref);
+    // Planning and verification are performed inside the run today. They have queues so the
+    // topology is complete and so moving them is a change of caller rather than of design.
     case "planning":
     case "verification":
-    case "webhooks":
       return;
     default: {
       // Exhaustiveness, not defensiveness. Without it, adding a name to `QUEUE_NAMES`
@@ -102,6 +104,16 @@ async function driftDecisionJob(ref: JobRef): Promise<void> {
     ref.actor ?? SCHEDULER_ACTOR,
     client,
   );
+}
+
+/**
+ * One turn of a shop's products-webhook drain (#811). The job names the shop and nothing
+ * else: the deliveries are rows, read again here, so a job that waited behind a storm acts
+ * on what is waiting now -- including deliveries persisted after it was rung.
+ */
+async function webhooksJob(ref: JobRef): Promise<JobResult> {
+  const { drainShopWebhooks } = await import("../services/webhook-queue.server");
+  return drainShopWebhooks(ref.shopId);
 }
 
 async function auditJob(ref: JobRef): Promise<void> {

@@ -66,7 +66,7 @@ something proves otherwise.
 
 1. `SELECT status, count(*) FROM webhook_events WHERE "receivedAt" > now() - interval '1 hour' GROUP BY status;` — a large `RECEIVED` next to a small `PROCESSED` is a worker accepting deliveries and not draining them.
 2. `SELECT topic, count(*), max(now() - "receivedAt") AS oldest FROM webhook_events WHERE "processedAt" IS NULL GROUP BY topic ORDER BY oldest DESC;` — one topic backed up while the others move points at that handler rather than at the worker.
-3. `SELECT "failureReason", count(*) FROM webhook_events WHERE status = 'FAILED' AND "receivedAt" > now() - interval '1 hour' GROUP BY 1 ORDER BY 2 DESC;` — a repeated reason means the handler is throwing and `attempts` is climbing.
+3. `SELECT "failureReason", count(*) FROM webhook_events WHERE status = 'FAILED' AND "receivedAt" > now() - interval '1 hour' GROUP BY 1 ORDER BY 2 DESC;` — a repeated reason means the handler is throwing and `attempts` is climbing. For products deliveries, which the worker handles (#811), its tries are `processAttempts` (`attempts` counts Shopify's deliveries): a delivery is set aside as `FAILED` after five, and the rest of its shop's backlog goes on. A `RECEIVED` products row that never moves has lost its job; the worker's tick rings any shop whose deliveries have waited two minutes.
 
 **Remediate.** If the queue is draining and merely slow, let it. Restarting mid-drain
 costs the in-flight batch and buys nothing, because delivery is at-least-once and the

@@ -14,6 +14,11 @@
  *
  * Metadata only: the alerts need counts and times, and a products payload is large and
  * carries prices. Best-effort: recording a delivery must never fail it.
+ *
+ * The products route records its deliveries itself when a worker queue takes them (#811):
+ * the row is the delivery, written before the answer and with its body until the worker has
+ * handled it (`webhook-queue.server`). This wrapper is for every other route, and for the
+ * products route handling a delivery inline when there is no queue.
  */
 
 import type { ActionFunctionArgs } from "react-router";
@@ -86,6 +91,9 @@ async function record(
       // Shopify retries a delivery under the same id until it is answered with a 2xx.
       update: {
         ...(erased ? { shopId: null, shopDomain: ERASED_SHOP } : {}),
+        // A products delivery persisted for the worker and then handled inline -- a web
+        // process restarted without its queue (#811) -- keeps no body once handled.
+        payload: {},
         status,
         attempts: { increment: 1 },
         processedAt,

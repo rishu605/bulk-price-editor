@@ -19,6 +19,7 @@ import { reportDepths, runtimeFor } from "../app/worker/queue-runtime.server";
 import { handleJob } from "../app/worker/handlers.server";
 import { LeaderLock } from "../app/worker/leader-lock";
 import { pruneWriteIntents } from "../app/services/drift.server";
+import { ringStrandedWebhooks } from "../app/services/webhook-queue.server";
 import prisma from "../app/db.server";
 
 const TICK_INTERVAL_MS = Number(process.env.SCHEDULER_TICK_MS ?? 30_000);
@@ -73,6 +74,16 @@ async function runOnce(): Promise<void> {
   // number. A rising floor here is the earliest signal that the worker is losing
   // ground, and the one that predicts a missed scheduled revert before it is missed.
   await reportDepths(queues);
+
+  // Products deliveries persisted and never drained: their job was not taken or was lost
+  // (#811). A shop whose drain is merely busy absorbs the ring; the rest get one.
+  // Its own failure, so it never costs the housekeeping below its turn.
+  try {
+    const rung = await ringStrandedWebhooks(queues);
+    if (rung > 0) console.log(`[worker] rang ${rung} shop(s) with products webhooks left waiting`);
+  } catch (error) {
+    console.error("[worker] could not ring stranded products webhooks:", error instanceof Error ? error.message : error);
+  }
 
   if (
     result.applied > 0 ||

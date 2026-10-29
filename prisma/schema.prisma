@@ -1030,10 +1030,20 @@ model WebhookEvent {
   shopId     String?
   shopDomain String
   topic      String
+  /// The delivery's body while it waits for the worker (#811), and `{}` once it has been
+  /// handled: the log keeps metadata, not a second copy of the catalogue's prices.
   payload    Json
 
+  /// What a queued delivery is about -- the product, for `products/*` -- so the worker
+  /// handles one product's deliveries together and only the newest of them (#811).
+  subjectGid String?
+
   status        WebhookStatus @default(RECEIVED)
+  /// Deliveries: Shopify's retries of the same id.
   attempts      Int           @default(0)
+  /// The worker's tries at handling a queued delivery that threw (#811), counted apart from
+  /// Shopify's deliveries so a poison payload stops after a few rather than blocking its shop.
+  processAttempts Int         @default(0)
   failureReason String?
 
   receivedAt  DateTime  @default(now())
@@ -1043,6 +1053,10 @@ model WebhookEvent {
 
   @@index([shopDomain, topic])
   @@index([status, receivedAt])
+  /// A shop's waiting deliveries, oldest first: what the worker drains (#811).
+  @@index([shopId, status, receivedAt])
+  /// One product's waiting deliveries, which the worker coalesces (#811).
+  @@index([shopId, subjectGid, status])
   @@map("webhook_events")
 }
 
