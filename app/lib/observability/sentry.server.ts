@@ -22,6 +22,7 @@ import * as Sentry from "@sentry/node";
 import { redact, redactText } from "../logging/redact";
 import { redactPrices, redactPricesInText } from "../telemetry/redact";
 import { logger } from "../logging/logger";
+import { releaseOf } from "./release";
 
 let started = false;
 
@@ -52,7 +53,7 @@ export function initSentry(options: SentryOptions): boolean {
     environment: env.SENTRY_ENVIRONMENT ?? env.NODE_ENV ?? "development",
     // The deployed commit. Without it a stack trace points at a line number in a file
     // that has moved, which is worse than no trace because it looks authoritative.
-    release: env.SENTRY_RELEASE ?? env.SOURCE_VERSION ?? undefined,
+    release: releaseOf(env),
 
     // Sampled, because a busy shop's campaign generates thousands of spans and none of
     // them is individually interesting. Errors are always sent; traces are a sample.

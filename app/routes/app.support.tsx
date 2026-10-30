@@ -36,6 +36,7 @@ import { withGuard } from "../lib/errors/guard.server";
 import { SPACE } from "../lib/ui/spacing";
 import { Secondary } from "../components/Type";
 import { Card } from "../components/Card";
+import { releaseOf } from "../lib/observability/release";
 
 /**
  * Which build this is.
@@ -45,9 +46,7 @@ import { Card } from "../components/Card";
  * printing.
  */
 function appVersion(): string {
-  // eslint-disable-next-line no-undef
-  const env = process.env;
-  return env.SENTRY_RELEASE ?? env.SOURCE_VERSION ?? "dev";
+  return releaseOf() ?? "dev";
 }
 
 async function contextFor(request: Request) {
