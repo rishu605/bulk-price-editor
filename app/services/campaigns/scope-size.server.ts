@@ -3,7 +3,7 @@ import type { Prisma } from "@prisma/client";
 import prisma from "../../db.server";
 import { inChunksCounting } from "../../lib/db/chunk";
 import { astToWhere } from "../segments.server";
-import { scopeOf } from "./model.server";
+import { DEFINITION, scopeOf } from "./model.server";
 
 /**
  * How many variants a campaign's scope covers: one indexed count, never a plan (#803).
@@ -13,7 +13,7 @@ import { scopeOf } from "./model.server";
  * database connections the run itself needed.
  */
 export async function scopeSize(shopId: string, campaignId: string): Promise<number> {
-  const campaign = await prisma.campaign.findFirstOrThrow({ where: { id: campaignId, shopId }, select: { schedule: true } });
+  const campaign = await prisma.campaign.findFirstOrThrow({ where: { id: campaignId, shopId }, select: DEFINITION });
   return prisma.variantIndex.count({ where: astToWhere(shopId, await scopeOf(shopId, campaign)) });
 }
 

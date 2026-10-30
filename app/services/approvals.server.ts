@@ -15,7 +15,7 @@
 import prisma from "../db.server";
 import { logger } from "../lib/logging/logger";
 import { astToWhere } from "./segments.server";
-import { scopeOf } from "./campaigns/model.server";
+import { DEFINITION, scopeOf } from "./campaigns/model.server";
 import { readSettings } from "./settings.server";
 
 export interface ApprovalPolicy {
@@ -83,7 +83,7 @@ export async function approvalFor(shopId: string, campaignId: string): Promise<A
 
   const campaign = await prisma.campaign.findFirst({
     where: { id: campaignId, shopId },
-    select: { schedule: true },
+    select: DEFINITION,
   });
   if (!campaign) return { required: false };
 
@@ -140,7 +140,7 @@ export async function requestApproval(
 ): Promise<void> {
   const campaign = await prisma.campaign.findFirstOrThrow({
     where: { id: campaignId, shopId },
-    select: { schedule: true },
+    select: DEFINITION,
   });
 
   const variants = await prisma.variantIndex.count({

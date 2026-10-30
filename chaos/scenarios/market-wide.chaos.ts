@@ -25,6 +25,7 @@ import { parseMoney } from "../../app/lib/money/money";
 import { previewCampaign } from "../../app/services/campaigns/preview.server";
 import { chaosAdminClient } from "../harness/http-client";
 import { withChaos, type ChaosContext } from "../harness/scenario";
+import { redefine } from "../harness/definition";
 
 const EU = "gid://shopify/PriceList/eu";
 
@@ -530,17 +531,8 @@ describe("chaos: repricing a market with one mutation", () => {
           data: { tags: ["HALF"] },
         });
 
-        const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
-        await prisma.campaign.update({
-          where: { id: campaignId },
-          data: {
-            surfaces: { base: true, priceLists: [EU] } as never,
-            schedule: {
-              ...(campaign.schedule as object),
-              ast: { groups: [{ conditions: [{ field: "tag", value: "HALF" }] }] },
-            } as never,
-          },
-        });
+        await prisma.campaign.update({ where: { id: campaignId }, data: { surfaces: { base: true, priceLists: [EU] } as never } });
+        await redefine(campaignId, { ast: { groups: [{ conditions: [{ field: "tag", value: "HALF" }] }] } });
 
         const euList = chaos.fake.priceLists.find((l) => l.id === EU)!;
         const before = new Map(
@@ -587,13 +579,7 @@ describe("chaos: repricing a market with one mutation", () => {
         // Charm-99 pricing perturbs each product individually. The rule still reads as
         // a uniform 20%, which is exactly why eligibility is proven from the finished
         // plan rather than predicted from the rule.
-        const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
-        await prisma.campaign.update({
-          where: { id: campaignId },
-          data: {
-            schedule: { ...(campaign.schedule as object), rounding: "charm99" } as never,
-          },
-        });
+        await redefine(campaignId, { rounding: "charm99" });
 
         const applied = await chaos.apply();
         await chaos.expectHonest(applied.runId);

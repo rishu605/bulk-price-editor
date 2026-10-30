@@ -25,6 +25,7 @@ import {
   type MatchOutcome,
 } from "../lib/segments/csv-import";
 import { resolveVariantGids, type FilterAst } from "./segments.server";
+import { DEFINITION, segmentIdOf } from "./campaigns/model.server";
 import { formatCount } from "../lib/format/display";
 import { campaignsBlockingDelete, deleteBlockedReason } from "../lib/segments/delete-rule";
 
@@ -56,7 +57,7 @@ export async function referencingCampaigns(shopId: string, segmentId: string) {
     }),
     prisma.campaign.findMany({
       where: { shopId },
-      select: { id: true, name: true, status: true, ruleRows: true, schedule: true },
+      select: { id: true, name: true, status: true, ruleRows: true, ...DEFINITION },
     }),
   ]);
 
@@ -64,7 +65,12 @@ export async function referencingCampaigns(shopId: string, segmentId: string) {
 
   for (const campaign of all) {
     if (byId.has(campaign.id)) continue;
-    if (mentionsSegment(campaign.ruleRows, segmentId) || mentionsSegment(campaign.schedule, segmentId)) {
+    // Its segment as the run reads it, column first (#884), and anywhere in its filter, rules
+    // or schedule JSON -- the last for a campaign the release before made, until the contract.
+    const mentioned =
+      segmentIdOf(campaign) === segmentId ||
+      [campaign.ruleRows, campaign.filter, campaign.schedule].some((blob) => mentionsSegment(blob, segmentId));
+    if (mentioned) {
       byId.set(campaign.id, { id: campaign.id, name: campaign.name, status: campaign.status });
     }
   }

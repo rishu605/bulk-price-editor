@@ -16,6 +16,7 @@ import prisma from "../../app/db.server";
 import { parseMoney } from "../../app/lib/money/money";
 import { previewDraft } from "../../app/services/campaigns/draft-preview.server";
 import { withChaos, type ChaosContext } from "../harness/scenario";
+import { redefine } from "../harness/definition";
 
 /** Sets one variant's normal price everywhere the fixture recorded it. */
 async function priceAt(chaos: ChaosContext, variantGid: string, minor: number) {
@@ -42,11 +43,7 @@ describe("chaos: 5% up, rounded to .99", () => {
       ] as const);
       for (const [gid, [minor]] of cases) await priceAt(chaos, gid, minor);
 
-      const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
-      await prisma.campaign.update({
-        where: { id: campaignId },
-        data: { schedule: { ...(campaign.schedule as object), rounding: { default: "charm99", byCurrency: {} } } as never },
-      });
+      await redefine(campaignId, { rounding: { default: "charm99", byCurrency: {} } });
 
       // The preview, from the same baselines, before anything is written.
       const preview = await previewDraft(

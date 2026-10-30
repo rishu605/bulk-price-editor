@@ -16,7 +16,7 @@ import { uncopiableRule } from "../../lib/campaigns/rule-limits";
 import { copiedSchedule } from "../../lib/campaigns/schedule-blob";
 import { AppError } from "../../lib/errors/app-error";
 import { logger } from "../../lib/logging/logger";
-import { isPractice } from "./model.server";
+import { campaignDefinition, DEFINITION, definitionData } from "./model.server";
 
 /**
  * Everything that describes what a campaign *does*, and nothing about what it *did*.
@@ -28,11 +28,13 @@ import { isPractice } from "./model.server";
  * any of these would be a campaign that quietly prices differently from the one it was
  * copied from, which is worse than no duplicate at all.
  *
- * Copied from inside `schedule`, too: the filter, the segment id, the rounding and the
- * practice flag live in that JSON beside the dates (`lib/campaigns/schedule-blob.ts`).
- * Dropping the whole blob made every copy price the entire catalogue, let a practice
- * campaign's copy be applied, and lost its rounding (#762). The practice flag is left behind
- * only when asked for by name: a practice campaign's real copy (#1077).
+ * Copied as the definition, too: the filter, the segment id, the rounding and the practice
+ * flag. They lived inside `schedule` beside the dates, and dropping the whole blob made every
+ * copy price the entire catalogue, let a practice campaign's copy be applied, and lost its
+ * rounding (#762). Columns of their own since #884, read as `campaignDefinition` reads them
+ * -- so a source the release before made, with its definition in the blob alone, is copied
+ * as faithfully -- and written both ways, as every definition is this release. The practice
+ * flag is left behind only when asked for by name: a practice campaign's real copy (#1077).
  *
  * Not copied, and this is the point of the feature: `status` (a copy is a draft), the
  * schedule's window and `startAt`/`endAt` (last month's dates are never the dates the
@@ -71,7 +73,7 @@ export async function duplicateCampaign(
 ): Promise<{ id: string; name: string }> {
   const source = await prisma.campaign.findFirstOrThrow({
     where: { id: campaignId, shopId },
-    select: { ...COPIED, schedule: true, segments: { select: { id: true } } },
+    select: { ...COPIED, ...DEFINITION, segments: { select: { id: true } } },
   });
 
   // A rule every Apply refuses -- a reduction of 100% or more (#818) -- is not copied into a
@@ -84,8 +86,11 @@ export async function duplicateCampaign(
   // thousand short strings is cheaper than the query that would avoid it.
   const taken = await prisma.campaign.findMany({ where: { shopId }, select: { name: true } });
 
-  const { segments, ruleRows, surfaces, compareAtPolicy, guardrails, schedule, ...fields } = source;
-  const copied = copiedSchedule(schedule, { real: options.real });
+  // `fields` holds the definition's columns and the blob as read, too: `definitionData`
+  // below writes every one of them over the source's.
+  const { segments, ruleRows, surfaces, compareAtPolicy, guardrails, ...fields } = source;
+  // The source's definition, column first (#884), and a real copy's without the flag (#1077).
+  const definition = { ...campaignDefinition(source), ...(options.real ? { practice: false } : {}) };
 
   const copy = await prisma.campaign.create({
     data: {
@@ -102,12 +107,13 @@ export async function duplicateCampaign(
       shopId,
       name: copyName(source.name, taken.map((c) => c.name), options.real ? "real" : "copy"),
       status: "DRAFT",
-      // What it prices, run by hand: the same scope, rounding and practice flag, and no
-      // dates. A draft, so `manual` -- the window is what is deliberately left behind.
-      // Without the source's typed confirmation too (#1009): that was a person's decision
-      // about the source, and the copy's start is asked about afresh. A real copy leaves
-      // the practice flag behind as well (#1077), and nothing else.
-      schedule: copied as Prisma.InputJsonValue,
+      // What it prices, run by hand: the same scope, rounding and practice flag, in its
+      // columns and in the blob (#884), and no dates. A draft, so `manual` -- the window is
+      // what is deliberately left behind. Without the source's typed confirmation too
+      // (#1009): that was a person's decision about the source, and the copy's start is
+      // asked about afresh. A real copy leaves the practice flag behind as well (#1077), and
+      // nothing else.
+      ...definitionData(copiedSchedule(source.schedule, { real: options.real }), definition),
       createdBy: actor,
       // Connected, not copied. A segment is a saved definition shared across campaigns;
       // duplicating the rows would give the copy a segment that stops tracking the
@@ -126,7 +132,7 @@ export async function duplicateCampaign(
       entityId: copy.id,
       // Whether the copy is practice, as "campaign.created" records it: a real copy of a
       // practice campaign is the moment it became something that can be applied (#1077).
-      after: { from: campaignId, name: copy.name, practice: isPractice({ schedule: copied as never }) } as never,
+      after: { from: campaignId, name: copy.name, practice: definition.practice } as never,
     },
   });
 

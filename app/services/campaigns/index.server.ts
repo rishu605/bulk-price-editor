@@ -5,7 +5,7 @@
  * in, and the split can change without touching the UI.
  */
 
-export { createCampaign, toResolvable, astOf } from "./model.server";
+export { createCampaign, toResolvable, astOf, IS_PRACTICE } from "./model.server";
 export { loadCandidates, productMapFor, titleMapFor } from "./candidates.server";
 export { pagePreview, previewCampaign, type PreviewOptions } from "./preview.server";
 export { runCampaign, runToResume, type RunOptions } from "./run.server";

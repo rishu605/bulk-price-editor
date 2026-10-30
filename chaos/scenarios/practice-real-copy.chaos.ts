@@ -18,6 +18,7 @@ import { isPractice } from "../../app/services/campaigns/model.server";
 import { chaosAdminContext } from "../harness/http-client";
 import { type ChaosSpec, withChaos } from "../harness/scenario";
 import { judge } from "../harness/verdict";
+import { redefine } from "../harness/definition";
 
 /** A staff member's id, as App Bridge's session token carries it. */
 const STAFF = "91614707946";
@@ -84,14 +85,10 @@ describe("chaos: a practice campaign's real copy (#1077)", () => {
       // The fixture campaign made practice, as the editor makes one, with what else a copy has
       // to keep: an exclusion -- so a copy that dropped it writes a row too many -- and a note.
       const [excluded, ...priced] = variantGids;
-      const fixture = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
+      await redefine(campaignId, { practice: true });
       await prisma.campaign.update({
         where: { id: campaignId },
-        data: {
-          schedule: { ...(fixture.schedule as object), practice: true } as never,
-          excludedVariantGids: [excluded!],
-          note: "Try the alpine sale before the season",
-        },
+        data: { excludedVariantGids: [excluded!], note: "Try the alpine sale before the season" },
       });
       const source = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
 
@@ -121,7 +118,12 @@ describe("chaos: a practice campaign's real copy (#1077)", () => {
       const definition: Record<string, unknown> = { ...(source.schedule as Record<string, unknown>), kind: "manual" };
       delete definition.practice;
       expect(copy.schedule).toEqual(definition);
+      // And in its columns (#884), less the flag there too.
+      expect(copy.practice).toBe(false);
       for (const field of [
+        "filter",
+        "segmentId",
+        "rounding",
         "ruleRows",
         "surfaces",
         "compareAtPolicy",
@@ -182,13 +184,10 @@ describe("chaos: a practice campaign's real copy (#1077)", () => {
     await withChaos("practice-real-copy-refused", CATALOG, async (chaos) => {
       const { shopId, domain, campaignId } = chaos.fixture;
       pending = { shop: domain, endpoint: chaos.server.endpoint() };
-      const fixture = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
+      await redefine(campaignId, { practice: true });
       await prisma.campaign.update({
         where: { id: campaignId },
-        data: {
-          schedule: { ...(fixture.schedule as object), practice: true } as never,
-          ruleRows: [{ segmentIds: [], rule: { kind: "percent-change", percent: -150 } }],
-        },
+        data: { ruleRows: [{ segmentIds: [], rule: { kind: "percent-change", percent: -150 } }] },
       });
       const before = await prisma.campaign.count({ where: { shopId } });
 

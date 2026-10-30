@@ -19,6 +19,7 @@ import { filtersFrom, listCampaigns } from "../../app/services/campaigns/list.se
 import { astToWhere } from "../../app/services/segments.server";
 import { createSegment } from "../../app/services/segments-crud.server";
 import { withChaos } from "../harness/scenario";
+import { redefine } from "../harness/definition";
 
 let pending = { shop: "" };
 
@@ -50,14 +51,10 @@ describe("chaos: deleting a segment campaigns have used", () => {
       // A spreadsheet campaign's shape: a frozen segment, and an empty stored filter that
       // on its own would match every variant.
       const segment = await createSegment(shopId, { name: "Sale (imported)", kind: "FROZEN", variantGids: variantGids.slice(0, 2) });
-      const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
-      await prisma.campaign.update({
+      await redefine(campaignId, { ast: { groups: [] }, segmentId: segment.id });
+      const campaign = await prisma.campaign.update({
         where: { id: campaignId },
-        data: {
-          status: "ACTIVE",
-          schedule: { ...(campaign.schedule as object), ast: { groups: [] }, segmentId: segment.id } as never,
-          segments: { connect: { id: segment.id } },
-        },
+        data: { status: "ACTIVE", segments: { connect: { id: segment.id } } },
       });
 
       // Live: refused, naming the campaign and a step that exists.

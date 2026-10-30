@@ -22,6 +22,7 @@ import { runCampaign } from "../../app/services/campaigns/run.server";
 import { revertVariant } from "../../app/services/campaigns/variant-revert.server";
 import { chaosAdminClient } from "../harness/http-client";
 import { withChaos, type ChaosContext } from "../harness/scenario";
+import { redefine } from "../harness/definition";
 
 const EU = "gid://shopify/PriceList/markets-only-eu";
 
@@ -128,11 +129,7 @@ describe("chaos: a campaign for Europe alone (#1094)", () => {
       const client = chaosAdminClient(chaos.server.endpoint());
       await europeOnly(chaos);
       // Charm pricing, so Europe gets a price per product and a failed write can leave it partial.
-      const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
-      await prisma.campaign.update({
-        where: { id: campaignId },
-        data: { schedule: { ...(campaign.schedule as object), rounding: "charm99" } as never },
-      });
+      await redefine(campaignId, { rounding: "charm99" });
       const start = basePrices(chaos);
       const before = europe(chaos);
 

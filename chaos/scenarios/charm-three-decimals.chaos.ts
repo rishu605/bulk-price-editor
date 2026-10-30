@@ -15,6 +15,7 @@ import prisma from "../../app/db.server";
 import { previewCampaign } from "../../app/services/campaigns/preview.server";
 import { chaosAdminClient } from "../harness/http-client";
 import { withChaos } from "../harness/scenario";
+import { redefine } from "../harness/definition";
 
 const KWD = "gid://shopify/PriceList/kwd-charm";
 
@@ -33,15 +34,9 @@ describe("chaos: .99 rounding in a Kuwaiti dinar market", () => {
       });
       const { syncMarkets } = await import("../../app/services/markets-sync.server");
       await syncMarkets(chaosAdminClient(chaos.server.endpoint()), shopId);
-      const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
-      await prisma.campaign.update({
-        where: { id: campaignId },
-        data: {
-          surfaces: { base: true, priceLists: [KWD] } as never,
-          // The store's .99, inherited by the dinar market: the case the ticket describes.
-          schedule: { ...(campaign.schedule as object), rounding: { default: "charm99", byCurrency: {} } } as never,
-        },
-      });
+      await prisma.campaign.update({ where: { id: campaignId }, data: { surfaces: { base: true, priceLists: [KWD] } as never } });
+      // The store's .99, inherited by the dinar market: the case the ticket describes.
+      await redefine(campaignId, { rounding: { default: "charm99", byCurrency: {} } });
 
       const preview = await previewCampaign(shopId, campaignId, { client: chaosAdminClient(chaos.server.endpoint()) });
       const market = preview.markets.find((m) => m.priceListGid === KWD);

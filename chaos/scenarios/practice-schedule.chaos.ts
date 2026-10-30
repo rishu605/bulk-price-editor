@@ -18,6 +18,7 @@ import { describe, expect, it, vi } from "vitest";
 import prisma from "../../app/db.server";
 import { tick } from "../../app/services/scheduler.server";
 import { type ChaosContext, fixtureAdminClient, withChaos } from "../harness/scenario";
+import { redefine } from "../harness/definition";
 
 let pending = { shop: "" };
 let endpoint = "";
@@ -108,6 +109,7 @@ describe("chaos: a practice campaign is never scheduled", () => {
       expect(created.headers.get("Location")).toMatch(/^\/app\/campaigns\//);
       const practice = await prisma.campaign.findFirstOrThrow({ where: { shopId, name: "Practice, no dates" } });
       expect(practice.status).toBe("DRAFT");
+      expect(practice.practice, "the editor's practice campaign is not practice in its column (#884)").toBe(true);
       expect((practice.schedule as { practice?: boolean; kind?: string }).practice).toBe(true);
       expect((practice.schedule as { kind?: string }).kind).toBe("manual");
       expect(practice.startAt).toBeNull();
@@ -165,10 +167,8 @@ describe("chaos: a practice campaign is never scheduled", () => {
       // tick, so the window above was genuinely due and the ticks unscheduled it because it
       // was practice -- not because of anything incidental to how the fixture was set up.
       await practiceScheduledAndDue(chaos);
-      const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
-      const real = { ...(campaign.schedule as Record<string, unknown>) };
-      delete real.practice;
-      await prisma.campaign.update({ where: { id: campaignId }, data: { schedule: real as never } });
+      // Real in both places: the unschedule above wrote the flag into its column (#884).
+      await redefine(campaignId, { practice: false });
       const result = await tick(new Date());
       expect(result.failures.filter((failure) => failure.campaignId === campaignId)).toEqual([]);
       expect(await statusOf(campaignId)).toBe("ACTIVE");
@@ -181,7 +181,9 @@ describe("chaos: a practice campaign is never scheduled", () => {
 
 /**
  * The fixture campaign as a row from before #827: practice, SCHEDULED, and due -- its start
- * passed five minutes ago, so the next tick acts on it unless something stops it.
+ * passed five minutes ago, so the next tick acts on it unless something stops it. Practice in
+ * its schedule JSON alone, as the release before #884 wrote it, which the tick reads behind
+ * the column.
  */
 async function practiceScheduledAndDue(chaos: ChaosContext) {
   endpoint = chaos.server.endpoint();

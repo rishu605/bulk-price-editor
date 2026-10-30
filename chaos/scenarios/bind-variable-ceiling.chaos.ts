@@ -30,6 +30,7 @@ import {
 import { captureBaselines } from "../../app/services/baselines.server";
 import { previewCampaign } from "../../app/services/campaigns/preview.server";
 import { withChaos } from "../harness/scenario";
+import { redefine } from "../harness/definition";
 
 /** Comfortably past the ceiling, and past a whole number of chunks. */
 const OVER_CEILING = 34_000;
@@ -145,10 +146,7 @@ describe("chaos: a campaign wider than one prepared statement", () => {
         });
 
         // Scope the campaign at the whole catalogue so the plan is the wide one.
-        await prisma.campaign.update({
-          where: { id: campaignId },
-          data: { schedule: { kind: "manual", rounding: "none", ast: { groups: [] } } as never },
-        });
+        await redefine(campaignId, { ast: { groups: [] }, rounding: "none" });
 
         const preview = await previewCampaign(shopId, campaignId);
 

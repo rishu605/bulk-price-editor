@@ -30,7 +30,7 @@ import { lifecycleBadge } from "../lib/campaigns/lifecycle-of";
 import { campaignFilterWhere, type StatusFilter } from "../lib/campaigns/list-filters";
 import { PRICING_STATES, type CampaignState } from "../lib/lifecycle/transitions";
 import { overlapEnded, type Overlap, type OverlapSide } from "../lib/scheduling/overlap-card";
-import { astOf, endingAmong, scopeOf } from "./campaigns/model.server";
+import { astOf, DEFINITION, endingAmong, scopeOf } from "./campaigns/model.server";
 import { astToWhere } from "./segments.server";
 
 /**
@@ -270,7 +270,7 @@ async function sharedScopes(
   for (const id of new Set(pairs.flatMap((pair) => [pair.a, pair.b]))) {
     const record = await prisma.campaign.findFirst({
       where: { id, shopId },
-      select: { schedule: true },
+      select: DEFINITION,
     });
     if (!record) continue;
 

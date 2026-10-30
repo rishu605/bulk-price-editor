@@ -18,7 +18,7 @@ const { prisma } = vi.hoisted(() => ({
 vi.mock("../../db.server", () => ({ default: prisma }));
 
 import { duplicateCampaign, housekeepingAction, setArchived, setNote } from "./housekeeping.server";
-import { astOf, isPractice, segmentIdOf } from "./model.server";
+import { astOf, campaignDefinition, isPractice, segmentIdOf, toResolvable } from "./model.server";
 
 const SOURCE = {
   name: "Summer sale",
@@ -34,8 +34,12 @@ const SOURCE = {
   autoEnroll: true,
   excludedVariantGids: ["gid://shopify/ProductVariant/9"],
   note: "Matched a competitor",
-  // The blob as `createCampaign` writes it: a window, and beside it the four things that
-  // decide a price (#762).
+  // What it prices, in its columns (#884) and -- as `createCampaign` writes it this release --
+  // in the blob too: a window, and beside it the things that decide a price (#762).
+  filter: { groups: [{ conditions: [{ field: "title", value: "Alpine" }] }], productStatuses: ["ACTIVE", "DRAFT"] },
+  segmentId: "seg-1",
+  rounding: { default: "charm99", byCurrency: { JPY: "nearest10" } },
+  practice: true,
   schedule: {
     kind: "window",
     startAt: "2026-07-01T09:00:00.000Z",
@@ -43,12 +47,21 @@ const SOURCE = {
     revertBufferMinutes: 10,
     clockNotes: ["The clocks go forward…"],
     ast: { groups: [{ conditions: [{ field: "title", value: "Alpine" }] }] },
+    productStatuses: ["ACTIVE", "DRAFT"],
     segmentId: "seg-1",
-    rounding: "charm-99",
+    rounding: { default: "charm99", byCurrency: { JPY: "nearest10" } },
     practice: true,
   },
   segments: [{ id: "seg-1" }],
 };
+
+/** The same campaign as the release before wrote it: the definition in the blob alone (#884). */
+const BLOB_ONLY = { ...SOURCE, filter: null, segmentId: null, rounding: null, practice: false };
+
+/** A copy as the readers see it: its columns, its blob, or both. */
+const columnsOf = (data: Record<string, unknown>) =>
+  ({ filter: data.filter, segmentId: data.segmentId, rounding: data.rounding, practice: data.practice, schedule: data.schedule }) as never;
+const blobOf = (data: Record<string, unknown>) => ({ schedule: data.schedule }) as never;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -102,14 +115,40 @@ describe("duplicating a campaign", () => {
     await duplicateCampaign("shop", "c1", "ada");
 
     const { data } = prisma.campaign.create.mock.calls[0]![0];
-    const copy = { schedule: data.schedule } as never;
-    const source = { schedule: SOURCE.schedule } as never;
+    const copy = columnsOf(data);
+    const source = SOURCE as never;
 
     expect(astOf(copy)).toEqual(astOf(source));
     expect(astOf(copy).groups).toHaveLength(1);
+    expect(astOf(copy).productStatuses).toEqual(["ACTIVE", "DRAFT"]);
     expect(segmentIdOf(copy)).toBe("seg-1");
     expect(isPractice(copy), "a practice campaign's copy could be applied").toBe(true);
-    expect(data.schedule.rounding).toBe("charm-99");
+    expect(toResolvable({ ...SOURCE, ...data, id: "copy-1", createdAt: new Date() } as never).roundingPolicy).toEqual(
+      toResolvable({ ...SOURCE, id: "c1", createdAt: new Date() } as never).roundingPolicy,
+    );
+  });
+
+  it("copies the definition into the copy's own columns (#884)", async () => {
+    await duplicateCampaign("shop", "c1", "ada");
+
+    const { data } = prisma.campaign.create.mock.calls[0]![0];
+    expect(data).toMatchObject({ filter: SOURCE.filter, segmentId: "seg-1", rounding: SOURCE.rounding, practice: true });
+    // And the blob says the same, for the release before: a rollback reads the copy alike.
+    expect(campaignDefinition(blobOf(data))).toEqual(campaignDefinition(columnsOf(data)));
+  });
+
+  it("copies a campaign the release before made, whose definition is in its blob alone (#884)", async () => {
+    // A row written by the release before -- in the migration's wake, or during a rollback --
+    // has its columns at their defaults. Its copy is still the same campaign, and has its
+    // columns filled from the blob.
+    prisma.campaign.findFirstOrThrow.mockResolvedValue(BLOB_ONLY);
+
+    await duplicateCampaign("shop", "c1", "ada");
+
+    const { data } = prisma.campaign.create.mock.calls[0]![0];
+    expect(campaignDefinition(BLOB_ONLY as never)).toEqual(campaignDefinition(SOURCE as never));
+    expect(data).toMatchObject({ filter: SOURCE.filter, segmentId: "seg-1", rounding: SOURCE.rounding, practice: true });
+    expect(campaignDefinition(columnsOf(data))).toEqual(campaignDefinition(SOURCE as never));
   });
 
   it("connects the segment rather than copying it", async () => {
@@ -167,10 +206,11 @@ describe("a practice campaign's real copy (#1077)", () => {
     await duplicateCampaign("shop", "c1", "ada", { real: true });
     const real = prisma.campaign.create.mock.calls[1]![0].data;
 
-    expect(isPractice({ schedule: real.schedule } as never), "the real copy is practice").toBe(false);
-    expect(isPractice({ schedule: duplicate.schedule } as never), "Duplicate stopped keeping practice (#762)").toBe(true);
+    expect(isPractice(columnsOf(real)), "the real copy is practice").toBe(false);
+    expect(isPractice(blobOf(real)), "the real copy is practice to the release before").toBe(false);
+    expect(isPractice(columnsOf(duplicate)), "Duplicate stopped keeping practice (#762)").toBe(true);
     expect(real.schedule).toEqual(without(duplicate.schedule, "practice"));
-    expect(without(real, "name", "schedule")).toEqual(without(duplicate, "name", "schedule"));
+    expect(without(real, "name", "schedule", "practice")).toEqual(without(duplicate, "name", "schedule", "practice"));
     expect(real.status).toBe("DRAFT");
   });
 
@@ -203,13 +243,24 @@ describe("a practice campaign's real copy (#1077)", () => {
     const reply = await press("real-copy");
 
     expect(reply).toMatchObject({ ok: true, redirectTo: "/app/campaigns/copy-1?duplicated=1" });
-    expect(isPractice({ schedule: prisma.campaign.create.mock.calls[0]![0].data.schedule } as never)).toBe(false);
+    expect(isPractice(columnsOf(prisma.campaign.create.mock.calls[0]![0].data))).toBe(false);
+  });
+
+  it("is real of a practice campaign the release before made, though only its blob said so (#884)", async () => {
+    prisma.campaign.findFirstOrThrow.mockResolvedValue(BLOB_ONLY);
+
+    await press("real-copy");
+
+    const { data } = prisma.campaign.create.mock.calls[0]![0];
+    expect(isPractice(columnsOf(data))).toBe(false);
+    expect(data.schedule).not.toHaveProperty("practice");
+    expect(segmentIdOf(columnsOf(data)), "the real copy lost its segment").toBe("seg-1");
   });
 
   it("leaves Duplicate's press making a practice copy", async () => {
     await press("duplicate");
 
-    expect(isPractice({ schedule: prisma.campaign.create.mock.calls[0]![0].data.schedule } as never)).toBe(true);
+    expect(isPractice(columnsOf(prisma.campaign.create.mock.calls[0]![0].data))).toBe(true);
   });
 });
 

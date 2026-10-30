@@ -142,7 +142,7 @@ describe("chaos: two campaigns' bulk runs in one shop at once", () => {
       // Its Status card says the same, not "Writing prices now".
       const card = describeState(
         "APPLYING",
-        await lifecycleContext(shopId, clearance.id, "APPLYING", { kind: "manual" }, "UTC", { outrankedBy: [] }),
+        await lifecycleContext(shopId, clearance.id, "APPLYING", { schedule: { kind: "manual" }, practice: false }, "UTC", { outrankedBy: [] }),
       );
       expect(card.explanation).toBe(waiting.reason);
       expect(card.label).toMatch(/waiting/i);
@@ -165,7 +165,7 @@ describe("chaos: two campaigns' bulk runs in one shop at once", () => {
       expect(b.runId).toBe(live.id);
 
       // Once it is running, the card stops saying it is waiting.
-      const after = await lifecycleContext(shopId, clearance.id, "APPLYING", { kind: "manual" }, "UTC", { outrankedBy: [] });
+      const after = await lifecycleContext(shopId, clearance.id, "APPLYING", { schedule: { kind: "manual" }, practice: false }, "UTC", { outrankedBy: [] });
       expect(after.waitingBehind ?? null).toBeNull();
     });
   });

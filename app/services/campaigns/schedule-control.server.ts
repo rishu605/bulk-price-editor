@@ -21,13 +21,14 @@ import { formatScheduleInstant } from "../../lib/scheduling/window";
 import { windowInputProblem } from "../../lib/scheduling/window-input";
 import { windowInStoreZone } from "../shop-timezone.server";
 import { transitionCampaign } from "./lifecycle.server";
+import { campaignDefinition, DEFINITION, definitionData } from "./model.server";
 import { confirmStart, saveStart } from "./start-confirmation.server";
 import { keepShownTimes, keepTypedTimes } from "./zone-shift.server";
 
 async function scheduled(shopId: string, campaignId: string) {
   const campaign = await prisma.campaign.findFirst({
     where: { id: campaignId, shopId },
-    select: { id: true, name: true, status: true, schedule: true, startAt: true, endAt: true },
+    select: { id: true, name: true, status: true, ...DEFINITION, startAt: true, endAt: true },
   });
   if (!campaign) {
     throw new AppError({ code: "NOT_FOUND", userMessage: "That campaign no longer exists. Reload the page." });
@@ -65,7 +66,9 @@ export async function cancelScheduled(shopId: string, campaignId: string, actor:
  * Back to a draft with no dates. Nothing runs until somebody schedules or applies it.
  *
  * The dates go with it: a draft that kept its window would revert on the old end date the
- * first time it was applied by hand.
+ * first time it was applied by hand. What it prices stays, in its columns and in the blob the
+ * release before reads (#884): written back as the columns say it, so a campaign that release
+ * made comes out of this with its columns filled.
  */
 export async function unschedule(
   shopId: string,
@@ -80,7 +83,7 @@ export async function unschedule(
 
   await prisma.campaign.update({
     where: { id: campaignId },
-    data: { schedule: manualSchedule(campaign.schedule) as never, startAt: null, endAt: null },
+    data: { ...definitionData(manualSchedule(campaign.schedule), campaignDefinition(campaign)), startAt: null, endAt: null },
   });
   await prisma.auditLogEntry.create({
     data: {
@@ -101,6 +104,7 @@ export async function unschedule(
  * with `windowInputProblem`, future start included, and its start with `saveStart`:
  * `confirmation` is the typed confirmation that check asked for, when it asked (#1009).
  * One it did not ask for again stays, since moving the dates changes nothing it writes.
+ * What it prices stays too, written back both ways as `unschedule` writes it (#884).
  */
 export async function reschedule(
   shopId: string,
@@ -117,17 +121,20 @@ export async function reschedule(
     // and moving the dates under a running apply would describe a window it is not in.
     where: { id: campaignId, shopId, status: "SCHEDULED" },
     data: {
-      schedule: {
-        ...definitionOf(previous),
-        kind: "window",
-        startAt: window.startUtc,
-        ...(window.endUtc ? { endAt: window.endUtc } : {}),
-        ...(previous.revertBufferMinutes !== undefined ? { revertBufferMinutes: previous.revertBufferMinutes } : {}),
-        ...(window.clockNotes.length > 0 ? { clockNotes: window.clockNotes } : {}),
-        // The zone the new dates were typed in (#799).
-        zone: window.zone,
-        ...(confirmation ? { [START_CONFIRMED_KEY]: confirmation } : {}),
-      } as never,
+      ...definitionData(
+        {
+          ...definitionOf(previous),
+          kind: "window",
+          startAt: window.startUtc,
+          ...(window.endUtc ? { endAt: window.endUtc } : {}),
+          ...(previous.revertBufferMinutes !== undefined ? { revertBufferMinutes: previous.revertBufferMinutes } : {}),
+          ...(window.clockNotes.length > 0 ? { clockNotes: window.clockNotes } : {}),
+          // The zone the new dates were typed in (#799).
+          zone: window.zone,
+          ...(confirmation ? { [START_CONFIRMED_KEY]: confirmation } : {}),
+        },
+        campaignDefinition(campaign),
+      ),
       startAt: new Date(window.startUtc),
       endAt: window.endUtc ? new Date(window.endUtc) : null,
     },

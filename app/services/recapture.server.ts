@@ -26,7 +26,7 @@ import {
 import { PRICES_MAY_BE_LIVE } from "../lib/lifecycle/transitions";
 import { captureBaselines, type CaptureOptions } from "./baselines.server";
 import { astToWhere, type FilterAst } from "./segments.server";
-import { scopeOf } from "./campaigns/model.server";
+import { DEFINITION, scopeOf } from "./campaigns/model.server";
 import type { RecaptureScope } from "../lib/baselines/recapture-scope";
 import { staleBaselineVariants } from "./reconciliation.server";
 
@@ -237,7 +237,7 @@ async function activeOverlaps(shopId: string, variantGids: string[]): Promise<Ac
   // prices still live* -- so recapturing then read "safe" and made the sale permanent.
   const campaigns = await prisma.campaign.findMany({
     where: { shopId, status: { in: [...PRICES_MAY_BE_LIVE] } },
-    select: { id: true, name: true, schedule: true },
+    select: { id: true, name: true, ...DEFINITION },
   });
 
   const inScope = new Set(variantGids);

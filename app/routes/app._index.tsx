@@ -9,7 +9,7 @@ import {
 } from "../lib/campaigns/quick-campaign";
 import { astToWhere } from "../services/segments.server";
 import { merchantFacing } from "../lib/audit/housekeeping";
-import { createCampaign } from "../services/campaigns/index.server";
+import { createCampaign, IS_PRACTICE } from "../services/campaigns/index.server";
 import { readSettings } from "../services/settings.server";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { redirect, useFetcher, useLoaderData, useNavigate } from "react-router";
@@ -137,7 +137,8 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
     prisma.campaignRun.count({
       where: { shopId: shop.id, kind: "APPLY", status: "COMPLETED", verifiedRows: { gt: 0 } },
     }),
-    prisma.campaign.count({ where: { shopId: shop.id, schedule: { path: ["practice"], equals: true } } }),
+    // The column, or the schedule JSON of one made by the release before (#884).
+    prisma.campaign.count({ where: { shopId: shop.id, ...IS_PRACTICE } }),
     // What "Put everything on sale" would cover, compiled the way its campaign's scope is
     // (#751): active products, no gift cards. `health.variants` is the catalogue -- the
     // right number for the Catalogue card and the wrong one to promise a sale over.

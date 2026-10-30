@@ -444,7 +444,30 @@ model Campaign {
   guardrails               Json?
   guardrailViolationPolicy String  @default("clamp")
 
-  /// kind (once | window | recurring), start, end, rrule subset, revert buffer.
+  /// What it prices, apart from when (#884): its filter -- the conditions and the product
+  /// statuses it covers (#751) -- the saved segment it targets instead, its rounding, and
+  /// whether it is practice. They lived in `schedule` beside the dates, so everything that
+  /// copied or cleared "the schedule" had to know which half was which, and Duplicate did not
+  /// (#762). `model.server.ts` reads and writes them, and nothing else.
+  ///
+  /// The expand half of an expand/contract move. Written here and, still, into `schedule`,
+  /// which the release before reads; read here first, falling back to `schedule` for a row
+  /// that release wrote, whose columns are left at null and false. So none of them has a
+  /// default a reader could mistake for a choice. The contract release stops writing the
+  /// blob's copy and drops the fallback: see the migration that added these.
+  ///
+  /// `segmentId` is not a foreign key: a campaign keeps the id of a segment deleted since,
+  /// which is how it knows it prices nothing (#776). `segments` is what the delete guard
+  /// reads. `rounding` is JSON rather than a string: a policy per currency, or the bare
+  /// profile name a campaign from before per-currency rounding stored.
+  filter    Json?
+  segmentId String?
+  rounding  Json?
+  practice  Boolean @default(false)
+
+  /// When it runs: kind (manual | window), start, end, revert buffer, the zone its times
+  /// were typed in, and what became of its start and end. Beside them, for one release, a
+  /// copy of the definition above (#884), and the campaign's own record (`OWN_KEYS`).
   schedule Json      @default("{}")
   startAt  DateTime?
   endAt    DateTime?

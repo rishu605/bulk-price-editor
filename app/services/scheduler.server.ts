@@ -120,8 +120,9 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
     // time rather than once -- and put it back: an activity entry and a worker failure every
     // thirty seconds, for ever, since nothing ever moves it out of SCHEDULED. Skipped here,
     // before the claim, so a tick neither touches it nor says anything about it. In code
-    // rather than in the query: the flag lives in the schedule JSON, and a JSON-path `NOT`
-    // drops every row that has no `practice` key at all, which is nearly all of them.
+    // rather than in the query: the flag is a column now (#884), but a campaign the release
+    // before made practice says so only in its schedule JSON, and a JSON-path `NOT` drops
+    // every row that has no `practice` key at all, which is nearly all of them.
     //
     // And one still in SCHEDULED is made a draft again, once (#976): its page hides the
     // schedule controls, as it should for practice, so the merchant could not unschedule
