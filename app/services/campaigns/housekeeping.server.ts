@@ -13,7 +13,6 @@ import { Prisma } from "@prisma/client";
 import prisma from "../../db.server";
 import { copyName } from "../../lib/campaigns/copy-name";
 import { uncopiableRule } from "../../lib/campaigns/rule-limits";
-import { copiedSchedule } from "../../lib/campaigns/schedule-blob";
 import { AppError } from "../../lib/errors/app-error";
 import { logger } from "../../lib/logging/logger";
 import { campaignDefinition, DEFINITION, definitionData } from "./model.server";
@@ -32,16 +31,17 @@ import { campaignDefinition, DEFINITION, definitionData } from "./model.server";
  * flag. They lived inside `schedule` beside the dates, and dropping the whole blob made every
  * copy price the entire catalogue, let a practice campaign's copy be applied, and lost its
  * rounding (#762). Columns of their own since #884, read as `campaignDefinition` reads them
- * -- so a source the release before made, with its definition in the blob alone, is copied
- * as faithfully -- and written both ways, as every definition is this release. The practice
- * flag is left behind only when asked for by name: a practice campaign's real copy (#1077).
+ * and written as `definitionData` writes them; since #1141 nothing of them is in the blob, so
+ * there is nothing there to tell apart. The practice flag is left behind only when asked for
+ * by name: a practice campaign's real copy (#1077).
  *
  * Not copied, and this is the point of the feature: `status` (a copy is a draft), the
- * schedule's window and `startAt`/`endAt` (last month's dates are never the dates the
- * merchant wants — leaving them would schedule a run in the past), `enrollPendingAt`, the
- * runs, and the ledger. History belongs to the campaign that made it. A duplicate carrying its
- * source's run history would be a lie about what has been written to the storefront, and
- * this app's entire proposition is that the record is true.
+ * `schedule` blob -- its window, and the source's own record (`OWN_KEYS`) -- and
+ * `startAt`/`endAt` (last month's dates are never the dates the merchant wants — leaving
+ * them would schedule a run in the past), `enrollPendingAt`, the runs, and the ledger.
+ * History belongs to the campaign that made it. A duplicate carrying its source's run
+ * history would be a lie about what has been written to the storefront, and this app's
+ * entire proposition is that the record is true.
  */
 const COPIED = {
   name: true,
@@ -86,10 +86,10 @@ export async function duplicateCampaign(
   // thousand short strings is cheaper than the query that would avoid it.
   const taken = await prisma.campaign.findMany({ where: { shopId }, select: { name: true } });
 
-  // `fields` holds the definition's columns and the blob as read, too: `definitionData`
-  // below writes every one of them over the source's.
+  // `fields` holds the definition's columns as read, too: `definitionData` below writes every
+  // one of them over the source's.
   const { segments, ruleRows, surfaces, compareAtPolicy, guardrails, ...fields } = source;
-  // The source's definition, column first (#884), and a real copy's without the flag (#1077).
+  // The source's definition, as its columns record it (#884), and a real copy's without the flag (#1077).
   const definition = { ...campaignDefinition(source), ...(options.real ? { practice: false } : {}) };
 
   const copy = await prisma.campaign.create({
@@ -107,13 +107,14 @@ export async function duplicateCampaign(
       shopId,
       name: copyName(source.name, taken.map((c) => c.name), options.real ? "real" : "copy"),
       status: "DRAFT",
-      // What it prices, run by hand: the same scope, rounding and practice flag, in its
-      // columns and in the blob (#884), and no dates. A draft, so `manual` -- the window is
-      // what is deliberately left behind. Without the source's typed confirmation too
-      // (#1009): that was a person's decision about the source, and the copy's start is
-      // asked about afresh. A real copy leaves the practice flag behind as well (#1077), and
-      // nothing else.
-      ...definitionData(copiedSchedule(source.schedule, { real: options.real }), definition),
+      // What it prices: the same scope, rounding and practice flag, in its columns (#884). A
+      // real copy leaves the practice flag behind (#1077), and nothing else.
+      ...definitionData(definition),
+      // Run by hand, and nothing of the source's blob (#1141). A draft, so `manual` -- the
+      // window is what is deliberately left behind -- and without the source's own record:
+      // its typed confirmation was a person's decision about the source, and the copy's start
+      // is asked about afresh (#1009); its refused run was the source's, and a copy never ran.
+      schedule: { kind: "manual" },
       createdBy: actor,
       // Connected, not copied. A segment is a saved definition shared across campaigns;
       // duplicating the rows would give the copy a segment that stops tracking the

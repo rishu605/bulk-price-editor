@@ -65,7 +65,8 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     prisma.campaign.findFirstOrThrow({
       where: { id: campaignId, shopId: shop.id },
       select: {
-        ...DEFINITION, // what it prices, and its schedule (#884)
+        ...DEFINITION, // what it prices (#884)
+        schedule: true, // and when, which the definition's select no longer brings (#1141)
         autoEnroll: true,
         enrollPendingAt: true,
         status: true,

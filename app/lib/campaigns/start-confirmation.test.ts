@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import { FLOW_ACTOR, SCHEDULER_ACTOR, startsUnattended } from "../audit/actor";
 import type { BlastRadius } from "./blast-radius";
-import { copiedSchedule, definitionOf, manualSchedule, WINDOW_KEYS } from "./schedule-blob";
+import { OWN_KEYS, ownRecordOf } from "./own-record";
 import {
   beyondConfirmation,
   confirmationOf,
@@ -77,14 +77,21 @@ describe("a confirmation", () => {
     expect(startConfirmationOf(null)).toBeNull();
   });
 
-  it("stays when the dates move or it is unscheduled, and a copy leaves it behind", () => {
-    // About what the campaign writes, which dates do not change; a copy is a new campaign
-    // nobody confirmed.
-    expect(WINDOW_KEYS).not.toContain(START_CONFIRMED_KEY);
-    const schedule = withStartConfirmed({ kind: "window", startAt: "2026-11-27T09:00:00Z", ast: { groups: [] } }, confirmed());
-    expect(definitionOf(schedule)[START_CONFIRMED_KEY]).toEqual(confirmed());
-    expect(manualSchedule(schedule)[START_CONFIRMED_KEY]).toEqual(confirmed());
-    expect(copiedSchedule(schedule)).toEqual({ kind: "manual", ast: { groups: [] } });
+  it("stays when the dates move or it is unscheduled, and only it of the old blob (#1141)", () => {
+    // About what the campaign writes, which dates do not change: the campaign's own record,
+    // which an unschedule and new dates take forward by name. A copy, a new campaign nobody
+    // confirmed, starts from `{ kind: "manual" }` -- pinned where Duplicate is tested.
+    expect(OWN_KEYS).toContain(START_CONFIRMED_KEY);
+    const schedule = withStartConfirmed(
+      { kind: "window", startAt: "2026-11-27T09:00:00Z", zone: "Europe/London", startRefused: { reason: "No." } },
+      confirmed(),
+    );
+    expect(ownRecordOf(schedule)).toEqual({ [START_CONFIRMED_KEY]: confirmed() });
+    expect(startConfirmationOf({ ...ownRecordOf(schedule), kind: "manual" })).toEqual(confirmed());
+  });
+
+  it("is read out of nothing that is not a blob", () => {
+    for (const blob of [null, undefined, "manual", 7, [START_CONFIRMED_KEY]]) expect(ownRecordOf(blob)).toEqual({});
   });
 });
 

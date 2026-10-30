@@ -65,11 +65,12 @@ export async function referencingCampaigns(shopId: string, segmentId: string) {
 
   for (const campaign of all) {
     if (byId.has(campaign.id)) continue;
-    // Its segment as the run reads it, column first (#884), and anywhere in its filter, rules
-    // or schedule JSON -- the last for a campaign the release before made, until the contract.
+    // Its segment as the run reads it, from its column (#884), and anywhere in its filter or
+    // rules. Not its schedule JSON, which holds no definition since #1141: its migration read
+    // the segment of every campaign whose blob alone named one into the column first.
     const mentioned =
       segmentIdOf(campaign) === segmentId ||
-      [campaign.ruleRows, campaign.filter, campaign.schedule].some((blob) => mentionsSegment(blob, segmentId));
+      [campaign.ruleRows, campaign.filter].some((blob) => mentionsSegment(blob, segmentId));
     if (mentioned) {
       byId.set(campaign.id, { id: campaign.id, name: campaign.name, status: campaign.status });
     }

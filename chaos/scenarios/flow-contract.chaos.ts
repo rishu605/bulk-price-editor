@@ -14,6 +14,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import prisma from "../../app/db.server";
 import type { JobRef, QueueName } from "../../app/worker/queues";
+import { redefine } from "../harness/definition";
 import { chaosAdminClient } from "../harness/http-client";
 import { type ChaosContext, fixtureAdminClient, withChaos } from "../harness/scenario";
 
@@ -100,8 +101,8 @@ describe("chaos: Flow's Start campaign", () => {
   it("answers 4xx for a practice campaign, naming it, and writes nothing", async () => {
     await withChaos("flow-start-practice", CATALOG, async (chaos) => {
       const { shopId, campaignId, variantGids, baseline } = chaos.fixture;
-      const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
-      await prisma.campaign.update({ where: { id: campaignId }, data: { schedule: { ...(campaign.schedule as object), practice: true } as never } });
+      // In its column, the only place the app reads it (#1141).
+      await redefine(campaignId, { practice: true });
 
       const answer = await flow("start-campaign", chaos, { "campaign-id": campaignId });
 

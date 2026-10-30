@@ -30,9 +30,10 @@ import {
 /**
  * Where the confirmation is kept, in the campaign's `schedule` JSON.
  *
- * Not one of the window's keys (`WINDOW_KEYS`): it is about what the campaign writes, which
- * moving its dates does not change, and every start is checked against it anyway. A copy
- * leaves it behind (`OWN_KEYS`): the person confirmed that campaign, not the copy.
+ * Not part of the window: it is about what the campaign writes, which moving its dates does
+ * not change, and every start is checked against it anyway. It is the campaign's own record
+ * (`OWN_KEYS` in `own-record.ts`), which an unschedule and new dates keep and a copy leaves
+ * behind: the person confirmed that campaign, not the copy.
  */
 export const START_CONFIRMED_KEY = "startConfirmed";
 

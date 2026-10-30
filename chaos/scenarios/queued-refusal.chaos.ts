@@ -24,6 +24,7 @@ import { filtersFrom, listCampaigns } from "../../app/services/campaigns/list.se
 import { createSegment } from "../../app/services/segments-crud.server";
 import { DEFAULT_SETTINGS, writeSettings } from "../../app/services/settings.server";
 import type { JobRef, QueueName } from "../../app/worker/queues";
+import { redefine } from "../harness/definition";
 import { chaosAdminClient, chaosAdminContext } from "../harness/http-client";
 import { type ChaosContext, fixtureAdminClient, withChaos } from "../harness/scenario";
 
@@ -175,11 +176,9 @@ describe("chaos: a queued run refused before it starts", () => {
       const { shopId, campaignId, variantGids } = chaos.fixture;
       useShop(chaos);
       const segment = await createSegment(shopId, { name: "Goes while queued", kind: "FROZEN", variantGids });
-      const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
-      await prisma.campaign.update({
-        where: { id: campaignId },
-        data: { schedule: { ...(campaign.schedule as object), segmentId: segment.id } as never, segments: { connect: { id: segment.id } } },
-      });
+      // The segment in its column, where the run reads it (#1141), and the relation beside it.
+      await redefine(campaignId, { segmentId: segment.id });
+      await prisma.campaign.update({ where: { id: campaignId }, data: { segments: { connect: { id: segment.id } } } });
 
       // Queued, then the segment goes before the worker gets to it.
       expect((await flowStart(campaignId)).status).toBe(200);

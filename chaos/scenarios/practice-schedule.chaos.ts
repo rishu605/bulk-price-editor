@@ -110,8 +110,7 @@ describe("chaos: a practice campaign is never scheduled", () => {
       const practice = await prisma.campaign.findFirstOrThrow({ where: { shopId, name: "Practice, no dates" } });
       expect(practice.status).toBe("DRAFT");
       expect(practice.practice, "the editor's practice campaign is not practice in its column (#884)").toBe(true);
-      expect((practice.schedule as { practice?: boolean; kind?: string }).practice).toBe(true);
-      expect((practice.schedule as { kind?: string }).kind).toBe("manual");
+      expect(practice.schedule, "the flag is copied into the schedule JSON again (#1141)").toEqual({ kind: "manual" });
       expect(practice.startAt).toBeNull();
     });
   });
@@ -139,8 +138,8 @@ describe("chaos: a practice campaign is never scheduled", () => {
         expect(await statusOf(campaignId), `tick ${i + 1} left it scheduled`).toBe("DRAFT");
         if (i === 0) {
           const unscheduled = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
-          expect((unscheduled.schedule as { kind?: string; practice?: boolean }).kind).toBe("manual");
-          expect((unscheduled.schedule as { practice?: boolean }).practice, "it stopped being practice").toBe(true);
+          expect((unscheduled.schedule as { kind?: string }).kind).toBe("manual");
+          expect(unscheduled.practice, "it stopped being practice").toBe(true);
           expect(unscheduled.startAt).toBeNull();
         }
       }
@@ -167,7 +166,7 @@ describe("chaos: a practice campaign is never scheduled", () => {
       // tick, so the window above was genuinely due and the ticks unscheduled it because it
       // was practice -- not because of anything incidental to how the fixture was set up.
       await practiceScheduledAndDue(chaos);
-      // Real in both places: the unschedule above wrote the flag into its column (#884).
+      // Real again, in its column: the only place practice is read (#1141).
       await redefine(campaignId, { practice: false });
       const result = await tick(new Date());
       expect(result.failures.filter((failure) => failure.campaignId === campaignId)).toEqual([]);
@@ -182,8 +181,8 @@ describe("chaos: a practice campaign is never scheduled", () => {
 /**
  * The fixture campaign as a row from before #827: practice, SCHEDULED, and due -- its start
  * passed five minutes ago, so the next tick acts on it unless something stops it. Practice in
- * its schedule JSON alone, as the release before #884 wrote it, which the tick reads behind
- * the column.
+ * its column, the only place the tick reads it since the contract (#1141): a flag written into
+ * the schedule JSON alone, as this scenario once did, is a campaign that is not practice.
  */
 async function practiceScheduledAndDue(chaos: ChaosContext) {
   endpoint = chaos.server.endpoint();
@@ -191,6 +190,8 @@ async function practiceScheduledAndDue(chaos: ChaosContext) {
   const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
   const startAt = new Date(Date.now() - 5 * 60_000);
   const endAt = new Date(Date.now() + 24 * HOUR);
+  // Practice in its column, where the app reads it (#1141): the blob says when it runs.
+  await redefine(campaignId, { practice: true });
   await prisma.campaign.update({
     where: { id: campaignId },
     data: {
@@ -199,7 +200,6 @@ async function practiceScheduledAndDue(chaos: ChaosContext) {
       endAt,
       schedule: {
         ...(campaign.schedule as object),
-        practice: true,
         kind: "window",
         startAt: startAt.toISOString(),
         endAt: endAt.toISOString(),

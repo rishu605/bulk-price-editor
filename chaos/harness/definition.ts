@@ -1,14 +1,11 @@
 /**
- * Changing what a fixture campaign prices, the way this release stores it (#884).
+ * Changing what a fixture campaign prices, the way the app stores it (#884, #1141).
  *
  * Scenarios used to spread a new `ast` or `rounding` into the `schedule` JSON. A campaign's
- * definition has columns of its own now, which every reader reads first, so that changed
- * nothing on a campaign `createCampaign` made -- its columns are filled -- and the scenario
- * went on testing the fixture's own filter and rounding. This writes both halves through
- * the app's own writer, so the campaign is one this release could have written.
- *
- * A scenario about a row the release before wrote -- definition in the blob, columns at their
- * defaults -- writes the blob itself, on purpose, and says so.
+ * definition has columns of its own, and since #1141 nothing reads the blob for one, so that
+ * changes nothing: the scenario goes on testing the fixture's own filter and rounding. This
+ * writes the columns through the app's own writer, and leaves `schedule` -- the window and
+ * the campaign's own record -- as it is, so the campaign is one the app could have written.
  */
 
 import prisma from "../../app/db.server";
@@ -39,7 +36,7 @@ export async function redefine(campaignId: string, change: Redefinition): Promis
 
   await prisma.campaign.update({
     where: { id: campaignId },
-    data: definitionData(campaign.schedule, {
+    data: definitionData({
       filter: statuses === undefined ? ast : { ...ast, productStatuses: statuses },
       segmentId: change.segmentId === undefined ? current.segmentId : change.segmentId,
       rounding: change.rounding === undefined ? current.rounding : (change.rounding as typeof current.rounding),

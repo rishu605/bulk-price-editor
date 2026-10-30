@@ -2,22 +2,26 @@ import { describe, expect, it } from "vitest";
 
 import { describeState } from "../lifecycle/transitions";
 import { compose } from "../notifications/templates";
+import { ownRecordOf } from "./own-record";
 import { queuedRefusal, queuedVerb, QUEUED_REFUSED_KEY, withoutQueuedRefused, withQueuedRefused } from "./queued-refusal";
-import { copiedSchedule } from "./schedule-blob";
 
 const at = new Date("2026-10-15T10:00:00Z");
 const refusal = { verb: "apply" as const, reason: "A guardrail stopped this run before anything was written." };
 
 describe("a queued run refused before it wrote (#1046)", () => {
-  it("is kept beside the definition and read back, and cleared without touching the rest", () => {
-    const schedule = withQueuedRefused({ kind: "manual", rounding: "x" }, refusal, at);
+  it("is kept beside the window and read back, and cleared without touching the rest", () => {
+    const schedule = withQueuedRefused({ kind: "window", startAt: "2026-10-20T09:00:00.000Z" }, refusal, at);
     expect(queuedRefusal(schedule)).toEqual(refusal);
-    expect(withoutQueuedRefused(schedule)).toEqual({ kind: "manual", rounding: "x" });
+    expect(withoutQueuedRefused(schedule)).toEqual({ kind: "window", startAt: "2026-10-20T09:00:00.000Z" });
     expect(withoutQueuedRefused({ kind: "manual" }), "nothing to clear is not a write").toBeNull();
   });
 
-  it("is not carried to a copy, which never ran", () => {
-    expect(copiedSchedule(withQueuedRefused({ kind: "manual" }, refusal, at))).not.toHaveProperty(QUEUED_REFUSED_KEY);
+  it("is the campaign's own record, which an unschedule and new dates keep (#1141)", () => {
+    // A copy keeps none of its source's blob -- it starts from `{ kind: "manual" }`, having
+    // never run -- and that is pinned where Duplicate is tested.
+    const schedule = withQueuedRefused({ kind: "window", startAt: "2026-10-20T09:00:00.000Z" }, refusal, at);
+    expect(ownRecordOf(schedule)).toEqual({ [QUEUED_REFUSED_KEY]: schedule[QUEUED_REFUSED_KEY] });
+    expect(queuedRefusal({ ...ownRecordOf(schedule), kind: "manual" })).toEqual(refusal);
   });
 
   it("ignores a stored value it does not understand", () => {

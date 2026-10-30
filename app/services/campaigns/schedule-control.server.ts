@@ -13,7 +13,7 @@
 
 import prisma from "../../db.server";
 import { AppError } from "../../lib/errors/app-error";
-import { definitionOf, manualSchedule } from "../../lib/campaigns/schedule-blob";
+import { ownRecordOf } from "../../lib/campaigns/own-record";
 import { START_CONFIRMED_KEY, type StartConfirmation } from "../../lib/campaigns/start-confirmation";
 import { describeState, type CampaignState } from "../../lib/lifecycle/transitions";
 import type { AdminClient } from "../../lib/execution/sync-executor";
@@ -21,14 +21,14 @@ import { formatScheduleInstant } from "../../lib/scheduling/window";
 import { windowInputProblem } from "../../lib/scheduling/window-input";
 import { windowInStoreZone } from "../shop-timezone.server";
 import { transitionCampaign } from "./lifecycle.server";
-import { campaignDefinition, DEFINITION, definitionData } from "./model.server";
 import { confirmStart, saveStart } from "./start-confirmation.server";
 import { keepShownTimes, keepTypedTimes } from "./zone-shift.server";
 
 async function scheduled(shopId: string, campaignId: string) {
   const campaign = await prisma.campaign.findFirst({
     where: { id: campaignId, shopId },
-    select: { id: true, name: true, status: true, ...DEFINITION, startAt: true, endAt: true },
+    // Its window, and nothing of what it prices: neither change below touches that (#1141).
+    select: { id: true, name: true, status: true, schedule: true, startAt: true, endAt: true },
   });
   if (!campaign) {
     throw new AppError({ code: "NOT_FOUND", userMessage: "That campaign no longer exists. Reload the page." });
@@ -66,9 +66,11 @@ export async function cancelScheduled(shopId: string, campaignId: string, actor:
  * Back to a draft with no dates. Nothing runs until somebody schedules or applies it.
  *
  * The dates go with it: a draft that kept its window would revert on the old end date the
- * first time it was applied by hand. What it prices stays, in its columns and in the blob the
- * release before reads (#884): written back as the columns say it, so a campaign that release
- * made comes out of this with its columns filled.
+ * first time it was applied by hand, and so does everything about them -- a refused start
+ * (#975), a missed or late end. What stays of the blob is the campaign's own record, by name
+ * (`ownRecordOf`): a typed confirmation, since moving the dates changes nothing it writes
+ * (#1009), and a refused run until a later one claims it (#1046). What it prices is in its own
+ * columns (#884), which this does not write (#1141).
  */
 export async function unschedule(
   shopId: string,
@@ -83,7 +85,7 @@ export async function unschedule(
 
   await prisma.campaign.update({
     where: { id: campaignId },
-    data: { ...definitionData(manualSchedule(campaign.schedule), campaignDefinition(campaign)), startAt: null, endAt: null },
+    data: { schedule: { ...ownRecordOf(campaign.schedule), kind: "manual" } as never, startAt: null, endAt: null },
   });
   await prisma.auditLogEntry.create({
     data: {
@@ -104,7 +106,8 @@ export async function unschedule(
  * with `windowInputProblem`, future start included, and its start with `saveStart`:
  * `confirmation` is the typed confirmation that check asked for, when it asked (#1009).
  * One it did not ask for again stays, since moving the dates changes nothing it writes.
- * What it prices stays too, written back both ways as `unschedule` writes it (#884).
+ * The new window replaces the old, and of the rest only the campaign's own record stays, as
+ * `unschedule` keeps it. What it prices is in its columns, which this does not write (#1141).
  */
 export async function reschedule(
   shopId: string,
@@ -121,20 +124,17 @@ export async function reschedule(
     // and moving the dates under a running apply would describe a window it is not in.
     where: { id: campaignId, shopId, status: "SCHEDULED" },
     data: {
-      ...definitionData(
-        {
-          ...definitionOf(previous),
-          kind: "window",
-          startAt: window.startUtc,
-          ...(window.endUtc ? { endAt: window.endUtc } : {}),
-          ...(previous.revertBufferMinutes !== undefined ? { revertBufferMinutes: previous.revertBufferMinutes } : {}),
-          ...(window.clockNotes.length > 0 ? { clockNotes: window.clockNotes } : {}),
-          // The zone the new dates were typed in (#799).
-          zone: window.zone,
-          ...(confirmation ? { [START_CONFIRMED_KEY]: confirmation } : {}),
-        },
-        campaignDefinition(campaign),
-      ),
+      schedule: {
+        ...ownRecordOf(previous),
+        kind: "window",
+        startAt: window.startUtc,
+        ...(window.endUtc ? { endAt: window.endUtc } : {}),
+        ...(previous.revertBufferMinutes !== undefined ? { revertBufferMinutes: previous.revertBufferMinutes } : {}),
+        ...(window.clockNotes.length > 0 ? { clockNotes: window.clockNotes } : {}),
+        // The zone the new dates were typed in (#799).
+        zone: window.zone,
+        ...(confirmation ? { [START_CONFIRMED_KEY]: confirmation } : {}),
+      } as never,
       startAt: new Date(window.startUtc),
       endAt: window.endUtc ? new Date(window.endUtc) : null,
     },

@@ -31,6 +31,7 @@ import { reschedule } from "../../app/services/campaigns/schedule-control.server
 import { tick } from "../../app/services/scheduler.server";
 import { DEFAULT_SETTINGS, writeSettings } from "../../app/services/settings.server";
 import { createSegment } from "../../app/services/segments-crud.server";
+import { redefine } from "../harness/definition";
 import { type ChaosContext, fixtureAdminClient, withChaos } from "../harness/scenario";
 
 let endpoint = "";
@@ -70,7 +71,7 @@ const HOUR = 60 * 60_000;
 const CATALOG = { catalog: { products: 3, variantsPerProduct: 1 }, percent: -20 } as const;
 
 /** The fixture campaign SCHEDULED, its start five minutes ago: the next tick applies it. */
-async function dueToStart(chaos: ChaosContext, extra: Record<string, unknown> = {}) {
+async function dueToStart(chaos: ChaosContext) {
   endpoint = chaos.server.endpoint();
   const { campaignId } = chaos.fixture;
   const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
@@ -84,7 +85,6 @@ async function dueToStart(chaos: ChaosContext, extra: Record<string, unknown> = 
       endAt,
       schedule: {
         ...(campaign.schedule as object),
-        ...extra,
         kind: "window",
         startAt: startAt.toISOString(),
         endAt: endAt.toISOString(),
@@ -134,7 +134,8 @@ describe("chaos: a scheduled start refused for good", () => {
       // A campaign on a segment that is gone (#776): one saved before deleting was refused
       // for a scheduled campaign, or one whose segment went in a race with the scheduler.
       const segment = await createSegment(shopId, { name: "Gone", kind: "FROZEN", variantGids });
-      await dueToStart(chaos, { segmentId: segment.id });
+      await redefine(campaignId, { segmentId: segment.id });
+      await dueToStart(chaos);
       await prisma.segment.delete({ where: { id: segment.id } });
       sent.length = 0;
 

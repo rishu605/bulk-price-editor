@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { WINDOW_KEYS } from "../campaigns/schedule-blob";
+import { ownRecordOf } from "../campaigns/own-record";
 import { parseSchedule, type Schedule } from "./window";
 import { describeZoneShift, isTimeZone, keptWallClock, zoneShiftOf } from "./zone-shift";
 
@@ -137,10 +137,11 @@ describe("the sentence", () => {
 
 describe("the zone is part of the window, not of what the campaign prices", () => {
   it("survives parsing, and is one of the keys a copy or an unschedule drops", () => {
-    // Duplicate and Unschedule keep the definition and drop the window by `WINDOW_KEYS`. A
-    // zone left behind on a copy would describe dates the copy does not have.
+    // Unschedule keeps only the campaign's own record by name and Duplicate keeps nothing of
+    // the blob (#1141), so no key of the window rides along. A zone left behind on a copy
+    // would describe dates the copy does not have.
     const parsed = parseSchedule({ ...typed("America/New_York", "2026-12-01T14:00:00.000Z", "2026-12-02T04:59:00.000Z"), clockNotes: ["x"] });
     expect(parsed).toMatchObject({ zone: "America/New_York" });
-    for (const key of Object.keys(parsed)) expect(WINDOW_KEYS as readonly string[], key).toContain(key);
+    expect(ownRecordOf(parsed)).toEqual({});
   });
 });

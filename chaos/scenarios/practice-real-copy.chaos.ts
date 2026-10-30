@@ -114,11 +114,9 @@ describe("chaos: a practice campaign's real copy (#1077)", () => {
       expect(copy.startAt).toBeNull();
       expect(copy.endAt).toBeNull();
       expect(copy.archivedAt).toBeNull();
-      // Everything that decides a price, as the source has it: the blob less its practice flag.
-      const definition: Record<string, unknown> = { ...(source.schedule as Record<string, unknown>), kind: "manual" };
-      delete definition.practice;
-      expect(copy.schedule).toEqual(definition);
-      // And in its columns (#884), less the flag there too.
+      // Run by hand, and nothing of the source's blob, which holds no definition (#1141).
+      expect(copy.schedule).toEqual({ kind: "manual" });
+      // Everything that decides a price is in its columns (#884), as the source has it, less the flag.
       expect(copy.practice).toBe(false);
       for (const field of [
         "filter",

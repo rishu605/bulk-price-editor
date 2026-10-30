@@ -13,6 +13,7 @@
 import { describe, expect, it } from "vitest";
 
 import prisma from "../../app/db.server";
+import { redefine } from "../harness/definition";
 import { withChaos } from "../harness/scenario";
 
 describe("chaos: practice mode", () => {
@@ -23,11 +24,8 @@ describe("chaos: practice mode", () => {
       async (chaos) => {
         const { campaignId, variantGids, baseline } = chaos.fixture;
 
-        const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
-        await prisma.campaign.update({
-          where: { id: campaignId },
-          data: { schedule: { ...(campaign.schedule as object), practice: true } as never },
-        });
+        // In its column, the only place the app reads it (#1141).
+        await redefine(campaignId, { practice: true });
 
         // Called directly, as a scheduler tick or a stray caller would — not through
         // the UI that knows to hide the button.
