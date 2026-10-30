@@ -17,6 +17,7 @@
 import type { Prisma } from "@prisma/client";
 
 import prisma from "../../db.server";
+import { inRunChunks } from "../../lib/db/run-writes.server";
 import {
   readContextualPrices,
   readDerivedPrices,
@@ -354,10 +355,15 @@ async function settle(
 ) {
   if (variantGids.length === 0) return;
 
-  await prisma.variantChange.updateMany({
-    where: { runId, priceListGid, variantGid: { in: [...variantGids] } },
-    data: { status, verifiedAt: new Date(), appliedAt: new Date() },
-  });
+  // A market-wide change settles every variant on the list at once, so this was one `IN`
+  // list the size of the catalogue (#810). In `RUN_CHUNK` batches now, each retried.
+  const now = new Date();
+  await inRunChunks("ledger.market-wide.settle", variantGids, (batch) =>
+    prisma.variantChange.updateMany({
+      where: { runId, priceListGid, variantGid: { in: batch } },
+      data: { status, verifiedAt: now, appliedAt: now },
+    }),
+  );
 }
 
 async function failRows(
@@ -366,12 +372,10 @@ async function failRows(
   rows: readonly PlannedRow[],
   reason: string,
 ) {
-  await prisma.variantChange.updateMany({
-    where: {
-      runId,
-      priceListGid,
-      variantGid: { in: rows.map((row) => row.ref.variantGid) },
-    },
-    data: { status: "FAILED", failureReason: reason },
-  });
+  await inRunChunks("ledger.market-wide.fail", rows.map((row) => row.ref.variantGid), (batch) =>
+    prisma.variantChange.updateMany({
+      where: { runId, priceListGid, variantGid: { in: batch } },
+      data: { status: "FAILED", failureReason: reason },
+    }),
+  );
 }

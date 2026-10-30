@@ -218,3 +218,55 @@ describe("Prisma refusing a query is not Shopify refusing a change (#747)", () =
     );
   });
 });
+
+describe("a page cut off by its statement timeout says so (#810)", () => {
+  // Both shapes as Prisma 6.19 threw them against Postgres 16 with `statement_timeout` set:
+  // a raw query's P2010 with the SQLSTATE in `meta`, and a model query's engine error with
+  // no code at all. Before #810 the first read "some of the values on this form need
+  // fixing" (P2010 starts with P20) and the second was UNKNOWN.
+  const raw = Object.assign(
+    new Error("Invalid `prisma.$queryRaw()` invocation:\n\nRaw query failed. Code: `57014`. Message: `ERROR: canceling statement due to statement timeout`"),
+    { code: "P2010", meta: { code: "57014", message: "ERROR: canceling statement due to statement timeout" } },
+  );
+  const model = Object.assign(
+    new Error(
+      'Invalid `prisma.shop.findMany()` invocation:\n\nError occurred during query execution:\nConnectorError(ConnectorError { user_facing_error: None, kind: QueryError(PostgresError { code: "57014", message: "canceling statement due to statement timeout", severity: "ERROR", detail: None, column: None, hint: None }), transient: false })',
+    ),
+    { name: "PrismaClientUnknownRequestError" },
+  );
+
+  it.each([
+    ["a raw query", raw],
+    ["a model query", model],
+  ])("files %s as the database being busy, and retryable", (_shape, error) => {
+    const app = toAppError(error);
+
+    expect(app.code).toBe("DB_UNAVAILABLE");
+    expect(app.status).toBe(503);
+    expect(app.retryable).toBe(true);
+    expect(app.context.timeout).toBe("statement");
+  });
+
+  it("names the page, the cause and what to do", () => {
+    const { userMessage } = toAppError(model);
+
+    expect(userMessage).toMatch(/^This page took too long to read from the app's database, which is busy/);
+    expect(userMessage).toContain("Nothing was changed in your store");
+    expect(userMessage).toMatch(/Reload the page in a minute/);
+    expect(userMessage).not.toMatch(/form/);
+  });
+
+  it("leaves a pool timeout with its own sentence", () => {
+    const app = toAppError(Object.assign(new Error("Timed out fetching a new connection from the connection pool"), { code: "P2024" }));
+
+    expect(app.code).toBe("DB_UNAVAILABLE");
+    expect(app.context.timeout).toBeUndefined();
+    expect(app.userMessage).toContain("heavy load");
+  });
+
+  it("still calls a raw query that failed for another reason a validation error", () => {
+    const app = toAppError(Object.assign(new Error("Raw query failed. Code: `42703`."), { code: "P2010", meta: { code: "42703" } }));
+
+    expect(app.code).toBe("VALIDATION");
+  });
+});

@@ -29,7 +29,8 @@ import type { ResolvableCampaign } from "../../lib/pricing/types";
 import type { CampaignSurfaces } from "../../lib/campaigns/surfaces";
 import { marketGuardrails, type MovedCause } from "../../lib/markets/guardrails";
 import { guardrailsFor, shopCurrency } from "../settings.server";
-import { inChunks } from "../../lib/db/chunk";
+import { chunk, inChunks } from "../../lib/db/chunk";
+import { retryTransient, RUN_CHUNK } from "../../lib/db/run-writes.server";
 import { LANDED } from "../../lib/execution/landed";
 import { PRICES_MAY_BE_LIVE, type CampaignState } from "../../lib/lifecycle/transitions";
 
@@ -334,16 +335,20 @@ export async function marketBaselines(
   variantGids: string[],
   client: AdminClient,
 ): Promise<{ prices: Map<string, Money>; compareAts: Map<string, Money>; moved: string[]; movedBy: MovedCause; stale: string[]; ladderUnread: boolean }> {
-  const stored = await prisma.baseline.findMany({
-    where: {
-      shopId,
-      surfaceKind: "MARKET",
-      priceListGid: list.priceListGid,
-      supersededAt: null,
-      variantGid: { in: variantGids },
-    },
-    select: { id: true, variantGid: true, basePrice: true, baseCompareAt: true, currency: true, handSet: true, listAdjustmentBps: true, ladderRead: true },
-  });
+  // Chunked (#810): a whole market's variants in one `IN` list, plus four filters, is the
+  // bind-ceiling failure of #346 on any market past 32,763 variants.
+  const stored = await inChunks(variantGids, (batch) =>
+    prisma.baseline.findMany({
+      where: {
+        shopId,
+        surfaceKind: "MARKET",
+        priceListGid: list.priceListGid,
+        supersededAt: null,
+        variantGid: { in: batch },
+      },
+      select: { id: true, variantGid: true, basePrice: true, baseCompareAt: true, currency: true, handSet: true, listAdjustmentBps: true, ladderRead: true },
+    }),
+  );
 
   // Read again when the list's percentage has moved since (#1093), as far as it can be.
   const { refresh, unreadable } = await staleSetting(shopId, list, stored);
@@ -798,15 +803,22 @@ async function captureMarketBaselines(
   // clear the merchant's quantity breaks on it. The next run reads it again.
   if (ladders === null) return { captured: new Map(), ladderUnread: true };
 
-  if (found.size > 0) {
-    const retiring = [...found.keys()].map((gid) => supersedes.get(gid)).filter((id): id is string => Boolean(id));
-    // One transaction: an old baseline is retired only as its replacement is recorded.
-    await prisma.$transaction(async (tx) => {
-      if (retiring.length > 0) {
-        await tx.baseline.updateMany({ where: { id: { in: retiring }, supersededAt: null }, data: { supersededAt: new Date() } });
+  // One transaction per `RUN_CHUNK` variants (#810): an old baseline is still retired only
+  // as its replacement is recorded, variant by variant, which is the property that matters.
+  // It was one transaction over the whole market -- 102,132 inserts and an `IN` list of as
+  // many ids, holding a connection and every row lock until the last one landed, inside
+  // Prisma's five-second interactive limit. Each batch is retried whole on a transient
+  // error, which rolled it back; `skipDuplicates` and the `supersededAt: null` filter make a
+  // batch that did commit a no-op the second time.
+  for (const batch of chunk([...found], RUN_CHUNK)) {
+    // At most one superseded baseline per variant in this batch, so never more than it.
+    const retiringInBatch = batch.map(([gid]) => supersedes.get(gid)).filter((id): id is string => Boolean(id));
+    await retryTransient("baseline.market.capture", () => prisma.$transaction(async (tx) => {
+      if (retiringInBatch.length > 0) {
+        await tx.baseline.updateMany({ where: { id: { in: retiringInBatch }, supersededAt: null }, data: { supersededAt: new Date() } });
       }
       await tx.baseline.createMany({
-        data: [...found].map(([variantGid, price]) => ({
+        data: batch.map(([variantGid, price]) => ({
           shopId,
           variantGid,
           surfaceKind: "MARKET" as const,
@@ -829,7 +841,7 @@ async function captureMarketBaselines(
         })),
         skipDuplicates: true,
       });
-    });
+    }));
   }
 
   // A variant Shopify has no price for on this market is left out rather than guessed

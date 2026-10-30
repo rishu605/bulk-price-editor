@@ -9,6 +9,7 @@ import { Prisma } from "@prisma/client";
 
 import prisma from "../../db.server";
 import { chunk } from "../../lib/db/chunk";
+import { retryTransient, RUN_CHUNK } from "../../lib/db/run-writes.server";
 import type { MarketPriceRow, MarketWriteResult } from "../../lib/execution/market-executor";
 
 /**
@@ -55,6 +56,11 @@ export async function settleMirror(runId: string): Promise<void> {
   // the same answer -- and sees a webhook that lands between the two as later, too.
   const notNewer = Prisma.sql`NOT COALESCE(v."remoteUpdatedAt" > c."remoteUpdatedAt", false)`;
 
+  // Each statement retried on a transient error (#810). This runs after every price has
+  // landed and been recorded, and before the run says so: a pool timeout here used to end
+  // a clean run Partial. Set-based statements, each idempotent -- the same ledger settles
+  // the same rows to the same values however many times it runs.
+
   // The version of the variant this write produced, as far as webhooks and catalogue syncs
   // are concerned (#828, #1087). The products webhook skips a delivery older than
   // `remoteUpdatedAt`, and a sync a read older than it; left where
@@ -65,7 +71,7 @@ export async function settleMirror(runId: string): Promise<void> {
   // `updated_at` is on Shopify's clock and to the second, and our read-back time ran ahead
   // of it: an edit made a second after the write compared older and was dropped. Our
   // verifiedAt only for rows written before that was recorded.
-  await prisma.$executeRaw`
+  await retryTransient("mirror.base.landed-index", () => prisma.$executeRaw`
     UPDATE "variant_index" v
     SET "price" = c."intendedPrice",
         "compareAt" = CASE WHEN c."intendedCompareAtSet" THEN c."intendedCompareAt" ELSE v."compareAt" END,
@@ -75,13 +81,13 @@ export async function settleMirror(runId: string): Promise<void> {
         ),
         "syncedAt" = ${now}
     FROM "variant_changes" c
-    WHERE ${landed} AND v."shopId" = c."shopId" AND v."variantGid" = c."variantGid" AND ${notNewer}`;
+    WHERE ${landed} AND v."shopId" = c."shopId" AND v."variantGid" = c."variantGid" AND ${notNewer}`);
   // After the stamp above, never before it. A catalogue sync writes a row only where the
   // stamp is older than its read (#1087), so once it has moved, a sync that read the product
   // before this write leaves both rows alone. In the other order there was a moment when
   // the base-surface row held this price and the stamp did not yet, and a sync writing then
   // put its older price over the surface row while this went on to stamp the index row.
-  await prisma.$executeRaw`
+  await retryTransient("mirror.base.landed-surface", () => prisma.$executeRaw`
     UPDATE "price_surface_entries" e
     SET "livePrice" = c."intendedPrice",
         "liveCompareAt" = CASE WHEN c."intendedCompareAtSet" THEN c."intendedCompareAt" ELSE e."liveCompareAt" END,
@@ -89,18 +95,18 @@ export async function settleMirror(runId: string): Promise<void> {
     FROM "variant_changes" c, "variant_index" v
     WHERE ${landed} AND e."shopId" = c."shopId" AND e."variantGid" = c."variantGid"
       AND e."surfaceKind" = 'BASE' AND e."priceListGid" = ''
-      AND v."shopId" = c."shopId" AND v."variantGid" = c."variantGid" AND ${notNewer}`;
-  await prisma.$executeRaw`
+      AND v."shopId" = c."shopId" AND v."variantGid" = c."variantGid" AND ${notNewer}`);
+  await retryTransient("mirror.base.unknown-surface", () => prisma.$executeRaw`
     UPDATE "price_surface_entries" e
     SET "livePrice" = NULL, "liveCompareAt" = NULL, "syncedAt" = ${now}
     FROM "variant_changes" c
     WHERE ${unknown} AND e."shopId" = c."shopId" AND e."variantGid" = c."variantGid"
-      AND e."surfaceKind" = 'BASE' AND e."priceListGid" = ''`;
-  await prisma.$executeRaw`
+      AND e."surfaceKind" = 'BASE' AND e."priceListGid" = ''`);
+  await retryTransient("mirror.base.unknown-index", () => prisma.$executeRaw`
     UPDATE "variant_index" v
     SET "price" = NULL, "compareAt" = NULL, "syncedAt" = ${now}
     FROM "variant_changes" c
-    WHERE ${unknown} AND v."shopId" = c."shopId" AND v."variantGid" = c."variantGid"`;
+    WHERE ${unknown} AND v."shopId" = c."shopId" AND v."variantGid" = c."variantGid"`);
 
   // Market prices this run sent and never heard back about (#779). Each market write
   // mirrors its own outcome as it lands (`mirrorMarketWrite`), so what is left here are
@@ -108,10 +114,12 @@ export async function settleMirror(runId: string): Promise<void> {
   // them, so the mirror says it does not know. Failed rows are not among them -- the write
   // that failed them already said what it knew, and a market-wide percentage that was
   // refused wrote no price at all.
-  const unsettled = await prisma.variantChange.findMany({
-    where: { runId, surfaceKind: { not: "BASE" }, priceListGid: { not: "" }, status: { in: ["PENDING", "WRITING", "APPLIED"] } },
-    select: { shopId: true, variantGid: true, priceListGid: true, currency: true },
-  });
+  const unsettled = await retryTransient("mirror.market.unsettled", () =>
+    prisma.variantChange.findMany({
+      where: { runId, surfaceKind: { not: "BASE" }, priceListGid: { not: "" }, status: { in: ["PENDING", "WRITING", "APPLIED"] } },
+      select: { shopId: true, variantGid: true, priceListGid: true, currency: true },
+    }),
+  );
   const byList = new Map<string, { shopId: string; currency: string; variantGids: string[] }>();
   for (const row of unsettled) {
     const list = byList.get(row.priceListGid) ?? { shopId: row.shopId, currency: row.currency, variantGids: [] };
@@ -163,7 +171,9 @@ export async function mirrorMarketWrite(
     const now = new Date();
     const stamp = Prisma.sql`(${now}::timestamptz AT TIME ZONE 'UTC')`;
 
-    for (const batch of chunk(landed)) {
+    // `RUN_CHUNK` rows a batch, each statement retried (#810): this runs inside the run,
+    // between a market write and its ledger update, on the run's own pool.
+    for (const batch of chunk(landed, RUN_CHUNK)) {
       // Three states, as Shopify keeps them: a strike-through set or cleared by this write,
       // and one the write left as the list had it. Two statements rather than a flag per
       // row, so neither has to say which it is.
@@ -171,7 +181,7 @@ export async function mirrorMarketWrite(
       const left = batch.filter((row) => row.compareAt === undefined);
 
       if (decided.length > 0) {
-        await prisma.$executeRaw`
+        await retryTransient("mirror.market.decided", () => prisma.$executeRaw`
           UPDATE "price_surface_entries" e
           SET "livePrice" = v.price::bigint,
               "liveCompareAt" = NULLIF(v.compare, '')::bigint,
@@ -182,10 +192,10 @@ export async function mirrorMarketWrite(
             ${decided.map((row) => String(row.price.amount))}::text[],
             ${decided.map((row) => (row.compareAt ? String(row.compareAt.amount) : ""))}::text[]
           ) AS v(gid, price, compare)
-          WHERE e."shopId" = ${shopId} AND e."priceListGid" = ${list.priceListGid} AND e."variantGid" = v.gid`;
+          WHERE e."shopId" = ${shopId} AND e."priceListGid" = ${list.priceListGid} AND e."variantGid" = v.gid`);
       }
       if (left.length > 0) {
-        await prisma.$executeRaw`
+        await retryTransient("mirror.market.left", () => prisma.$executeRaw`
           UPDATE "price_surface_entries" e
           SET "livePrice" = v.price::bigint,
               "currency" = ${list.currency},
@@ -194,25 +204,27 @@ export async function mirrorMarketWrite(
             ${left.map((row) => row.variantGid)}::text[],
             ${left.map((row) => String(row.price.amount))}::text[]
           ) AS v(gid, price)
-          WHERE e."shopId" = ${shopId} AND e."priceListGid" = ${list.priceListGid} AND e."variantGid" = v.gid`;
+          WHERE e."shopId" = ${shopId} AND e."priceListGid" = ${list.priceListGid} AND e."variantGid" = v.gid`);
       }
 
       // The rows the list had no fixed price for until now. A strike-through this write did
       // not set is none: a fixed price added without one has none.
       if (kind) {
-        await prisma.priceSurfaceEntry.createMany({
-          data: batch.map((row) => ({
-            shopId,
-            variantGid: row.variantGid,
-            surfaceKind: kind,
-            priceListGid: list.priceListGid,
-            currency: list.currency,
-            livePrice: BigInt(row.price.amount),
-            liveCompareAt: row.compareAt ? BigInt(row.compareAt.amount) : null,
-            syncedAt: now,
-          })),
-          skipDuplicates: true,
-        });
+        await retryTransient("mirror.market.create", () =>
+          prisma.priceSurfaceEntry.createMany({
+            data: batch.map((row) => ({
+              shopId,
+              variantGid: row.variantGid,
+              surfaceKind: kind,
+              priceListGid: list.priceListGid,
+              currency: list.currency,
+              livePrice: BigInt(row.price.amount),
+              liveCompareAt: row.compareAt ? BigInt(row.compareAt.amount) : null,
+              syncedAt: now,
+            })),
+            skipDuplicates: true,
+          }),
+        );
       }
     }
   }
@@ -237,10 +249,12 @@ export async function mirrorMarketDelete(
   if (!list.priceListGid) return;
 
   const gone = result.rows.filter((row) => row.status === "verified").map((row) => row.variantGid);
-  for (const batch of chunk(gone)) {
-    await prisma.priceSurfaceEntry.deleteMany({
-      where: { shopId, priceListGid: list.priceListGid, variantGid: { in: batch } },
-    });
+  for (const batch of chunk(gone, RUN_CHUNK)) {
+    await retryTransient("mirror.market.delete", () =>
+      prisma.priceSurfaceEntry.deleteMany({
+        where: { shopId, priceListGid: list.priceListGid, variantGid: { in: batch } },
+      }),
+    );
   }
 
   await markUnknown(
@@ -267,25 +281,29 @@ async function markUnknown(
   const kind = await surfaceKindOf(shopId, list.priceListGid);
   const now = new Date();
 
-  for (const batch of chunk(variantGids)) {
-    await prisma.priceSurfaceEntry.updateMany({
-      where: { shopId, priceListGid: list.priceListGid, variantGid: { in: batch } },
-      data: { livePrice: null, liveCompareAt: null, syncedAt: now },
-    });
+  for (const batch of chunk(variantGids, RUN_CHUNK)) {
+    await retryTransient("mirror.market.unknown", () =>
+      prisma.priceSurfaceEntry.updateMany({
+        where: { shopId, priceListGid: list.priceListGid, variantGid: { in: batch } },
+        data: { livePrice: null, liveCompareAt: null, syncedAt: now },
+      }),
+    );
     if (kind) {
-      await prisma.priceSurfaceEntry.createMany({
-        data: batch.map((variantGid) => ({
-          shopId,
-          variantGid,
-          surfaceKind: kind,
-          priceListGid: list.priceListGid,
-          currency: list.currency,
-          livePrice: null,
-          liveCompareAt: null,
-          syncedAt: now,
-        })),
-        skipDuplicates: true,
-      });
+      await retryTransient("mirror.market.unknown-create", () =>
+        prisma.priceSurfaceEntry.createMany({
+          data: batch.map((variantGid) => ({
+            shopId,
+            variantGid,
+            surfaceKind: kind,
+            priceListGid: list.priceListGid,
+            currency: list.currency,
+            livePrice: null,
+            liveCompareAt: null,
+            syncedAt: now,
+          })),
+          skipDuplicates: true,
+        }),
+      );
     }
   }
 }

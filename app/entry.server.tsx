@@ -8,6 +8,9 @@ import { addDocumentResponseHeaders } from "./shopify.server";
 import { initSentry } from "./lib/observability/sentry.server";
 import { initOtel } from "./lib/observability/otel.server";
 import { logger } from "./lib/logging/logger";
+import prisma, { databasePool } from "./db.server";
+import { reportPoolBudget } from "./lib/db/budget.server";
+import { startPoolWaitSampler } from "./lib/db/pool-wait.server";
 
 // Once per process, at import time, before any request is handled. Initialising lazily
 // on the first error would miss the errors that happen during startup, which are the ones
@@ -16,6 +19,11 @@ initSentry({ process: "web" });
 // Not awaited: the SDK starts in the background and metrics recorded before it is ready
 // fall through to the log sink, which is where they were going anyway.
 void initOtel({ process: "web" });
+// The connection budget against `max_connections`, logged once at boot, and this pool's
+// wait sampled from then on (#810). Neither is awaited and neither can throw: a database
+// that is slow to answer at boot must not delay the first request, let alone stop it.
+void reportPoolBudget(prisma, databasePool);
+startPoolWaitSampler(prisma, databasePool.role);
 
 export const streamTimeout = 5000;
 

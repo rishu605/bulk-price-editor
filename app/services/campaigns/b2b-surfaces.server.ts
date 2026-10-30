@@ -33,6 +33,7 @@ import {
   type TieredCampaign,
 } from "./b2b-plan.server";
 import { inChunks } from "../../lib/db/chunk";
+import { inRunChunks, retryTransient } from "../../lib/db/run-writes.server";
 import { laddersHandedTo } from "./handover.server";
 import { recordedCosts } from "./market-plan.server";
 import { parseSurfaces } from "./market-surfaces.server";
@@ -133,7 +134,9 @@ async function ledgerLadderChunk(
   chunk: readonly QuantityRow[],
   index: number,
 ): Promise<void> {
-  await prisma.variantChange.createMany({
+  // Retried on a transient error, as every ledger write in a run is (#810). A chunk here is
+  // a request's worth of ladders, already bounded by the executor.
+  await retryTransient("ledger.b2b.create", () => prisma.variantChange.createMany({
     data: chunk.map((row) => ({
       runId,
       shopId,
@@ -152,7 +155,7 @@ async function ledgerLadderChunk(
       status: "PENDING" as const,
     })),
     skipDuplicates: true,
-  });
+  }));
 
   logger.info("b2b chunk ledgered", {
     runId,
@@ -174,20 +177,23 @@ async function recordLadderResults(
     const gids = rows.filter((row) => row.status === status).map((row) => row.variantGid);
     if (gids.length === 0) continue;
 
-    await prisma.variantChange.updateMany({
-      where: { runId, shopId, priceListGid, variantGid: { in: gids } },
-      data: {
-        status: status === "verified" ? "VERIFIED" : "FAILED",
-        appliedAt: status === "verified" ? now : null,
-        verifiedAt: status === "verified" ? now : null,
-      },
-    });
+    // One `IN` list of every row on the catalogue until #810; `RUN_CHUNK` at a time now.
+    await inRunChunks("ledger.b2b.result", gids, (batch) =>
+      prisma.variantChange.updateMany({
+        where: { runId, shopId, priceListGid, variantGid: { in: batch } },
+        data: {
+          status: status === "verified" ? "VERIFIED" : "FAILED",
+          appliedAt: status === "verified" ? now : null,
+          verifiedAt: status === "verified" ? now : null,
+        },
+      }),
+    );
   }
 
   for (const row of rows) {
     if (!row.failureReason) continue;
 
-    await prisma.variantChange.updateMany({
+    await retryTransient("ledger.b2b.reason", () => prisma.variantChange.updateMany({
       where: { runId, shopId, priceListGid, variantGid: row.variantGid },
       data: {
         // The merchant's version, then Shopify's. Support needs the latter.
@@ -196,7 +202,7 @@ async function recordLadderResults(
           : row.failureReason,
         attempt: { increment: 1 },
       },
-    });
+    }));
   }
 }
 

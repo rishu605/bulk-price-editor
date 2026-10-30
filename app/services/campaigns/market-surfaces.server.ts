@@ -48,6 +48,7 @@ import { logger } from "../../lib/logging/logger";
 import { metric } from "../../lib/telemetry/metrics";
 import { LANDED } from "../../lib/execution/landed";
 import { inChunks } from "../../lib/db/chunk";
+import { inRunChunks, retryTransient } from "../../lib/db/run-writes.server";
 import { tallyStatuses } from "../../lib/campaigns/run-result";
 import type { PlannedRow } from "../../lib/planning/types";
 import { marketsHandedTo } from "./handover.server";
@@ -407,16 +408,19 @@ export async function applyMarketSurfaces(
       //
       // Revert needs nothing extra: reverting the base restores the market, which is the
       // same reason no write was needed here.
+      //
+      // In batches (#810). On a relative list every variant can be settled here at once --
+      // 102,132 of them on anchor-perf -- and one `IN` list of them plus two filters is the
+      // bind-limit failure of #346, one statement past the ceiling.
       const already = rows.filter((row) => settled.has(row.variantGid));
       await ledgerChunk(runId, shopId, list, already, 0);
-      await prisma.variantChange.updateMany({
-        where: {
-          runId,
-          priceListGid: list.priceListGid,
-          variantGid: { in: already.map((row) => row.variantGid) },
-        },
-        data: { status: "VERIFIED", appliedAt: new Date(), verifiedAt: new Date() },
-      });
+      const settledAt = new Date();
+      await inRunChunks("ledger.market.settled", already.map((row) => row.variantGid), (batch) =>
+        prisma.variantChange.updateMany({
+          where: { runId, priceListGid: list.priceListGid, variantGid: { in: batch } },
+          data: { status: "VERIFIED", appliedAt: settledAt, verifiedAt: settledAt },
+        }),
+      );
     }
 
     const remaining = rows.filter((row) => !settled.has(row.variantGid));
@@ -606,21 +610,27 @@ export async function revertMarketSurfaces(
     const letGo = released.length > 0 ? await releaseFixedPrices(recompute!.runId, shopId, list!, released, client, onProgress) : null;
 
     const deleted = followed.length > 0 ? await deleteMarketPrices(client, priceListGid, followed, onProgress) : null;
+    // Settled in batches, each retried (#810). These were one `IN` list per market of every
+    // variant the campaign wrote there -- a whole-catalogue revert's worth, unbounded.
     if (deleted) {
       // A deleted fixed price leaves no row behind, as the sync would mirror it (#779).
       await mirrorMarketDelete(shopId, { priceListGid, currency: list?.currency ?? "" }, deleted);
-      await prisma.variantChange.updateMany({
-        where: { shopId, priceListGid, variantGid: { in: followed }, run: { campaignId } },
-        data: { status: deleted.clean ? "REVERTED" : "FAILED" },
-      });
+      await inRunChunks("ledger.market.reverted", followed, (batch) =>
+        prisma.variantChange.updateMany({
+          where: { shopId, priceListGid, variantGid: { in: batch }, run: { campaignId } },
+          data: { status: deleted.clean ? "REVERTED" : "FAILED" },
+        }),
+      );
     }
 
     const restored = recompute && list && rewrite.size > 0 ? await rewriteHandSet(shopId, list, [...rewrite], recompute, client, onProgress) : null;
     if (restored) {
-      await prisma.variantChange.updateMany({
-        where: { shopId, priceListGid, variantGid: { in: [...rewrite] }, run: { campaignId }, NOT: { runId: recompute!.runId } },
-        data: { status: restored.clean ? "REVERTED" : "FAILED" },
-      });
+      await inRunChunks("ledger.market.rewritten", [...rewrite], (batch) =>
+        prisma.variantChange.updateMany({
+          where: { shopId, priceListGid, variantGid: { in: batch }, run: { campaignId }, NOT: { runId: recompute!.runId } },
+          data: { status: restored.clean ? "REVERTED" : "FAILED" },
+        }),
+      );
     }
 
     outcomes.push({
@@ -714,21 +724,23 @@ async function releaseFixedPrices(
   client: AdminClient,
   onProgress?: () => void | Promise<void>,
 ): Promise<MarketWriteResult> {
-  await prisma.variantChange.createMany({
-    data: variantGids.map((variantGid) => ({
-      runId,
-      shopId,
-      variantGid,
-      surfaceKind: "MARKET" as const,
-      priceListGid: list.priceListGid,
-      currency: list.currency,
-      intendedPrice: null,
-      intendedCompareAt: null,
-      intendedCompareAtSet: false,
-      status: "PENDING" as const,
-    })),
-    skipDuplicates: true,
-  });
+  await inRunChunks("ledger.market.release", variantGids, (batch) =>
+    prisma.variantChange.createMany({
+      data: batch.map((variantGid) => ({
+        runId,
+        shopId,
+        variantGid,
+        surfaceKind: "MARKET" as const,
+        priceListGid: list.priceListGid,
+        currency: list.currency,
+        intendedPrice: null,
+        intendedCompareAt: null,
+        intendedCompareAtSet: false,
+        status: "PENDING" as const,
+      })),
+      skipDuplicates: true,
+    }),
+  );
 
   const deleted = await deleteMarketPrices(client, list.priceListGid, variantGids, onProgress);
   const answered = deleted.rows.filter((row) => row.status === "verified").map((row) => row.variantGid);
@@ -907,21 +919,25 @@ async function ledgerChunk(
   chunk: readonly MarketPriceRow[],
   index: number,
 ): Promise<void> {
-  await prisma.variantChange.createMany({
-    data: chunk.map((row) => ({
-      runId,
-      shopId,
-      variantGid: row.variantGid,
-      surfaceKind: "MARKET" as const,
-      priceListGid: list.priceListGid,
-      currency: list.currency,
-      intendedPrice: BigInt(row.price.amount),
-      intendedCompareAt: row.compareAt ? BigInt(row.compareAt.amount) : null,
-      intendedCompareAtSet: row.compareAt !== undefined,
-      status: "PENDING" as const,
-    })),
-    skipDuplicates: true,
-  });
+  // A write chunk is at most a request's worth (`chunkPrices`), but the settled rows above
+  // arrive as one "chunk" of every variant on the list, so bounded here too (#810).
+  await inRunChunks("ledger.market.create", chunk, (batch) =>
+    prisma.variantChange.createMany({
+      data: batch.map((row) => ({
+        runId,
+        shopId,
+        variantGid: row.variantGid,
+        surfaceKind: "MARKET" as const,
+        priceListGid: list.priceListGid,
+        currency: list.currency,
+        intendedPrice: BigInt(row.price.amount),
+        intendedCompareAt: row.compareAt ? BigInt(row.compareAt.amount) : null,
+        intendedCompareAtSet: row.compareAt !== undefined,
+        status: "PENDING" as const,
+      })),
+      skipDuplicates: true,
+    }),
+  );
 
   logger.info("market chunk ledgered", {
     runId,
@@ -939,31 +955,40 @@ async function recordResults(
 ): Promise<void> {
   const now = new Date();
 
+  // One `IN` list per outcome of every row the market wrote, until #810: a 102k-variant
+  // market's results in one statement, past the bind ceiling once two filters were added
+  // (#346). Now `RUN_CHUNK` at a time, each retried on a transient error, as the base
+  // surface's are -- this is the same ledger, and the same pool.
   for (const status of ["verified", "failed"] as const) {
     const gids = result.rows.filter((row) => row.status === status).map((row) => row.variantGid);
     if (gids.length === 0) continue;
 
-    await prisma.variantChange.updateMany({
-      where: { runId, shopId, priceListGid, variantGid: { in: gids } },
-      data: {
-        status: status === "verified" ? "VERIFIED" : "FAILED",
-        appliedAt: status === "verified" ? now : null,
-        verifiedAt: status === "verified" ? now : null,
-      },
-    });
+    await inRunChunks("ledger.market.result", gids, (batch) =>
+      prisma.variantChange.updateMany({
+        where: { runId, shopId, priceListGid, variantGid: { in: batch } },
+        data: {
+          status: status === "verified" ? "VERIFIED" : "FAILED",
+          appliedAt: status === "verified" ? now : null,
+          verifiedAt: status === "verified" ? now : null,
+        },
+      }),
+    );
   }
 
   for (const row of result.rows) {
     if (!row.failureReason) continue;
-    await prisma.variantChange.updateMany({
-      where: { runId, shopId, priceListGid, variantGid: row.variantGid },
-      data: {
-        failureReason: row.guidance
-          ? `${row.guidance} (Shopify said: ${row.failureReason})`
-          : row.failureReason,
-        attempt: { increment: 1 },
-      },
-    });
+    // Retried only on the codes that mean it did not commit, so the increment counts once.
+    await retryTransient("ledger.market.reason", () =>
+      prisma.variantChange.updateMany({
+        where: { runId, shopId, priceListGid, variantGid: row.variantGid },
+        data: {
+          failureReason: row.guidance
+            ? `${row.guidance} (Shopify said: ${row.failureReason})`
+            : row.failureReason,
+          attempt: { increment: 1 },
+        },
+      }),
+    );
   }
 
   metric("run.rows", result.verified, { runId, surface: "market", outcome: "verified" });
