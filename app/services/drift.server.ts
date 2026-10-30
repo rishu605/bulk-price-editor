@@ -20,6 +20,7 @@
 import { createHash } from "node:crypto";
 
 import prisma from "../db.server";
+import { inRunChunks } from "../lib/db/run-writes.server";
 import { adoptBaselines } from "./baseline-adopt.server";
 import { AppError } from "../lib/errors/app-error";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
@@ -71,15 +72,21 @@ export async function recordWriteIntents(
 ): Promise<void> {
   if (intents.length === 0) return;
 
-  await prisma.writeIntent.createMany({
-    data: intents.map((intent) => ({
-      shopId,
-      variantGid: intent.variantGid,
-      surfaceKind: "BASE" as const,
-      priceListGid: intent.priceListGid ?? "",
-      valueHash: hashValue(intent.price, intent.compareAt === "leave" ? ANY_COMPARE_AT : intent.compareAt),
-    })),
-  });
+  // A run records every price it is about to write here, so this was one createMany of the
+  // whole plan -- 102,132 rows, split by Prisma into one long transaction. `RUN_CHUNK` rows
+  // a statement now, each retried on a transient error (#810). A retried batch cannot
+  // double up: P2024 and P2034 mean it never committed.
+  await inRunChunks("drift.write-intents", intents, (batch) =>
+    prisma.writeIntent.createMany({
+      data: batch.map((intent) => ({
+        shopId,
+        variantGid: intent.variantGid,
+        surfaceKind: "BASE" as const,
+        priceListGid: intent.priceListGid ?? "",
+        valueHash: hashValue(intent.price, intent.compareAt === "leave" ? ANY_COMPARE_AT : intent.compareAt),
+      })),
+    }),
+  );
 }
 
 /** True when this value matches something we wrote recently. */

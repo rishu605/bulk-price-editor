@@ -134,7 +134,80 @@ not after.
 | `SCHEDULER_TICK_MS` | Defaults to 30s. |
 | `RUN_STALE_AFTER_MS` | Defaults to 5min — how long before the reaper treats a silent run as abandoned and makes it resumable. Raise it only if a legitimate run can go that long without a heartbeat. |
 | `BILLING_TEST_CHARGES` | Charges are real on real stores and test charges on development stores, decided per shop (#860). Set it to `true` only on a staging deploy, where every plan change should be a test charge. **Never on production**: no merchant would ever be billed. |
-| `DATABASE_POOL_SIZE` | Defaults to 10 database connections **per process**, so web plus worker is 20. Measured in `docs/perf/README.md`: ten buys 91% of the throughput available at 40 for a quarter of the connections. Raise it only against a known `max_connections`, remembering that every service and every replica draws from the same budget, as does the `migrate deploy` each container runs at boot. A `connection_limit` already present in `DATABASE_URL` wins over this. |
+| `DATABASE_POOL_SIZE` | Defaults to 10 database connections **per process**, so web plus worker is 20. Measured in `docs/perf/README.md`: ten buys 91% of the throughput available at 40 for a quarter of the connections. Raise it only against a known `max_connections`, remembering that every service and every replica draws from the same budget, as does the `migrate deploy` each container runs at boot. A `connection_limit` already present in `DATABASE_URL` wins over this. The two variables below win over it, per process. |
+| `DATABASE_POOL_SIZE_WEB` | The web service's pool, per replica. Falls back to `DATABASE_POOL_SIZE`, then 10. See [Database connections](#database-connections) for the budget it is checked against. |
+| `DATABASE_POOL_SIZE_WORKER` | The worker's pool — the one a run lives in. Falls back to `DATABASE_POOL_SIZE`, then 10. |
+| `DATABASE_POOL_RESERVE` | Defaults to 5: connections nothing in the app opens, kept for the boot-time `migrate deploy`, `psql` and Railway's dashboard. Counted in the boot check, never used. |
+| `WEB_REPLICAS` | Defaults to 1. How many web replicas the boot check counts a full web pool for. Set it when you scale the web service, or the check under-counts. |
+| `DATABASE_POOL_TIMEOUT_WEB_S` | Unset leaves Prisma's 10 s. Whole seconds a web query waits for a free connection before failing with "the app's own database is not responding". Web only; the worker waits out pool timeouts by retrying instead. |
+| `DATABASE_STATEMENT_TIMEOUT_WEB_MS` | Unset means none. Milliseconds a web statement may run before Postgres cancels it and the page says the database is busy and to reload. **Web only** — never the worker, never migrations. Inline Apply, Revert and Resume run in the web process too, so measure before you go below a few seconds. |
+| `DATABASE_DIRECT_URL` | Unset means migrations use `DATABASE_URL`, as always. Set it — to Postgres itself, not the pooler — once `DATABASE_URL` points at PgBouncer: `prisma migrate deploy` cannot run through transaction pooling. Read only by `scripts/migrate.ts`. |
+
+---
+
+## Database connections
+
+Each process has its own pool, and every process checks the sum at boot (#810). The numbers
+that matter, and the line that reports them:
+
+```
+INFO  database pool budget: web 15 + worker 22 + reserve 5 = 42, within max_connections 100 − 3 reserved for superusers = 97 (55 spare)
+```
+
+Over budget is an **error** line ending in what to change; it does not stop the process,
+because a boot refused over a sizing mistake is an outage and a pool that is too big is a
+slowdown at peak. Search the logs for `database pool budget exceeded` after changing any of
+the pool variables or the Postgres plan. The same line, as a warning, says when a statement
+timeout was asked for and the session did not get it.
+
+**The budget.** `web × WEB_REPLICAS + worker + DATABASE_POOL_RESERVE` must fit under
+`max_connections` minus the superuser slots. Railway's Postgres runs the stock image, whose
+`max_connections` is 100 — check yours with `SHOW max_connections;`, since a plan or a
+custom config can change it, and the boot line prints what it read. The recommendation,
+against 100: web 15, worker 22, reserve 5, which leaves room for a second web replica.
+
+**Why the worker's is the bigger pool.** It is every queue's as well as the run's: the
+products-webhook drains (#811, ten at once), planning (five), execution and verification
+(two each), sync and audit (one each), and the scheduler's tick, which runs due campaigns
+itself — 22 jobs that can each be holding a connection. The worker's boot line warns when
+`DATABASE_POOL_SIZE_WORKER` is below that count and says what it counted; a run waits out a
+pool timeout by retrying the statement, but this decides how often it has to.
+
+**The page timeouts.** Recommended once the budget is set: `DATABASE_POOL_TIMEOUT_WEB_S=2`
+and `DATABASE_STATEMENT_TIMEOUT_WEB_MS=5000`. A page then fails in a couple of seconds with
+a sentence naming the cause, rather than waiting ten behind a run. Both are off by default
+because the web process also writes (Apply, Revert and Resume run inline), and the right
+statement limit is one measured against those writes on your database.
+
+**How busy the pool is.** `db.pool_wait_ms`, a histogram labelled `process: web | worker`,
+is a `SELECT 1` timed every 10 s in each process — connection wait plus one round trip.
+#810's target is web p95 under 1 s while a 102k-variant run writes. `db.transient_retries`
+counts the run's writes that hit P2024 or P2034 and were retried (`outcome: retried`) or ran
+out of retries (`outcome: gave_up`, which is a run that went Partial because of load).
+
+### Putting PgBouncer in front (a person's job)
+
+Transaction pooling lets both services keep their client pools while Postgres sees only
+PgBouncer's. The app is ready for it; the provisioning is not automated.
+
+1. **Add PgBouncer** to the Railway project (Railway's PgBouncer template, or the
+   `edoburu/pgbouncer` image) with `POOL_MODE=transaction`, pointed at the Postgres service's
+   private URL. Size its `DEFAULT_POOL_SIZE` (server connections) under `max_connections`
+   with the reserve to spare — that is now the number that has to fit.
+2. **Point `DATABASE_URL` at PgBouncer** on both services, with `pgbouncer=true` on the query
+   string — Prisma then stops using named prepared statements, which transaction pooling
+   cannot keep. Keep the pool variables above: they now size the clients' pools against
+   PgBouncer.
+3. **Set `DATABASE_DIRECT_URL`** on the web service to the Postgres service's own URL
+   (`${{Postgres.DATABASE_URL}}`). Only migrations use it; without it the boot's
+   `migrate deploy` goes through PgBouncer and fails on its advisory lock.
+4. **Move the web statement timeout onto a role.** Behind `pgbouncer=true` the app does not
+   send `statement_timeout` as a startup option (PgBouncer refuses or drops it), so give the
+   web service its own Postgres role and run
+   `ALTER ROLE anchor_web SET statement_timeout = '5s';` — and give the worker a role
+   without one. The boot line warns when the web session's timeout is not what
+   `DATABASE_STATEMENT_TIMEOUT_WEB_MS` asked for, and when the worker's is not zero.
+5. **Redeploy both**, then read the boot lines and `/healthz`.
 
 ---
 

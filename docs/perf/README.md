@@ -201,6 +201,55 @@ The measurement found #906: the mirror refresh after a run is row by row and run
 the campaign reads Active, so a revert started inside those minutes plans against a stale
 mirror and skips rows.
 
+## Connection budgets, per process (#810)
+
+#803's production run is the measurement this answers: with one `DEFAULT_POOL_SIZE = 10`
+and Prisma's 10 s `pool_timeout`, a 102,132-variant run held `/healthz`'s `SELECT 1` at
+9–12 s for forty minutes, failed its own writes with P2024 (#802, #805), and failed
+`/healthz` with a 503.
+
+**The budget**, set per process by environment and checked at every boot against what the
+database reports (`app/lib/db/pool.ts`, `app/lib/db/budget.server.ts`):
+
+| | Unset (today) | Recommended against 100 |
+|---|---|---|
+| Web pool, per replica (`DATABASE_POOL_SIZE_WEB`) | 10 | 15 |
+| Worker pool (`DATABASE_POOL_SIZE_WORKER`) | 10 | 22 — one per job the worker can run at once |
+| Migrations, `psql`, dashboard (`DATABASE_POOL_RESERVE`) | 5 | 5 |
+| **Sum, one web replica** | **25** | **42** |
+| Railway Postgres `max_connections` (stock image) | 100 | 100 |
+| Superuser-only slots (`superuser_reserved_connections`) | 3 | 3 |
+| Headroom | 72 | 55 — a second web replica still fits |
+| Web `pool_timeout` (`DATABASE_POOL_TIMEOUT_WEB_S`) | Prisma's 10 s | 2 s |
+| Web `statement_timeout` (`DATABASE_STATEMENT_TIMEOUT_WEB_MS`) | none | 5,000 ms |
+
+The boot line, from every process, is the check:
+`database pool budget: web 15 + worker 22 + reserve 5 = 42, within max_connections 100 − 3
+reserved for superusers = 97 (55 spare)`. The worker's 22 is its queues' concurrency summed --
+products-webhook drains 10 (#811), planning 5, execution 2, verification 2, sync 1, audit 1 --
+plus the scheduler's tick, each of which can hold a connection at the same moment as a run;
+the worker warns at boot when its pool is smaller than that count. #810's own example was
+worker 20, two short of that count now that the products-webhook drains run there. Over budget it is an error line naming what to
+change. `max_connections` is the one number here that is not in this repo — it moves with
+the Railway plan — which is why it is read at boot rather than written down as a constant.
+Confirm it on the deployed database with `SHOW max_connections;`.
+
+**The run's side.** A run writes its ledger, its write intents and its market mirror
+`RUN_CHUNK` (1,000) rows a statement, one statement at a time (`app/lib/db/run-writes.server.ts`),
+so a page waiting for a connection waits for one short statement, not for a run. A P2024 or
+P2034 on a statement retries that statement after 250 ms, 1 s and 4 s and the run carries on;
+only a fourth failure ends it, Partial with what landed, as before. Pinned by
+`run-path-bounds.test.ts` (no unchunked `IN` list or insert in the run's modules) and
+`transient-db-error.chaos.ts` (a run that meets P2024 or P2034 once finishes Completed, Applying
+→ Active and nowhere else; a 1,100-variant run sends nothing over 1,000 rows a statement).
+
+**Not measured yet: the live run.** The acceptance numbers -- zero P2024 in Diagnostics across
+the 102k apply and revert on anchor-perf, and the web's `db.pool_wait_ms` p95 under 1 s while
+they run -- need the deployed services with the recommended values set and anchor-perf. To
+take them: set the variables, redeploy, read both boot lines, start the apply, and read
+`db.pool_wait_ms{process="web"}` p95 and `db.transient_retries` for its duration; then the same
+for the revert.
+
 ## What these numbers do not cover
 
 Webhook lag under load. Twenty sequential edits on an idle store is the best

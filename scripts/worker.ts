@@ -10,6 +10,11 @@
  *   npm run worker
  */
 
+// First, before anything that reaches `db.server`: the client is built when that module is
+// first evaluated, and imports evaluate in order, so this is the only place a declaration
+// can land in time to give the worker its own pool rather than the web's (#810).
+import "../app/worker/as-worker";
+
 import Redis from "ioredis";
 
 import { initSentry } from "../app/lib/observability/sentry.server";
@@ -20,7 +25,10 @@ import { handleJob } from "../app/worker/handlers.server";
 import { LeaderLock } from "../app/worker/leader-lock";
 import { pruneWriteIntents } from "../app/services/drift.server";
 import { ringStrandedWebhooks } from "../app/services/webhook-queue.server";
-import prisma from "../app/db.server";
+import prisma, { databasePool } from "../app/db.server";
+import { reportPoolBudget } from "../app/lib/db/budget.server";
+import { startPoolWaitSampler } from "../app/lib/db/pool-wait.server";
+import { QUEUE_POLICIES } from "../app/worker/queues";
 
 const TICK_INTERVAL_MS = Number(process.env.SCHEDULER_TICK_MS ?? 30_000);
 const LOCK_TTL_MS = Math.max(TICK_INTERVAL_MS * 2, 30_000);
@@ -35,8 +43,33 @@ for (const key of ["DATABASE_URL"]) {
   }
 }
 
+// Built for the web, the worker would run its writes under whatever statement timeout the
+// web's pages were given -- a run cancelled part-way by a limit meant for a page (#810). An
+// import reordered above `as-worker` is the way that happens, and it is caught here, at
+// boot, where it is a failed deploy rather than a stream of Partial runs.
+if (databasePool.role !== "worker") {
+  console.error(
+    `[worker] The database client was built for the ${databasePool.role} process, not the worker: ` +
+      "`app/worker/as-worker` must be the first import in scripts/worker.ts.",
+  );
+  process.exit(1);
+}
+
 initSentry({ process: "worker" });
 void initOtel({ process: "worker" });
+
+// The connection budget against `max_connections`, logged once, and this pool's wait sampled
+// from then on (#810): the worker's pool is the one a run lives in. It is also every queue's:
+// told how many jobs can run at once -- the products-webhook drains (#811) included, and the
+// scheduler's tick, which runs due campaigns itself -- so it can say when the pool is smaller.
+const queueSlots = Object.values(QUEUE_POLICIES);
+void reportPoolBudget(prisma, databasePool, {
+  concurrentJobs: {
+    total: queueSlots.reduce((sum, policy) => sum + policy.concurrency, 0) + 1,
+    detail: [...queueSlots.map((policy) => `${policy.name} ${policy.concurrency}`), "scheduler tick 1"].join(", "),
+  },
+});
+startPoolWaitSampler(prisma, databasePool.role);
 
 const redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
   maxRetriesPerRequest: 3,

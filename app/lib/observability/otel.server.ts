@@ -50,6 +50,10 @@ export const INSTRUMENTS: Record<Metric, "counter" | "histogram" | "gauge"> = {
   "queue.enqueued": "counter",
   "queue.failed": "counter",
   "plan.summary_ms": "histogram",
+  // A distribution: #810's criterion is a p95 (a page's database wait under 1 s during a
+  // 102k run), and only a histogram can answer a percentile.
+  "db.pool_wait_ms": "histogram",
+  "db.transient_retries": "counter",
 };
 
 let enabled = false;

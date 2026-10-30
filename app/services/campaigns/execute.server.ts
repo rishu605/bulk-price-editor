@@ -27,6 +27,7 @@ import prisma from "../../db.server";
 import { AppError } from "../../lib/errors/app-error";
 import { isClampReason } from "../../lib/campaigns/clamp-reasons";
 import { chunk } from "../../lib/db/chunk";
+import { retryTransient, RUN_CHUNK } from "../../lib/db/run-writes.server";
 import { money } from "../../lib/money/money";
 import { executeSync, type AdminClient, type ExecutedRow } from "../../lib/execution/sync-executor";
 import { readBackRowVerdict } from "../../lib/execution/read-back";
@@ -415,9 +416,16 @@ export async function settleSubmittedBulk(
     );
   }
 
+  // Still one transaction, unlike the run's own ledger writes (#810): the record says the
+  // operation is settled only in the step that settles its rows, so a resume that dies here
+  // reads the result file again rather than finding a finished operation over WRITING rows
+  // -- and the failed rows' `attempt` counts each failure once. Bounded where it can be:
+  // `RUN_CHUNK` ids a statement. Retried whole on a transient error, which is safe because a
+  // P2024 or P2034 means none of it committed; built fresh per attempt, because a Prisma
+  // statement already handed to a failed transaction is not one to hand to another.
   const settle = (ids: string[], data: Parameters<typeof prisma.variantChange.updateMany>[0]["data"]) =>
-    chunk(ids).map((batch) => prisma.variantChange.updateMany({ where: { id: { in: batch } }, data }));
-  await prisma.$transaction([
+    chunk(ids, RUN_CHUNK).map((batch) => prisma.variantChange.updateMany({ where: { id: { in: batch } }, data }));
+  await retryTransient("ledger.bulk.settle", () => prisma.$transaction([
     ...settle(verified, { status: "VERIFIED", appliedAt: now, verifiedAt: now }),
     ...settle(clamped, { status: "CLAMPED", appliedAt: now, verifiedAt: now }),
     ...[...stamps]
@@ -453,7 +461,7 @@ export async function settleSubmittedBulk(
         ...(finalState.url ? { resultUrl: finalState.url } : {}),
       },
     }),
-  ]);
+  ]));
   return {
     settledRunId: record.runId,
     operation: record.shopifyGid,

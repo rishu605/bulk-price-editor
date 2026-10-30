@@ -104,6 +104,19 @@ export function toAppError(error: unknown): AppError {
   if (error instanceof AppError) return error;
 
   const message = messageOf(error);
+
+  // Before `classify`, whose `P20` catch-all would call a raw query's P2010 a form error.
+  // DB_UNAVAILABLE -- a 503, retryable -- because it is the database being busy, with its
+  // own sentence because "not responding" is not what a page cut off at five seconds saw.
+  if (isStatementTimeout(error, message)) {
+    return new AppError({
+      code: "DB_UNAVAILABLE",
+      userMessage: STATEMENT_TIMEOUT_MESSAGE,
+      cause: error,
+      context: { originalMessage: message.slice(0, 500), timeout: "statement" },
+    });
+  }
+
   const code = classify(error, message);
 
   return new AppError({
@@ -147,8 +160,43 @@ const USER_MESSAGE: Record<ErrorCode, string> = {
  * A named set rather than another `startsWith`, because that is what put them in the
  * wrong bucket: `P20` is Prisma's prefix for "query engine", not for "your input was
  * invalid", and treating the prefix as the latter misfiles anything transient it emits.
+ *
+ * Exported for the run's chunk retry (`lib/db/run-writes.server.ts`, #810), so "what a run waits
+ * out" and "what a merchant is told is load" are one list rather than two that drift.
  */
-const TRANSIENT_PRISMA_CODES: ReadonlySet<string> = new Set(["P2024", "P2034"]);
+export const TRANSIENT_PRISMA_CODES: ReadonlySet<string> = new Set(["P2024", "P2034"]);
+
+/**
+ * Postgres's SQLSTATE for a statement it cancelled: `statement_timeout`, which the web
+ * process can now set (#810), or an operator's `pg_cancel_backend`.
+ */
+const QUERY_CANCELED = "57014";
+
+/**
+ * A statement Postgres cancelled for taking too long (#810).
+ *
+ * Prisma reports it two ways, and both were misfiled. A raw query fails with P2010 and the
+ * SQLSTATE in `meta.code` -- and P2010 starts with `P20`, so it read "some of the values on
+ * this form need fixing". A model query fails with no code at all, the SQLSTATE only in the
+ * engine's message, and read as UNKNOWN. Both shapes were taken from a real cancellation
+ * against Postgres 16 under Prisma 6.19, not from the docs.
+ */
+function isStatementTimeout(error: unknown, message: string): boolean {
+  const meta = (error as { meta?: { code?: unknown } })?.meta;
+  if (meta?.code === QUERY_CANCELED) return true;
+  return message.includes(`"${QUERY_CANCELED}"`) || /canceling statement due to statement timeout/i.test(message);
+}
+
+/**
+ * What a page that hit its statement timeout says (#810): the object (this page), the cause
+ * (the app's database is busy, usually with a large run) and the next action (reload; a run
+ * carries on). A run that hits it after writing is told "stopped part-way" instead, by
+ * `stoppedPartWay` in the run path, which replaces this sentence.
+ */
+const STATEMENT_TIMEOUT_MESSAGE =
+  "This page took too long to read from the app's database, which is busy right now — usually with a " +
+  "large price run on this store or another. Nothing was changed in your store. Reload the page in a " +
+  "minute; any run in progress carries on without it.";
 
 function classify(error: unknown, message: string): ErrorCode {
   const prismaCode = (error as { code?: unknown })?.code;

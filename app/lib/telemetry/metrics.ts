@@ -70,7 +70,21 @@ export type Metric =
    * waits on, and the one that says whether the inline threshold is set right. Counts and
    * durations only, never a price.
    */
-  | "plan.summary_ms";
+  | "plan.summary_ms"
+  /**
+   * How long a trivial query waited for this process's pool, labelled by `process` (web or
+   * worker), sampled every few seconds (#810). The number #803 read off `/healthz` by hand
+   * -- `SELECT 1` at 9–12 s behind a run -- made continuous, per process, so "a page's
+   * database wait stays under 1 s p95 during a 102k run" is a query on a panel rather than
+   * a person watching a terminal. See `lib/db/pool-wait.server.ts`.
+   */
+  | "db.pool_wait_ms"
+  /**
+   * A run's write that hit P2024 or P2034 and was retried, or gave up, by `what` and
+   * `outcome` (#810). Retried ones are the pool under pressure and the run surviving it;
+   * any `gave_up` is a run that went Partial because of load.
+   */
+  | "db.transient_retries";
 
 export interface MetricLabels {
   shopId?: string;

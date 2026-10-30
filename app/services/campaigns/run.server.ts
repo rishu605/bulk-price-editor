@@ -31,7 +31,8 @@ import { AppError, toAppError } from "../../lib/errors/app-error";
 import { LANDED } from "../../lib/execution/landed";
 import { guardrailsFor } from "../settings.server";
 import type { RunOutcome } from "./types";
-import { chunk, inChunksCounting } from "../../lib/db/chunk";
+import { chunk } from "../../lib/db/chunk";
+import { inRunChunks, retryTransient, RUN_CHUNK } from "../../lib/db/run-writes.server";
 import { overBudget, refuseInline, type InlineWork } from "../../lib/execution/inline-budget";
 import { recordClaim, releaseClaim, transitionCampaign } from "./lifecycle.server";
 import { endingLateWatch } from "./ending-late.server";
@@ -1062,14 +1063,20 @@ async function executeCampaignRun(
     onProgress: beat,
     // On the run row, where an estimate of how long the next one takes reads it from (#1055).
     onPath: async (path) => {
-      await prisma.campaignRun.update({ where: { id: run.id }, data: { writePath: path === "bulk" ? "BULK" : "SYNC" } });
+      await retryTransient("run.write-path", () =>
+        prisma.campaignRun.update({ where: { id: run.id }, data: { writePath: path === "bulk" ? "BULK" : "SYNC" } }),
+      );
     },
     // A bulk operation, once accepted, applies its prices whatever happens to this
     // process. Its rows say "sent to Shopify" from that moment, in the same step that
     // records which operation holds them (#832). Until now they stayed Pending -- "Nothing
     // has been written" -- for over an hour while Shopify applied 100,139 prices.
+    //
+    // One transaction, retried whole on a transient error (#810): the record and the rows
+    // it holds move together, and a P2024 or P2034 means none of it committed. Its clamp
+    // reasons go in `RUN_CHUNK` batches, never one list per reason.
     onSubmitted: async (operation) => {
-      await prisma.$transaction([
+      await retryTransient("run.bulk-submitted", () => prisma.$transaction([
         prisma.bulkOperationRecord.upsert({
           where: { shopifyGid: operation.id },
           create: { shopId, runId: run.id, shopifyGid: operation.id, kind: "MUTATION", ...bulkProgress(operation) },
@@ -1088,6 +1095,7 @@ async function executeCampaignRun(
             writable
               .filter((row) => row.status === "clamped" && (row.reason ?? "below-floor") === reason)
               .map((row) => row.ref.variantGid),
+            RUN_CHUNK,
           ).map((batch) =>
             prisma.variantChange.updateMany({
               where: { runId: run.id, shopId, variantGid: { in: batch } },
@@ -1095,13 +1103,15 @@ async function executeCampaignRun(
             }),
           ),
         ),
-      ]);
+      ]));
     },
     onPoll: async (operation) => {
-      await prisma.bulkOperationRecord.updateMany({
-        where: { shopifyGid: operation.id },
-        data: { ...bulkProgress(operation), lastPolledAt: new Date() },
-      });
+      await retryTransient("run.bulk-poll", () =>
+        prisma.bulkOperationRecord.updateMany({
+          where: { shopifyGid: operation.id },
+          data: { ...bulkProgress(operation), lastPolledAt: new Date() },
+        }),
+      );
     },
     // Shopify is running as many bulk mutations for this app in the shop as it allows, and
     // refused this one (#1054). The run waits for a turn still holding its occurrence (rule
@@ -1230,16 +1240,20 @@ async function executeCampaignRun(
   // from the ledger, done before the run row or the campaign says "finished".
   await settleMirror(run.id);
 
-  await prisma.campaignRun.update({
-    where: { id: run.id },
-    data: {
-      status: result.clean ? "COMPLETED" : "PARTIAL",
-      verifiedRows,
-      failedRows,
-      skippedRows: outcome.counts.skipped,
-      finishedAt: new Date(),
-    },
-  });
+  // Retried like the ledger (#810): every price has landed and been recorded by now, and a
+  // pool timeout on the one statement saying so must not turn a clean run into a Partial.
+  await retryTransient("run.finish", () =>
+    prisma.campaignRun.update({
+      where: { id: run.id },
+      data: {
+        status: result.clean ? "COMPLETED" : "PARTIAL",
+        verifiedRows,
+        failedRows,
+        skippedRows: outcome.counts.skipped,
+        finishedAt: new Date(),
+      },
+    }),
+  );
 
   // A run over a named handful of variants says nothing about the campaign as a
   // whole. Reverting one variant out of a four-thousand-variant sale must not mark
@@ -1609,38 +1623,46 @@ async function writeSparedRows(
 ): Promise<void> {
   if (rows.length === 0) return;
 
-  await prisma.variantChange.createMany({
-    data: rows.map((row) => ({
-      runId,
-      shopId,
-      variantGid: row.ref.variantGid,
-      surfaceKind: "BASE" as const,
-      priceListGid: "",
-      currency: row.ref.currency,
-      beforePrice: row.beforePrice ? BigInt(row.beforePrice.amount) : null,
-      beforeCompareAt: row.beforeCompareAt ? BigInt(row.beforeCompareAt.amount) : null,
-      intendedPrice: row.intendedPrice ? BigInt(row.intendedPrice.amount) : null,
-      intendedCompareAt: row.intendedCompareAt ? BigInt(row.intendedCompareAt.amount) : null,
-      intendedCompareAtSet: row.intendedCompareAtSet,
-      status: "SKIPPED" as const,
-      failureReason: reason,
-      appliedAt: new Date(),
-    })),
-    skipDuplicates: true,
-  });
+  // In `RUN_CHUNK` batches, each retried (#810): a merchant keeping thousands of edits is
+  // thousands of rows, and one createMany of them was one long statement.
+  await inRunChunks("ledger.base.spared", rows, (batch) =>
+    prisma.variantChange.createMany({
+      data: batch.map((row) => ({
+        runId,
+        shopId,
+        variantGid: row.ref.variantGid,
+        surfaceKind: "BASE" as const,
+        priceListGid: "",
+        currency: row.ref.currency,
+        beforePrice: row.beforePrice ? BigInt(row.beforePrice.amount) : null,
+        beforeCompareAt: row.beforeCompareAt ? BigInt(row.beforeCompareAt.amount) : null,
+        intendedPrice: row.intendedPrice ? BigInt(row.intendedPrice.amount) : null,
+        intendedCompareAt: row.intendedCompareAt ? BigInt(row.intendedCompareAt.amount) : null,
+        intendedCompareAtSet: row.intendedCompareAtSet,
+        status: "SKIPPED" as const,
+        failureReason: reason,
+        appliedAt: new Date(),
+      })),
+      skipDuplicates: true,
+    }),
+  );
 }
 
-/** Write-ahead ledger. Chunked so a large plan does not build one giant statement. */
+/**
+ * Write-ahead ledger. Chunked so a large plan does not build one giant statement.
+ *
+ * And each chunk retried on its own (#810): a pool timeout on chunk 41 of 102 used to throw
+ * the run away before a price was sent. `skipDuplicates` over the row's unique key is what
+ * makes a retried chunk, or a chunk a previous attempt already wrote, a no-op.
+ */
 async function writeLedgerRows(
   runId: string,
   shopId: string,
   rows: PlannedRow[],
 ): Promise<void> {
-  const CHUNK = 1_000;
-
-  for (let i = 0; i < rows.length; i += CHUNK) {
-    await prisma.variantChange.createMany({
-      data: rows.slice(i, i + CHUNK).map((row) => ({
+  await inRunChunks("ledger.base.create", rows, (batch) =>
+    prisma.variantChange.createMany({
+      data: batch.map((row) => ({
         runId,
         shopId,
         variantGid: row.ref.variantGid,
@@ -1655,8 +1677,8 @@ async function writeLedgerRows(
         status: "PENDING" as const,
       })),
       skipDuplicates: true,
-    });
-  }
+    }),
+  );
 }
 
 type ExecutedRows = Awaited<ReturnType<typeof executeRows>>["rows"];
@@ -1755,9 +1777,12 @@ async function recordResults(
     }
   }
 
+  // Every statement below in `RUN_CHUNK` batches, one after another, each retried on a
+  // transient error (#810). This is where #802's run died: 55,000 prices verified, then a
+  // pool timeout recording the rest, and the run Partial over prices that had landed.
   const now = new Date();
   for (const [status, gids] of byStatus) {
-    await inChunksCounting(gids, (batch) =>
+    await inRunChunks("ledger.base.result", gids, (batch) =>
       prisma.variantChange.updateMany({
         where: { runId, shopId, variantGid: { in: batch } },
         data: {
@@ -1773,7 +1798,7 @@ async function recordResults(
   // product's variants share it and it is to the second, so grouped: a few statements per
   // second of writing, not one per row.
   for (const [stamp, gids] of groupByRemoteStamp(rows)) {
-    await inChunksCounting(gids, (batch) =>
+    await inRunChunks("ledger.base.stamp", gids, (batch) =>
       prisma.variantChange.updateMany({
         where: { runId, shopId, variantGid: { in: batch } },
         data: { remoteUpdatedAt: stamp },
@@ -1788,7 +1813,7 @@ async function recordResults(
       .filter((executed) => executed.status === "verified" && executed.row.status === "clamped" && (executed.row.reason ?? "below-floor") === reason)
       .map((executed) => executed.row.ref.variantGid);
     if (gids.length === 0) continue;
-    await inChunksCounting(gids, (batch) =>
+    await inRunChunks("ledger.base.clamp", gids, (batch) =>
       prisma.variantChange.updateMany({
         where: { runId, shopId, variantGid: { in: batch } },
         data: { failureReason: text },
@@ -1800,7 +1825,9 @@ async function recordResults(
   // for the rows that actually failed, which is the rare case.
   for (const executed of rows) {
     if (!executed.failureReason) continue;
-    await prisma.variantChange.updateMany({
+    // Retried only on the two codes that mean it did not commit, so the increment below
+    // counts one failure once.
+    await retryTransient("ledger.base.reason", () => prisma.variantChange.updateMany({
       where: { runId, shopId, variantGid: executed.row.ref.variantGid },
       data: {
         // Shopify's own words, then ours. Support needs the former; the merchant
@@ -1823,7 +1850,7 @@ async function recordResults(
         // by the next resume rather than retried forever.
         attempt: { increment: 1 },
       },
-    });
+    }));
   }
 
   return messages;
