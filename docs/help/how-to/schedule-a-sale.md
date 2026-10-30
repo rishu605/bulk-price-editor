@@ -28,8 +28,8 @@ confirmation is kept with the campaign: who gave it, when, and what the sale rea
 When the start comes, the sale runs if it still reaches no further than that: no more than a
 tenth more prices, and no price moved further than the largest change you confirmed. A sale
 whose scope has grown past that, because its segment was edited or products were added, is
-not started. The campaign reads **Scheduled — couldn't start**, says what grew, and you get one
-email. Move its dates and type *apply* when asked, or apply it by hand.
+not started. The campaign reads **Scheduled — couldn't start** and says what grew. Move its
+dates and type *apply* when asked, or apply it by hand.
 
 ## The revert buffer
 

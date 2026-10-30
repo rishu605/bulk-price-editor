@@ -80,4 +80,10 @@ describe("each run's email (#1123)", () => {
     expect(html).not.toContain("No email");
     expect(html).not.toContain("Emailed");
   });
+
+  it("has no Email column at all while the deployment cannot send email (#1118)", () => {
+    const html = rendered("/app/campaigns/c1?tab=runs", [run(), run({ id: "r2" })], null);
+    expect(html).not.toContain(">Email<");
+    expect(html).toContain(">Verified<");
+  });
 });

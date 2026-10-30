@@ -97,10 +97,13 @@ describe("notify keeps what happened (#1121)", () => {
     ]);
   });
 
-  it("records each reason nothing was sent", async () => {
+  it("records nothing while this deployment cannot send email: the app does not offer it then", async () => {
     vi.stubEnv("RESEND_API_KEY", "");
-    await notify("s1", reverted);
-    vi.stubEnv("RESEND_API_KEY", "re_test");
+    expect(await notify("s1", reverted)).toMatchObject({ sent: false, reason: "unconfigured" });
+    expect(recorded()).toEqual([]);
+  });
+
+  it("records each reason nothing was sent", async () => {
 
     db.settings = { notifications: { ...DEFAULT_PREFERENCES, email: null } };
     await notify("s1", reverted);
@@ -116,7 +119,6 @@ describe("notify keeps what happened (#1121)", () => {
     await notify("s1", reverted);
 
     expect(recorded().map(({ outcome, status }) => ({ outcome, status }))).toEqual([
-      { outcome: "unconfigured", status: null },
       { outcome: "no-recipient", status: null },
       { outcome: "muted", status: null },
       { outcome: "failed", status: 422 },

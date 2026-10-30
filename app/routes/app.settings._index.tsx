@@ -156,23 +156,25 @@ export const action = withGuard("/app/settings", async ({ request }: ActionFunct
     actor,
   );
 
-  await writePreferences(
-    shop.id,
-    {
-      // Missing is not blank, as for the approval threshold (#788): a post without the field
-      // is not the merchant clearing it. Anything else was refused above if it was not one
-      // address.
-      email: form.has("email")
-        ? (notificationEmailFrom(form.get("email")) ?? null)
-        : (await readPreferences(shop.id)).email,
-      onCompletion: form.get("onCompletion") === "on",
-      onPartialOrFailure: form.get("onPartialOrFailure") === "on",
-      onDrift: form.get("onDrift") === "on",
-      onRevert: form.get("onRevert") === "on",
-      weeklyDigest: form.get("weeklyDigest") === "on",
-    },
-    actor,
-  );
+  // Only from a form that showed the Notifications card, which carries the address field.
+  // The card is not shown while this deployment cannot send email, and its checkboxes read as
+  // "off" when they are not posted: saving a guardrail then would switch every notification
+  // off, and they would stay off once sending is set up.
+  if (form.has("email")) {
+    await writePreferences(
+      shop.id,
+      {
+        // Anything other than one address was refused above.
+        email: notificationEmailFrom(form.get("email")) ?? null,
+        onCompletion: form.get("onCompletion") === "on",
+        onPartialOrFailure: form.get("onPartialOrFailure") === "on",
+        onDrift: form.get("onDrift") === "on",
+        onRevert: form.get("onRevert") === "on",
+        weeklyDigest: form.get("weeklyDigest") === "on",
+      },
+      actor,
+    );
+  }
 
   return {
     ok: true,
@@ -483,25 +485,18 @@ export default function Settings() {
             </s-stack>
         </Card>
 
+        {/* Offered only where it can be kept (#1118): while this deployment cannot send
+            email the card is not shown, rather than a card whose every choice leads nowhere.
+            App Review saved an address here, reverted a campaign, and no email came (2.1.4).
+            Preferences already saved are kept, and the card comes back once sending is set
+            up. */}
+        {mailConfigured ? (
         <Card heading="Notifications">      <s-paragraph>
             <s-text>
               A campaign over a large catalogue runs for a while. These let you close the
               tab and still find out what happened.
             </s-text>
           </s-paragraph>
-
-          {/* Anchor's problem, said as Anchor's (#1119). "Email is not configured on this
-              deployment" sat above the field App Review had just filled in, and read as the
-              app telling them their own setting had not taken. */}
-          {!mailConfigured ? (
-            <s-banner tone="warning">
-              <s-paragraph>
-                Anchor can&rsquo;t send email right now. This is on our side, not a setting
-                you&rsquo;ve missed: your address and choices below are saved, and emails
-                start as soon as sending is back.
-              </s-paragraph>
-            </s-banner>
-          ) : null}
 
             <s-stack gap={SPACE.section}>
               <Field width="medium">
@@ -554,6 +549,7 @@ export default function Settings() {
             </s-text>
           </s-paragraph>
         </Card>
+        ) : null}
 
       </PageSections>
       </fetcher.Form>

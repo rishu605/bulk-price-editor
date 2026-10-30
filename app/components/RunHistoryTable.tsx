@@ -61,6 +61,9 @@ function RunEmail({ email }: { email: RunSummary["email"] }) {
 /** Every apply and revert for a campaign, newest first. */
 export function RunHistoryTable({ runs, selectedRunId, timeZone }: Props) {
   const [params] = useSearchParams();
+  // A column only where email is offered: absent on every run while this deployment cannot
+  // send it, rather than a column of dashes about a feature the app does not have then.
+  const emailing = runs.some((run) => run.email !== undefined);
   return (
     <s-table>
       <s-table-header-row>
@@ -70,7 +73,7 @@ export function RunHistoryTable({ runs, selectedRunId, timeZone }: Props) {
         <s-table-header listSlot="labeled" format="numeric">Verified</s-table-header>
         <s-table-header listSlot="labeled" format="numeric">Failed</s-table-header>
         <s-table-header listSlot="kicker">Finished</s-table-header>
-        <s-table-header listSlot="labeled">Email</s-table-header>
+        {emailing ? <s-table-header listSlot="labeled">Email</s-table-header> : null}
         <s-table-header listSlot="inline">Ledger</s-table-header>
       </s-table-header-row>
       <s-table-body>
@@ -86,9 +89,11 @@ export function RunHistoryTable({ runs, selectedRunId, timeZone }: Props) {
             <s-table-cell>
               {run.finishedAt ? formatWhen(run.finishedAt, timeZone) : <Blank />}
             </s-table-cell>
-            <s-table-cell>
-              <RunEmail email={run.email} />
-            </s-table-cell>
+            {emailing ? (
+              <s-table-cell>
+                <RunEmail email={run.email} />
+              </s-table-cell>
+            ) : null}
             <s-table-cell>
               {run.id === selectedRunId ? (
                 <s-text>Showing</s-text>

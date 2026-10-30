@@ -117,19 +117,25 @@ export default function Support() {
             </s-button>
           )}
         </s-banner>
-      ) : !canSend ? (
-        // Before they write, not after they press Send: finding out the form cannot send
-        // once the message is written is the dead end this replaces (#758).
-        <s-banner tone="warning">
-          <s-paragraph>
-            Sending from inside Anchor isn&rsquo;t available right now. Email us at{" "}
-            {SUPPORT_ADDRESS} instead, and include what is listed under &ldquo;What we
-            attach&rdquo; so we do not have to ask.
+      ) : null}
+
+      {/* Without in-app sending, the address is the way to reach us, offered as that rather
+          than as a warning over a form that cannot send: "isn't available right now" read
+          as something broken, and App Review fails what it finds broken (#1118). Before they
+          write, not after they press Send, which is the dead end #758 replaced. */}
+      {!canSend ? (
+        <Card heading="Email us">    <s-paragraph>
+            <s-text>
+              Write to {SUPPORT_ADDRESS}, and include what is listed under &ldquo;What we
+              attach&rdquo; so we do not have to ask.
+            </s-text>
           </s-paragraph>
-          <s-button href={mailto} target="_blank" icon="email">
-            Email {SUPPORT_ADDRESS}
-          </s-button>
-        </s-banner>
+          <ActionRow>
+            <s-button href={mailto} target="_blank" icon="email" variant="primary">
+              Email {SUPPORT_ADDRESS}
+            </s-button>
+          </ActionRow>
+        </Card>
       ) : null}
 
       {/* "Your message", not "What happened".
@@ -139,6 +145,7 @@ export default function Support() {
           email address and a subject line in between. The card holds the whole message;
           the field holds the account of the problem. Naming the container after one of
           its contents is how a form stops being legible as a form. */}
+      {canSend ? (
       <Card heading="Your message">    <fetcher.Form method="post">
           {/* Each field at the width of what it holds. An email address and a subject
               line rendered the full width of the card, which is a message box's worth of
@@ -185,6 +192,7 @@ export default function Support() {
           </s-stack>
         </fetcher.Form>
       </Card>
+      ) : null}
 
       <Card heading="What we attach">    {/* Listed, not summarised. A merchant cannot consent to "diagnostic
             information", and the fastest way to make somebody distrust a Send button is

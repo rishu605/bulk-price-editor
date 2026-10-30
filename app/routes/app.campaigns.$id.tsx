@@ -41,7 +41,7 @@ import {
 } from "../lib/lifecycle/transitions";
 import { transitionHistory } from "../services/campaigns/lifecycle.server";
 import { housekeepingAction } from "../services/campaigns/housekeeping.server";
-import { readPreferences } from "../services/notifications.server";
+import { mailConfigured, readPreferences } from "../services/notifications.server";
 import { approvalFor, approvalSummary, decideApproval, requestApproval, SelfApprovalError } from "../services/approvals.server";
 import { PageShell } from "../components/PageShell";
 import { CampaignTabs, currentTab, tabsFor } from "../components/campaign/CampaignTabs";
@@ -144,8 +144,9 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     note: record.note,
     archived: record.archivedAt !== null,
     // Where the run report goes, so the confirmation can say so at the moment a merchant
-    // decides whether they have to sit and watch. See #475.
-    notifyEmail: (await readPreferences(shop.id)).email,
+    // decides whether they have to sit and watch. See #475. Undefined while this deployment
+    // cannot send email: the app does not offer email then, and says nothing about it.
+    notifyEmail: mailConfigured() ? (await readPreferences(shop.id)).email : undefined,
     autoEnroll: record.autoEnroll,
     enrollPendingAt: record.enrollPendingAt !== null,
     state,
