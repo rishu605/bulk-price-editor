@@ -84,10 +84,9 @@ describe("chaos: the campaign calendar", () => {
             compareAtViolationPolicy: "clear",
             guardrails: {} as never,
             guardrailViolationPolicy: "clamp",
-            schedule: {
-              ...(first.schedule as object),
-              ast: { groups: [{ conditions: [{ field: "tag", value: "HALF" }] }] },
-            } as never,
+            // What it prices in its filter column, the only place it is read (#1141).
+            filter: { groups: [{ conditions: [{ field: "tag", value: "HALF" }] }] },
+            schedule: first.schedule as never,
           },
         });
 
@@ -108,10 +107,8 @@ describe("chaos: the campaign calendar", () => {
             compareAtViolationPolicy: "clear",
             guardrails: {} as never,
             guardrailViolationPolicy: "clamp",
-            schedule: {
-              ...(first.schedule as object),
-              ast: { groups: [{ conditions: [{ field: "tag", value: "NOTHING-HAS-THIS" }] }] },
-            } as never,
+            filter: { groups: [{ conditions: [{ field: "tag", value: "NOTHING-HAS-THIS" }] }] },
+            schedule: first.schedule as never,
           },
         });
 
@@ -132,6 +129,7 @@ describe("chaos: the campaign calendar", () => {
             compareAtViolationPolicy: "clear",
             guardrails: {} as never,
             guardrailViolationPolicy: "clamp",
+            filter: first.filter as never, // the first's scope, in its column (#1141)
             schedule: first.schedule as never,
           },
         });
@@ -200,6 +198,7 @@ describe("chaos: the campaign calendar", () => {
             compareAtViolationPolicy: "clear",
             guardrails: {} as never,
             guardrailViolationPolicy: "clamp",
+            filter: first.filter as never, // the first's scope, in its column (#1141)
             schedule: first.schedule as never,
           },
         });

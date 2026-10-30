@@ -1,115 +1,154 @@
 /**
- * What a campaign prices moves out of its schedule JSON into columns, and no campaign prices
- * differently for it (#884).
+ * What a campaign prices is read from its columns alone, and the schedule JSON holds no copy
+ * of it (#1141, the contract of #884), and no campaign prices differently for it.
  *
- * The expand release. Campaigns already in the database are filled by the migration's
- * backfill, from every shape the blob has held. Campaigns the release before writes -- in the
- * migration's wake, or during a rollback -- have the definition in the blob alone and their
- * columns at null and false, and every reader takes those from the blob. Each is checked here
- * against a real Postgres: the readers' answers before the backfill, after it, and from the
- * columns alone, which is all the contract release will read.
+ * #884's expand release read each column first and the blob behind it. A rollback to the
+ * release before it inserts campaigns with the definition in the blob alone and the columns
+ * at null and false; this release reads no blob, so its migration fills those columns once
+ * more and only then strips the copy. Here, against a real Postgres: rows of every shape the
+ * blob has held, inserted as that rollback inserts them after #884's migration ran, and a row
+ * as #884's release wrote it, go through the contract's migration and read correctly from
+ * their columns, with nothing of a definition left in their blobs.
  *
- * Then the writers that copy or clear a schedule -- Duplicate, Make a real copy, Unschedule --
- * on a campaign the release before made: each comes out with its columns filled, and its copy
- * prices what the source prices.
+ * Then the writers that copy or clear a schedule -- Duplicate, Make a real copy, Unschedule,
+ * new dates -- write the columns and nothing of a definition into the blob, and an unschedule
+ * or new dates keep only the campaign's own record beside the window.
  */
 
 import { describe, expect, it } from "vitest";
 
 import prisma from "../../app/db.server";
-import { DEFINITION_KEYS } from "../../app/lib/campaigns/schedule-blob";
+import { QUEUED_REFUSED_KEY } from "../../app/lib/campaigns/queued-refusal";
+import { START_CONFIRMED_KEY } from "../../app/lib/campaigns/start-confirmation";
 import { rawSource } from "../../app/lib/testing/source";
 import { duplicateCampaign } from "../../app/services/campaigns/housekeeping.server";
 import {
-  astOf,
   campaignDefinition,
+  createCampaign,
+  definitionData,
   IS_PRACTICE,
   isPractice,
   productStatusesFor,
   scopeOf,
-  segmentIdOf,
-  toResolvable,
+  type Definition,
 } from "../../app/services/campaigns/model.server";
 import { previewCampaign } from "../../app/services/campaigns/preview.server";
 import { runCampaign } from "../../app/services/campaigns/run.server";
 import { reschedule, unschedule } from "../../app/services/campaigns/schedule-control.server";
 import { referencingCampaigns } from "../../app/services/segments-crud.server";
-import { astToWhere } from "../../app/services/segments.server";
+import { astToWhere, type FilterAst } from "../../app/services/segments.server";
 import { chaosAdminClient } from "../harness/http-client";
 import { withChaos } from "../harness/scenario";
 
 const CATALOG = { catalog: { products: 3, variantsPerProduct: 1 }, percent: -20 } as const;
-const MIGRATION = "prisma/migrations/20261030090000_campaign_definition_columns/migration.sql";
+const EXPAND = "prisma/migrations/20261030090000_campaign_definition_columns/migration.sql";
+const CONTRACT = "prisma/migrations/20261031120000_campaign_definition_contract/migration.sql";
 
-/** The migration's backfill, confined to one shop: the chaos database is shared. */
-async function backfill(shopId: string): Promise<void> {
-  const sql = rawSource(MIGRATION).replace(/--.*$/gm, "");
-  const update = sql
+/** The keys #884's release copied into the blob, which the contract strips. */
+const COPIED_KEYS = ["ast", "productStatuses", "segmentId", "rounding", "practice"];
+
+/** A migration's statements that change rows, comments out and whitespace collapsed. */
+function updatesOf(path: string): string[] {
+  return rawSource(path)
+    .replace(/--.*$/gm, "")
     .split(";")
-    .map((statement) => statement.trim())
-    .find((statement) => statement.startsWith("UPDATE"));
-  expect(update, "the migration has no backfill").toBeDefined();
-  await prisma.$executeRawUnsafe(`${update} WHERE "shopId" = $1`, shopId);
+    .map((statement) => statement.replace(/\s+/g, " ").trim())
+    .filter((statement) => statement.startsWith("UPDATE"));
 }
 
+/** The contract's migration, confined to one shop: the chaos database is shared. */
+async function contract(shopId: string): Promise<void> {
+  const updates = updatesOf(CONTRACT);
+  expect(updates, "the contract no longer backfills, then strips").toHaveLength(2);
+  for (const update of updates) {
+    await prisma.$executeRawUnsafe(`${update} ${/\bWHERE\b/.test(update) ? "AND" : "WHERE"} "shopId" = $1`, shopId);
+  }
+}
+
+/** A blob without the copy, as the strip leaves it. */
+function stripped(blob: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(blob).filter(([key]) => !COPIED_KEYS.includes(key)));
+}
+
+const CHAOS_TAG: FilterAst = { groups: [{ conditions: [{ field: "tag", value: "chaos" }] }] };
+
 /**
- * Every shape a campaign's blob has held, as the release before inserts it: the definition
- * there, and the columns left at their defaults.
+ * Every shape a campaign's blob has held, as the release before #884 inserts it: the definition
+ * there, and the columns at their defaults. Beside each, the definition its columns must hold
+ * once the contract's migration has run -- what #884's readers read from that blob -- and how
+ * many of the fixture's three variants that prices.
  */
-const OLD_BLOBS: Record<string, Record<string, unknown>> = {
+const OLD_BLOBS: Record<string, { blob: Record<string, unknown>; definition: Definition; covers: number }> = {
   "as #751 to #884 wrote it": {
-    kind: "manual",
-    ast: { groups: [{ conditions: [{ field: "tag", value: "chaos" }] }] },
-    productStatuses: ["ACTIVE", "DRAFT"],
-    segmentId: "seg-deleted-long-ago",
-    rounding: { default: "charm99", byCurrency: { JPY: "nearest10" } },
-    practice: true,
+    blob: {
+      kind: "manual",
+      ast: CHAOS_TAG,
+      productStatuses: ["ACTIVE", "DRAFT"],
+      segmentId: "seg-deleted-long-ago",
+      rounding: { default: "charm99", byCurrency: { JPY: "nearest10" } },
+      practice: true,
+    },
+    definition: {
+      filter: { ...CHAOS_TAG, productStatuses: ["ACTIVE", "DRAFT"] },
+      segmentId: "seg-deleted-long-ago",
+      rounding: { default: "charm99", byCurrency: { JPY: "nearest10" } },
+      practice: true,
+    },
+    // Its segment is gone, so it prices nothing (#776).
+    covers: 0,
   },
   "from before #751, with no statuses": {
-    kind: "manual",
-    ast: { groups: [{ conditions: [{ field: "tag", value: "chaos" }] }] },
-    rounding: "charm99",
+    blob: { kind: "manual", ast: CHAOS_TAG, rounding: "charm99" },
+    definition: { filter: CHAOS_TAG, segmentId: null, rounding: "charm99", practice: false },
+    covers: 3,
   },
-  "from before rounding": { kind: "manual", ast: { groups: [] } },
-  "with nothing but its kind": { kind: "manual" },
-  "with JSON nulls": { kind: "manual", ast: null, productStatuses: null, segmentId: null, rounding: null, practice: false },
+  "from before rounding": {
+    blob: { kind: "manual", ast: { groups: [] } },
+    definition: { filter: { groups: [] }, segmentId: null, rounding: null, practice: false },
+    covers: 3,
+  },
+  "with nothing but its kind": {
+    blob: { kind: "manual" },
+    definition: { filter: { groups: [] }, segmentId: null, rounding: null, practice: false },
+    covers: 3,
+  },
+  "with JSON nulls": {
+    blob: { kind: "manual", ast: null, productStatuses: null, segmentId: null, rounding: null, practice: false },
+    definition: { filter: { groups: [], productStatuses: null as never }, segmentId: null, rounding: null, practice: false },
+    covers: 3,
+  },
   "with statuses inside its ast, which were never read": {
-    kind: "manual",
-    ast: { groups: [], productStatuses: ["ARCHIVED"] },
+    blob: { kind: "manual", ast: { groups: [], productStatuses: ["ARCHIVED"] } },
+    definition: { filter: { groups: [] }, segmentId: null, rounding: null, practice: false },
+    covers: 3,
   },
-  "practice as a string, which was never practice": { kind: "manual", ast: { groups: [] }, practice: "true" },
+  "practice as a string, which was never practice": {
+    blob: { kind: "manual", ast: { groups: [] }, practice: "true" },
+    definition: { filter: { groups: [] }, segmentId: null, rounding: null, practice: false },
+    covers: 3,
+  },
   "scheduled, with its window and its own record": {
-    kind: "window",
-    startAt: "2027-01-01T09:00:00.000Z",
-    endAt: "2027-01-02T09:00:00.000Z",
-    zone: "Europe/London",
-    startConfirmed: { by: "staff:1", at: "2026-10-30T09:00:00.000Z" },
-    ast: { groups: [{ conditions: [{ field: "tag", value: "chaos" }] }] },
-    productStatuses: ["ACTIVE"],
-    rounding: { default: "none", byCurrency: {} },
+    blob: {
+      kind: "window",
+      startAt: "2027-01-01T09:00:00.000Z",
+      endAt: "2027-01-02T09:00:00.000Z",
+      zone: "Europe/London",
+      [START_CONFIRMED_KEY]: { by: "staff:1", at: "2026-10-30T09:00:00.000Z" },
+      ast: CHAOS_TAG,
+      productStatuses: ["ACTIVE"],
+      rounding: { default: "none", byCurrency: {} },
+    },
+    definition: {
+      filter: { ...CHAOS_TAG, productStatuses: ["ACTIVE"] },
+      segmentId: null,
+      rounding: { default: "none", byCurrency: {} },
+      practice: false,
+    },
+    covers: 3,
   },
 };
 
-/** Every reader's answer for a campaign, and how many variants its scope covers. */
-async function readings(shopId: string, campaign: Parameters<typeof campaignDefinition>[0]) {
-  return {
-    ast: astOf(campaign),
-    productStatuses: productStatusesFor(campaign),
-    segmentId: segmentIdOf(campaign),
-    practice: isPractice(campaign),
-    rounding: toResolvable({ ...(campaign as object), id: "c", createdAt: new Date(0) } as never).roundingPolicy,
-    covers: await prisma.variantIndex.count({ where: astToWhere(shopId, await scopeOf(shopId, campaign)) }),
-  };
-}
-
-/** The columns alone, with the blob's copy of the definition taken out: what the contract reads. */
-function columnsOnly<T extends { schedule: unknown }>(campaign: T): T {
-  const schedule = { ...(campaign.schedule as Record<string, unknown>) };
-  for (const key of DEFINITION_KEYS) delete schedule[key];
-  return { ...campaign, schedule };
-}
-
-/** A campaign as the release before inserts one: the fixture's rule, its definition in `schedule`. */
+/** A campaign as the release before #884 inserts one: the fixture's rule, its definition in `schedule`. */
 async function insertedByTheReleaseBefore(shopId: string, fixtureId: string, name: string, schedule: object) {
   const fixture = await prisma.campaign.findUniqueOrThrow({ where: { id: fixtureId } });
   return prisma.campaign.create({
@@ -126,154 +165,188 @@ async function insertedByTheReleaseBefore(shopId: string, fixtureId: string, nam
   });
 }
 
-describe("chaos: a campaign's definition in columns of its own (#884)", () => {
-  it("fills them from every shape the blob has held, and every reader answers as before", async () => {
-    await withChaos("definition-columns-backfill", CATALOG, async (chaos) => {
-      const { shopId, campaignId } = chaos.fixture;
+/** The same, as #884's release inserts it: the definition in its columns and copied into the blob. */
+async function insertedByTheExpandRelease(shopId: string, fixtureId: string, name: string, shape: (typeof OLD_BLOBS)[string]) {
+  const row = await insertedByTheReleaseBefore(shopId, fixtureId, name, shape.blob);
+  return prisma.campaign.update({ where: { id: row.id }, data: definitionData(shape.definition) });
+}
 
-      const ids = new Map<string, string>();
-      for (const [shape, blob] of Object.entries(OLD_BLOBS)) {
-        ids.set(shape, (await insertedByTheReleaseBefore(shopId, campaignId, shape, blob)).id);
-      }
+describe("chaos: a campaign's definition in its columns alone (#1141)", () => {
+  it("re-runs #884's backfill exactly, before it strips the copy", () => {
+    const [backfill, strip] = updatesOf(CONTRACT);
+    expect(updatesOf(EXPAND), "#884's migration changed").toHaveLength(1);
+    expect(backfill, "the contract fills a row differently from #884").toBe(updatesOf(EXPAND)[0]);
+    expect(strip).toContain(`"schedule" - 'ast' - 'productStatuses' - 'segmentId' - 'rounding' - 'practice'`);
+  });
+
+  it("fills the columns of a row a rollback inserted after #884's migration, then strips every copy", async () => {
+    await withChaos("definition-contract-migration", CATALOG, async (chaos) => {
+      const { shopId, campaignId } = chaos.fixture;
       const load = (id: string) => prisma.campaign.findUniqueOrThrow({ where: { id } });
 
-      // Before: columns at their defaults, every answer from the blob.
-      const before = new Map<string, Awaited<ReturnType<typeof readings>>>();
+      // A row as #884's release wrote it, columns and copy agreeing.
+      const expand = await insertedByTheExpandRelease(shopId, campaignId, "Expand-era sale", OLD_BLOBS["as #751 to #884 wrote it"]!);
+      expect((await load(expand.id)).schedule, "the expand-era row has no copy to strip").toHaveProperty("ast");
+
+      // Then a rollback to the release before #884, which inserts rows of every shape it has held.
+      const ids = new Map<string, string>();
+      for (const [shape, { blob }] of Object.entries(OLD_BLOBS)) {
+        ids.set(shape, (await insertedByTheReleaseBefore(shopId, campaignId, shape, blob)).id);
+      }
       for (const [shape, id] of ids) {
-        const row = await load(id);
-        expect(row, `${shape}: the release before left a column off its default`).toMatchObject({
+        expect(await load(id), `${shape}: the release before left a column off its default`).toMatchObject({
           filter: null,
           segmentId: null,
           rounding: null,
           practice: false,
         });
-        before.set(shape, await readings(shopId, row));
       }
-      // The answers the blob always gave, so "the same as before" is not the same mistake twice.
-      expect(before.get("from before #751, with no statuses")!.productStatuses).toEqual(["ACTIVE"]);
-      expect(before.get("from before #751, with no statuses")!.covers).toBe(3);
-      expect(before.get("with nothing but its kind")!.ast).toEqual({ groups: [], productStatuses: ["ACTIVE"] });
-      expect(before.get("as #751 to #884 wrote it")!.covers, "a deleted segment's campaign priced something").toBe(0);
-      expect(before.get("as #751 to #884 wrote it")!.practice).toBe(true);
-      expect(before.get("practice as a string, which was never practice")!.practice).toBe(false);
-      expect(before.get("with statuses inside its ast, which were never read")!.productStatuses).toEqual(["ACTIVE"]);
 
-      await backfill(shopId);
+      await contract(shopId);
 
       for (const [shape, id] of ids) {
         const row = await load(id);
-        expect(row.filter, `${shape}: the backfill left the filter empty`).not.toBeNull();
-        expect(row.schedule, `${shape}: the backfill touched the blob`).toEqual(OLD_BLOBS[shape]);
-        expect(await readings(shopId, row), `${shape}: reads differently once backfilled`).toEqual(before.get(shape));
-        expect(await readings(shopId, columnsOnly(row)), `${shape}: the columns alone are not the campaign`).toEqual(
-          before.get(shape),
-        );
+        const { blob, definition, covers } = OLD_BLOBS[shape]!;
+        expect(campaignDefinition(row), `${shape}: reads differently once contracted`).toEqual(definition);
+        expect(row.schedule, `${shape}: the copy is still in the blob`).toEqual(stripped(blob));
+        const scope = await scopeOf(shopId, row);
+        expect(await prisma.variantIndex.count({ where: astToWhere(shopId, scope) }), `${shape}: prices another scope`).toBe(covers);
       }
-      expect(await load(ids.get("as #751 to #884 wrote it")!)).toMatchObject({
-        filter: { groups: [{ conditions: [{ field: "tag", value: "chaos" }] }], productStatuses: ["ACTIVE", "DRAFT"] },
-        segmentId: "seg-deleted-long-ago",
-        rounding: { default: "charm99", byCurrency: { JPY: "nearest10" } },
-        practice: true,
-      });
-      expect(await load(ids.get("with JSON nulls")!)).toMatchObject({ segmentId: null, rounding: null, practice: false });
+      // The answers the blob always gave, so "as the blob said" is not the same mistake twice.
+      expect(productStatusesFor(await load(ids.get("from before #751, with no statuses")!))).toEqual(["ACTIVE"]);
+      expect(productStatusesFor(await load(ids.get("with statuses inside its ast, which were never read")!))).toEqual(["ACTIVE"]);
+      expect(productStatusesFor(await load(ids.get("with JSON nulls")!))).toEqual(["ACTIVE"]);
+      expect(await prisma.campaign.count({ where: { shopId, ...IS_PRACTICE } }), "Home's practice count").toBe(2);
 
-      // Run again -- as the contract will, for rows a rollback inserted -- it changes nothing.
-      const definitions = () =>
+      // The expand-era row keeps the columns it wrote, and loses only its copy.
+      const contracted = await load(expand.id);
+      expect(campaignDefinition(contracted)).toEqual(campaignDefinition(expand));
+      expect(contracted.schedule).toEqual({ kind: "manual" });
+      // And the fixture, which this release made, had nothing to strip.
+      expect((await load(campaignId)).schedule).toEqual({ kind: "manual" });
+
+      // Run again, it changes nothing.
+      const rows = () =>
         prisma.campaign.findMany({
           where: { shopId },
           orderBy: { id: "asc" },
           select: { id: true, filter: true, segmentId: true, rounding: true, practice: true, schedule: true },
         });
-      const once = await definitions();
-      await backfill(shopId);
-      expect(await definitions()).toEqual(once);
-
-      // A campaign this release made reads the same from its blob, as the release before reads
-      // it in a rollback, as from its columns.
-      const made = await load(campaignId);
-      expect(await readings(shopId, { ...made, filter: null, segmentId: null, rounding: null, practice: false })).toEqual(
-        await readings(shopId, made),
-      );
-      expect(await readings(shopId, columnsOnly(made))).toEqual(await readings(shopId, made));
+      const once = await rows();
+      await contract(shopId);
+      expect(await rows()).toEqual(once);
     });
   });
 
-  it("copies, really copies and unschedules a campaign the release before made, filling its columns", async () => {
-    await withChaos("definition-columns-writers", CATALOG, async (chaos) => {
+  it("copies, really copies, unschedules and redates a campaign with nothing of its definition in the blob", async () => {
+    await withChaos("definition-contract-writers", CATALOG, async (chaos) => {
       const { shopId, campaignId, variantGids } = chaos.fixture;
       const client = chaosAdminClient(chaos.server.endpoint());
+      const load = (id: string) => prisma.campaign.findUniqueOrThrow({ where: { id } });
+      const fixture = await load(campaignId);
 
-      // A practice campaign the release before made, on the fixture's products, charm-rounded.
-      const practice = await insertedByTheReleaseBefore(shopId, campaignId, "Old practice", {
-        kind: "manual",
-        ast: { groups: [{ conditions: [{ field: "tag", value: "chaos" }] }] },
-        productStatuses: ["ACTIVE"],
-        rounding: "charm99",
+      // A practice campaign on the fixture's products, charm-rounded, made by this release.
+      const practice = await createCampaign(shopId, {
+        name: "Practice",
+        ast: CHAOS_TAG,
+        rule: { kind: "percent-change", percent: -20 },
+        compareAtPolicy: { kind: "leave" },
+        rounding: "charm99" as never,
         practice: true,
       });
-      expect(await prisma.campaign.count({ where: { shopId, ...IS_PRACTICE } }), "Home missed a practice campaign").toBe(1);
+      const made = await load(practice.id);
+      expect(made).toMatchObject({ practice: true, rounding: "charm99", filter: { ...CHAOS_TAG, productStatuses: ["ACTIVE"] } });
+      expect(made.schedule, "the blob holds a definition").toEqual({ kind: "manual" });
       const source = await previewCampaign(shopId, practice.id, { limit: 100 });
       expect(source.rows.map((row) => row.variantGid).sort()).toEqual([...variantGids].sort());
 
-      // Duplicate: practice still, in its column now, and refused by the run.
-      const copy = await duplicateCampaign(shopId, practice.id, "staff@example.com");
-      const copied = await prisma.campaign.findUniqueOrThrow({ where: { id: copy.id } });
-      expect(copied).toMatchObject({ practice: true, rounding: "charm99", filter: { productStatuses: ["ACTIVE"] } });
-      expect(campaignDefinition(columnsOnly(copied))).toEqual(campaignDefinition(practice));
+      // Duplicate: practice still, in its column, and refused by the run.
+      const copy = await load((await duplicateCampaign(shopId, practice.id, "staff@example.com")).id);
+      expect(campaignDefinition(copy)).toEqual(campaignDefinition(made));
+      expect(copy.schedule).toEqual({ kind: "manual" });
       await expect(runCampaign(shopId, copy.id, client, { actor: "chaos" })).rejects.toThrow(/practice campaign/);
       expect(await prisma.campaign.count({ where: { shopId, ...IS_PRACTICE } })).toBe(2);
 
-      // Make a real copy: not practice in either place, and it prices what its source previewed.
-      const real = await duplicateCampaign(shopId, practice.id, "staff@example.com", { real: true });
-      const made = await prisma.campaign.findUniqueOrThrow({ where: { id: real.id } });
-      expect(made.practice).toBe(false);
-      expect(made.schedule).not.toHaveProperty("practice");
-      expect(campaignDefinition(columnsOnly(made))).toEqual({ ...campaignDefinition(practice), practice: false });
+      // Make a real copy: not practice, and it prices what its source previewed.
+      const real = await load((await duplicateCampaign(shopId, practice.id, "staff@example.com", { real: true })).id);
+      expect(campaignDefinition(real)).toEqual({ ...campaignDefinition(made), practice: false });
+      expect(real.schedule).toEqual({ kind: "manual" });
       const preview = await previewCampaign(shopId, real.id, { limit: 100 });
       const after = (rows: typeof preview.rows) => new Map(rows.map((row) => [row.variantGid, row.after]));
       expect(after(preview.rows)).toEqual(after(source.rows));
       const applied = await runCampaign(shopId, real.id, client, { actor: "chaos", verifySampleRate: 1 });
       expect(applied.clean).toBe(true);
       expect(applied.verified).toBe(variantGids.length);
-      for (const gid of variantGids) {
-        expect(chaos.fake.priceOf(gid), "the real copy lost its rounding").toMatch(/\.99$/);
-      }
+      for (const gid of variantGids) expect(chaos.fake.priceOf(gid), "the real copy lost its rounding").toMatch(/\.99$/);
 
-      // Unschedule: the dates go, the definition stays -- in its columns now, and in the blob.
-      const scheduled = await insertedByTheReleaseBefore(shopId, campaignId, "Old scheduled", OLD_BLOBS["scheduled, with its window and its own record"]!);
-      await unschedule(shopId, scheduled.id, "staff@example.com");
-      const drafted = await prisma.campaign.findUniqueOrThrow({ where: { id: scheduled.id } });
-      expect(drafted.status).toBe("DRAFT");
-      expect(drafted.schedule).toMatchObject({ kind: "manual", ast: OLD_BLOBS["scheduled, with its window and its own record"]!.ast });
-      expect(drafted.schedule).not.toHaveProperty("startAt");
-      expect(drafted).toMatchObject({ filter: { productStatuses: ["ACTIVE"] }, rounding: { default: "none", byCurrency: {} } });
-      expect(campaignDefinition(columnsOnly(drafted))).toEqual(campaignDefinition(scheduled));
+      // A scheduled campaign with its own record beside the window, and what became of a start.
+      const own = {
+        [START_CONFIRMED_KEY]: { by: "staff:1", at: "2026-10-30T09:00:00.000Z", planned: 3, largeChanges: 0, largestBasisPoints: 0, atMinimum: 0 },
+        [QUEUED_REFUSED_KEY]: { verb: "apply", reason: "x", at: "2026-10-30T09:00:00.000Z" },
+      };
+      const window = {
+        kind: "window",
+        startAt: "2027-01-01T09:00:00.000Z",
+        endAt: "2027-01-02T09:00:00.000Z",
+        revertBufferMinutes: 15,
+        zone: "Europe/London",
+        startRefused: { reason: "No.", at: "2026-12-31T09:00:00.000Z", startAt: "2027-01-01T09:00:00.000Z" },
+      };
+      const scheduledWith = async (name: string, extra: object = {}) => {
+        const { id } = await createCampaign(shopId, {
+          name,
+          ast: CHAOS_TAG,
+          rule: { kind: "percent-change", percent: -20 },
+          compareAtPolicy: { kind: "leave" },
+          rounding: { default: "none", byCurrency: {} },
+          schedule: { kind: "window", startAt: window.startAt, endAt: window.endAt },
+        });
+        await prisma.campaign.update({ where: { id }, data: { schedule: { ...window, ...own, ...extra } as never } });
+        return load(id);
+      };
 
-      // New dates: the window changes, the definition stays, written both ways.
-      const moved = await insertedByTheReleaseBefore(shopId, campaignId, "Old moved", OLD_BLOBS["scheduled, with its window and its own record"]!);
-      const window = { startUtc: "2027-02-01T09:00:00.000Z", endUtc: null, clockNotes: [], zone: "UTC" };
-      await reschedule(shopId, moved.id, window, "staff@example.com");
-      const redated = await prisma.campaign.findUniqueOrThrow({ where: { id: moved.id } });
-      expect(redated.schedule).toMatchObject({ kind: "window", startAt: window.startUtc, zone: "UTC", productStatuses: ["ACTIVE"] });
-      expect(redated.schedule).not.toHaveProperty("endAt");
-      expect(redated).toMatchObject({ filter: { productStatuses: ["ACTIVE"] }, rounding: { default: "none", byCurrency: {} } });
-      expect(campaignDefinition(columnsOnly(redated))).toEqual(campaignDefinition(moved));
+      // Unschedule: the dates go, and all about them; the campaign's own record stays.
+      const drafted = await scheduledWith("Unscheduled");
+      await unschedule(shopId, drafted.id, "staff@example.com");
+      const unscheduled = await load(drafted.id);
+      expect(unscheduled.status).toBe("DRAFT");
+      expect(unscheduled.schedule).toEqual({ ...own, kind: "manual" });
+      expect(campaignDefinition(unscheduled)).toEqual(campaignDefinition(drafted));
+
+      // New dates: the window is the new one, the buffer kept; the own record stays.
+      const moved = await scheduledWith("Redated");
+      const redate = { startUtc: "2027-02-01T09:00:00.000Z", endUtc: null, clockNotes: [], zone: "UTC" };
+      await reschedule(shopId, moved.id, redate, "staff@example.com");
+      const redated = await load(moved.id);
+      expect(redated.schedule).toEqual({ ...own, kind: "window", startAt: redate.startUtc, revertBufferMinutes: 15, zone: "UTC" });
+      expect(campaignDefinition(redated)).toEqual(campaignDefinition(moved));
+
+      // And either one leaves behind a copy #884's release wrote, which nothing reads.
+      const stale = await scheduledWith("Expand-era", { ast: { groups: [] }, productStatuses: ["ARCHIVED"], practice: true });
+      expect(isPractice(stale), "a stale copy made it practice").toBe(false);
+      await unschedule(shopId, stale.id, "staff@example.com");
+      expect((await load(stale.id)).schedule).toEqual({ ...own, kind: "manual" });
+      expect(campaignDefinition(await load(stale.id))).toEqual(campaignDefinition(stale));
+      expect(campaignDefinition(stale).filter).toEqual(campaignDefinition(fixture).filter);
     });
   });
 
-  it("keeps a segment from being deleted while a campaign names it in either place", async () => {
-    await withChaos("definition-columns-segment", CATALOG, async (chaos) => {
+  it("keeps a segment from being deleted while a campaign a rollback made names it, once its column is filled", async () => {
+    await withChaos("definition-contract-segment", CATALOG, async (chaos) => {
       const { shopId, campaignId } = chaos.fixture;
       const segmentId = "seg-named-not-related";
 
-      // Neither has the relation the delete guard reads first: one names the segment in its
-      // blob alone, as the release before wrote it; one in its column alone, as the contract will.
+      // Neither has the relation the delete guard reads first. One was inserted by the release
+      // before #884, naming the segment in its blob alone; one names it in its column alone.
       const old = await insertedByTheReleaseBefore(shopId, campaignId, "Old segment sale", { kind: "manual", segmentId });
-      const contract = await insertedByTheReleaseBefore(shopId, campaignId, "New segment sale", { kind: "manual" });
-      await prisma.campaign.update({ where: { id: contract.id }, data: { segmentId } });
+      const current = await insertedByTheReleaseBefore(shopId, campaignId, "New segment sale", { kind: "manual" });
+      await prisma.campaign.update({ where: { id: current.id }, data: { filter: { groups: [] }, segmentId } });
 
+      await contract(shopId);
+
+      expect((await prisma.campaign.findUniqueOrThrow({ where: { id: old.id } })).schedule).toEqual({ kind: "manual" });
       const named = await referencingCampaigns(shopId, segmentId);
-      expect(named.map((campaign) => campaign.id).sort()).toEqual([old.id, contract.id].sort());
+      expect(named.map((campaign) => campaign.id).sort()).toEqual([old.id, current.id].sort());
     });
   });
 });

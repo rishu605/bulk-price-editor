@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { AppError } from "../errors/app-error";
-import { definitionOf, manualSchedule } from "../campaigns/schedule-blob";
+import { ownRecordOf } from "../campaigns/own-record";
 import { refusedForGood, startRefusal, startRefusedEntry, withStartRefused } from "./start-refusal";
 
 const segmentGone = new AppError({
@@ -55,7 +55,7 @@ describe("a scheduled start refused for good (#975)", () => {
 });
 
 describe("the refusal kept beside the start it refused", () => {
-  const window = { kind: "window", startAt: "2026-10-15T09:00:00.000Z", endAt: "2026-10-20T09:00:00.000Z", segmentId: "s1" };
+  const window = { kind: "window", startAt: "2026-10-15T09:00:00.000Z", endAt: "2026-10-20T09:00:00.000Z", zone: "UTC" };
 
   it("names the reason while the start is the one refused", () => {
     const marked = withStartRefused(window, segmentGone.userMessage, new Date("2026-10-15T09:00:30Z"));
@@ -63,7 +63,7 @@ describe("the refusal kept beside the start it refused", () => {
     // The same instant written another way is the same start.
     expect(startRefusal({ ...marked, startAt: "2026-10-15T09:00:00Z" })).toBe(segmentGone.userMessage);
     // Everything else in the blob is kept.
-    expect(marked.segmentId).toBe("s1");
+    expect(marked.zone).toBe("UTC");
     expect(marked.endAt).toBe(window.endAt);
   });
 
@@ -74,9 +74,12 @@ describe("the refusal kept beside the start it refused", () => {
   });
 
   it("goes with the dates: a copy, an unschedule or a reschedule leaves it behind", () => {
+    // Neither keeps anything of the old blob but the campaign's own record (#1141), and a
+    // copy starts from `{ kind: "manual" }`.
     const marked = withStartRefused(window, "No.", new Date());
-    expect(startRefusal({ ...definitionOf(marked), ...window })).toBeNull();
-    expect(startRefusal(manualSchedule(marked))).toBeNull();
+    expect(ownRecordOf(marked)).toEqual({});
+    expect(startRefusal({ ...ownRecordOf(marked), ...window })).toBeNull();
+    expect(startRefusal({ ...ownRecordOf(marked), kind: "manual" })).toBeNull();
   });
 
   it("is nothing on a schedule that never had one, or a malformed one", () => {

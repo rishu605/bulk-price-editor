@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 
 import prisma from "../../app/db.server";
 import { createSegment } from "../../app/services/segments-crud.server";
+import { redefine } from "../harness/definition";
 import { ledgerOf, withChaos } from "../harness/scenario";
 
 describe("chaos: a campaign scoped to a segment", () => {
@@ -36,16 +37,11 @@ describe("chaos: a campaign scoped to a segment", () => {
         });
 
         // Point the existing campaign at the segment, both ways a campaign can
-        // reference one: the id in its schedule blob, which the run path reads, and
-        // the relation, which the delete guard reads.
-        const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
-        await prisma.campaign.update({
-          where: { id: campaignId },
-          data: {
-            schedule: { ...(campaign.schedule as object), segmentId: segment.id } as never,
-            segments: { connect: { id: segment.id } },
-          },
-        });
+        // reference one: the id in its `segmentId` column, which the run path reads --
+        // the only place since #1141, not its schedule blob -- and the relation, which
+        // the delete guard reads.
+        await redefine(campaignId, { segmentId: segment.id });
+        await prisma.campaign.update({ where: { id: campaignId }, data: { segments: { connect: { id: segment.id } } } });
 
         const outcome = await chaos.apply();
         await chaos.expectHonest(outcome.runId);
@@ -84,11 +80,7 @@ describe("chaos: a campaign scoped to a segment", () => {
           variantGids: [],
         });
 
-        const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
-        await prisma.campaign.update({
-          where: { id: campaignId },
-          data: { schedule: { ...(campaign.schedule as object), segmentId: segment.id } as never },
-        });
+        await redefine(campaignId, { segmentId: segment.id });
 
         const outcome = await chaos.apply();
         expect(outcome.planned).toBe(0);

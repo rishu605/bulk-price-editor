@@ -20,16 +20,16 @@ describe("a practice draft's Status card", () => {
     expect(describeState("DRAFT", context).explanation).not.toMatch(/until you apply/);
   });
 
-  it("says so of one the release before made practice, in its schedule JSON alone (#884)", async () => {
-    const blobOnly = { schedule: { kind: "manual", practice: true }, practice: false };
-    const context = await lifecycleContext("shop", "c1", "DRAFT", blobOnly, "UTC", {});
+  it("goes by the practice column alone, not by a copy left in the schedule JSON (#1141)", async () => {
+    // #884's release wrote the flag into the blob as well; nothing reads it there now.
+    const staleCopy = { schedule: { kind: "manual", practice: true }, practice: false };
+    const context = await lifecycleContext("shop", "c1", "DRAFT", staleCopy, "UTC", {});
 
-    expect(context.practice).toBe(true);
-    expect(describeState("DRAFT", context).nextAction?.intent).not.toBe("apply");
+    expect(context.practice).toBe(false);
   });
 
   it("keeps a real draft's Apply", async () => {
-    const context = await lifecycleContext("shop", "c1", "DRAFT", { schedule: { kind: "manual", segmentId: "s1" }, practice: false }, "UTC", {});
+    const context = await lifecycleContext("shop", "c1", "DRAFT", { schedule: { kind: "manual" }, practice: false }, "UTC", {});
 
     expect(context.practice).toBe(false);
     expect(describeState("DRAFT", context).nextAction?.intent).toBe("apply");

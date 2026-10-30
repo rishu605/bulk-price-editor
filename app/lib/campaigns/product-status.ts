@@ -50,7 +50,7 @@ export const PRODUCT_STATUS_FIELDS = {
 /**
  * A stored list of statuses, made safe to query with.
  *
- * Unknown values are dropped -- the blob is JSON, so anything could be in it -- and an
+ * Unknown values are dropped -- the filter column is JSON, so anything could be in it -- and an
  * absent or empty list is the default rather than "no status at all". An empty `IN ()`
  * would price nothing, and silently pricing nothing is a failure this app does not get to
  * call conservative: the merchant pressed Apply on a sale.

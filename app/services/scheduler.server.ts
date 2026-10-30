@@ -15,7 +15,7 @@ import {
   parseSchedule,
   type Transition,
 } from "../lib/scheduling/window";
-import { isPractice } from "./campaigns/model.server";
+import { IS_PRACTICE, isPractice } from "./campaigns/model.server";
 import { unschedule } from "./campaigns/schedule-control.server";
 import { runCampaign } from "./campaigns/run.server";
 import type { RunOutcome } from "./campaigns/types";
@@ -100,8 +100,13 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
 
   // HELD too: a held campaign's prices are still live, and its window still ends. Leaving
   // it out meant a sale that took one price edit never reverted on its end date (#756).
+  //
+  // A practice campaign never runs, so it never owes a transition (#827), and is not read at
+  // all -- unless it is still in SCHEDULED, to be made a draft below (#976). In the query since
+  // the flag is a column read alone (#1141): a JSON-path `NOT` on the schedule dropped every
+  // row with no `practice` key at all, which was nearly all of them.
   const candidates = await prisma.campaign.findMany({
-    where: { status: { in: ["SCHEDULED", "ACTIVE", "PARTIAL", "HELD"] } },
+    where: { status: { in: ["SCHEDULED", "ACTIVE", "PARTIAL", "HELD"] }, OR: [{ NOT: IS_PRACTICE }, { status: "SCHEDULED" }] },
     include: { shop: { select: { id: true, domain: true, uninstalledAt: true } } },
   });
 
@@ -114,19 +119,14 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
     // anyway. Skipping quietly is correct; the data is retained for reinstall.
     if (campaign.shop.uninstalledAt) continue;
 
-    // A practice campaign never runs, so it never owes a transition (#827). One created
-    // with dates before the editor refused them sits in SCHEDULED, and from its start every
-    // tick claimed it, had `runCampaign` refuse it -- a throw, whose release is recorded every
-    // time rather than once -- and put it back: an activity entry and a worker failure every
-    // thirty seconds, for ever, since nothing ever moves it out of SCHEDULED. Skipped here,
-    // before the claim, so a tick neither touches it nor says anything about it. In code
-    // rather than in the query: the flag is a column now (#884), but a campaign the release
-    // before made practice says so only in its schedule JSON, and a JSON-path `NOT` drops
-    // every row that has no `practice` key at all, which is nearly all of them.
-    //
-    // And one still in SCHEDULED is made a draft again, once (#976): its page hides the
-    // schedule controls, as it should for practice, so the merchant could not unschedule
-    // it, and it went on saying its prices would change automatically.
+    // A practice campaign created with dates before the editor refused them sits in
+    // SCHEDULED (#827), and from its start every tick claimed it, had `runCampaign` refuse it
+    // -- a throw, whose release is recorded every time rather than once -- and put it back: an
+    // activity entry and a worker failure every thirty seconds, for ever, since nothing ever
+    // moves it out of SCHEDULED. The query reads one only in SCHEDULED, and here, before the
+    // claim, it is made a draft again, once (#976): its page hides the schedule controls, as it
+    // should for practice, so the merchant could not unschedule it, and it went on saying its
+    // prices would change automatically.
     if (isPractice(campaign)) {
       if (campaign.status === "SCHEDULED") await unschedulePractice(campaign.shop.id, campaign.id);
       continue;

@@ -115,7 +115,7 @@ describe("chaos: calling off a scheduled campaign", () => {
     await withChaos("schedule-unschedule", CATALOG, async (chaos) => {
       const { campaignId } = chaos.fixture;
       await scheduledAndDue(chaos);
-      const before = (await record(campaignId)).schedule as Record<string, unknown>;
+      const before = await record(campaignId);
 
       const result = await press(campaignId, { intent: "unschedule" });
       expect(result.ok, result.message).toBe(true);
@@ -129,8 +129,10 @@ describe("chaos: calling off a scheduled campaign", () => {
       const schedule = after.schedule as Record<string, unknown>;
       expect(schedule.kind).toBe("manual");
       expect(schedule.startAt).toBeUndefined();
-      // Everything else in the blob is the campaign's definition, not its dates.
-      expect(schedule.ast).toEqual(before.ast);
+      // Its definition is in its columns, untouched, and none of it in the blob (#1141).
+      expect(after.filter).toEqual(before.filter);
+      expect(after.filter).not.toBeNull();
+      expect(schedule).not.toHaveProperty("ast");
     });
   });
 
@@ -138,6 +140,7 @@ describe("chaos: calling off a scheduled campaign", () => {
     await withChaos("schedule-move", CATALOG, async (chaos) => {
       const { campaignId } = chaos.fixture;
       await scheduledAndDue(chaos);
+      const before = await record(campaignId);
 
       const moved = await press(campaignId, {
         intent: "reschedule",
@@ -153,7 +156,7 @@ describe("chaos: calling off a scheduled campaign", () => {
       expect(after.status, "moved into the future, it must not start today").toBe("SCHEDULED");
       expect(await applyRuns(campaignId)).toBe(0);
       expect(after.startAt!.getTime()).toBeGreaterThan(Date.now() + 23 * HOUR);
-      expect((after.schedule as { ast?: unknown }).ast).toBeDefined();
+      expect(after.filter, "new dates touched its scope").toEqual(before.filter);
 
       const backwards = await press(campaignId, {
         intent: "reschedule",

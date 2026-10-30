@@ -137,7 +137,7 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
     prisma.campaignRun.count({
       where: { shopId: shop.id, kind: "APPLY", status: "COMPLETED", verifiedRows: { gt: 0 } },
     }),
-    // The column, or the schedule JSON of one made by the release before (#884).
+    // The practice column (#884), and nothing in the schedule JSON since #1141.
     prisma.campaign.count({ where: { shopId: shop.id, ...IS_PRACTICE } }),
     // What "Put everything on sale" would cover, compiled the way its campaign's scope is
     // (#751): active products, no gift cards. `health.variants` is the catalogue -- the

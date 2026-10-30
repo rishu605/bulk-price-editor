@@ -1,12 +1,12 @@
 /**
- * What a campaign prices, in columns of its own and, for one release, in its schedule JSON
- * too (#884).
+ * What a campaign prices, in columns of its own (#884), and since the contract nowhere else
+ * (#1141).
  *
- * Pinned here: that every writer writes both halves and they agree; that every reader takes
- * the column first and the blob only where the column is at its default; and that a row the
- * release before wrote -- definition in the blob, columns at null and false -- reads exactly
- * as it did. The chaos scenario `definition-columns` runs the migration's backfill against
- * rows of every shape the blob has held, and compares these readers before and after.
+ * Pinned here: that every writer writes the columns and nothing of a definition into the
+ * schedule JSON; that every reader reads the columns alone, whatever a blob says; and what a
+ * column at its default means. The chaos scenario `definition-columns` runs the contract's
+ * migration against rows of every shape the blob has held -- a rollback's included -- and
+ * reads them back through these readers.
  */
 
 import { Prisma } from "@prisma/client";
@@ -23,12 +23,13 @@ vi.mock("../settings.server", () => ({
   readSettings: vi.fn(async () => ({ violationPolicy: "clamp" })),
 }));
 
-import { DEFINITION_KEYS, OWN_KEYS, WINDOW_KEYS } from "../../lib/campaigns/schedule-blob";
+import { OWN_KEYS } from "../../lib/campaigns/own-record";
 import { START_CONFIRMED_KEY } from "../../lib/campaigns/start-confirmation";
 import {
   astOf,
   campaignDefinition,
   createCampaign,
+  DEFINITION,
   definitionData,
   IS_PRACTICE,
   isPractice,
@@ -52,21 +53,14 @@ const INPUT: CampaignInput = {
   practice: true,
 };
 
-/** A row as this release stores it, from what `createCampaign` handed Prisma. */
+/** The keys #884's release copied into the blob, which no blob holds since #1141. */
+const COPIED_KEYS = ["ast", "productStatuses", "segmentId", "rounding", "practice"];
+
+/** A row as the app stores it, from what `createCampaign` handed Prisma. */
 async function created(input: CampaignInput) {
   await createCampaign("shop", input);
   return prisma.campaign.create.mock.calls.at(-1)![0].data as Record<string, unknown>;
 }
-
-/** The row's columns, at their defaults, as the release before leaves them: its blob alone. */
-const blobOnly = (row: Record<string, unknown>) =>
-  ({ ...row, filter: null, segmentId: null, rounding: null, practice: false }) as never;
-/** The row's columns alone, with a blob holding the window only: what the contract reads. */
-const columnsOnly = (row: Record<string, unknown>) => {
-  const schedule = { ...(row.schedule as Record<string, unknown>) };
-  for (const key of DEFINITION_KEYS) delete schedule[key];
-  return { ...row, schedule } as never;
-};
 
 /** Every reader's answer for a campaign, as one comparable value. */
 function readings(campaign: never) {
@@ -84,7 +78,7 @@ beforeEach(() => {
   prisma.campaign.create.mockResolvedValue({ id: "c1", name: "Alpine clearance", status: "DRAFT" });
 });
 
-describe("a campaign as this release writes it", () => {
+describe("a campaign as the app writes it", () => {
   it("has its definition in its columns", async () => {
     const row = await created(INPUT);
 
@@ -96,38 +90,27 @@ describe("a campaign as this release writes it", () => {
     });
   });
 
-  it("has the same definition in its blob, where the release before reads it", async () => {
+  it("has none of it in its schedule JSON (#1141)", async () => {
     const row = await created(INPUT);
 
-    // The blob's shape is the one that release reads: `ast` without the statuses, beside it.
-    expect(row.schedule).toEqual({
-      kind: "manual",
-      ast: { groups: INPUT.ast.groups },
-      productStatuses: ["ACTIVE", "DRAFT"],
-      segmentId: "seg-1",
-      rounding: INPUT.rounding,
-      practice: true,
-    });
-    expect(readings(blobOnly(row))).toEqual(readings(row as never));
-    expect(readings(columnsOnly(row))).toEqual(readings(row as never));
+    expect(row.schedule).toEqual({ kind: "manual" });
+    for (const key of COPIED_KEYS) expect(row.schedule, key).not.toHaveProperty(key);
   });
 
-  it("leaves out of the blob what the release before never wrote: no segment, not practice", async () => {
-    const row = await created({ ...INPUT, segmentId: undefined, practice: undefined });
-
-    expect(row).toMatchObject({ segmentId: null, practice: false });
-    expect(row.schedule).not.toHaveProperty("segmentId");
-    expect(row.schedule).not.toHaveProperty("practice");
-    expect(readings(blobOnly(row))).toEqual(readings(row as never));
-  });
-
-  it("keeps the window and its own record beside the blob's definition", async () => {
+  it("keeps the window and its own record there, and only those", async () => {
     const startAt = "2026-11-27T09:00:00.000Z";
     const confirmation = { by: "staff:1", at: "2026-10-30T09:00:00.000Z" } as never;
     const row = await created({ ...INPUT, practice: undefined, schedule: { kind: "window", startAt }, startConfirmed: confirmation });
 
-    expect(row.schedule).toMatchObject({ kind: "window", startAt, [START_CONFIRMED_KEY]: confirmation });
+    expect(row.schedule).toEqual({ kind: "window", startAt, [START_CONFIRMED_KEY]: confirmation });
     expect(row.status).toBe("SCHEDULED");
+  });
+
+  it("writes no segment and not practice as the columns' defaults", async () => {
+    const row = await created({ ...INPUT, segmentId: undefined, practice: undefined });
+
+    expect(row).toMatchObject({ segmentId: null, practice: false });
+    expect(readings(row as never)).toMatchObject({ segmentId: null, practice: false });
   });
 
   it("is planned before it is saved from the same columns (#1009)", async () => {
@@ -135,90 +118,74 @@ describe("a campaign as this release writes it", () => {
     const row = await created(INPUT);
 
     expect(readings(unsaved as never)).toEqual(readings(row as never));
-    expect(unsaved).toMatchObject({ segmentId: "seg-1", practice: true, rounding: INPUT.rounding });
+    expect(unsaved).toMatchObject({ segmentId: "seg-1", practice: true, rounding: INPUT.rounding, schedule: { kind: "manual" } });
   });
 
   it("writes a null rounding as a database null, not as JSON null", async () => {
     const row = await created({ ...INPUT, rounding: undefined as never });
 
     expect(row.rounding).toBe(Prisma.DbNull);
-    expect(row.schedule).not.toHaveProperty("rounding");
+    expect(readings({ ...row, rounding: null } as never).rounding).toEqual(roundingFor(null));
   });
 });
 
-describe("a campaign the release before wrote: its columns at their defaults", () => {
-  const BLOB = {
-    filter: null,
-    segmentId: null,
-    rounding: null,
-    practice: false,
-    schedule: {
-      kind: "manual",
-      ast: { groups: [{ conditions: [{ field: "tag", value: "alpine" }] }] },
-      productStatuses: ["ACTIVE", "ARCHIVED"],
-      segmentId: "seg-1",
-      rounding: { default: "charm95", byCurrency: {} },
-      practice: true,
-    },
-  } as never;
-
-  it("is read from its blob", () => {
-    expect(astOf(BLOB)).toEqual({ groups: [{ conditions: [{ field: "tag", value: "alpine" }] }], productStatuses: ["ACTIVE", "ARCHIVED"] });
-    expect(segmentIdOf(BLOB)).toBe("seg-1");
-    expect(isPractice(BLOB)).toBe(true);
-    expect(readings(BLOB).rounding).toEqual(roundingFor({ default: "charm95", byCurrency: {} }));
-  });
-
-  it("is read the same with no columns at all, as a caller holding only the blob has", () => {
-    const { schedule } = BLOB as { schedule: unknown };
-    expect(readings({ schedule } as never)).toEqual(readings(BLOB));
-  });
-
-  it("is read as it always was in every shape the blob has held", () => {
-    // Before #751, no statuses: active only. Before per-currency rounding, a bare name.
-    // Before rounding, none. A filter that was never written: every variant.
-    const old = { filter: null, segmentId: null, rounding: null, practice: false, schedule: { kind: "manual", rounding: "charm99" } } as never;
-    expect(astOf(old)).toEqual({ groups: [], productStatuses: ["ACTIVE"] });
-    expect(readings(old).rounding).toEqual(roundingFor("charm99"));
-    expect(readings({ ...(old as object), schedule: { kind: "manual" } } as never).rounding).toEqual(roundingFor(undefined));
-
-    // Statuses inside `ast` were never what `astOf` read: the blob's own list, or the default.
-    const inside = { schedule: { ast: { groups: [], productStatuses: ["DRAFT"] } } } as never;
-    expect(productStatusesFor(inside)).toEqual(["ACTIVE"]);
-    // Practice only for a JSON true.
-    expect(isPractice({ practice: false, schedule: { practice: "true" } } as never)).toBe(false);
-  });
-});
-
-describe("the column first", () => {
-  it("wins over a blob that says otherwise, wherever it is off its default", () => {
-    // Not a state any release writes -- the two always agree -- but the order is the rule:
-    // a column off its default was written by this release, and the blob cannot know better.
-    const disagreeing = {
+describe("reading a definition: the columns alone (#1141)", () => {
+  it("ignores a blob that still holds a copy, as one #884's release wrote may", () => {
+    // #884's release writes the copy beside the columns, and a rollback to it, or a write of
+    // its while this deploys, leaves one behind. Nothing reads it, even where it disagrees
+    // with a column at its default.
+    const stale = {
       filter: { groups: [{ conditions: [{ field: "vendor", value: "Burton" }] }], productStatuses: ["DRAFT"] },
-      segmentId: "seg-column",
-      rounding: "whole",
-      practice: true,
-      schedule: { ast: { groups: [] }, productStatuses: ["ACTIVE"], segmentId: "seg-blob", rounding: "charm99" },
+      segmentId: null,
+      rounding: null,
+      practice: false,
+      schedule: {
+        kind: "manual",
+        ast: { groups: [] },
+        productStatuses: ["ACTIVE"],
+        segmentId: "seg-blob",
+        rounding: "charm99",
+        practice: true,
+      },
     } as never;
 
-    expect(astOf(disagreeing)).toEqual({ groups: [{ conditions: [{ field: "vendor", value: "Burton" }] }], productStatuses: ["DRAFT"] });
-    expect(segmentIdOf(disagreeing)).toBe("seg-column");
-    expect(isPractice(disagreeing)).toBe(true);
-    expect(readings(disagreeing).rounding).toEqual(roundingFor("whole"));
+    expect(readings(stale)).toEqual({
+      ast: { groups: [{ conditions: [{ field: "vendor", value: "Burton" }] }], productStatuses: ["DRAFT"] },
+      productStatuses: ["DRAFT"],
+      segmentId: null,
+      practice: false,
+      rounding: roundingFor(null),
+    });
   });
 
-  it("takes a filter column with no statuses as no statuses recorded, not the blob's", () => {
-    const column = { filter: { groups: [] }, schedule: { productStatuses: ["DRAFT"] } } as never;
-    expect(productStatusesFor(column)).toEqual(["ACTIVE"]);
+  it("reads a definition with no schedule at all, which `DEFINITION` no longer selects", () => {
+    expect(DEFINITION).not.toHaveProperty("schedule");
+    const columns = { filter: { groups: [] }, segmentId: "seg-1", rounding: "charm99", practice: true } as never;
+    expect(readings(columns)).toEqual({
+      ast: { groups: [], productStatuses: ["ACTIVE"] },
+      productStatuses: ["ACTIVE"],
+      segmentId: "seg-1",
+      practice: true,
+      rounding: roundingFor("charm99"),
+    });
   });
 
-  it("finds practice campaigns in a query the same way", () => {
-    expect(IS_PRACTICE).toEqual({ OR: [{ practice: true }, { schedule: { path: ["practice"], equals: true } }] });
+  it("reads the columns' defaults as answers: active products only, no segment, no rounding, not practice", () => {
+    // A filter with no statuses is a campaign from before #751, which covered the archive
+    // because nobody asked; null is a filter nothing since #884 writes, read as no conditions.
+    for (const filter of [{ groups: [] }, null]) {
+      const campaign = { filter, segmentId: null, rounding: null, practice: false } as never;
+      expect(astOf(campaign)).toEqual({ groups: [], productStatuses: ["ACTIVE"] });
+      expect(readings(campaign)).toMatchObject({ segmentId: null, practice: false, rounding: roundingFor(null) });
+    }
+  });
+
+  it("finds practice campaigns in a query by the column alone", () => {
+    expect(IS_PRACTICE).toEqual({ practice: true });
   });
 });
 
-describe("writing a definition over a blob", () => {
+describe("writing a definition", () => {
   const DEFINED: Definition = {
     filter: { groups: [], productStatuses: ["ACTIVE"] },
     segmentId: null,
@@ -226,48 +193,21 @@ describe("writing a definition over a blob", () => {
     practice: false,
   };
 
-  it("replaces whatever the blob held of one, and nothing else", () => {
-    const stale = {
-      kind: "window",
-      startAt: "2026-11-27T09:00:00.000Z",
-      zone: "Europe/London",
-      ast: { groups: [{ conditions: [] }] },
-      productStatuses: ["DRAFT"],
-      segmentId: "seg-old",
-      rounding: "charm99",
-      practice: true,
-      [OWN_KEYS[0]]: { by: "staff:1" },
-    };
-
-    const { schedule } = definitionData(stale, DEFINED);
-
-    expect(schedule).toEqual({
-      kind: "window",
-      startAt: "2026-11-27T09:00:00.000Z",
-      zone: "Europe/London",
-      [OWN_KEYS[0]]: { by: "staff:1" },
-      ast: { groups: [] },
-      productStatuses: ["ACTIVE"],
-    });
+  it("writes its four columns and no schedule (#1141)", () => {
+    expect(Object.keys(definitionData(DEFINED)).sort()).toEqual(Object.keys(DEFINITION).sort());
+    expect(definitionData(DEFINED)).toEqual({ filter: DEFINED.filter, segmentId: null, rounding: Prisma.DbNull, practice: false });
   });
 
-  it("names no key that is also a window key or the campaign's own", () => {
-    const others: readonly string[] = [...WINDOW_KEYS, ...OWN_KEYS];
-    expect(DEFINITION_KEYS.filter((key) => others.includes(key))).toEqual([]);
-  });
-
-  it("does not touch the blob it is handed", () => {
-    const blob = { kind: "manual", practice: true };
-    definitionData(blob, DEFINED);
-    expect(blob).toEqual({ kind: "manual", practice: true });
+  it("names no column after a key of the blob's own record", () => {
+    const own: readonly string[] = OWN_KEYS;
+    expect(Object.keys(DEFINITION).filter((key) => own.includes(key))).toEqual([]);
   });
 
   it("round-trips through the readers", () => {
     const defined: Definition = { ...DEFINED, segmentId: "seg-2", rounding: "nearest100", practice: true };
-    const data = definitionData({ kind: "manual" }, defined);
+    const data = definitionData(defined);
     const row = { ...data, rounding: data.rounding === Prisma.DbNull ? null : data.rounding } as never;
 
     expect(campaignDefinition(row)).toEqual(defined);
-    expect(campaignDefinition(blobOnly(row))).toEqual(defined);
   });
 });

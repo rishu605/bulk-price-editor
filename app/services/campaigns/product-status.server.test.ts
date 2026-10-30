@@ -43,10 +43,10 @@ const INPUT: CampaignInput = {
   rounding: { default: "none", byCurrency: {} },
 };
 
-/** The schedule blob `createCampaign` wrote, from its one call. */
+/** The filter column `createCampaign` wrote, from its one call (#884): the conditions and the statuses. */
 async function storedFor(input: CampaignInput) {
   await createCampaign(SHOP, input);
-  return prisma.campaign.create.mock.calls[0]![0].data.schedule as Record<string, unknown>;
+  return prisma.campaign.create.mock.calls[0]![0].data.filter as FilterAst;
 }
 
 /** What the status filter at the top of a compiled scope admits, or null for any. */
@@ -62,24 +62,25 @@ beforeEach(() => {
 
 describe("an all-variants campaign", () => {
   it("leaves draft and archived products out when it says nothing", async () => {
-    const schedule = await storedFor(INPUT);
+    const filter = await storedFor(INPUT);
 
     // Recorded, so the campaign's own row says what it covers.
-    expect(schedule.productStatuses).toEqual(["ACTIVE"]);
-    expect(statusesAdmitted(astToWhere(SHOP, astOf({ schedule } as never)))).toEqual(["ACTIVE"]);
+    expect(filter.productStatuses).toEqual(["ACTIVE"]);
+    expect(statusesAdmitted(astToWhere(SHOP, astOf({ filter } as never)))).toEqual(["ACTIVE"]);
   });
 
   it("covers them when it opted in", async () => {
-    const schedule = await storedFor({ ...INPUT, productStatuses: ["ACTIVE", "DRAFT", "ARCHIVED"] });
+    const filter = await storedFor({ ...INPUT, productStatuses: ["ACTIVE", "DRAFT", "ARCHIVED"] });
 
-    expect(statusesAdmitted(astToWhere(SHOP, astOf({ schedule } as never)))).toEqual(["ACTIVE", "DRAFT", "ARCHIVED"]);
+    expect(statusesAdmitted(astToWhere(SHOP, astOf({ filter } as never)))).toEqual(["ACTIVE", "DRAFT", "ARCHIVED"]);
   });
 
   it("covers active products only when it was made before anybody could choose", () => {
-    // Every campaign created before #751 has no statuses in its blob. They covered the
-    // archive because nobody had asked, and the reader's default is what keeps a path that
-    // forgets to record a choice from pricing it again.
-    const legacy = { schedule: { kind: "manual", ast: { groups: [] } } } as never;
+    // Every campaign created before #751 has no statuses in its filter: none were in its blob
+    // for the backfill to read (#884). They covered the archive because nobody had asked, and
+    // the reader's default is what keeps a path that forgets to record a choice from pricing
+    // it again.
+    const legacy = { filter: { groups: [] } } as never;
 
     expect(productStatusesFor(legacy)).toEqual(["ACTIVE"]);
     expect(statusesAdmitted(astToWhere(SHOP, astOf(legacy)))).toEqual(["ACTIVE"]);
@@ -90,33 +91,32 @@ describe("where the choice is kept", () => {
   it("takes statuses carried inside the filter, and stores the filter without them", async () => {
     // Home hands its constant scope over whole; the editor sends a field. One answer is
     // kept, beside the conditions, so `astOf` has nothing to reconcile.
-    const schedule = await storedFor({ ...INPUT, ast: { groups: [], productStatuses: EVERY_STATUS } });
+    const filter = await storedFor({ ...INPUT, ast: { groups: [], productStatuses: EVERY_STATUS } });
 
-    expect(schedule.ast).toEqual({ groups: [] });
-    expect(schedule.productStatuses).toEqual(["ACTIVE", "DRAFT", "ARCHIVED"]);
+    expect(filter).toEqual({ groups: [], productStatuses: ["ACTIVE", "DRAFT", "ARCHIVED"] });
   });
 
   it("gives Home's quick campaign the scope its card counts", async () => {
-    const schedule = await storedFor({ ...INPUT, ast: QUICK_CAMPAIGN_SCOPE });
+    const filter = await storedFor({ ...INPUT, ast: QUICK_CAMPAIGN_SCOPE });
 
-    expect(astOf({ schedule } as never)).toEqual(QUICK_CAMPAIGN_SCOPE);
+    expect(astOf({ filter } as never)).toEqual(QUICK_CAMPAIGN_SCOPE);
   });
 
   it("lets the field win over a filter that disagrees with it", async () => {
-    const schedule = await storedFor({
+    const filter = await storedFor({
       ...INPUT,
       ast: { groups: [], productStatuses: ["ACTIVE"] },
       productStatuses: ["ACTIVE", "ARCHIVED"],
     });
 
-    expect(schedule.productStatuses).toEqual(["ACTIVE", "ARCHIVED"]);
+    expect(filter.productStatuses).toEqual(["ACTIVE", "ARCHIVED"]);
   });
 
   it("keeps the conditions next to the statuses rather than replacing them", async () => {
     const titled: FilterAst = { groups: [{ conditions: [{ field: "title", value: "Alpine Snowboard 0" }] }] };
-    const schedule = await storedFor({ ...INPUT, ast: titled });
+    const filter = await storedFor({ ...INPUT, ast: titled });
 
-    const where = astToWhere(SHOP, astOf({ schedule } as never)) as Record<string, unknown>;
+    const where = astToWhere(SHOP, astOf({ filter } as never)) as Record<string, unknown>;
     expect(statusesAdmitted(where)).toEqual(["ACTIVE"]);
     // Outside the OR the groups compile to, so it holds for every group rather than for
     // one of them.
@@ -125,15 +125,18 @@ describe("where the choice is kept", () => {
   });
 
   it("survives a duplicate", async () => {
-    // Copied from inside `schedule` with the filter and the rounding (#762); a copy that
-    // dropped it would quietly reach the archive the original left out, or the reverse.
+    // Copied with the filter it is part of and the rounding (#762), in their columns (#884); a
+    // copy that dropped it would quietly reach the archive the original left out, or the reverse.
     prisma.campaign.findFirstOrThrow.mockResolvedValue({
       name: "Sale",
       ruleRows: [],
       surfaces: {},
       compareAtPolicy: { kind: "leave" },
       guardrails: null,
-      schedule: { kind: "manual", ast: { groups: [] }, productStatuses: ["ACTIVE", "DRAFT"] },
+      filter: { groups: [], productStatuses: ["ACTIVE", "DRAFT"] },
+      segmentId: null,
+      rounding: null,
+      practice: false,
       segments: [],
     });
     prisma.campaign.findMany.mockResolvedValue([]);
@@ -141,7 +144,7 @@ describe("where the choice is kept", () => {
 
     await duplicateCampaign(SHOP, "c1", null);
 
-    const copy = { schedule: prisma.campaign.create.mock.calls[0]![0].data.schedule } as never;
+    const copy = { filter: prisma.campaign.create.mock.calls[0]![0].data.filter } as never;
     expect(productStatusesFor(copy)).toEqual(["ACTIVE", "DRAFT"]);
   });
 });
@@ -156,15 +159,13 @@ describe("a campaign on a saved segment", () => {
       frozenVariantGids: ["gid://shopify/ProductVariant/1"],
     });
 
-    const active = await scopeOf(SHOP, { schedule: { segmentId: "seg_1", ast: { groups: [] } } } as never);
+    const active = await scopeOf(SHOP, { segmentId: "seg_1", filter: { groups: [] } } as never);
     expect(active.productStatuses).toEqual(["ACTIVE"]);
     expect(active.groups).toEqual([
       { conditions: [{ field: "variantGid", value: ["gid://shopify/ProductVariant/1"] }] },
     ]);
 
-    const all = await scopeOf(SHOP, {
-      schedule: { segmentId: "seg_1", ast: { groups: [] }, productStatuses: EVERY_STATUS },
-    } as never);
+    const all = await scopeOf(SHOP, { segmentId: "seg_1", filter: { groups: [], productStatuses: EVERY_STATUS } } as never);
     expect(statusesAdmitted(astToWhere(SHOP, all))).toEqual(["ACTIVE", "DRAFT", "ARCHIVED"]);
   });
 });

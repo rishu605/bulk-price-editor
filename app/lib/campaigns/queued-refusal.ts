@@ -13,7 +13,10 @@
  * the run did not happen and why, and the merchant is told once, by email.
  */
 
-/** Where it is kept, in the campaign's `schedule` JSON: the campaign's own record (`OWN_KEYS`). */
+/**
+ * Where it is kept, in the campaign's `schedule` JSON: the campaign's own record (`OWN_KEYS` in
+ * `own-record.ts`), which an unschedule and new dates keep and a copy, which never ran, does not.
+ */
 export const QUEUED_REFUSED_KEY = "queuedRefused";
 
 export type QueuedVerb = "apply" | "revert" | "resume";

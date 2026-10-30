@@ -1,3 +1,5 @@
+import type { Campaign } from "@prisma/client";
+
 import { queuedRefusal } from "../../lib/campaigns/queued-refusal";
 import { startConfirmationOf, unconfirmedStart } from "../../lib/campaigns/start-confirmation";
 import { endMissed } from "../../lib/scheduling/end-missed";
@@ -7,7 +9,7 @@ import { neverStarts, parseSchedule, windowEndText } from "../../lib/scheduling/
 import type { CampaignState } from "../../lib/lifecycle/transitions";
 import { bulkWaitOf } from "./bulk-wait.server";
 import { lateStart } from "./late-start.server";
-import { isPractice, type DefinedCampaign } from "./model.server";
+import { isPractice } from "./model.server";
 import { partialProgress } from "./result.server";
 import type { CampaignPreview } from "./types";
 
@@ -21,8 +23,8 @@ export async function lifecycleContext(
   shopId: string,
   campaignId: string,
   state: CampaignState,
-  /** Its schedule, and whether it is practice, which is a column now (#884). */
-  campaign: Pick<DefinedCampaign, "schedule" | "practice">,
+  /** Its schedule, which the caller selects beside its definition (#1141), and its practice column (#884). */
+  campaign: Pick<Campaign, "schedule" | "practice">,
   timeZone: string,
   preview: Pick<CampaignPreview, "outrankedBy" | "confirm">,
 ) {

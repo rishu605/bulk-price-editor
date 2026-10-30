@@ -451,11 +451,11 @@ model Campaign {
   /// copied or cleared "the schedule" had to know which half was which, and Duplicate did not
   /// (#762). `model.server.ts` reads and writes them, and nothing else.
   ///
-  /// The expand half of an expand/contract move. Written here and, still, into `schedule`,
-  /// which the release before reads; read here first, falling back to `schedule` for a row
-  /// that release wrote, whose columns are left at null and false. So none of them has a
-  /// default a reader could mistake for a choice. The contract release stops writing the
-  /// blob's copy and drops the fallback: see the migration that added these.
+  /// The whole record of what it prices since the contract (#1141): nothing is written into
+  /// `schedule` or read from it, and its migration filled these from any blob that still held
+  /// them before it stripped the copy. A column at its default is the campaign's answer.
+  /// `filter` and `rounding` stay nullable as the expand half (#884) left them, so the
+  /// release before needs no other schema; a null filter is read as no conditions.
   ///
   /// `segmentId` is not a foreign key: a campaign keeps the id of a segment deleted since,
   /// which is how it knows it prices nothing (#776). `segments` is what the delete guard
@@ -467,8 +467,8 @@ model Campaign {
   practice  Boolean @default(false)
 
   /// When it runs: kind (manual | window), start, end, revert buffer, the zone its times
-  /// were typed in, and what became of its start and end. Beside them, for one release, a
-  /// copy of the definition above (#884), and the campaign's own record (`OWN_KEYS`).
+  /// were typed in, and what became of its start and end. Beside them the campaign's own
+  /// record (`OWN_KEYS` in `lib/campaigns/own-record.ts`), and nothing of what it prices (#1141).
   schedule Json      @default("{}")
   startAt  DateTime?
   endAt    DateTime?

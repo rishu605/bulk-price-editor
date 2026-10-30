@@ -2,7 +2,7 @@
  * A duplicate prices what its source prices (#762).
  *
  * The filter, segment, rounding and practice flag lived in the `schedule` JSON beside the
- * dates (columns of their own since #884, with a copy in the blob for one release), and
+ * dates (columns of their own since #884, and nothing of them in the blob since #1141), and
  * Duplicate dropped the whole blob so last month's dates were not re-armed. The
  * copy got `{}`: an empty filter, which matches the whole catalogue. A merchant who
  * duplicated "Alpine clearance · 30% off Alpine boards" to run it again had a draft that

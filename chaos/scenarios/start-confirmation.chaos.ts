@@ -416,9 +416,9 @@ describe("chaos: duplicating a campaign (#1009)", () => {
       const copied = await press(campaignId, { intent: "duplicate" });
       expect(copied.location, copied.message).toMatch(/^\/app\/campaigns\/.+\?duplicated=1$/);
       const copyId = copied.location!.split("/").pop()!.split("?")[0];
-      const copy = (await campaignOf(copyId)).schedule as Record<string, unknown>;
-      expect(copy.ast, "the copy lost its scope").toEqual(((await campaignOf(campaignId)).schedule as Record<string, unknown>).ast);
-      expect(copy.startConfirmed, "the copy carried its source's confirmation").toBeUndefined();
+      const copy = await campaignOf(copyId);
+      expect(copy.filter, "the copy lost its scope").toEqual((await campaignOf(campaignId)).filter);
+      expect(copy.schedule, "the copy carried its source's confirmation").toEqual({ kind: "manual" });
       expect(await confirmationOf(campaignId), "the source lost its confirmation").toBeDefined();
     });
   });
