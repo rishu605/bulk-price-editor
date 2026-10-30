@@ -238,15 +238,18 @@ would say so.
 
 ## Alert: queue depth rising
 
-**Metric:** `queue.depth`, per queue
+**Metric:** `queue.depth`, per queue. The alert reads `execution`'s depth from Redis each
+tick; until #813 nothing passed it one, so it could not fire.
 
 **What it means.** Jobs are arriving faster than they are draining. Which queue matters
 enormously: `audit` backing up is cosmetic, `execution` backing up means merchant
 campaigns are late.
 
 **Diagnose.** Depth alone is not the signal — a bulk import legitimately enqueues a lot.
-Look at whether the floor is rising over hours. Compare against `queue.failed`: a queue
-that is failing every attempt looks like a backlog and is not one.
+Look at whether the floor is rising over hours, and at `queue.oldest_wait_ms` beside it: a
+deep queue whose front job is seconds old is busy, one whose front job is minutes old is
+stuck (that is `queue-stalled` or `shop-run-waiting`, below). Compare against `queue.failed`:
+a queue that is failing every attempt looks like a backlog and is not one.
 
 **Remediate.** Add worker replicas; queue consumers start with the process, so a second
 worker drains immediately without any leadership change. If one queue is stuck behind a
@@ -254,10 +257,55 @@ single poison job, its failure is in `error_events` with the job id.
 
 ---
 
+## Alert: a shop's run is waiting to start
+
+**Signal:** the `execution` queue's waiting jobs, read from Redis by the worker's alerting job:
+each shop's longest-waiting run. Pages past 2 min (`RUN_WAIT_MS` in `alerts.ts`). The history
+is `queue.wait_ms` with `queue=execution`, per shop, recorded as each run starts.
+
+**What it means.** A merchant pressed Apply or Revert, or a scheduled end came due, and the
+worker has not picked the job up. Their page reads Applying or Reverting with nothing
+happening, or a sale is running past its end. Usually it is one shop's run waiting behind
+another's — `execution` runs two at a time, and one 102,132-variant run holds a slot for
+minutes. That is Epic 19's failure (#807), and `npm run gate:two-shops` is the test for it
+(`docs/perf/two-shop-gate.md`).
+
+**Diagnose.** `queue.depth` and `queue.oldest_wait_ms` for `execution`: two active and the
+rest waiting is slots held by long runs; nothing active is no worker consuming — look at the
+worker's logs and `scheduler-stopped`. `/healthz` → `queues` shows the same counts without
+shop ids.
+
+**Remediate.** Let the long runs finish rather than restarting the worker: a restart
+mid-write leaves a Partial campaign to resume, and the waiting job stays queued and starts
+afterwards anyway. If no worker is consuming, restart the worker service.
+
+---
+
+## Alert: background work is not being picked up
+
+**Signal:** the front job of `sync`, `webhooks`, `planning` or `verification` has waited more
+than 10 min to start (`QUEUE_STALLED_MS`). The history is `queue.oldest_wait_ms`, per queue.
+`execution` has the page above instead; `audit` never pages.
+
+**What it means.** Nothing is taking from that queue. A stalled `webhooks` queue is the
+mirror going stale with no error anywhere: `webhook-lag` is computed from *processed*
+deliveries, and a queue nothing consumes processes none, so that alert goes quiet rather
+than firing. A stalled `sync` is a shop whose catalogue stops updating.
+
+**Diagnose.** `queue.failed` for the queue — a job failing every attempt is a different
+incident. Then the worker: consumers start with the process, so a stall on every queue at
+once is no worker, and one queue alone is that queue's job blocking its only slot (`sync`
+runs one at a time).
+
+**Remediate.** Restart the worker if nothing is consuming. If one job is wedged, its failure
+lands in `error_events` with the job id once it gives up; the queue drains behind it.
+
+---
+
 ## Alert: pages waiting for the database
 
 **Signal:** `/healthz` → `database.waitMs`, read by the worker's alerting job over HTTP. Pages
-at over 5 s; `/healthz` itself reads `degraded` from 2 s.
+at over 5 s; `/healthz` itself reads `degraded` from 1 s (`HEALTH_DATABASE_WAIT_MS`, #813).
 
 **What it means.** `SELECT 1` takes a millisecond; the rest is the web process waiting for a
 pooled connection (10 per process, `app/lib/db/pool.ts`). Every page of every shop is waiting
@@ -420,7 +468,7 @@ Every alert the app can raise, and what to do when it arrives. Kept in step with
 `app/lib/observability/alerts.ts` by `runbook-coverage.test.ts`: a new alert, a removed one,
 or a changed severity fails CI until this table matches.
 
-**Wake up for these.** All seven mean merchant prices are wrong or about to be, which is the
+**Wake up for these.** All nine mean merchant prices are wrong or about to be, which is the
 line `alerts.ts` draws between a page and a graph.
 
 | Alert | Response | Why it cannot wait |
@@ -432,6 +480,8 @@ line `alerts.ts` draws between a page and a graph.
 | `shop-error-spike` | **Page** | One merchant's every campaign is failing inside a healthy global rate — the incident the overall error rate cannot see. |
 | `unpriceable-variants` | **Page** | Variants are mirrored, counted and shown, with no baseline — so campaigns silently skip them and the merchant is told nothing. |
 | `pages-waiting-for-database` | **Page** | Every shop's pages are blank, and a run writing in the web process can die of a pool timeout part-way, leaving prices half-changed. |
+| `shop-run-waiting` | **Page** | A merchant's Apply, Revert or scheduled end has not started for minutes — usually behind another shop's large run, which is the failure Epic 19 exists to prevent. |
+| `queue-stalled` | **Page** | Nothing is taking from a queue, so webhooks or syncs stop reaching the mirror — and the webhook-lag alert, which reads processed deliveries, goes quiet instead of firing. |
 
 **Look at these next working day.**
 

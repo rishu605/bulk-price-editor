@@ -15,6 +15,8 @@ import {
   evaluate,
   DIVERGENCE_RATE,
   NOT_ALERTS,
+  QUEUE_STALLED_MS,
+  RUN_WAIT_MS,
   TICK_SILENCE_SECONDS,
   WEBHOOK_LAG_MS,
   type SignalWindow,
@@ -30,6 +32,23 @@ const quiet: SignalWindow = {
   unpriceableVariants: 0,
   pagesDatabaseWaitMs: 0,
   shopRates: null,
+  queues: null,
+  shopRunWaits: null,
+};
+
+/** Every condition at once, so a new alert is covered without anybody remembering to add it. */
+const everythingWrong: SignalWindow = {
+  secondsSinceTick: 10_000,
+  webhookLagMs: 10 * 60_000,
+  errors: 100,
+  requests: 100,
+  divergenceRate: 0.5,
+  executionQueueDepth: 5_000,
+  unpriceableVariants: 400,
+  pagesDatabaseWaitMs: 60_000,
+  shopRates: [{ shopId: "shop-1", errors: 40, requests: 100 }],
+  queues: [{ queue: "webhooks", depth: 3, oldestWaitMs: 60 * 60_000 }],
+  shopRunWaits: [{ shopId: "shop-2", waitMs: 30 * 60_000 }],
 };
 
 const ids = (window: Partial<SignalWindow>) =>
@@ -44,6 +63,51 @@ describe("pages waiting for the database (#803)", () => {
   it("stays quiet for an ordinary wait, and when nobody could ask", () => {
     expect(ids({ pagesDatabaseWaitMs: 40 })).not.toContain("pages-waiting-for-database");
     expect(ids({ pagesDatabaseWaitMs: null })).not.toContain("pages-waiting-for-database");
+  });
+});
+
+describe("work waiting to start (#813)", () => {
+  it("pages when one shop's run has waited minutes for the worker", () => {
+    // The 1-variant apply the gate times, stuck behind another shop's 102,132-variant run.
+    expect(ids({ shopRunWaits: [{ shopId: "dartmode", waitMs: RUN_WAIT_MS + 1 }] })).toContain("shop-run-waiting");
+  });
+
+  it("stays quiet for a run that is merely next, and when nobody could read the queue", () => {
+    expect(ids({ shopRunWaits: [{ shopId: "dartmode", waitMs: RUN_WAIT_MS }] })).not.toContain("shop-run-waiting");
+    expect(ids({ shopRunWaits: [] })).not.toContain("shop-run-waiting");
+    expect(ids({ shopRunWaits: null })).not.toContain("shop-run-waiting");
+  });
+
+  it("fires once however many shops are waiting", () => {
+    const fired = evaluate({
+      ...quiet,
+      shopRunWaits: [
+        { shopId: "a", waitMs: RUN_WAIT_MS * 2 },
+        { shopId: "b", waitMs: RUN_WAIT_MS * 3 },
+      ],
+    }).filter((alert) => alert.id === "shop-run-waiting");
+    expect(fired).toHaveLength(1);
+  });
+
+  it("pages when a queue's front job has waited past the stall limit, whatever its depth", () => {
+    // Three jobs deep and stuck is the stall; hundreds deep and moving is not.
+    expect(ids({ queues: [{ queue: "webhooks", depth: 3, oldestWaitMs: QUEUE_STALLED_MS + 1 }] })).toContain(
+      "queue-stalled",
+    );
+    expect(ids({ queues: [{ queue: "webhooks", depth: 500, oldestWaitMs: 2_000 }] })).not.toContain(
+      "queue-stalled",
+    );
+  });
+
+  it("leaves execution to the per-shop alert and the audit queue to nobody", () => {
+    // Execution has its own, tighter page; `NOT_ALERTS` says the audit queue never pages.
+    const old = QUEUE_STALLED_MS * 6;
+    expect(ids({ queues: [{ queue: "execution", depth: 1, oldestWaitMs: old }] })).not.toContain("queue-stalled");
+    expect(ids({ queues: [{ queue: "audit", depth: 900, oldestWaitMs: old }] })).toEqual([]);
+  });
+
+  it("does not read an empty queue as a stalled one", () => {
+    expect(ids({ queues: [{ queue: "sync", depth: 0, oldestWaitMs: null }] })).toEqual([]);
   });
 });
 
@@ -92,6 +156,8 @@ describe("what a missing signal means", () => {
         unpriceableVariants: null,
         pagesDatabaseWaitMs: null,
         shopRates: null,
+        queues: null,
+        shopRunWaits: null,
       }),
     ).toEqual([]);
   });
@@ -130,17 +196,7 @@ describe("every alert is actionable", () => {
   it("has a runbook and says why it matters", () => {
     // An alert without a runbook is a notification, and a notification at 3am is worse
     // than nothing because somebody is now awake and none the wiser.
-    const all = evaluate({
-      secondsSinceTick: 10_000,
-      webhookLagMs: 10 * 60_000,
-      errors: 100,
-      requests: 100,
-      divergenceRate: 0.5,
-      executionQueueDepth: 5_000,
-      unpriceableVariants: 400,
-      pagesDatabaseWaitMs: 60_000,
-      shopRates: [{ shopId: "shop-1", errors: 40, requests: 100 }],
-    });
+    const all = evaluate(everythingWrong);
 
     expect(all.length).toBeGreaterThan(0);
     for (const alert of all) {
@@ -169,6 +225,8 @@ describe("one shop failing while the rest are fine", () => {
     executionQueueDepth: 0,
     unpriceableVariants: 0,
     pagesDatabaseWaitMs: 0,
+    queues: null,
+    shopRunWaits: null,
   };
 
   const ids = (window: Parameters<typeof evaluate>[0]) => evaluate(window).map((a) => a.id);
@@ -254,22 +312,12 @@ describe("every alert leads somewhere", () => {
 
   // Every condition at once, so a new alert is covered without anybody remembering to add
   // it here.
-  const all = evaluate({
-    secondsSinceTick: 10_000,
-    webhookLagMs: 10 * 60_000,
-    errors: 100,
-    requests: 100,
-    divergenceRate: 0.5,
-    executionQueueDepth: 5_000,
-    unpriceableVariants: 400,
-    pagesDatabaseWaitMs: 60_000,
-    shopRates: [{ shopId: "shop-1", errors: 40, requests: 100 }],
-  });
+  const all = evaluate(everythingWrong);
 
   it("fires every condition, so this file cannot silently stop covering one", () => {
     // If a condition is added and this number is not, the assertions below stop being
     // exhaustive without failing — which is the same rot they exist to prevent.
-    expect(all.length).toBe(8);
+    expect(all.length).toBe(10);
   });
 
   for (const alert of all) {

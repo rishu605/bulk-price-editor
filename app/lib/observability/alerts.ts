@@ -62,6 +62,33 @@ export interface SignalWindow {
    * for per-shop spikes for exactly this reason.
    */
   shopRates: ShopRate[] | null;
+  /**
+   * Every queue's depth and how long its longest-waiting job has waited to start, or null
+   * when Redis could not be read (#813).
+   *
+   * The age is what depth cannot say. A dozen shops' webhook drains queued at once (#811)
+   * are gone in seconds; one job sitting at the front for ten minutes is a queue nothing is
+   * taking from -- and a stalled `webhooks` queue produces no processed deliveries, so
+   * `webhook-lag`, computed from those, goes quiet rather than firing.
+   */
+  queues: QueueSignal[] | null;
+  /**
+   * How long each shop's longest-waiting run has waited in `execution`, or null when Redis
+   * could not be read (#813). Only shops with a run waiting have a row.
+   */
+  shopRunWaits: ShopRunWait[] | null;
+}
+
+export interface QueueSignal {
+  queue: string;
+  depth: number;
+  /** Null when nothing is waiting, which is not the same as a wait of zero. */
+  oldestWaitMs: number | null;
+}
+
+export interface ShopRunWait {
+  shopId: string;
+  waitMs: number;
 }
 
 export interface ShopRate {
@@ -106,17 +133,38 @@ export const DIVERGENCE_RATE = 0.005;
 export const EXECUTION_BACKLOG = 50;
 
 /**
- * How long `/healthz`'s trivial query may wait before the app reads as degraded (#803).
+ * How long the web process's `/healthz` may wait for the database before somebody is woken
+ * for it (#803).
  *
- * `SELECT 1` takes a millisecond; anything over this is time spent waiting for a pooled
- * connection, which is what every page in the app is doing at the same moment. One shop's
- * 102,132-variant apply ran the pool dry: the check took 6.8 to 10.4 seconds and still
- * said "ok" while every shop's pages were blank.
+ * `SELECT 1` takes a millisecond; anything over it is time spent waiting for a pooled
+ * connection, which every page in the app is doing at the same moment. One shop's
+ * 102,132-variant apply ran the pool dry: the check took 6.8 to 10.4 seconds and still said
+ * "ok" while every shop's pages were blank. `/healthz` itself reads degraded much earlier,
+ * at `DATABASE_WAIT_DEGRADED_MS` in `health.ts` -- a reading, where this is a page.
  */
-export const DATABASE_WAIT_DEGRADED_MS = 2_000;
-
-/** And how long before somebody is woken for it. */
 export const PAGES_DATABASE_WAIT_MS = 5_000;
+
+/**
+ * How long a shop's run may wait to start before somebody is woken (#813).
+ *
+ * An `execution` job is a merchant's Apply, Revert or scheduled end that the worker has not
+ * picked up. Two minutes is four ticks, and long past the gate's 30 s for a 1-variant apply;
+ * by then the merchant is looking at "Applying" with nothing happening, or a sale is running
+ * past its end -- and it is one shop waiting behind another's run, which is #807's failure.
+ */
+export const RUN_WAIT_MS = 2 * 60_000;
+
+/**
+ * How long any other queue's front job may wait before the queue counts as stalled (#813).
+ *
+ * Ten minutes, because `sync` runs one import at a time and the perf store's takes about
+ * three -- a shop waiting behind two of them is busy, not stuck. `execution` has its own,
+ * tighter alert above; `audit` has none, for the reason `NOT_ALERTS` gives.
+ */
+export const QUEUE_STALLED_MS = 10 * 60_000;
+
+/** The queues `queue-stalled` watches: everything with a consequence and no alert of its own. */
+const STALL_WATCHED: ReadonlySet<string> = new Set(["sync", "webhooks", "planning", "verification"]);
 
 /**
  * Which alerts a window of signals fires.
@@ -242,6 +290,39 @@ export function evaluate(window: SignalWindow): AlertCondition[] {
         "Every shop's pages are slow or blank, and a run writing prices in the web process can die of a " +
         "pool timeout part-way, leaving prices half-changed (#802). One shop's large write ran the pool dry.",
       runbook: "docs/runbooks.md#alert-pages-waiting-for-the-database",
+    });
+  }
+
+  // Per shop, the way the error rate is: the backlog alert above counts jobs, and one
+  // shop's run waiting behind another's is a single job that no count notices (#813).
+  const waiting = (window.shopRunWaits ?? []).filter((shop) => shop.waitMs > RUN_WAIT_MS);
+  if (waiting.length > 0) {
+    firing.push({
+      id: "shop-run-waiting",
+      severity: "page",
+      title: "A shop's campaign run is waiting to start",
+      because:
+        "A merchant pressed Apply or Revert, or a scheduled end came due, and the worker has not picked it " +
+        "up: their page reads Applying or Reverting with nothing happening, or a sale is running past its end.",
+      runbook: "docs/runbooks.md#alert-a-shops-run-is-waiting-to-start",
+    });
+  }
+
+  // One alert however many queues, for the reason `shop-error-spike` fires once: several
+  // queues stalled together is one stopped consumer, and one page.
+  const stalled = (window.queues ?? []).filter(
+    (queue) => STALL_WATCHED.has(queue.queue) && queue.oldestWaitMs !== null && queue.oldestWaitMs > QUEUE_STALLED_MS,
+  );
+  if (stalled.length > 0) {
+    firing.push({
+      id: "queue-stalled",
+      severity: "page",
+      title: "Background work has stopped being picked up",
+      because:
+        "A queue's front job has waited more than ten minutes to start. A stalled webhooks or sync queue is a " +
+        "mirror going stale with no error anywhere -- the webhook-lag alert reads processed deliveries, and " +
+        "there are none.",
+      runbook: "docs/runbooks.md#alert-background-work-is-not-being-picked-up",
     });
   }
 
