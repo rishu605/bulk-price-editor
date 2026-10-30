@@ -18,6 +18,7 @@ import { confirmShopTimezone, windowInStoreZone } from "../services/shop-timezon
 import { facetDetails } from "../lib/segments/facets";
 import { facets } from "../services/segments.server";
 import { createCampaign } from "../services/campaigns/index.server";
+import { requestPlanSummary } from "../services/campaigns/plan-summary.server";
 import { unsavedCampaign } from "../services/campaigns/model.server";
 import { saveStart } from "../services/campaigns/start-confirmation.server";
 import type { CampaignInput } from "../services/campaigns/types";
@@ -434,6 +435,9 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
   }
 
   const campaign = await createCampaign(shop.id, input, { actor });
+  // Planned in the background as it is created when its scope is too large to plan as its
+  // page loads, so the page it lands on finds a plan ready or on its way (#812).
+  await requestPlanSummary(shop.id, campaign.id);
 
   return redirect(`/app/campaigns/${campaign.id}`);
 });

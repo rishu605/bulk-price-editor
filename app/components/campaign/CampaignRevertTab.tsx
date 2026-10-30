@@ -9,8 +9,9 @@
 
 import { RollbackReportTable } from "../../components/RollbackReportTable";
 import { ActionRow } from "../ActionRow";
-import { downloadCsv, filenameSlug } from "../../lib/reporting/csv";
-import { rollbackReportCsv, rollbackSummary, unaffectedSentence } from "../../lib/reporting/rollback";
+import { filenameSlug } from "../../lib/reporting/csv";
+import { rollbackSummary, unaffectedSentence } from "../../lib/reporting/rollback";
+import { ExportButton } from "../ExportButton";
 import type { CampaignDetailProps } from "./props";
 import { Card } from "../Card";
 import { countOf } from "../../lib/format/display";
@@ -56,7 +57,7 @@ export function CampaignRevertTab({ rollback, preview, fetcher, busy }: Campaign
 
           <fetcher.Form method="post">
             <input type="hidden" name="intent" value="revert" />
-            <RollbackReportTable rows={rollback.rows} />
+            <RollbackReportTable rows={rollback.rows} total={rollback.counts.total} />
             <ActionRow>
               {/* "Keeping the ticked edits" only where there is a box to tick (#759). With
                   none, the same confirmation the header's Revert opens: a second revert
@@ -76,19 +77,14 @@ export function CampaignRevertTab({ rollback, preview, fetcher, busy }: Campaign
                   Revert, keeping the ticked edits
                 </s-button>
               )}
-              <s-button
-                type="button"
-                variant="tertiary"
-                icon="download"
-                onClick={() =>
-                  downloadCsv(
-                    `rollback-${filenameSlug(preview.name) || "campaign"}.csv`,
-                    rollbackReportCsv(rollback),
-                  )
-                }
-              >
-                Export this report (CSV)
-              </s-button>
+              {/* Every row, read on the server (#812, as #819 did for the others): the page
+                  carries only the rows this tab renders, which at 102,132 variants is the
+                  difference between a report and a page that does not load. */}
+              <ExportButton
+                href={`/app/export/rollback?campaign=${encodeURIComponent(preview.campaignId)}`}
+                filename={`rollback-${filenameSlug(preview.name) || "campaign"}.csv`}
+                rows={rollback.counts.total}
+              />
             </ActionRow>
           </fetcher.Form>
         </Card>

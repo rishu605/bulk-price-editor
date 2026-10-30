@@ -36,7 +36,7 @@ import { overBudget, refuseInline, type InlineWork } from "../../lib/execution/i
 import { recordClaim, releaseClaim, transitionCampaign } from "./lifecycle.server";
 import { endingLateWatch } from "./ending-late.server";
 import { clearQueuedRefused, recordEndMissed, recordQueuedRefused, recordStartRefused } from "./start-refusal.server";
-import { refuseUnconfirmedStart } from "./start-confirmation.server";
+import { refuseUnconfirmedStart, refuseUntypedPress } from "./start-confirmation.server";
 import { startsUnattended } from "../../lib/audit/actor";
 import { queuedVerb } from "../../lib/campaigns/queued-refusal";
 import { refusedForGood, startRefusedEntry } from "../../lib/scheduling/start-refusal";
@@ -159,6 +159,13 @@ export interface RunOptions {
   skipVariantGids?: string[];
   /** Why `skipVariantGids` were left alone, for their ledger rows. */
   skipReason?: string;
+  /**
+   * An Apply pressed on the campaign page without "apply" typed (#812). The press was let
+   * through on the campaign's stored preview, which did not ask for the word; this run checks
+   * its own plan, and refuses before writing if that plan asks after all. Carried to the
+   * worker for a run handed there.
+   */
+  untypedPress?: boolean;
 }
 
 export async function runCampaign(
@@ -666,6 +673,7 @@ async function executeCampaignRun(
       actor: options.actor,
       skipVariantGids: options.skipVariantGids,
       skipReason: options.skipReason,
+      untypedPress: options.untypedPress,
     });
     if (queued) return queued;
     // No worker queue. A revert runs here as it always did -- ending a sale must always be
@@ -784,6 +792,11 @@ async function executeCampaignRun(
   // plan, before the run row, so a refusal writes nothing and is a refusal for good.
   if (unattendedStart) {
     await refuseUnconfirmedStart(shopId, campaignRecord, options.actor, { ...outcome, candidates });
+  }
+  // An Apply pressed without the word over a stored preview that did not ask for it (#812):
+  // the same check, on this plan, so a stale stored number can never be what skipped it.
+  if (options.untypedPress && !options.revert && !options.variantGids) {
+    await refuseUntypedPress(shopId, campaignId, { ...outcome, candidates });
   }
 
   const kind = options.revert ? "REVERT" : "APPLY";

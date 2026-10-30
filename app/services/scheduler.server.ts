@@ -188,6 +188,15 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
     logger.warn("could not prune the error log", { error: error instanceof Error ? error.message : String(error) });
   }
 
+  // The log of writes stored plans are judged against (#812), past the age any summary could
+  // still be current about. Last as well, on the same terms.
+  try {
+    const { prunePlanInputChanges } = await import("./campaigns/plan-summary.server");
+    await prunePlanInputChanges(now);
+  } catch (error) {
+    logger.warn("could not prune the plan-input log", { error: error instanceof Error ? error.message : String(error) });
+  }
+
   // Emitted every tick, including the quiet ones. A scheduler panel that only has data
   // when something happened cannot distinguish "nothing was due" from "the worker died"
   // — and those need very different responses.

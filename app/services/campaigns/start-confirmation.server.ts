@@ -15,7 +15,13 @@
 
 import prisma from "../../db.server";
 import { FLOW_ACTOR, SCHEDULER_ACTOR } from "../../lib/audit/actor";
-import { confirmThresholdsOf, typedTheWord, type BlastRadius } from "../../lib/campaigns/blast-radius";
+import {
+  asksForConfirmation,
+  confirmationReasons,
+  confirmThresholdsOf,
+  typedTheWord,
+  type BlastRadius,
+} from "../../lib/campaigns/blast-radius";
 import {
   confirmationOf,
   confirmedReach,
@@ -97,6 +103,34 @@ export async function refuseUnconfirmedStart(
     code: "VALIDATION",
     userMessage: `${unconfirmed} ${nextStep(actor)}`,
     context: { campaignId: campaign.id, unconfirmedStart: true },
+  });
+}
+
+/**
+ * Refuses an Apply pressed on the campaign page without "apply" typed, when this run's own
+ * plan asks for it (#812).
+ *
+ * The press is checked before the run against the campaign's stored preview, which is what
+ * the dialog showed -- and a stored number can be stale. A sale previewed at 10% off eight
+ * variants, edited or re-scoped since, may plan 95% off two thousand: the dialog asked for
+ * nothing and the stored preview said so. So the run checks again, on the plan that decides
+ * what it writes, in the reading the dialog uses (`blastRadiusOf`), before its run row exists:
+ * a refusal writes nothing. A stored number can make the press ask when it need not; it can
+ * never be why the word was skipped.
+ */
+export async function refuseUntypedPress(shopId: string, campaignId: string, plan: StartPlan): Promise<void> {
+  const thresholds = confirmThresholdsOf(await readSettings(shopId));
+  const radius = await blastRadiusOf(shopId, plan.rows, plan.counts, plan.candidates, thresholds, new Map());
+  if (!asksForConfirmation(radius)) return;
+
+  throw new AppError({
+    code: "VALIDATION",
+    // The dialog's own sentences, as the press refuses with them (#818): no prices, only
+    // counts, percentages and a title.
+    userMessage:
+      `${confirmationReasons(radius).join(" ")} The preview this was pressed over said less, because it was worked ` +
+      "out before something changed, so nothing was written. Type “apply” in the confirmation box to run it.",
+    context: { campaignId, untypedPress: true },
   });
 }
 

@@ -100,6 +100,13 @@ export interface JobRef {
   resume?: boolean;
   /** Who asked, so what the run resolves on their behalf is attributed to them. */
   actor?: string;
+  /**
+   * An apply pressed on the campaign page without "apply" typed, because the preview it was
+   * pressed over did not ask for it (#812). The worker's run checks its own plan before it
+   * writes, and refuses where the page can see if that plan asks after all: the preview is
+   * stored, and a stored number that was stale must never be what skipped the word.
+   */
+  untypedPress?: boolean;
   /** Variants the merchant asked to leave as they are, and why (#790). */
   skipVariantGids?: string[];
   skipReason?: string;

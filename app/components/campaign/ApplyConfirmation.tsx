@@ -77,7 +77,10 @@ export function ApplyConfirmation({
    */
   onConfirm: (confirmation: string) => void;
 }) {
-  const { counts, markets, blastRadius, confirm, writePath } = preview;
+  const { counts, markets, confirm, writePath, recomputing } = preview;
+  // Over numbers that are no longer current the word is asked whatever they say (#812): the
+  // server asks for it too, and a stored count that under-counts must not be what skipped it.
+  const blastRadius = preview.blastRadius || Boolean(recomputing);
 
   // Read at click time rather than held in state. Polaris fields are uncontrolled here
   // (see `docs/polaris-notes.md` on `defaultValue`), and the value is wanted once.
@@ -216,7 +219,14 @@ export function ApplyConfirmation({
             should know which of the three they are confirming. */}
         {blastRadius ? (
           <s-banner tone="warning">
-            {(confirm ? confirmationReasons(confirm) : [`This campaign writes ${formatCount(counts.planned)} prices.`]).map(
+            {/* The page's own sentence for these numbers, where the decision is made (#812). */}
+            {recomputing ? <s-paragraph>{recomputing}</s-paragraph> : null}
+            {(preview.blastRadius
+              ? confirm
+                ? confirmationReasons(confirm)
+                : [`This campaign writes ${formatCount(counts.planned)} prices.`]
+              : []
+            ).map(
               (reason) => (
                 <s-paragraph key={reason}>{reason}</s-paragraph>
               ),

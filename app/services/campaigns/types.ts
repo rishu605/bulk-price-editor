@@ -228,6 +228,25 @@ export interface CampaignPreview {
    */
   writing?: string;
   /**
+   * Set instead of a plan while this campaign's first plan is worked out in the background
+   * (#812): its scope is too large to plan while the page loads, and nothing is stored yet.
+   * The page says this rather than a preview of zeros, and offers no Apply until there is a
+   * preview to confirm.
+   */
+  planning?: string;
+  /**
+   * Set over a stored plan that is not current (#812): something it depends on has changed
+   * since it was worked out, and it is being worked out again. The page shows these numbers
+   * -- the last it has -- with this sentence beside them, never as the answer, and the Apply
+   * dialog asks for the word typed whatever they say.
+   */
+  recomputing?: string;
+  /**
+   * When the plan these numbers came from was made, for a stored one (#812): the page follows
+   * a plan being worked out until a newer one is stored.
+   */
+  asOf?: string;
+  /**
    * Every live campaign sharing this one's variants, and who prices them (#821). On a
    * revert preview, the ones that keep the variants this campaign gives up.
    */

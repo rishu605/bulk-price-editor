@@ -92,6 +92,25 @@ export const PAGE_INLINE_BUDGET_MS = 2 * 60 * 1000;
  */
 export const PAGE_INLINE_LADDER_READS = 40;
 
+/**
+ * The largest scope the campaign page plans while it loads, when it has no current stored
+ * plan to read (#812). Larger, and the plan is handed to the worker and the page shows the
+ * last numbers it has -- or says one is being worked out -- until the worker's plan arrives.
+ *
+ * A plan's cost grows with the scope: 2 min 20 s for 102,132 variants on an idle server
+ * (#803), about 1.4 ms a variant, every candidate, baseline and market price read. The page
+ * is meant to answer in under 1.5 s at p95, so the plan inside it has to fit with room for
+ * the rest of the loader: 500 variants is about 0.7 s at that rate. Inline below it, because
+ * a small campaign planned while the page loads is current the moment it is shown, where one
+ * handed to the worker is "being worked out" for the seconds a job takes to be picked up --
+ * and the small campaigns are most of them.
+ *
+ * Counted by `scopeSize`, one indexed count, never from a stored summary's own numbers: a
+ * stale one that said 300 for a scope a catalogue import took to 102,132 would plan the very
+ * campaign this exists to keep out of the page.
+ */
+export const PAGE_INLINE_PLAN_VARIANTS = 500;
+
 /** What a run will do, counted before it starts. */
 export interface InlineWork {
   /** Variants in scope. Over `DEFAULT_THRESHOLD` the run takes the bulk path. */

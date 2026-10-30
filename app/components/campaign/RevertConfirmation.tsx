@@ -96,8 +96,13 @@ export function RevertConfirmation({
 
         {/* The half no competitor can render: not "some prices may not return to normal",
             but which campaign holds which variants, by name. */}
-        {pending ? (
+        {pending || (keepers?.recomputing && keepers.keepers.length === 0) ? (
           <Secondary>Working out what the prices would become…</Secondary>
+        ) : null}
+        {/* The last answer worked out, when something has changed since (#812): shown, and
+            said to be that, while a new one is worked out. */}
+        {keepers?.recomputing && keepers.keepers.length > 0 ? (
+          <Secondary>Worked out before the latest changes, and being worked out again.</Secondary>
         ) : null}
 
         {keepers && keepers.keepers.length > 0 ? (
@@ -118,7 +123,7 @@ export function RevertConfirmation({
           </s-banner>
         ) : null}
 
-        {keepers && keepers.keepers.length === 0 && !pending ? (
+        {keepers && keepers.keepers.length === 0 && !pending && !keepers.recomputing ? (
           <Secondary>
             No other campaign covers these variants, so every one of them returns to its
             baseline.

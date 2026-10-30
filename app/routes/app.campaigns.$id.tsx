@@ -6,13 +6,8 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { ensureShop } from "../services/shop.server";
 import { toAdminClient } from "../services/admin-client.server";
-import {
-  campaignRuns,
-  pagePreview,
-  rollbackReport,
-  runCampaign,
-  runToResume,
-} from "../services/campaigns/index.server";
+import { campaignRuns, runCampaign, runToResume } from "../services/campaigns/index.server";
+import { campaignPagePlan } from "../services/campaigns/plan-summary.server";
 import { PAGE_INLINE_BUDGET_MS } from "../lib/execution/inline-budget";
 import { runResponse } from "../lib/campaigns/run-response";
 import { ResultBanner } from "../components/ResultBanner";
@@ -22,6 +17,7 @@ import { scheduledWindow } from "../lib/scheduling/window-input";
 import { zoneShiftOf } from "../lib/scheduling/zone-shift";
 import { scheduleAction } from "../services/campaigns/schedule-control.server";
 import { RunHistoryTable } from "../components/RunHistoryTable";
+import { rowsToShow } from "../components/RollbackReportTable";
 import { RunResultSection } from "../components/RunResultSection";
 import { runEvidence } from "../services/campaigns/run-evidence.server";
 import { lifecycleContext } from "../services/campaigns/lifecycle-context.server";
@@ -29,7 +25,7 @@ import { variantAction } from "../services/campaigns/variant-action.server";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { reportError } from "../services/error-report.server";
 import { withGuard } from "../lib/errors/guard.server";
-import { pressRefusal } from "../services/campaigns/blast-radius.server";
+import { pressCheck } from "../services/campaigns/blast-radius.server";
 import { describeCampaign } from "../lib/campaigns/describe";
 import { astOf, DEFINITION, isPractice, ruleOf, segmentNameOf } from "../services/campaigns/model.server";
 import { actorFor } from "../lib/audit/actor";
@@ -47,6 +43,7 @@ import { PageShell } from "../components/PageShell";
 import { CampaignTabs, currentTab, tabsFor } from "../components/campaign/CampaignTabs";
 import { useKeepers } from "../components/campaign/useKeepers";
 import { IN_FLIGHT, useRunPolling } from "../components/campaign/useRunPolling";
+import { usePlanPolling } from "../components/campaign/usePlanPolling";
 import { CampaignHeader } from "../components/campaign/CampaignHeader";
 import { CampaignOverviewTab } from "../components/campaign/CampaignOverviewTab";
 import { CampaignPreviewTab } from "../components/campaign/CampaignPreviewTab";
@@ -60,11 +57,10 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
   const shop = await ensureShop(session.shop);
   const campaignId = String(params.id);
 
-  const [preview, runs, record] = await Promise.all([
-    // The client lets the review step say how each market will actually be written.
-    // Without it the preview says the choice is made at run time, which is honest but
-    // less useful than the answer.
-    pagePreview(shop.id, campaignId, { client: toAdminClient(admin) }), // no plan while a run writes (#803)
+  const [plan, runs, record] = await Promise.all([
+    // Stored, not planned, once a current plan is (#812); none while a run writes (#803). The
+    // client lets a plan made here say how each market will actually be written.
+    campaignPagePlan(shop.id, campaignId, { client: toAdminClient(admin), timeZone: shop.timezone }),
     campaignRuns(shop.id, campaignId),
     prisma.campaign.findFirstOrThrow({
       where: { id: campaignId, shopId: shop.id },
@@ -82,6 +78,7 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     }),
   ]);
 
+  const { preview } = plan;
   const approval = await approvalFor(shop.id, campaignId);
   const state = record.status as CampaignState;
   const practice = isPractice(record);
@@ -113,16 +110,16 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
   );
 
   // Only for a campaign that has actually written something and could still be
-  // reverted. It costs a full plan, and on a draft it would be a report about
-  // nothing -- the honest answer there is that there is nothing to roll back.
+  // reverted: on a draft it would be a report about nothing. Stored with the plan (#812);
+  // until one has been worked out, Revert waits for it rather than skipping the report.
   const revertable = state === "ACTIVE" || state === "PARTIAL" || state === "HELD";
-  const rollback =
-    revertable && runs.some((run) => run.kind === "APPLY")
-      ? await rollbackReport(shop.id, campaignId)
-      : null;
+  const wantsRollback = revertable && runs.some((run) => run.kind === "APPLY");
+  const rollback = wantsRollback ? plan.rollback : null;
 
   return {
-    rollback,
+    // The rows the Revert tab renders, not all 102,132: the export reads every one (#812).
+    rollback: rollback && { ...rollback, rows: rowsToShow(rollback.rows) },
+    rollbackPending: wantsRollback && !rollback,
     preview,
     runs,
     ledger,
@@ -211,9 +208,10 @@ export const action = withGuard("/app/campaigns/$id", async ({ request, params }
     (intent === "resume" && (await runToResume(String(params.id)))?.kind === "REVERT");
 
   // A-3.11: over the blast-radius threshold a merchant types the word first, and the
-  // check is here rather than only in the modal. See `pressRefusal`.
-  const refusal = await pressRefusal(shop.id, campaignId, intent, String(form.get("confirmation") ?? ""));
-  if (refusal) return { ok: false, message: refusal, details: [] };
+  // check is here rather than only in the modal. See `pressCheck`; an untyped press is
+  // checked again on the run's own plan (#812).
+  const press = await pressCheck(shop.id, campaignId, intent, String(form.get("confirmation") ?? ""), toAdminClient(admin));
+  if (press.refusal) return { ok: false, message: press.refusal, details: [] };
 
   try {
     // Reverting one variant out of a running campaign, rather than ending the whole
@@ -234,6 +232,7 @@ export const action = withGuard("/app/campaigns/$id", async ({ request, params }
       // meaningful on a revert; an apply has no drifted-row conversation to honour.
       skipVariantGids: reverting ? form.getAll("keep").map(String) : undefined,
       inlineBudgetMs: PAGE_INLINE_BUDGET_MS, // this request's deadline: longer goes to the worker (#790)
+      untypedPress: press.untyped && !reverting,
     });
 
     // Deferred, refused and clean all come back looking alike — see `runResponse`,
@@ -296,12 +295,14 @@ export default function CampaignDetail() {
   // control that exists only to be refused undermines the promise the merchant was given
   // when they chose practice.
   // Nor a stored rule the run refuses (#818): the preview says why.
-  const unappliable = Boolean(preview.blocked || preview.refused);
+  // Nor before there is a preview to confirm (#812).
+  const unappliable = Boolean(preview.blocked || preview.refused || preview.planning);
   const canApply = !practice && !unappliable && canTransition(state, "APPLYING") && !IN_FLIGHT.has(state);
 
   const tabs = tabsFor({ runs, rollback, ledger, ledgerTotal: data.ledgerTotal });
   const { keepers, pending: keepersPending } = useKeepers(rollback);
   useRunPolling(data.campaignId, state); // a run in the worker, followed to its end (#790)
+  usePlanPolling(data.campaignId, preview); // a plan in the worker, followed until it is stored (#812)
   const [params] = useSearchParams();
   const tab = currentTab(tabs, params.get("tab"));
 

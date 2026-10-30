@@ -49,6 +49,7 @@ export const INSTRUMENTS: Record<Metric, "counter" | "histogram" | "gauge"> = {
   "queue.depth": "gauge",
   "queue.enqueued": "counter",
   "queue.failed": "counter",
+  "plan.summary_ms": "histogram",
 };
 
 let enabled = false;

@@ -63,7 +63,14 @@ export type Metric =
   | "queue.enqueued"
   /** Jobs that exhausted their attempts. A class failing every attempt is the thing an
    * operator most needs to know, and the queue library's default is silence. */
-  | "queue.failed";
+  | "queue.failed"
+  /**
+   * How long one stored plan took to work out (#812), labelled by where -- the page, for a
+   * small scope, or the worker -- with the scope's size. The number the page no longer
+   * waits on, and the one that says whether the inline threshold is set right. Counts and
+   * durations only, never a price.
+   */
+  | "plan.summary_ms";
 
 export interface MetricLabels {
   shopId?: string;
