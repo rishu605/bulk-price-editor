@@ -80,14 +80,13 @@ the **Overview** tab. At the foot of that tab, below **New products**, is the li
 beside the ID, then paste it into the action's **Campaign ID** field. A practice campaign
 has no ID there, because Flow cannot start a practice campaign.
 
+![The foot of a campaign's Overview tab: below the "New products" card, a card headed "Campaign ID, used in Shopify Flow" shows the campaign's ID with a clipboard button beside it, and the line "Paste it into Anchor's Start a price campaign or End a price campaign action."](../images/flow-campaign-id.png)
+
 **A segment's ID.** Open **Settings**, then the **Segments** tab. In the **Your segments**
 table, each segment's ID is the grey line under its name, with the same clipboard button
 beside it. Paste it into the **Segment ID** field of *Capture baselines for a segment*.
 
+![Settings, Segments tab: the "Your segments" table, explaining that Shopify Flow's Capture baselines for a segment action asks for a segment's ID. Each row shows a segment's name with its ID in grey underneath and a clipboard button beside it, then its kind, variant count, the campaigns using it, and Edit and Delete buttons.](../images/flow-segment-id.png)
+
 If the browser blocks the copy, Anchor says so. Select the ID and copy it with Ctrl+C, or
 ⌘C on a Mac.
-
-<!-- TODO(#826): screenshots of both places, cropped as docs/help/images/README.md says:
-     the foot of a campaign's Overview tab showing "Campaign ID, used in Shopify Flow",
-     and Settings > Segments showing an ID under a segment's name. Put them under each
-     paragraph above, with alt text that describes what they show. -->
