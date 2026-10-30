@@ -125,8 +125,9 @@ not after.
 | Variable | Absent means |
 |---|---|
 | `SENTRY_DSN` | Errors stay local. Every failure still lands in `error_events` with an id a merchant can quote. |
-| `SENTRY_RELEASE` | Falls back to `SOURCE_VERSION`. With neither, Sentry releases are untagged and Contact support's "App version" reads `dev`, so a support thread cannot be lined up with a stack trace. |
-| `SOURCE_VERSION` | The build's commit, where the platform provides one; the fallback for `SENTRY_RELEASE`. |
+| `SENTRY_RELEASE` | Falls back to `SOURCE_VERSION`, then `RAILWAY_GIT_COMMIT_SHA`. With none of them, Sentry releases are untagged and Contact support's "App version" reads `dev`, so a support thread cannot be lined up with a stack trace. |
+| `SOURCE_VERSION` | The build's commit, where the platform provides one (Heroku does; Railway does not); the first fallback for `SENTRY_RELEASE`. |
+| `RAILWAY_GIT_COMMIT_SHA` | Set by Railway on every deploy, never by hand: the deployed commit, and the release name when neither variable above is set (#1147). |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Metrics stay in the logs rather than going to a collector. |
 | `OPERATOR_ALERT_EMAIL` | Nobody is paged for a systematic failure. |
 | `HELP_BASE_URL` | Help links point at this deploy's own `/help`. Set it only to move the docs onto hosting that survives an outage of this app — `failures/app-unavailable` is otherwise served by the app it describes. |
