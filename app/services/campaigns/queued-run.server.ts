@@ -29,6 +29,8 @@ export interface QueuedRunOptions {
   /** The rollback report's "leave as it is" (#790): carried to the worker, never dropped. */
   skipVariantGids?: string[];
   skipReason?: string;
+  /** An Apply pressed without the word, which the worker's run checks on its own plan (#812). */
+  untypedPress?: boolean;
 }
 
 const nothing = { runId: "", planned: 0, verified: 0, failed: 0, unverified: 0, clean: true };
@@ -45,7 +47,7 @@ export async function queueRun(
   campaignId: string,
   /** Why it cannot run here, from `overBudget`: names the size and the reason. */
   reason: string,
-  { revert, actor, resume, skipVariantGids, skipReason }: QueuedRunOptions,
+  { revert, actor, resume, skipVariantGids, skipReason, untypedPress }: QueuedRunOptions,
 ): Promise<RunOutcome | null> {
   const verb = revert ? "reverting" : "applying";
   const queue = webQueue();
@@ -81,6 +83,7 @@ export async function queueRun(
       ...(resume ? { resume } : {}),
       ...(actor ? { actor } : {}),
       ...(skipVariantGids?.length ? { skipVariantGids, skipReason } : {}),
+      ...(untypedPress && !revert ? { untypedPress: true } : {}),
     });
   } catch (error) {
     await releaseClaim(shopId, campaignId, before, {

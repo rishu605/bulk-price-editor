@@ -19,7 +19,9 @@ import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
 import { toAdminClient } from "../services/admin-client.server";
 import { runLedger } from "../services/campaigns/history.server";
-import { pagePreview } from "../services/campaigns/preview.server";
+import { pagePreview, writingText } from "../services/campaigns/preview.server";
+import { currentRollback } from "../services/campaigns/plan-summary.server";
+import { rollbackReportCsv } from "../lib/reporting/rollback";
 import { reconcile } from "../services/reconciliation.server";
 import { browseBaselines } from "../services/baseline-browser.server";
 import { activity } from "../services/activity.server";
@@ -70,6 +72,21 @@ export const loader = withGuard("/app/export/$kind", async ({ request, params }:
       if (preview.writing) return refuse(409, `${preview.writing} Export the preview once it has finished.`);
       if (preview.rows.length > EXPORT_ROW_LIMIT) return tooLarge(preview.counts.planned);
       return csv(`preview-${filenameSlug(preview.name) || "campaign"}.csv`, previewCsv(preview.rows, preview.markets));
+    }
+
+    // Every row of the rollback report (#812): the campaign page carries only those its
+    // Revert tab renders. The stored report when it is current, worked out again when not --
+    // an export is the merchant's record of what reverting does, so never a stale one.
+    case "rollback": {
+      const campaignId = query.get("campaign") ?? "";
+      const campaign = await prisma.campaign.findFirst({ where: { id: campaignId, shopId: shop.id }, select: { id: true, name: true, status: true } });
+      if (!campaign) return refuse(404, "That campaign isn't in this store. Reload the page and export again.");
+      if (campaign.status === "APPLYING" || campaign.status === "REVERTING") {
+        return refuse(409, `${writingText(campaign.status)} Export the rollback report once it has finished.`);
+      }
+      const report = await currentRollback(shop.id, campaign.id);
+      if (report.rows.length > EXPORT_ROW_LIMIT) return tooLarge(report.rows.length);
+      return csv(`rollback-${filenameSlug(campaign.name) || "campaign"}.csv`, rollbackReportCsv(report));
     }
 
     case "live":

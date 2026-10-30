@@ -53,7 +53,17 @@ export function rowsToShow(rows: RollbackRow[]): RollbackRow[] {
   return [...decisions, ...clean.slice(0, Math.max(0, ROWS_PER_VIEW - decisions.length))];
 }
 
-export function RollbackReportTable({ rows }: { rows: RollbackRow[] }) {
+export function RollbackReportTable({
+  rows,
+  total = rows.length,
+}: {
+  rows: RollbackRow[];
+  /**
+   * Every row in the report, when `rows` is already only the ones shown: the campaign page
+   * sends no more than this table renders, and the export reads the rest on the server (#812).
+   */
+  total?: number;
+}) {
   const shown = rowsToShow(rows);
 
   return (
@@ -61,7 +71,7 @@ export function RollbackReportTable({ rows }: { rows: RollbackRow[] }) {
         <TableBlock
       pagination={<ShowingSome
       shown={shown.length}
-      total={rows.length}
+      total={total}
       noun="rows"
       suffix="The rest need no decision; the export lists every one."
     />}

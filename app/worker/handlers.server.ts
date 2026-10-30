@@ -31,9 +31,12 @@ export async function handleJob(name: QueueName, ref: JobRef): Promise<JobResult
     // queue's first move from the web process, a change of caller as this said it would be.
     case "webhooks":
       return webhooksJob(ref);
-    // Planning and verification are performed inside the run today. They have queues so the
-    // topology is complete and so moving them is a change of caller rather than of design.
+    // A campaign's stored plan, for its page and dialogs (#812): the run's own plan is still
+    // made inside the run, and is the only one that decides prices.
     case "planning":
+      return planningJob(ref);
+    // Verification is performed inside the run today. It has a queue so the topology is
+    // complete and so moving it is a change of caller rather than a change of design.
     case "verification":
       return;
     default: {
@@ -76,8 +79,29 @@ async function runCampaignJob(ref: JobRef): Promise<void> {
     actor: ref.actor ?? SCHEDULER_ACTOR,
     skipVariantGids: ref.skipVariantGids,
     skipReason: ref.skipReason,
+    // A press of Apply without the word, checked again on this run's own plan (#812).
+    ...(ref.untypedPress ? { untypedPress: true } : {}),
     ...(ref.claimedFrom ? { claimedFrom: ref.claimedFrom as CampaignState } : {}),
   });
+}
+
+/**
+ * Plans a campaign for its page and stores the answer (#812). Without a usable session the
+ * plan is still made: it says each market's write is decided at run time, rather than leaving
+ * the page with no numbers at all.
+ */
+async function planningJob(ref: JobRef): Promise<void> {
+  if (!ref.campaignId) return;
+
+  const shop = await prisma.shop.findUnique({
+    where: { id: ref.shopId },
+    select: { domain: true, uninstalledAt: true },
+  });
+  if (!shop || shop.uninstalledAt) return;
+
+  const client = await adminClientForShop(shop.domain);
+  const { runPlanningJob } = await import("../services/campaigns/plan-summary.server");
+  await runPlanningJob(ref.shopId, ref.campaignId, client);
 }
 
 /**

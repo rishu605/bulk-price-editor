@@ -118,6 +118,7 @@ model Shop {
   auditEntries     AuditLogEntry[]
   errorEvents      ErrorEvent[]
   recaptures       BaselineRecapture[]
+  planSummaries    PlanSummary[]
 
   @@index([uninstalledAt])
   @@map("shops")
@@ -509,6 +510,7 @@ model Campaign {
   runs            CampaignRun[]
   driftEvents     DriftEvent[]
   approvals       Approval[]
+  planSummary     PlanSummary?
 
   @@index([shopId, status])
   @@index([shopId, startAt])
@@ -1208,4 +1210,61 @@ model SchedulerHeartbeat {
   instance String?
 
   @@map("scheduler_heartbeat")
+}
+
+// ------------------------------------------------------------- plan summaries
+
+/// A campaign's plan, stored (#812): what its page, its Apply and Revert dialogs and its
+/// rollback report read, instead of planning the whole campaign on every load.
+///
+/// Each answer is `previewCampaign`'s, `rollbackReport`'s and the Revert dialog's keepers as
+/// those functions returned them -- the planner the run uses (rule 4), stored rather than
+/// recomputed. The run plans again when it starts, and that plan alone decides prices.
+///
+/// `snapshot` is `pg_current_snapshot()` taken before the plan read anything. The summary is
+/// current while no write logged in `plan_input_changes` for its shop is invisible to it;
+/// see the migration, and `plan-summary.server.ts`.
+model PlanSummary {
+  campaignId String @id
+  shopId     String
+
+  /// The page's preview: counts, write path, the confirmation's reach, the table's rows,
+  /// overlaps, margins, markets. Null until first planned.
+  preview  Json?
+  /// The rollback report, for a campaign that has written something and can be reverted.
+  rollback Json?
+  /// Who keeps which variants once this campaign is reverted, for the Revert dialog.
+  keepers  Json?
+
+  snapshot     String?
+  /// The snapshot's xmin: no logged write older than this can be invisible to it, so the
+  /// freshness check reads only the log from here on.
+  snapshotXmin BigInt?
+  /// When the snapshot was taken: the moment the stored numbers describe.
+  computedAt   DateTime?
+  /// When a background plan was last asked for, so a page asks once rather than every load.
+  requestedAt  DateTime?
+
+  shop     Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([shopId])
+  @@map("plan_summaries")
+}
+
+/// One write to a table a plan reads, by shop and transaction (#812). Written by the
+/// database's own triggers, never by the app: see the migration that adds them.
+///
+/// No relation to the shop, deliberately: a shop's deletion cascades through the tables
+/// these triggers sit on, and a row referencing the shop being deleted would fail it.
+model PlanInputChange {
+  id     BigInt   @id @default(autoincrement())
+  shopId String
+  /// The writing transaction's id, `pg_current_xact_id()`, as a bigint.
+  xid    BigInt
+  at     DateTime
+
+  @@unique([shopId, xid])
+  @@index([at])
+  @@map("plan_input_changes")
 }

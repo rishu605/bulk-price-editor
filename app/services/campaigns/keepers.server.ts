@@ -1,3 +1,5 @@
+import prisma from "../../db.server";
+import { previewCampaign } from "./preview.server";
 import type { CampaignPreview } from "./types";
 
 /** A campaign that keeps some of the variants this one is giving up. */
@@ -12,6 +14,38 @@ export interface KeepersAfterRevert {
   repriced: number;
   /** Campaigns still covering some of those variants, biggest first. */
   keepers: Keeper[];
+  /**
+   * Set when this is the last answer worked out and something it depends on has changed
+   * since, or when there is none yet and one is being worked out (#812). The dialog says so
+   * rather than "no other campaign covers these variants" over an answer it does not have.
+   */
+  recomputing?: boolean;
+}
+
+/**
+ * Who keeps each variant once this campaign is reverted, worked out from a plan made with
+ * the campaign excluded -- the resolver's answer rather than a guess assembled from
+ * priorities. The Revert dialog asked for it as it opened (`app.revert-preview`); it is now
+ * worked out with the rest of the campaign's stored plan, and the dialog reads that (#812).
+ */
+export async function keepersOf(shopId: string, campaignId: string): Promise<KeepersAfterRevert> {
+  // `revert: true` plans with this campaign excluded, so every row that comes back is
+  // owned by whoever keeps the variant afterwards.
+  const preview = await previewCampaign(shopId, campaignId, { revert: true });
+
+  // Names for whatever the plan says still owns rows. Fetched after the plan rather than
+  // before it, so the query asks for the few campaigns that actually keep something
+  // instead of every campaign the shop has.
+  const owners = [
+    ...new Set(preview.rows.map((row) => row.campaignId).filter((id): id is string => Boolean(id))),
+  ].filter((id) => id !== campaignId);
+
+  const named = await prisma.campaign.findMany({
+    where: { shopId, id: { in: owners } },
+    select: { id: true, name: true },
+  });
+
+  return keepersAfterRevert(preview, campaignId, new Map(named.map((campaign) => [campaign.id, campaign.name])));
 }
 
 /**

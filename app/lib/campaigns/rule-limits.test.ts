@@ -80,7 +80,8 @@ describe("the campaign page offers no Apply the run refuses", () => {
     // The run refuses it whatever is typed, so a button that exists only to be refused
     // would promise the merchant something the app will not do.
     const page = sourceOf("app/routes/app.campaigns.$id.tsx");
-    expect(page).toContain("const unappliable = Boolean(preview.blocked || preview.refused);");
+    // Nor before there is a preview at all (#812).
+    expect(page).toContain("const unappliable = Boolean(preview.blocked || preview.refused || preview.planning);");
     expect(page).toMatch(/const canApply = !practice && !unappliable && /);
     expect(page).toContain("{preview.refused}");
   });

@@ -1021,3 +1021,35 @@ describe("the overflow holds what files a campaign, never what prices one", () =
   });
 });
 
+
+describe("a stored plan that is not current (#812)", () => {
+  const recomputing = "These numbers were worked out at 30 Oct 2026, 10:00, and something they depend on has changed since";
+
+  it("says so above every tab, and is never shown without it", () => {
+    const html = render(<CampaignHeader {...props({ preview: preview({ recomputing }) as never })} />);
+    expect(html).toContain(recomputing);
+    expect(render(<CampaignHeader {...props()} />)).not.toContain("worked out at");
+  });
+
+  it("asks for the word in the Apply dialog over numbers that are out of date, whatever they say", () => {
+    const stale = render(<CampaignHeader {...props({ preview: preview({ recomputing, blastRadius: false }) as never })} />);
+    expect(stale).toContain("Type apply to confirm");
+    expect(stale.split("<s-modal")[1]).toContain(recomputing);
+    expect(render(<CampaignHeader {...props()} />), "a current plan under every threshold asked for the word").not.toContain(
+      "Type apply to confirm",
+    );
+  });
+
+  it("says why there is no preview while the first is worked out", () => {
+    const planning = "Working out what this campaign would do. It covers 102,132 variants";
+    expect(render(<CampaignHeader {...props({ preview: preview({ planning }) as never })} />)).toContain(planning);
+  });
+
+  it("offers no Revert until the rollback report is worked out, and says so", () => {
+    const html = render(
+      <CampaignHeader {...props({ lifecycle: describeState("ACTIVE"), state: "ACTIVE", rollback: null, rollbackPending: true } as never)} />,
+    );
+    expect(html).toContain("Revert is offered once its rollback report is worked out.");
+    expect(html).not.toContain(">Revert<");
+  });
+});

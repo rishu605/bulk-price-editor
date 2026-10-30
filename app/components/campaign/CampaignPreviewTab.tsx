@@ -35,11 +35,13 @@ import type { CampaignDetailProps } from "./props";
 import { Card } from "../Card";
 
 export function CampaignPreviewTab({ preview, approval, fetcher, busy }: CampaignDetailProps) {
-  // A run is writing this campaign: no plan was made, and none is needed (#803).
-  if (preview.writing) {
+  // A run is writing this campaign: no plan was made, and none is needed (#803). Or its
+  // first plan is still being worked out in the background, and there is nothing to show
+  // but why (#812): a table of zeros would read as a campaign that changes nothing.
+  if (preview.writing || preview.planning) {
     return (
       <Card heading="Preview">
-        <s-paragraph>{preview.writing}</s-paragraph>
+        <s-paragraph>{preview.writing ?? preview.planning}</s-paragraph>
       </Card>
     );
   }

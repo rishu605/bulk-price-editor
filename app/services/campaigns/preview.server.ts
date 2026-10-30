@@ -87,6 +87,30 @@ export async function pagePreview(
   });
   if (campaign.status !== "APPLYING" && campaign.status !== "REVERTING") return previewCampaign(shopId, campaignId, options);
 
+  return planlessPreview(campaignId, campaign, { writing: writingText(campaign.status) });
+}
+
+/** Why the page shows no preview while a run writes the campaign (#803). */
+export function writingText(status: string): string {
+  return (
+    `This campaign is being ${status === "REVERTING" ? "reverted" : "applied"} right now, so there is no ` +
+    "preview to show: what it changes is already decided. The Runs tab follows the run, and the preview comes back " +
+    "when it finishes."
+  );
+}
+
+/**
+ * A preview with no plan in it, saying why: a run is writing the campaign (#803), or its
+ * first plan is still being worked out in the background (#812). Nothing in it is a number
+ * a merchant could act on -- every count zero, no rows, no confirmation -- and the page reads
+ * `writing` or `planning` and says that instead of rendering them. `refused` still comes from
+ * the stored rule, which needs no plan, so a campaign the run would refuse says so meanwhile.
+ */
+export function planlessPreview(
+  campaignId: string,
+  campaign: { name: string; status: string; ruleRows?: unknown },
+  why: { writing: string } | { planning: string },
+): CampaignPreview {
   return {
     campaignId,
     name: campaign.name,
@@ -99,10 +123,8 @@ export async function pagePreview(
     margin: null,
     blastRadius: false,
     staleBaselines: 0,
-    writing:
-      `This campaign is being ${campaign.status === "REVERTING" ? "reverted" : "applied"} right now, so there is no ` +
-      "preview to show: what it changes is already decided. The Runs tab follows the run, and the preview comes back " +
-      "when it finishes.",
+    ...("planning" in why && campaign.ruleRows !== undefined ? refusedRule(campaign.ruleRows) : {}),
+    ...why,
   };
 }
 
@@ -365,7 +387,7 @@ export async function blastRadiusOf(
 }
 
 /** `refused` for a campaign whose stored rule cannot be applied, or nothing. */
-function refusedRule(ruleRows: unknown): { refused?: string } {
+export function refusedRule(ruleRows: unknown): { refused?: string } {
   const refused = unappliableRule(ruleRows);
   return refused ? { refused } : {};
 }

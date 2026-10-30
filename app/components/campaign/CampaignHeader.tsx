@@ -45,6 +45,7 @@ const MORE_MENU_ID = "campaign-more-actions";
 
 export function CampaignHeader({
   rollback,
+  rollbackPending,
   practice,
   preview,
   rule,
@@ -87,6 +88,14 @@ export function CampaignHeader({
     {/* Above the row, with the page's other banners: it qualifies the schedule sentence
         beside the badge, which reads in the store's zone now (#799). */}
     {zoneShift ? <ZoneShiftNotice zoneShift={zoneShift} fetcher={fetcher} busy={busy} /> : null}
+    {/* Above every tab, because every tab reads the same stored plan (#812): numbers from one
+        that is no longer current are the last the page has, and are never shown as the
+        answer without this beside them; with none yet, why there is no preview. */}
+    {preview.recomputing || preview.planning ? (
+      <s-banner tone="info">
+        <s-paragraph>{preview.recomputing ?? preview.planning}</s-paragraph>
+      </s-banner>
+    ) : null}
     <s-grid
       // The status takes the space, the actions take what they need. Centred, so the
       // badge and the buttons sit on one line whatever the schedule sentence wraps to.
@@ -179,7 +188,12 @@ export function CampaignHeader({
             builds a rollback report. Rendered without one, Revert pointed at a dialog that
             was never drawn, and pressing it on a draft or a scheduled campaign did nothing
             at all (#749). */}
-        {!rollback ? null : !rollback.straightforward ? (
+        {/* A campaign that can be reverted, whose rollback report is still being worked out
+            (#812): no Revert until it is, since the report is where a hand edit is kept, and
+            a Revert without it would write over one without asking. Said, not hidden. */}
+        {!rollback ? (
+          rollbackPending ? <s-text color="subdued">Revert is offered once its rollback report is worked out.</s-text> : null
+        ) : !rollback.straightforward ? (
           // Deliberately not a revert button. There are edits to decide about, and a
           // one-click revert here would silently overwrite them.
           //
