@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 
 import prisma from "../../app/db.server";
 import { withChaos, type ChaosContext } from "../harness/scenario";
+import { redefine } from "../harness/definition";
 
 const EU = "gid://shopify/PriceList/eu";
 const JP = "gid://shopify/PriceList/jp";
@@ -53,20 +54,13 @@ describe("chaos: rounding chosen per currency", () => {
         const { chaosAdminClient } = await import("../harness/http-client");
         await syncMarkets(chaosAdminClient(chaos.server.endpoint()), chaos.fixture.shopId);
 
-        const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
-        await prisma.campaign.update({
-          where: { id: campaignId },
-          data: {
-            surfaces: { base: true, priceLists: [EU, JP] } as never,
-            schedule: {
-              ...(campaign.schedule as object),
-              rounding: {
-                default: "charm99",
-                // Euro-zone charm, and yen left to the default — which must not inherit
-                // a charm ending it has no room for.
-                byCurrency: { EUR: "charm95" },
-              },
-            } as never,
+        await prisma.campaign.update({ where: { id: campaignId }, data: { surfaces: { base: true, priceLists: [EU, JP] } as never } });
+        await redefine(campaignId, {
+          rounding: {
+            default: "charm99",
+            // Euro-zone charm, and yen left to the default — which must not inherit
+            // a charm ending it has no room for.
+            byCurrency: { EUR: "charm95" },
           },
         });
 
@@ -109,13 +103,7 @@ describe("chaos: rounding chosen per currency", () => {
         // The shape campaigns stored before rounding was per-currency. Changing what an
         // existing campaign does to live prices is the one migration this product
         // cannot ship.
-        const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
-        await prisma.campaign.update({
-          where: { id: campaignId },
-          data: {
-            schedule: { ...(campaign.schedule as object), rounding: "charm99" } as never,
-          },
-        });
+        await redefine(campaignId, { rounding: "charm99" });
 
         const applied = await chaos.apply();
         await chaos.expectHonest(applied.runId);

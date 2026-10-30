@@ -6,17 +6,15 @@
  * campaign's price. Only the second is a drift answered. See `lib/drift/not-priced.ts`.
  */
 
-import type { Campaign } from "@prisma/client";
-
 import prisma from "../../db.server";
 import { inChunks } from "../../lib/db/chunk";
 import { whyNotPriced, type NotPriced } from "../../lib/drift/not-priced";
 import { astToWhere } from "../segments.server";
-import { scopeOf } from "./model.server";
+import { scopeOf, type DefinedCampaign } from "./model.server";
 
 export async function notPricedBy(
   shopId: string,
-  campaign: Pick<Campaign, "schedule" | "excludedVariantGids">,
+  campaign: DefinedCampaign & { excludedVariantGids: string[] },
   variantGids: readonly string[],
 ): Promise<Map<string, NotPriced>> {
   const gids = [...new Set(variantGids)];

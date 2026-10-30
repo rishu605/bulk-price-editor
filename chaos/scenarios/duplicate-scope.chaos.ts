@@ -1,8 +1,9 @@
 /**
  * A duplicate prices what its source prices (#762).
  *
- * The filter, segment, rounding and practice flag live in the `schedule` JSON beside the
- * dates, and Duplicate dropped the whole blob so last month's dates were not re-armed. The
+ * The filter, segment, rounding and practice flag lived in the `schedule` JSON beside the
+ * dates (columns of their own since #884, with a copy in the blob for one release), and
+ * Duplicate dropped the whole blob so last month's dates were not re-armed. The
  * copy got `{}`: an empty filter, which matches the whole catalogue. A merchant who
  * duplicated "Alpine clearance · 30% off Alpine boards" to run it again had a draft that
  * put every variant in the store at 30% off, and a practice campaign's copy could be
@@ -17,6 +18,7 @@ import { describe, expect, it } from "vitest";
 import prisma from "../../app/db.server";
 import { duplicateCampaign } from "../../app/services/campaigns/housekeeping.server";
 import { runCampaign } from "../../app/services/campaigns/run.server";
+import { redefine } from "../harness/definition";
 import { chaosAdminClient } from "../harness/http-client";
 import { withChaos, type ChaosContext } from "../harness/scenario";
 
@@ -79,11 +81,7 @@ describe("chaos: duplicating a campaign", () => {
   it("keeps a practice campaign's copy a practice campaign", async () => {
     await withChaos("duplicate-practice", CATALOG, async (chaos) => {
       const { shopId, campaignId } = chaos.fixture;
-      const source = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
-      await prisma.campaign.update({
-        where: { id: campaignId },
-        data: { schedule: { ...(source.schedule as object), practice: true } as never },
-      });
+      await redefine(campaignId, { practice: true });
 
       const copy = await duplicateCampaign(shopId, campaignId, "staff@example.com");
       await expect(

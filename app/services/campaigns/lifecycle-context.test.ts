@@ -14,14 +14,22 @@ import { lifecycleContext } from "./lifecycle-context.server";
 
 describe("a practice draft's Status card", () => {
   it("says nothing will ever be written, rather than until it is applied", async () => {
-    const context = await lifecycleContext("shop", "c1", "DRAFT", { practice: true }, "UTC", {});
+    const context = await lifecycleContext("shop", "c1", "DRAFT", { schedule: { kind: "manual" }, practice: true }, "UTC", {});
 
     expect(context.practice).toBe(true);
     expect(describeState("DRAFT", context).explanation).not.toMatch(/until you apply/);
   });
 
+  it("says so of one the release before made practice, in its schedule JSON alone (#884)", async () => {
+    const blobOnly = { schedule: { kind: "manual", practice: true }, practice: false };
+    const context = await lifecycleContext("shop", "c1", "DRAFT", blobOnly, "UTC", {});
+
+    expect(context.practice).toBe(true);
+    expect(describeState("DRAFT", context).nextAction?.intent).not.toBe("apply");
+  });
+
   it("keeps a real draft's Apply", async () => {
-    const context = await lifecycleContext("shop", "c1", "DRAFT", { segmentId: "s1" }, "UTC", {});
+    const context = await lifecycleContext("shop", "c1", "DRAFT", { schedule: { kind: "manual", segmentId: "s1" }, practice: false }, "UTC", {});
 
     expect(context.practice).toBe(false);
     expect(describeState("DRAFT", context).nextAction?.intent).toBe("apply");

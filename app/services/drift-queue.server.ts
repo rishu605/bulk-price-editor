@@ -50,6 +50,7 @@ import { DEFAULT_THRESHOLD } from "../lib/planning/write-path";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { enqueueWithin, webQueue } from "../worker/web-queue.server";
 import { releaseHold } from "./campaigns/lifecycle.server";
+import { DEFINITION } from "./campaigns/model.server";
 import { notPricedBy } from "./campaigns/not-priced.server";
 import { driftRowsFor, type DriftRow } from "./drift.server";
 
@@ -558,7 +559,7 @@ async function putBackAll(
   // left waiting.
   const record = await prisma.campaign.findUniqueOrThrow({
     where: { id: campaign.id },
-    select: { schedule: true, excludedVariantGids: true },
+    select: { ...DEFINITION, excludedVariantGids: true },
   });
   const variants = [...new Set(events.map((event) => event.variantGid))];
   const notPriced = await notPricedBy(shopId, record, variants);

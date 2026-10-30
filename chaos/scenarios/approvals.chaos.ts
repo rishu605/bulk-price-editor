@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 
 import prisma from "../../app/db.server";
 import { withChaos, type ChaosContext } from "../harness/scenario";
+import { redefine } from "../harness/definition";
 
 async function requireApprovalAbove(chaos: ChaosContext, threshold: number) {
   const shop = await prisma.shop.findUniqueOrThrow({ where: { id: chaos.fixture.shopId } });
@@ -152,16 +153,7 @@ describe("chaos: approvals", () => {
           where: { shopId, variantGid: { in: variantGids.slice(0, 5) } },
           data: { tags: ["chaos", "HALF"] },
         });
-        const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
-        await prisma.campaign.update({
-          where: { id: campaignId },
-          data: {
-            schedule: {
-              ...(campaign.schedule as object),
-              ast: { groups: [{ conditions: [{ field: "tag", value: "HALF" }] }] },
-            } as never,
-          },
-        });
+        await redefine(campaignId, { ast: { groups: [{ conditions: [{ field: "tag", value: "HALF" }] }] } });
 
         const { requestApproval, decideApproval } = await import(
           "../../app/services/approvals.server"
@@ -171,10 +163,7 @@ describe("chaos: approvals", () => {
 
         // Then widened to the whole catalogue. An approval granted for five products is
         // not an approval for ten.
-        await prisma.campaign.update({
-          where: { id: campaignId },
-          data: { schedule: { ...(campaign.schedule as object), ast: { groups: [] } } as never },
-        });
+        await redefine(campaignId, { ast: { groups: [] } });
 
         const result = await chaos.apply();
 

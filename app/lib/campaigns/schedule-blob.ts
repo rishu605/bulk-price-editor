@@ -1,12 +1,17 @@
 /**
  * The two halves of a campaign's `schedule` column.
  *
- * `createCampaign` keeps four things that decide a price in that JSON -- the filter, the
+ * `createCampaign` kept four things that decide a price in that JSON -- the filter, the
  * segment id, the rounding and whether it is practice -- beside the window that says when
  * it runs, "so the shape can evolve without a migration". Anything that copies or clears
  * "the schedule" has to tell the halves apart: Duplicate dropped the whole blob to avoid
  * re-arming last month's dates, and its copy priced the entire catalogue, could be applied
  * though its source was practice, and lost its rounding (#762).
+ *
+ * They are columns since #884, and the blob keeps a copy for one release, because the release
+ * before reads only the blob. Every write of a definition replaces that copy with what the
+ * columns say (`definitionData` in `model.server.ts`), so what this file keeps of it is
+ * overwritten anyway. This file goes in the contract release, which stops writing the copy.
  */
 
 import { QUEUED_REFUSED_KEY } from "./queued-refusal";
@@ -33,6 +38,13 @@ export const WINDOW_KEYS = [
   "endingLate",
 ] as const;
 
+/**
+ * The blob's copy of what a campaign prices (#884), kept for the release before, which reads
+ * it there: the filter's conditions and statuses (#751), the segment, the rounding and the
+ * practice flag. Its own columns are what this release reads.
+ */
+export const DEFINITION_KEYS = ["ast", "productStatuses", "segmentId", "rounding", "practice"] as const;
+
 /** The blob without its window: the campaign's definition, which a copy keeps. */
 export function definitionOf(schedule: unknown): Record<string, unknown> {
   const rest = { ...((schedule ?? {}) as Record<string, unknown>) };
@@ -56,7 +68,7 @@ export function manualSchedule(schedule: unknown): Record<string, unknown> {
  */
 export const OWN_KEYS = [START_CONFIRMED_KEY, QUEUED_REFUSED_KEY] as const;
 
-/** Where the blob says a campaign is practice; `isPractice` reads it. */
+/** Where the blob says a campaign is practice, which `isPractice` reads behind the column. */
 const PRACTICE_KEY = "practice";
 
 /**

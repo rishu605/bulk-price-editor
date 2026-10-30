@@ -5,11 +5,15 @@
  * evolve without a migration; `toResolvable` turns that back into the typed input
  * the pure resolver expects. Keeping the conversion in one place means the resolver
  * never sees a loosely-typed database row.
+ *
+ * What a campaign prices is the exception, since #884: its filter, segment, rounding and
+ * practice flag are columns, read and written only here (`campaignDefinition`, `definitionData`).
  */
 
-import type { Campaign } from "@prisma/client";
+import { Prisma, type Campaign } from "@prisma/client";
 
 import prisma from "../../db.server";
+import { DEFINITION_KEYS } from "../../lib/campaigns/schedule-blob";
 import { inChunks } from "../../lib/db/chunk";
 import { AppError } from "../../lib/errors/app-error";
 import {
@@ -71,8 +75,8 @@ export async function createCampaign(
     data: {
       shopId,
       ...row,
-      // The declarative reference as well as the id in the blob. The rule engine reads
-      // the blob; the delete guard reads the relation, and a segment that could be
+      // The declarative reference as well as the id in `segmentId`. The rule engine reads
+      // the id; the delete guard reads the relation, and a segment that could be
       // deleted out from under a running campaign is the failure that matters.
       ...(input.segmentId ? { segments: { connect: { id: input.segmentId } } } : {}),
     },
@@ -114,10 +118,19 @@ export async function createCampaign(
  * save (#1009), planned by the same resolver over the same row the scheduler will read.
  */
 async function campaignRow(shopId: string, input: CampaignInput) {
-  // One place for the statuses, beside the filter rather than inside it (#751). A caller
-  // may hand them over either way -- the editor as a field, Home inside its constant scope
-  // -- and the stored filter keeps only the conditions, so `astOf` has one answer to read.
-  const { productStatuses: inAst, ...filter } = input.ast;
+  // One place for the statuses (#751). A caller may hand them over either way -- the editor
+  // as a field, Home inside its constant scope -- and the campaign records one list, the
+  // one `astOf` reads: beside the conditions in its filter column, and beside `ast` in the
+  // blob, whose `ast` keeps only the conditions (`definitionData`).
+  const { productStatuses: inAst, ...conditions } = input.ast;
+  const definition: Definition = {
+    // Written out even when it is the default, so a campaign's record says what it covers
+    // rather than leaving it to whatever the reader's default is that year.
+    filter: { ...conditions, productStatuses: productStatusesOf(input.productStatuses ?? inAst) },
+    segmentId: input.segmentId || null,
+    rounding: (input.rounding ?? null) as unknown as Prisma.JsonValue | null,
+    practice: input.practice === true,
+  };
 
   // A practice campaign is always a draft (#827). The editor refuses the dates and names
   // the field; this is the same rule for any caller that does not go through it, because a
@@ -153,19 +166,15 @@ async function campaignRow(shopId: string, input: CampaignInput) {
       // the store default does not retroactively change what a running campaign does
       // to prices already on a storefront.
       guardrailViolationPolicy: await violationPolicyFor(shopId),
-      // Rounding and scope ride along in the schedule blob so the shape can evolve
-      // without a migration; parseSchedule ignores the extra keys.
-      schedule: {
-        ...(input.schedule ?? { kind: "manual" }),
-        rounding: input.rounding,
-        ast: filter,
-        // Written out even when it is the default, so a campaign's record says what it
-        // covers rather than leaving it to whatever the reader's default is that year.
-        productStatuses: productStatusesOf(input.productStatuses ?? inAst),
-        ...(input.segmentId ? { segmentId: input.segmentId } : {}),
-        ...(input.practice ? { practice: true } : {}),
-        ...(input.startConfirmed ? { [START_CONFIRMED_KEY]: input.startConfirmed } : {}),
-      } as never,
+      // What it prices, in its columns and in the blob beside the window, for the release
+      // before (#884); parseSchedule ignores the extra keys.
+      ...definitionData(
+        {
+          ...(input.schedule ?? { kind: "manual" }),
+          ...(input.startConfirmed ? { [START_CONFIRMED_KEY]: input.startConfirmed } : {}),
+        },
+        definition,
+      ),
       ...(input.schedule?.kind === "window"
         ? {
             startAt: new Date(input.schedule.startAt),
@@ -184,7 +193,7 @@ export type PlannableCampaign = Pick<
   | "compareAtPolicy"
   | "guardrails"
   | "guardrailViolationPolicy"
-  | "schedule"
+  | keyof typeof DEFINITION
   | "createdAt"
   | "excludedVariantGids"
   | "surfaces"
@@ -209,7 +218,11 @@ export async function unsavedCampaign(shopId: string, input: CampaignInput): Pro
     compareAtPolicy: row.compareAtPolicy,
     guardrails: row.guardrails,
     guardrailViolationPolicy: row.guardrailViolationPolicy,
-    schedule: row.schedule,
+    schedule: row.schedule as Prisma.JsonValue,
+    filter: row.filter as Prisma.JsonValue,
+    segmentId: row.segmentId,
+    rounding: row.rounding === Prisma.DbNull ? null : (row.rounding as Prisma.JsonValue),
+    practice: row.practice,
     createdAt: new Date(),
     excludedVariantGids: [],
     surfaces: row.surfaces,
@@ -242,6 +255,123 @@ export function ruleOf(campaign: Pick<Campaign, "ruleRows">): AdjustmentRule | n
 }
 
 /**
+ * What a campaign prices, apart from when it runs (#884): its filter -- the conditions,
+ * and the product statuses it covers (#751) -- the segment it targets instead, its
+ * rounding as stored, and whether it is practice.
+ *
+ * Columns of its own since #884. They lived in the `schedule` blob beside the dates, and a
+ * copy that dropped the dates dropped them too (#762). For one release they are written
+ * both ways (`definitionData`), because the release before reads only the blob.
+ *
+ * ## Read from the column, or from the blob where the column is at its default
+ *
+ * Every reader takes a column at its default -- null, or false -- to mean "not recorded
+ * here", and reads the blob instead. Only one writer leaves a row like that: the release
+ * before this one, which knows nothing of the columns. Its inserts leave them at their
+ * defaults, and its updates never touch them. Nor does it change what an existing campaign
+ * prices -- nothing does; a campaign that prices differently is a copy, which is an insert
+ * -- so its writes to an existing row's blob carry the definition keys along as they were.
+ * Two kinds of row, then, and no third: one this release wrote, whose columns and blob
+ * agree, and one the release before inserted -- in the migration's wake, or during a
+ * rollback -- whose columns are at their defaults and whose blob holds the definition.
+ *
+ * So a column off its default is always one this release wrote, and the blob cannot know
+ * better; a column at its default is wrong only where the blob says otherwise, and then the
+ * blob is right. Column first, blob behind it, is exact for both. A real `false` and a
+ * default `false` look alike, and need not differ: the blob of a row this release wrote
+ * says the same. The contract release drops the fallback, once a second backfill has filled
+ * the rows a rollback may have inserted (see the migration that added the columns).
+ */
+export interface Definition {
+  /** The conditions, and the product statuses as recorded: none on a campaign from before #751. */
+  filter: FilterAst;
+  segmentId: string | null;
+  /** As recorded, for `roundingFor`: a policy, a bare profile name from before those, or null. */
+  rounding: Prisma.JsonValue | null;
+  practice: boolean;
+}
+
+/** For a `select`: the columns a definition is read from, and the blob behind them (#884). */
+export const DEFINITION = { filter: true, segmentId: true, rounding: true, practice: true, schedule: true } as const;
+
+/** A campaign as far as its definition is concerned. */
+export type DefinedCampaign = Pick<Campaign, keyof typeof DEFINITION>;
+
+/** The blob's copy of a definition, read for a row the release before wrote. Gone with the contract. */
+interface DefinitionBlob {
+  ast?: FilterAst | null;
+  productStatuses?: unknown;
+  segmentId?: string | null;
+  rounding?: Prisma.JsonValue;
+  practice?: unknown;
+}
+
+function blobOf(campaign: Pick<Campaign, "schedule">): DefinitionBlob {
+  return (campaign.schedule ?? {}) as DefinitionBlob;
+}
+
+/** What a campaign prices, as recorded: what `definitionData` writes, and a copy copies. */
+export function campaignDefinition(campaign: DefinedCampaign): Definition {
+  return {
+    filter: storedFilter(campaign),
+    segmentId: segmentIdOf(campaign),
+    rounding: storedRounding(campaign),
+    practice: isPractice(campaign),
+  };
+}
+
+/** The rounding as recorded, for `roundingFor`: the column, or the blob's (#884). */
+function storedRounding(campaign: Pick<Campaign, "rounding" | "schedule">): Prisma.JsonValue | null {
+  return campaign.rounding ?? blobOf(campaign).rounding ?? null;
+}
+
+/**
+ * A definition as a write stores it (#884): its columns, and `schedule` -- the blob the write
+ * stores -- with whatever it held of a definition replaced by this one's keys, as the
+ * release before reads them. Every write of a definition comes through here, so neither half
+ * is ever written without the other, and the blob says what the columns say. The contract
+ * keeps the columns and leaves `schedule` as it is handed in.
+ */
+export function definitionData(schedule: unknown, definition: Definition) {
+  const blob = { ...((schedule ?? {}) as Record<string, unknown>) };
+  for (const key of DEFINITION_KEYS) delete blob[key];
+  // The blob's `ast` is the conditions alone, with the statuses beside it (#751).
+  const { productStatuses, ...ast } = definition.filter;
+
+  return {
+    filter: definition.filter as unknown as Prisma.InputJsonValue,
+    segmentId: definition.segmentId,
+    // `DbNull`, as Prisma spells a null in a JSON column: every column is written, always.
+    rounding: definition.rounding === null ? Prisma.DbNull : (definition.rounding as Prisma.InputJsonValue),
+    practice: definition.practice,
+    schedule: {
+      ...blob,
+      ...(definition.rounding === null ? {} : { rounding: definition.rounding }),
+      ast,
+      ...(productStatuses === undefined ? {} : { productStatuses }),
+      ...(definition.segmentId ? { segmentId: definition.segmentId } : {}),
+      ...(definition.practice ? { practice: true } : {}),
+    } as unknown as Prisma.InputJsonValue,
+  };
+}
+
+/**
+ * The filter as recorded: the column, or the blob's `ast` with its statuses beside it. The
+ * blob's top-level list over any inside `ast`, as `astOf` always read it, and as the
+ * migration's backfill fills the column.
+ */
+function storedFilter(campaign: Pick<Campaign, "filter" | "schedule">): FilterAst {
+  const column = campaign.filter ?? null;
+  if (column !== null) return column as unknown as FilterAst;
+
+  const blob = blobOf(campaign);
+  const conditions: FilterAst = { ...(blob.ast ?? { groups: [] }) };
+  delete conditions.productStatuses;
+  if (blob.productStatuses === undefined) return conditions;
+  return { ...conditions, productStatuses: blob.productStatuses as FilterAst["productStatuses"] };
+}
+
+/**
  * The filter that defines a campaign's scope -- an empty one matching every variant --
  * limited to the product statuses the campaign covers (#751).
  *
@@ -250,9 +380,8 @@ export function ruleOf(campaign: Pick<Campaign, "ruleRows">): AdjustmentRule | n
  * sentence the campaigns list and header print. A caller that forgot would be a count or
  * a description that includes the drafts the run leaves out.
  */
-export function astOf(campaign: Pick<Campaign, "schedule">): FilterAst {
-  const schedule = (campaign.schedule ?? {}) as { ast?: FilterAst };
-  return { ...(schedule.ast ?? { groups: [] }), productStatuses: productStatusesFor(campaign) };
+export function astOf(campaign: Pick<Campaign, "filter" | "schedule">): FilterAst {
+  return { ...storedFilter(campaign), productStatuses: productStatusesFor(campaign) };
 }
 
 /**
@@ -265,9 +394,8 @@ export function astOf(campaign: Pick<Campaign, "schedule">): FilterAst {
  * this: a whole-campaign revert takes back every price the campaign wrote, in its scope or
  * not (#828) -- see D12 in `docs/decisions.md`.
  */
-export function productStatusesFor(campaign: Pick<Campaign, "schedule">): ProductStatus[] {
-  const schedule = (campaign.schedule ?? {}) as { productStatuses?: unknown };
-  return productStatusesOf(schedule.productStatuses);
+export function productStatusesFor(campaign: Pick<Campaign, "filter" | "schedule">): ProductStatus[] {
+  return productStatusesOf(storedFilter(campaign).productStatuses);
 }
 
 /**
@@ -277,24 +405,30 @@ export function productStatusesFor(campaign: Pick<Campaign, "schedule">): Produc
  * with fifty thousand products builds confidence before touching a live price, which is
  * exactly the merchant most worth converting — and the promise is only worth anything
  * if it is impossible to break by accident.
+ *
+ * Practice where either place says so (#884): `false` is the column's default, and a
+ * campaign the release before made practice says so only in its blob.
  */
-export function isPractice(campaign: Pick<Campaign, "schedule">): boolean {
-  const schedule = (campaign.schedule ?? {}) as { practice?: boolean };
-  return schedule.practice === true;
+export function isPractice(campaign: Pick<Campaign, "practice" | "schedule">): boolean {
+  return campaign.practice === true || blobOf(campaign).practice === true;
 }
 
+/** `isPractice` as a query: the column, or the blob for a row the release before wrote (#884). */
+export const IS_PRACTICE = {
+  OR: [{ practice: true }, { schedule: { path: ["practice"], equals: true } }],
+} satisfies Prisma.CampaignWhereInput;
+
 /** The segment a campaign targets, if it targets one rather than an inline filter. */
-export function segmentIdOf(campaign: Pick<Campaign, "schedule">): string | null {
-  const schedule = (campaign.schedule ?? {}) as { segmentId?: string };
-  return schedule.segmentId ?? null;
+export function segmentIdOf(campaign: Pick<Campaign, "segmentId" | "schedule">): string | null {
+  return campaign.segmentId ?? blobOf(campaign).segmentId ?? null;
 }
 
 /**
  * True when the campaign was built on a segment that has since been deleted (#776).
  *
- * The campaign keeps the segment's id in its schedule; the relation goes with the segment.
+ * The campaign keeps the segment's id in `segmentId`; the relation goes with the segment.
  */
-export async function segmentGone(shopId: string, campaign: Pick<Campaign, "schedule">): Promise<boolean> {
+export async function segmentGone(shopId: string, campaign: Pick<Campaign, "segmentId" | "schedule">): Promise<boolean> {
   const segmentId = segmentIdOf(campaign);
   if (!segmentId) return false;
   return (await prisma.segment.count({ where: { id: segmentId, shopId } })) === 0;
@@ -309,7 +443,9 @@ export const DELETED_SEGMENT_SCOPE = "Its segment was deleted, so it prices noth
  * segment was deleted described its stored filter instead -- "All variants" for a
  * spreadsheet campaign -- which is exactly what it no longer prices.
  */
-export function segmentNameOf(campaign: Pick<Campaign, "schedule"> & { segments: Array<{ name: string }> }): string | undefined {
+export function segmentNameOf(
+  campaign: Pick<Campaign, "segmentId" | "schedule"> & { segments: Array<{ name: string }> },
+): string | undefined {
   return campaign.segments[0]?.name ?? (segmentIdOf(campaign) ? DELETED_SEGMENT_SCOPE : undefined);
 }
 
@@ -330,7 +466,7 @@ export function segmentNameOf(campaign: Pick<Campaign, "schedule"> & { segments:
  */
 export async function scopeOf(
   shopId: string,
-  campaign: Pick<Campaign, "schedule">,
+  campaign: Pick<Campaign, "filter" | "segmentId" | "schedule">,
 ): Promise<FilterAst> {
   const segmentId = segmentIdOf(campaign);
   if (!segmentId) return astOf(campaign);
@@ -359,8 +495,6 @@ export async function scopeOf(
 
 /** Rehydrates a stored campaign into the shape the pure resolver expects. */
 export function toResolvable(campaign: PlannableCampaign): ResolvableCampaign {
-  const schedule = (campaign.schedule ?? {}) as { rounding?: string };
-
   return {
     id: campaign.id,
     priority: campaign.priority,
@@ -372,7 +506,7 @@ export function toResolvable(campaign: PlannableCampaign): ResolvableCampaign {
     ruleRows: campaign.ruleRows as unknown as ResolvableCampaign["ruleRows"],
     compareAtPolicy: campaign.compareAtPolicy as unknown as CompareAtPolicy,
     compareAtViolationPolicy: "clear",
-    roundingPolicy: roundingFor(schedule.rounding),
+    roundingPolicy: roundingFor(storedRounding(campaign)),
     guardrails: (campaign.guardrails ?? undefined) as unknown as Guardrails | undefined,
     // Read from the campaign, not hardcoded. See #338: every layer below this
     // implemented `skip` and `block` correctly and none of them could ever be reached,

@@ -18,6 +18,7 @@ import { notPricedMessage } from "../../lib/drift/not-priced";
 import { AppError } from "../../lib/errors/app-error";
 import type { AdminClient } from "../../lib/execution/sync-executor";
 import { releaseHold } from "./lifecycle.server";
+import { DEFINITION } from "./model.server";
 import { notPricedBy } from "./not-priced.server";
 import { pressedRunKey } from "./pressed-run.server";
 import { runCampaign } from "./run.server";
@@ -49,7 +50,7 @@ export async function reassertDrift(
   const campaign = event.campaignId
     ? await prisma.campaign.findFirst({
         where: { id: event.campaignId, shopId },
-        select: { id: true, name: true, status: true, schedule: true, excludedVariantGids: true },
+        select: { id: true, name: true, status: true, ...DEFINITION, excludedVariantGids: true },
       })
     : null;
   if (!campaign || !REASSERTABLE.has(campaign.status)) {

@@ -31,7 +31,7 @@ import { reportError } from "../services/error-report.server";
 import { withGuard } from "../lib/errors/guard.server";
 import { pressRefusal } from "../services/campaigns/blast-radius.server";
 import { describeCampaign } from "../lib/campaigns/describe";
-import { astOf, isPractice, ruleOf, segmentNameOf } from "../services/campaigns/model.server";
+import { astOf, DEFINITION, isPractice, ruleOf, segmentNameOf } from "../services/campaigns/model.server";
 import { actorFor } from "../lib/audit/actor";
 import {
   canTransition,
@@ -69,7 +69,7 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     prisma.campaign.findFirstOrThrow({
       where: { id: campaignId, shopId: shop.id },
       select: {
-        schedule: true,
+        ...DEFINITION, // what it prices, and its schedule (#884)
         autoEnroll: true,
         enrollPendingAt: true,
         status: true,
@@ -92,7 +92,7 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
       : 0;
   const lifecycle = describeState(
     state,
-    await lifecycleContext(shop.id, campaignId, state, record.schedule, shop.timezone, preview),
+    await lifecycleContext(shop.id, campaignId, state, record, shop.timezone, preview),
   );
   const history = await transitionHistory(shop.id, campaignId, 8);
 

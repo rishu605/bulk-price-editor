@@ -24,7 +24,7 @@ import { recordWriteIntents, resolveOverwrittenDrift } from "../drift.server";
 import { loadCandidates, productMapFor, withWritten } from "./candidates.server";
 import { revertTakesBack } from "./handover.server";
 import { refreshBasePrices } from "../live-prices.server";
-import { isPractice, loadCampaignContext, scopeOf, importIdsOf, segmentGone } from "./model.server";
+import { DEFINITION, isPractice, loadCampaignContext, scopeOf, importIdsOf, segmentGone } from "./model.server";
 import { astToWhere } from "../segments.server";
 import { DEFAULT_THRESHOLD } from "../../lib/planning/write-path";
 import { AppError, toAppError } from "../../lib/errors/app-error";
@@ -497,7 +497,7 @@ async function executeCampaignRun(
   // caller, or a future button somebody adds without knowing.
   const practising = await prisma.campaign.findUnique({
     where: { id: campaignId },
-    select: { schedule: true, ruleRows: true },
+    select: { ...DEFINITION, ruleRows: true },
   });
   if (practising && isPractice(practising)) {
     throw new AppError({
@@ -1827,7 +1827,7 @@ async function recordResults(
 async function inlineWork(shopId: string, campaignId: string): Promise<InlineWork> {
   const campaign = await prisma.campaign.findFirstOrThrow({
     where: { id: campaignId, shopId },
-    select: { schedule: true, tagKit: true },
+    select: { ...DEFINITION, tagKit: true },
   });
   const where = astToWhere(shopId, await scopeOf(shopId, campaign));
   const variants = await prisma.variantIndex.count({ where });
@@ -1954,7 +1954,7 @@ async function refusedByPlan(
     billingFor(shopId),
     prisma.campaign.findFirst({
       where: { id: campaignId, shopId },
-      select: { surfaces: true, schedule: true },
+      select: { surfaces: true, ...DEFINITION },
     }),
   ]);
 

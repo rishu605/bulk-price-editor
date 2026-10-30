@@ -37,6 +37,7 @@ import { runCampaign } from "../../app/services/campaigns/run.server";
 import { scopeSize } from "../../app/services/campaigns/scope-size.server";
 import { chaosAdminClient } from "../harness/http-client";
 import { withChaos, type ChaosContext } from "../harness/scenario";
+import { redefine } from "../harness/definition";
 
 let pending = { shop: "" };
 
@@ -147,10 +148,7 @@ describe("chaos: draft and archived products (#751)", () => {
       await runCampaign(shopId, campaign.id, client, { actor: "chaos", verifySampleRate: 1 });
       expect(variantGids.map((gid) => chaos.fake.priceOf(gid))).toEqual(variantGids.map((gid) => at(gid, 0.8)));
 
-      const record = await prisma.campaign.findUniqueOrThrow({ where: { id: campaign.id }, select: { schedule: true } });
-      const legacy = { ...(record.schedule as Record<string, unknown>) };
-      delete legacy.productStatuses;
-      await prisma.campaign.update({ where: { id: campaign.id }, data: { schedule: legacy as never } });
+      await redefine(campaign.id, { productStatuses: null });
       expect(await scopeSize(shopId, campaign.id), "a campaign with nothing recorded still covers the archive").toBe(2);
 
       // Both previews of the revert, planned from scope alone, said these two "revert to" the
