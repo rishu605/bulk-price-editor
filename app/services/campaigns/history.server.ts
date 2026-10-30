@@ -10,7 +10,7 @@ import { labelled, priceListLabel } from "../../lib/markets/display-name";
 import { ROWS_PER_VIEW } from "../../lib/ui/table-budget";
 import { formatMinorUnits } from "../../lib/money/format";
 import { runEmailLine } from "../../lib/notifications/delivery";
-import { deliveriesByRun } from "../notifications.server";
+import { deliveriesByRun, mailConfigured } from "../notifications.server";
 import { titleMapFor } from "./candidates.server";
 import type { LedgerRow, RunSummary } from "./types";
 
@@ -25,8 +25,11 @@ export async function campaignRuns(
     take: limit,
   });
   // Each run's email is recorded after the run row, so the oldest run shown bounds them all.
+  // None at all while this deployment cannot send email: the app does not offer email then,
+  // so a run has nothing to say about one, and the column is not shown.
+  const emailing = mailConfigured();
   const oldest = runs.at(-1)?.createdAt;
-  const emails = oldest ? await deliveriesByRun(shopId, campaignId, oldest) : new Map();
+  const emails = emailing && oldest ? await deliveriesByRun(shopId, campaignId, oldest) : new Map();
 
   return runs.map((run) => ({
     id: run.id,
@@ -38,7 +41,7 @@ export async function campaignRuns(
     skipped: run.skippedRows,
     startedAt: run.startedAt?.toISOString() ?? null,
     finishedAt: run.finishedAt?.toISOString() ?? null,
-    email: runEmailLine(emails.get(run.id)),
+    ...(emailing ? { email: runEmailLine(emails.get(run.id)) } : {}),
   }));
 }
 

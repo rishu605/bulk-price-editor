@@ -178,7 +178,10 @@ export async function notify(
   context: { runId?: string } = {},
 ): Promise<DeliveryResult> {
   const result = await deliver(shopId, notification);
-  await recordDelivery(shopId, notification, result, context.runId);
+  // Not while this deployment cannot send email at all: nothing was attempted, the app does not
+  // offer email then, and a line per run saying so filled the Activity log with a feature it
+  // does not show (#1118). Every other outcome is kept, as #1121 keeps them.
+  if (result.reason !== "unconfigured") await recordDelivery(shopId, notification, result, context.runId);
   return result;
 }
 

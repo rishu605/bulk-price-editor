@@ -185,25 +185,30 @@ exactly as below, with "My app doesn't require an account to use it" ticked. The
 Rewritten for #1125 after the review of 2026-10-29 paused the submission. The version then in
 the dashboard told the reviewer to open a campaign called "Sale", which existed only on our
 store, and never mentioned email, which is the flow the reviewer then tested and failed
-(2.1.4). So these name nothing that only exists on our stores, and walk the email flow.
+(2.1.4). So these name nothing that only exists on our stores.
+
+Email is not offered while production cannot send it (#1118): Settings shows no Notifications
+card, runs have no Email column, and nothing promises an email. So these say so up front, for a
+reviewer who comes back looking for the setting they tested last time, and walk the flow
+without it. Once sending is set up the email features come back on their own; then these
+should walk the email flow again (the version in git history before this change).
 
 ```text
 No credentials are needed. Anchor has no account or login of its own: it runs inside the Shopify admin on your store's own session, so installing it is the whole set-up. Every feature works on a development store, where the paid plans are test charges.
 
+Email notifications are not part of this version: Settings has no email options and Anchor sends no email. What each run did is shown in the app instead (steps 3 and 4).
+
 1. Install. Home opens and the catalogue sync starts; a small store finishes in a minute or two.
 
-2. Email: Settings → Notifications. Type an address in "Send to" and press Save in the top bar. A "Settings saved" toast appears and the card reads "Emails go to <your address>". Press "Send test email": it arrives within a minute (check spam).
-On by default: a run did not finish cleanly, a price was changed outside the app, a campaign was reverted. "A run finished cleanly" is off by default; tick it to be emailed on Apply too.
+2. Campaigns → Create campaign: 20% off, all variants → Create and preview. The preview shows the exact prices the campaign will write, computed from each variant's baseline.
 
-3. Campaigns → Create campaign: 20% off, all variants → Create and preview. The preview shows the exact prices the campaign will write, computed from each variant's baseline.
+3. Apply to storefront. The Runs tab shows the rows written and read back from Shopify. The Ledger tab lists every variant.
 
-4. Apply to storefront. The Runs tab shows the rows written and read back from Shopify, and whether that run's email was sent. The Ledger tab lists every variant.
+4. Revert, at any time, including before an end date. Prices go back to their baselines, and the Runs tab shows the revert's rows read back the same way.
 
-5. Revert, at any time, including before an end date. Prices go back to their baselines, the "has been reverted" email goes to the address from step 2, the run shows "Emailed <your address>", and Settings → Notifications shows it as the last email.
+5. Settings → Plan → Switch to Markets. Shopify's approval screen opens; on a development store it is a test charge. Markets lets a campaign set each market's own price, which needs a market with its own currency (Shopify admin → Settings → Payments → activate the test gateway, then Markets → add a market). Wholesale adds B2B catalogues on Plus stores. Switch to Free cancels.
 
-6. Settings → Plan → Switch to Markets. Shopify's approval screen opens; on a development store it is a test charge. Markets lets a campaign set each market's own price, which needs a market with its own currency (Shopify admin → Settings → Payments → activate the test gateway, then Markets → add a market). Wholesale adds B2B catalogues on Plus stores. Switch to Free cancels.
-
-7. Prices → What's live → Check against Shopify reads every price back from the Admin API.
+6. Prices → What's live → Check against Shopify reads every price back from the Admin API.
 
 Any error shows a code like ANC-XXXX-XXXX; Settings → Diagnostics explains it.
 ```

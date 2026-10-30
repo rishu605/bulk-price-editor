@@ -59,7 +59,8 @@ export function ApplyConfirmation({
    * From the shop's notification preferences, not from anything about this campaign —
    * the address is one per shop, and the run report goes to whoever is listed there.
    */
-  notifyEmail: string | null;
+  /** Who is emailed when the run ends; undefined while this deployment cannot send email. */
+  notifyEmail: string | null | undefined;
   /** The schedule sentence the header shows, restated here where the decision is made. */
   scheduleText?: string | null;
   /** A request is in flight, so the submit shows it. */
@@ -178,9 +179,13 @@ export function ApplyConfirmation({
               rendering: naming the address is a promise kept, and saying plainly that
               nobody will be told is the thing they need *before* closing the tab on a
               run over a hundred thousand variants — not after. */}
-          <Fact label="When it finishes">
-            {notifyEmail ? `We will email ${notifyEmail}` : "Nobody is emailed — set an address in Settings"}
-          </Fact>
+          {/* Not said at all while email cannot be sent: "set an address in Settings" would
+              send them to a setting the app does not show then. */}
+          {notifyEmail !== undefined ? (
+            <Fact label="When it finishes">
+              {notifyEmail ? `We will email ${notifyEmail}` : "Nobody is emailed — set an address in Settings"}
+            </Fact>
+          ) : null}
         </s-grid>
 
         {/* The one thing this app can say that none of the three competitors can. It is

@@ -5,6 +5,9 @@
  * which existed only on our store, and never mentioned email -- the flow the reviewer then
  * tested, and failed (2.1.4, with 4.5.4 and 4.5.5 flagged beside it). The copy lives in
  * `docs/app-store-listing.md` and is pasted from there, so this is where it is checked.
+ *
+ * Email is not offered while production cannot send it (#1118), so the instructions say so
+ * and send the reviewer nowhere near it.
  */
 
 import { describe, expect, it } from "vitest";
@@ -31,14 +34,16 @@ describe("the App Review testing instructions", () => {
     expect(pasted).toContain("test charge");
   });
 
-  it("walk the email flow the review failed on, from saving an address to the revert email (2.1.4)", () => {
-    for (const step of ["Settings → Notifications", "Send test email", "Revert", "has been reverted", "Emailed"]) {
-      expect(pasted, step).toContain(step);
+  it("say email is not part of this version, and send the reviewer to no email setting (2.1.4, #1118)", () => {
+    expect(pasted).toContain("Email notifications are not part of this version");
+    for (const gone of ["Settings → Notifications", "Send test email", "has been reverted", "Emailed"]) {
+      expect(pasted, gone).not.toContain(gone);
     }
+    for (const label of NOTIFICATION_CHOICES.map((choice) => choice.label)) expect(pasted, label).not.toContain(label);
   });
 
-  it("name the notifications that are on by default in the words Settings uses", () => {
-    expect(pasted).toContain(`"${NOTIFICATION_CHOICES.find((choice) => choice.key === "onCompletion")!.label}" is off by default`);
+  it("still walk apply and revert, and where to see what each did", () => {
+    for (const step of ["Apply to storefront", "Revert", "Runs tab", "Ledger tab"]) expect(pasted, step).toContain(step);
   });
 
   it("name nothing that only exists on our own stores", () => {

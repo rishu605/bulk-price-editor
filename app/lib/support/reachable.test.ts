@@ -67,12 +67,16 @@ describe("the support address is never out of reach (#758)", () => {
     expect(sourceOf(file)).toMatch(MAILTO_LINK);
   });
 
-  it("warns before the merchant writes, when this deployment cannot send", () => {
+  it("offers no form it cannot send, and the address in its place, when this deployment cannot send", () => {
     // Finding out after pressing Send -- with the message already written -- is the dead
-    // end the ticket was about.
+    // end the ticket was about. Since #1118 there is no form to write in at all then: the
+    // address is the way to reach us, offered as that rather than as a warning over a form
+    // that reads as broken.
     const source = sourceOf("app/routes/app.support.tsx");
     expect(source).toContain("canSend: supportEmailConfigured()");
-    expect(source).toMatch(/!canSend \?[\s\S]{0,400}tone="warning"/);
+    expect(source).toMatch(/!canSend \? \([\s\S]{0,600}href=\{mailto\}/);
+    expect(source).toMatch(/\{canSend \? \(\s*<Card heading="Your message">\s*<fetcher\.Form/);
+    expect(source).not.toContain('tone="warning"');
   });
 
   it("is written down once", () => {

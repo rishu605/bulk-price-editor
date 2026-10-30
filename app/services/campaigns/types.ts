@@ -306,7 +306,8 @@ export interface RunSummary {
   finishedAt: string | null;
   /**
    * Whether this run's email went out, in a sentence (#1123). Null for a run with no record,
-   * which is every run from before the record existed.
+   * which is every run from before the record existed. Absent while the deployment cannot
+   * send email, when the app does not offer it at all.
    */
   email?: { text: string; toSettings: boolean } | null;
 }
