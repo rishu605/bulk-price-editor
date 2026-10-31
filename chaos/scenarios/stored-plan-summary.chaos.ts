@@ -413,6 +413,11 @@ describe("chaos: the campaign page reads a stored plan (#812)", () => {
       const unread: Array<[string, () => Promise<unknown>]> = [
         ["a sync's progress", () => prisma.shop.update({ where: { id: shopId }, data: { syncHeartbeatAt: new Date(), syncPhase: "variants", syncProgress: { done: 1 } } })],
         ["a run's heartbeat", () => prisma.campaignRun.update({ where: { id: live.id }, data: { heartbeatAt: new Date() } })],
+        // And the count it keeps beside the time (#820), stamped as often.
+        [
+          "a run's heartbeat with its progress",
+          () => prisma.campaignRun.update({ where: { id: live.id }, data: { heartbeatAt: new Date(), writtenRows: 3, writableRows: 40 } }),
+        ],
         ["the plan's own row", () => prisma.planSummary.update({ where: { campaignId }, data: { requestedAt: new Date() } })],
         ["nothing at all", async () => undefined],
       ];

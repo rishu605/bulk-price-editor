@@ -1101,9 +1101,10 @@ async function executeCampaignRun(
   // before writing too, for a revert moment that passed while this run was being planned.
   const pulse = heartbeat(run.id);
   const lateWatch = !options.revert && !options.variantGids ? endingLateWatch(shopId, campaignId, campaignRecord.schedule) : null;
+  // The prices' executor passes how far it has got, which the stamp keeps (#820).
   const beat = lateWatch
-    ? async () => {
-        await pulse();
+    ? async (written?: number, writable?: number) => {
+        await pulse(written, writable);
         await lateWatch();
       }
     : pulse;
@@ -1651,19 +1652,26 @@ function isOccurrenceTaken(error: unknown): boolean {
  * stamps is a live run reclaimed as dead -- the campaign shows Partial and offers Resume
  * mid-write (#791) -- which is why every phase that writes stamps it, and why the reaper
  * also counts the run's own ledger rows as signs of life.
+ *
+ * The prices' executor also says how far it has got, and the stamp keeps that too (#820), in
+ * the same update: nothing else that moves while prices are written can say how long the run
+ * has left. The tags and market phases report nothing, and leave the count where the prices
+ * finished. The count that finishes them is kept whatever the throttle says, once per run: a
+ * last stamp of 980 of 1,000 would read as "under a minute left" for as long as tagging took.
  */
 function heartbeat(runId: string, everyMs = HEARTBEAT_EVERY_MS) {
   let last = 0;
 
-  return async () => {
+  return async (written?: number, writable?: number) => {
     const now = Date.now();
-    if (now - last < everyMs) return;
+    const progress = written !== undefined && writable !== undefined;
+    if (now - last < everyMs && !(progress && written >= writable)) return;
     last = now;
 
     try {
       await prisma.campaignRun.update({
         where: { id: runId },
-        data: { heartbeatAt: new Date(now) },
+        data: { heartbeatAt: new Date(now), ...(progress ? { writtenRows: written, writableRows: writable } : {}) },
       });
     } catch {
       // Liveness is a hint, never a reason to fail a run that is otherwise working.

@@ -74,6 +74,7 @@ export function CampaignHeader({
   zoneShift,
   startConfirmation,
   breachPolicy,
+  eta,
 }: CampaignDetailProps) {
   // Archiving a campaign that is still running asks first (#748); Restore never does.
   const archiveModal = useRef<ArchiveModal | null>(null);
@@ -137,7 +138,7 @@ export function CampaignHeader({
             </s-button>
           </fetcher.Form>
         ) : IN_FLIGHT.has(state) ? (
-          <s-text color="subdued">{writing(runs, timeZone)}</s-text>
+          <s-text color="subdued">{writing(runs, timeZone, eta)}</s-text>
         ) : (
           <>
             {/* Opens the confirmation rather than submitting.
@@ -392,11 +393,18 @@ const LIVE_RUN = new Set(["PLANNING", "QUEUED", "EXECUTING", "VERIFYING"]);
 /**
  * What the header says while a run writes: when it started, or that the worker has yet to
  * pick it up -- a run handed over by #790 has no row until it does.
+ *
+ * And how long it has left, once it has written enough to say (#820). Only beside a run this
+ * page saw start: "Waiting for the background worker" with a time left contradicts itself.
  */
-function writing(runs: ReadonlyArray<{ status: string; startedAt: string | null }>, timeZone: string): string {
+function writing(
+  runs: ReadonlyArray<{ status: string; startedAt: string | null }>,
+  timeZone: string,
+  eta: string | null,
+): string {
   const live = runs.find((run) => LIVE_RUN.has(run.status));
   const when = live?.startedAt
-    ? `Started ${formatScheduleInstant(live.startedAt, timeZone)}`
+    ? `Started ${formatScheduleInstant(live.startedAt, timeZone)}${eta ? ` · ${eta}` : ""}`
     : "Waiting for the background worker";
   return `${when} · this page updates when it finishes`;
 }

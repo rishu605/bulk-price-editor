@@ -309,7 +309,7 @@ export default function CampaignDetail() {
 
   const tabs = tabsFor({ runs, rollback, ledger, ledgerTotal: data.ledgerTotal });
   const { keepers, pending: keepersPending } = useKeepers(rollback);
-  useRunPolling(data.campaignId, state); // a run in the worker, followed to its end (#790)
+  const eta = useRunPolling(data.campaignId, state); // a run in the worker, followed to its end (#790), and its time left (#820)
   usePlanPolling(data.campaignId, preview); // a plan in the worker, followed until it is stored (#812)
   const [params] = useSearchParams();
   const tab = currentTab(tabs, params.get("tab"));
@@ -329,6 +329,7 @@ export default function CampaignDetail() {
     attention,
     keepers,
     keepersPending,
+    eta,
   };
 
   return (
