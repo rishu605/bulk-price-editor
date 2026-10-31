@@ -5,8 +5,8 @@ import { formatPrice } from "../money/format";
  *
  * Pricing meters **variants under management and surfaces**, not changes (decision D3).
  * Change metering is the category norm and it taxes the core loop: it charges a merchant
- * for using the product, and makes recurring campaigns — the thing that differentiates
- * this app — the most expensive way to use it.
+ * for using the product, and makes running the same sale again — the thing a campaign
+ * manager is for, and recurrence when it is built (#815) — the most expensive way to use it.
  *
  * **Safety is never paywalled.** Preview, guardrails, the full history, and rollback are
  * on every tier including free. Charging for the ability to undo a mistake the app helped

@@ -158,7 +158,7 @@ describe("the confirmation names the variant, its price, and that leaving is for
       <VariantRevertConfirmation campaignName="Autumn sale" target={target} marketNames={[]} onConfirm={() => undefined} />,
     );
     expect(html).toContain("leaves Autumn sale for good");
-    expect(html).toMatch(/scheduled, recurring, or\s+applying the campaign again/);
+    expect(html).toMatch(/scheduled, or\s+applying the campaign again/);
   });
 
   it("names the markets whose prices move with it", () => {

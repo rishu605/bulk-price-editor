@@ -12,7 +12,7 @@ clearance campaign that made it £70. Now you end the summer sale. Restoring "wh
 before summer" gives £100 — but clearance is still running, and that product should be £70.
 
 Recomputing gives £70. It is the only approach that survives overlapping campaigns,
-recurring campaigns, and campaigns that ended in a partial state.
+running the same campaign again, and campaigns that ended in a partial state.
 
 ## What this means in practice
 
