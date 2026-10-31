@@ -47,13 +47,31 @@ export async function beat(now: Date = new Date(), instance?: string): Promise<v
  * Null rather than a large number on a fresh install, because "we have not looked" and
  * "we looked and it is dead" are different statements and only one of them should wake
  * somebody. Alerting treats null as "do not know" and stays quiet.
+ *
+ * **"Now" is read after the query, not before it (#813).** It used to be a default
+ * parameter, evaluated at the call -- so `/healthz`, whose query waited 6.8-10.4 s for a
+ * pooled connection on 25 Sep, measured from a moment several seconds before it read the
+ * row, and a beat stamped during that wait came out as a negative age. A caller asking
+ * about a particular moment still passes one; nothing else should.
  */
-export async function secondsSinceBeat(now: Date = new Date()): Promise<number | null> {
+export async function secondsSinceBeat(now?: Date): Promise<number | null> {
   const row = await prisma.schedulerHeartbeat.findUnique({
     where: { id: SINGLETON },
     select: { beatAt: true },
   });
 
   if (!row) return null;
-  return Math.round((now.getTime() - row.beatAt.getTime()) / 1000);
+  return secondsBetween(row.beatAt, now ?? new Date());
+}
+
+/**
+ * Whole seconds from a beat to `now`, never below zero.
+ *
+ * The beat is stamped by the worker's clock and read against this process's, and a caller
+ * may pass a `now` from before its own query. Either way a beat "after now" is a scheduler
+ * that is alive at now -- zero, the freshest an age can be -- not one that beats in the
+ * future, which every consumer of this number would misread.
+ */
+export function secondsBetween(beatAt: Date, now: Date): number {
+  return Math.max(0, Math.round((now.getTime() - beatAt.getTime()) / 1000));
 }

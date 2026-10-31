@@ -20,7 +20,15 @@
 import prisma from "../db.server";
 import { logger } from "../lib/logging/logger";
 import { metric } from "../lib/telemetry/metrics";
-import { evaluate, type AlertCondition, type SignalWindow } from "../lib/observability/alerts";
+import {
+  evaluate,
+  type AlertCondition,
+  type QueueSignal,
+  type ShopRunWait,
+  type SignalWindow,
+} from "../lib/observability/alerts";
+import { readingOf, waitedMs, type QueueSnapshot } from "../lib/observability/health";
+import { probeRedis } from "../worker/queue-stats.server";
 import { secondsSinceBeat } from "./scheduler-heartbeat.server";
 
 /** How far back a window looks. Long enough to be meaningful, short enough to be current. */
@@ -41,7 +49,7 @@ const lastSent = new Map<string, number>();
 export async function gather(now: Date = new Date()): Promise<SignalWindow> {
   const since = new Date(now.getTime() - WINDOW_MINUTES * 60_000);
 
-  const [sinceTick, errors, webhooks, delivered, lastAudit, errorsByShop, deliveriesByShop] =
+  const [sinceTick, errors, webhooks, delivered, lastAudit, errorsByShop, deliveriesByShop, redis] =
     await Promise.all([
     // The scheduler's own heartbeat, not a campaign run's.
     //
@@ -89,7 +97,13 @@ export async function gather(now: Date = new Date()): Promise<SignalWindow> {
       where: { receivedAt: { gte: since }, processedAt: { not: null }, shopId: { not: null } },
       _count: { _all: true },
     }),
+    // The queues, read from Redis rather than from this process's runtime (#813): the tick
+    // is handed none, and a reading is Redis's state whoever asks. Not from a table, unlike
+    // everything above -- but neither is the backlog, and Redis is where it is.
+    probeRedis(),
   ]);
+
+  const queues = queueSignals(redis.snapshots);
 
   const lagMs = webhooks.length
     ? Math.max(
@@ -122,7 +136,11 @@ export async function gather(now: Date = new Date()): Promise<SignalWindow> {
     // and "we looked and found none" are different statements, and only one of them is
     // worth staying asleep over.
     unpriceableVariants: typeof audit?.unpriceable === "number" ? audit.unpriceable : null,
-    executionQueueDepth: null,
+    // It was always null here, so the backlog alert could only fire for a caller that
+    // passed a depth -- and the tick never did (#813).
+    executionQueueDepth: queues?.signals.find((queue) => queue.queue === "execution")?.depth ?? null,
+    queues: queues?.signals ?? null,
+    shopRunWaits: queues?.shopRunWaits ?? null,
     pagesDatabaseWaitMs: await pagesDatabaseWait(),
     // Only shops that produced errors can be spiking, so the error groups drive the list
     // and the delivery counts supply each denominator. A shop with deliveries and no
@@ -133,6 +151,28 @@ export async function gather(now: Date = new Date()): Promise<SignalWindow> {
       requests: deliveries.get(group.shopId!) ?? 0,
     })),
   };
+}
+
+/**
+ * The window's view of the queues, or null when they could not be read.
+ *
+ * Ages against the real clock, read after Redis answered rather than the `now` the window
+ * was asked about: a job's enqueue time is a real moment, and a `now` from before the read
+ * is the mistake that made `secondsSinceBeat` negative (#813). Shop ids stay inside the
+ * worker; this goes to an alert, never to a page.
+ */
+function queueSignals(
+  snapshots: QueueSnapshot[] | null,
+): { signals: QueueSignal[]; shopRunWaits: ShopRunWait[] } | null {
+  if (!snapshots) return null;
+  const now = Date.now();
+  const signals = snapshots.map((snapshot) => ({ queue: snapshot.queue, ...readingOf(snapshot, now) }));
+  const execution = snapshots.find((snapshot) => snapshot.queue === "execution");
+  const shopRunWaits = Object.entries(execution?.oldestWaitingAtByShop ?? {}).map(([shopId, at]) => ({
+    shopId,
+    waitMs: waitedMs(at, now) ?? 0,
+  }));
+  return { signals, shopRunWaits };
 }
 
 export interface AlertDelivery {

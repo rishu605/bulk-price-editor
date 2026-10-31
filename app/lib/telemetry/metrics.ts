@@ -59,6 +59,20 @@ export type Metric =
   | "budget.saturation"
   /** Jobs waiting. Zero is healthy; a rising floor is not. */
   | "queue.depth"
+  /**
+   * How long each queue's longest-waiting job has waited to start, per queue (#813).
+   *
+   * The latency depth cannot show: a dozen shops' drains queued at once go in seconds, one
+   * job at the front for ten minutes is a queue nothing is taking from. A delay the job asked
+   * for -- #811's coalescing, a retry's backoff -- is not counted.
+   */
+  | "queue.oldest_wait_ms"
+  /**
+   * How long a job waited for a worker, by queue and shop, recorded as it starts (#813).
+   * On `execution` this is the per-shop run wait: whether one shop's runs wait behind
+   * another's, which is the question Epic 19 (#807) exists to answer.
+   */
+  | "queue.wait_ms"
   /** Jobs accepted onto a queue, by class. */
   | "queue.enqueued"
   /** Jobs that exhausted their attempts. A class failing every attempt is the thing an

@@ -11,7 +11,7 @@
  */
 
 import { logger } from "../lib/logging/logger";
-import { redisRuntime, type QueueRuntime } from "./queue-runtime.server";
+import { connectionFor, redisRuntime, type QueueRuntime } from "./queue-runtime.server";
 import type { JobRef, QueueName } from "./queues";
 
 /**
@@ -50,19 +50,13 @@ export function webQueue(): QueueRuntime | null {
   if (!url) return (runtime = null);
 
   try {
-    const parsed = new URL(url);
     runtime = redisRuntime(
       async () => {
         throw new Error("The web process enqueues jobs and never runs them.");
       },
-      {
-        connection: {
-          host: parsed.hostname,
-          port: Number(parsed.port || 6379),
-          ...(parsed.password ? { password: parsed.password } : {}),
-        },
-        consume: false,
-      },
+      // The same parse as the worker's, so both ends of a queue agree on which database
+      // it lives in (#813).
+      { connection: connectionFor(url), consume: false },
     );
   } catch (error) {
     logger.error("REDIS_URL is not a valid URL; nothing can be handed to the worker", {

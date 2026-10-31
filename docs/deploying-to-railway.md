@@ -134,6 +134,9 @@ not after.
 | `SCHEDULER_TICK_MS` | Defaults to 30s. |
 | `RUN_STALE_AFTER_MS` | Defaults to 5min — how long before the reaper treats a silent run as abandoned and makes it resumable. Raise it only if a legitimate run can go that long without a heartbeat. |
 | `BILLING_TEST_CHARGES` | Charges are real on real stores and test charges on development stores, decided per shop (#860). Set it to `true` only on a staging deploy, where every plan change should be a test charge. **Never on production**: no merchant would ever be billed. |
+| `HEALTH_DATABASE_WAIT_MS` | Defaults to 1000. How long `/healthz`'s `SELECT 1` may wait for a pooled connection before the app reads `degraded` (#813). It took 6.8–10.4 s on 25 Sep and said "ok" (#803). The page, `pages-waiting-for-database`, stays at 5 s. |
+| `HEALTH_QUEUE_DEPTH` | Per-queue overrides of the depth past which `/healthz` reads `degraded`, as `queue=n` pairs: `webhooks=500,execution=20`. Defaults in `app/lib/observability/health.ts` (`execution` 50; `webhooks` 200, which since #811 counts shops with deliveries waiting rather than deliveries; `audit` never). Unreadable entries keep the default. |
+| `HEALTH_QUEUE_WAIT_MS` | The same shape, for how long a queue's longest-waiting job may wait to start: `execution=30000`. Defaults: `execution` 60 s, `webhooks` and `planning` 2 min, `verification` 5 min, `sync` 10 min, `audit` never. |
 | `DATABASE_POOL_SIZE` | Defaults to 10 database connections **per process**, so web plus worker is 20. Measured in `docs/perf/README.md`: ten buys 91% of the throughput available at 40 for a quarter of the connections. Raise it only against a known `max_connections`, remembering that every service and every replica draws from the same budget, as does the `migrate deploy` each container runs at boot. A `connection_limit` already present in `DATABASE_URL` wins over this. The two variables below win over it, per process. |
 | `DATABASE_POOL_SIZE_WEB` | The web service's pool, per replica. Falls back to `DATABASE_POOL_SIZE`, then 10. See [Database connections](#database-connections) for the budget it is checked against. |
 | `DATABASE_POOL_SIZE_WORKER` | The worker's pool — the one a run lives in. Falls back to `DATABASE_POOL_SIZE`, then 10. |
@@ -240,21 +243,49 @@ curl -s https://<web-domain>/healthz | jq
 ```
 
 ```jsonc
-{ "status": "ok", "database": { "ok": true }, "redis": { "ok": true } }
+{
+  "status": "ok",
+  "database": { "ok": true, "waitMs": 2, "limitMs": 1000 },
+  "redis": { "ok": true },
+  "queues": { "ok": true, "byQueue": { "execution": { "depth": 0, "oldestWaitMs": null } /* … */ } },
+  "scheduler": { "ok": true, "secondsSinceTick": 12 },
+  "mail": { "ok": true }
+}
 ```
 
-`"degraded"` means something the app can run without is missing, and the entry with
-`"ok": false` says which:
+`"degraded"` means the app is up and something is missing or slow. `degradedBy` lists which
+entries, and each says why:
 
+- `database` — `SELECT 1` waited longer than `HEALTH_DATABASE_WAIT_MS` (1 s) for a pooled
+  connection; `waitMs` and `limitMs` give both numbers. Every page of every shop is waiting
+  the same way (#803, #813).
+- `queues` — a queue is deeper than its limit, or its longest-waiting job has waited too long
+  to start (`HEALTH_QUEUE_DEPTH`, `HEALTH_QUEUE_WAIT_MS`). `byQueue` has every queue's depth
+  and oldest wait, never which shops the jobs belong to: the endpoint is unauthenticated.
 - `redis` — the queue is running jobs inline: campaigns still apply, scheduling suffers.
 - `scheduler` — the worker has stopped or never started.
 - `mail` — the mail variables above are not all set, so Contact support cannot send.
 
-The check deliberately does not fail for any of them, because taking the web service
-down over one turns a partial outage into a total one.
+**Degraded is a 200, and that is deliberate.** Railway holds a deploy at "deploying" until
+`/healthz` answers 200 within `healthcheckTimeout` (120 s), fails the deploy on anything else,
+and stops polling once the deploy is live — so the code is a deploy-time decision, not live
+monitoring. A new container has a connection pool of its own and has served nothing; a slow
+pool or a deep queue is load the *previous* release is carrying, and a 503 for it would keep
+a fix out because the release it replaces is busy. Only `"unhealthy"` — the database did not
+answer at all — is a 503, because a release that cannot reach Postgres must not be promoted.
+Ongoing slowness is the alerting job's business: it reads this endpoint from the worker and
+pages past 5 s.
 
 For the worker, which has no endpoint, look for the tick line in its logs. Silence for
 more than three minutes is the condition `TICK_SILENCE_SECONDS` alerts on.
+
+## Before a release that touches runs, webhooks or pooling
+
+Run the two-shop gate against staging (or production, on the two development stores):
+`npm run gate:two-shops`, described in [`perf/two-shop-gate.md`](perf/two-shop-gate.md). It
+applies and reverts anchor-perf's whole catalogue while timing DartMode Labs' pages and a
+1-variant campaign, and fails on any missed SLO. Nothing else in the repo tests two shops at
+once, and 25 Sep's outage only exists with two (#803, #813).
 
 ---
 

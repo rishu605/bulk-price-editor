@@ -12,7 +12,14 @@ import { describe, expect, it, vi } from "vitest";
 import { sourceOf } from "../lib/testing/source";
 import { logger } from "../lib/logging/logger";
 
-import { inlineRuntime, runtimeFor } from "./queue-runtime.server";
+import {
+  connectionFor,
+  inlineRuntime,
+  reportDepths,
+  runnableAt,
+  runtimeFor,
+  snapshotQueues,
+} from "./queue-runtime.server";
 import type { JobRef, QueueName } from "./queues";
 
 describe("running without Redis", () => {
@@ -189,5 +196,105 @@ describe("a job's log lines carry the ids the job was asked for", () => {
       "the Redis worker runs traced() without the BullMQ job id, so a queued job's log " +
         "lines cannot be filtered back to the job",
     ).toMatch(/traced\(name, job\.data, \(\) => handler\(name, job\.data\), job\.id\)/);
+  });
+});
+
+describe("where the queues live (#813)", () => {
+  it("keeps the URL's database index, which it used to drop", () => {
+    // `/4` went to database 0 while the leader lock and the health check used 4, so a
+    // reader of queue depth that honoured the index read a different database.
+    expect(connectionFor("redis://localhost:6379/4")).toEqual({ host: "localhost", port: 6379, db: 4 });
+  });
+
+  it("leaves a production URL exactly as it was read before", () => {
+    // Built, not written out: a URL with a password in it reads as a leaked credential to
+    // the secret scanner, even an invented one.
+    const production = new URL("redis://redis.railway.internal:6380");
+    production.username = "default";
+    production.password = "placeholder";
+    expect(connectionFor(production.toString())).toEqual({
+      host: "redis.railway.internal",
+      port: 6380,
+      password: "placeholder",
+    });
+    expect(connectionFor("redis://localhost")).toEqual({ host: "localhost", port: 6379 });
+  });
+});
+
+describe("how far behind each queue is (#813)", () => {
+  type FakeJob = { timestamp: number; data: Partial<JobRef> };
+
+  /** A queue answering the two calls the snapshot makes, oldest waiting job first. */
+  const fakeQueue = (counts: Record<string, number>, waiting: FakeJob[]) =>
+    ({
+      getJobCounts: async () => counts,
+      getWaiting: async (start: number, end: number) => waiting.slice(start, end + 1),
+    }) as never;
+
+  it("does not count a delay the job asked for as waiting (#811)", async () => {
+    // A shop's first drain is held five seconds to coalesce a product's burst; a retry
+    // waits out its backoff. Neither is the queue being slow.
+    expect(runnableAt({ timestamp: 1_000, delay: 5_000 })).toBe(6_000);
+    expect(runnableAt({ timestamp: 1_000 })).toBe(1_000);
+
+    const snapshots = await snapshotQueues((name) =>
+      name === "webhooks"
+        ? fakeQueue({ waiting: 1, active: 0, delayed: 0 }, [{ timestamp: 1_000, delay: 5_000, data: { shopId: "s" } } as never])
+        : fakeQueue({ waiting: 0, active: 0, delayed: 0 }, []),
+    );
+    expect(snapshots.find((snapshot) => snapshot.queue === "webhooks")?.oldestWaitingAt).toBe(6_000);
+  });
+
+  it("reports the longest-waiting job, and for execution each shop's", async () => {
+    const queues: Partial<Record<QueueName, unknown>> = {
+      execution: fakeQueue({ waiting: 3, active: 2, delayed: 0 }, [
+        { timestamp: 1_000, data: { shopId: "anchor-perf" } },
+        { timestamp: 2_000, data: { shopId: "dartmode" } },
+        { timestamp: 3_000, data: { shopId: "anchor-perf" } },
+      ]),
+    };
+    const snapshots = await snapshotQueues(
+      (name) => (queues[name] ?? fakeQueue({ waiting: 0, active: 0, delayed: 0 }, [])) as never,
+    );
+    const execution = snapshots.find((snapshot) => snapshot.queue === "execution")!;
+
+    expect(execution).toMatchObject({ waiting: 3, active: 2, delayed: 0, oldestWaitingAt: 1_000 });
+    expect(execution.oldestWaitingAtByShop).toEqual({ "anchor-perf": 1_000, dartmode: 2_000 });
+    expect(snapshots.find((snapshot) => snapshot.queue === "sync")).toMatchObject({ oldestWaitingAt: null });
+    // Every queue, so a missing one cannot read as calm.
+    expect(snapshots).toHaveLength(6);
+  });
+
+  it("reports each queue's oldest wait as a metric beside its depth, zero when nothing waits", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      const runtime = {
+        ...inlineRuntime(async () => {}),
+        snapshots: async () => [
+          { queue: "execution" as const, waiting: 1, active: 0, delayed: 0, oldestWaitingAt: Date.now() - 90_000 },
+          { queue: "sync" as const, waiting: 0, active: 0, delayed: 0, oldestWaitingAt: null },
+        ],
+      };
+      await reportDepths(runtime);
+
+      const lines = log.mock.calls.map((call) => JSON.parse(String(call[0])) as Record<string, unknown>);
+      const ages = lines.filter((line) => line.metric === "queue.oldest_wait_ms");
+      expect(ages.find((line) => line.queue === "execution")?.value).toBeGreaterThanOrEqual(90_000);
+      expect(ages.find((line) => line.queue === "sync")?.value).toBe(0);
+      expect(lines.filter((line) => line.metric === "queue.depth")).toHaveLength(6);
+    } finally {
+      vi.unstubAllEnvs();
+      log.mockRestore();
+    }
+  });
+
+  it("times each job's wait as it starts, per shop, first attempts only", () => {
+    // Over the source, like the spans above: the wait is recorded inside BullMQ's own
+    // worker callback, which only a real Redis exercises.
+    const source = sourceOf("app/worker/queue-runtime.server.ts");
+    expect(source).toMatch(/reportWait\(name, job\);\s*const result = await traced\(/);
+    expect(source).toMatch(/metric\("queue\.wait_ms", Math\.max\(0, job\.processedOn - runnableAt\(job\)\)/);
+    expect(source).toMatch(/if \(job\.attemptsMade > 0/);
   });
 });
