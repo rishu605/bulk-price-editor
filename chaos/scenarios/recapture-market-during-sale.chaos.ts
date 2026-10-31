@@ -16,19 +16,31 @@
  * list alone, so the base price is never on sale and is left alone by the recapture: whatever
  * is flagged is the list's.
  *
- * Driven through the campaign page's own loader and action and the recapture service the page
- * and Flow call. Only `authenticate.admin` and `adminClientForShop` are replaced.
+ * And what #1166 left (#1171): the rollback export has a row per such market price, with the
+ * price before the sale; a campaign counted under before the count existed is counted by the
+ * scheduler's next tick; a list price that followed the base price before the sale, which the
+ * recapture made hand-set, follows the list again once reverted, and the next sale there is
+ * priced from the list's own price; and a market price past the change threshold asks for the
+ * word as a base price does.
+ *
+ * Driven through the campaign page's own loader and action, its rollback export, the recapture
+ * service the page and Flow call, and the real `tick`. Only `authenticate.admin` and
+ * `adminClientForShop` are replaced.
  */
 
 import { describe, expect, it, vi } from "vitest";
 
 import prisma from "../../app/db.server";
 import { DANGEROUS_PHRASE } from "../../app/lib/baselines/recapture";
+import { parseMoney } from "../../app/lib/money/money";
 import { marketsNotBeforeSentence } from "../../app/lib/reporting/rollback";
 import { calendarFor, todayIn } from "../../app/services/calendar.server";
 import { filtersFrom, listCampaigns } from "../../app/services/campaigns/list.server";
 import { runCampaign } from "../../app/services/campaigns/run.server";
+import { startCheck } from "../../app/services/campaigns/start-confirmation.server";
+import { revertVariant } from "../../app/services/campaigns/variant-revert.server";
 import { planRecapture, recapture } from "../../app/services/recapture.server";
+import { tick } from "../../app/services/scheduler.server";
 import { redefine } from "../harness/definition";
 import { chaosAdminClient, chaosAdminContext } from "../harness/http-client";
 import { type ChaosContext, fixtureAdminClient, withChaos } from "../harness/scenario";
@@ -78,6 +90,17 @@ async function page(campaignId: string) {
     params: { id: campaignId },
     context: {},
   } as never)) as unknown as Awaited<ReturnType<typeof import("../../app/routes/app.campaigns.$id").loader>>;
+}
+
+/** The rollback report's export, as its button fetches it: its lines. */
+async function exported(campaignId: string): Promise<string[]> {
+  const { loader } = await import("../../app/routes/app.export.$kind");
+  const response = (await loader({
+    request: new Request(`https://example.invalid/app/export/rollback?campaign=${campaignId}`),
+    params: { kind: "rollback" },
+    context: {},
+  } as never)) as Response;
+  return (await response.text()).trim().split("\n");
 }
 
 /** The campaign on the list and its Needs-a-decision filter, on Home, and on the calendar. */
@@ -179,12 +202,20 @@ describe("chaos: a market or wholesale price recaptured over a running sale (#11
       expect((await marketBaseline(shopId, other, list.id)).basePrice).toBe(5_000n);
 
       // 3. Every list says so before anyone opens the campaign: the recapture counted it.
-      expect(await everywhere(shopId, campaignId), "a list said plain Active over a list price at its sale price").toEqual({
+      const flaggedEverywhere = {
         label: "Active — needs a decision",
         filtered: [campaignId],
         home: 1,
         calendar: "Active — needs a decision",
-      });
+      };
+      expect(await everywhere(shopId, campaignId), "a list said plain Active over a list price at its sale price").toEqual(flaggedEverywhere);
+
+      // 3a. And had it been recaptured under before the count was kept (#1171), with no count,
+      // the lists said plain Active until something counted it: now the scheduler's next tick does.
+      await prisma.planSummary.updateMany({ where: { campaignId }, data: { recapturedAtSale: null, recapturedCountedAt: null } });
+      expect((await everywhere(shopId, campaignId)).label, "the premise: a campaign with no count reads Active").toBe("Active");
+      await tick(new Date());
+      expect(await everywhere(shopId, campaignId), "the tick left a campaign recaptured under before #1166 uncounted").toEqual(flaggedEverywhere);
 
       // 4. Its page: needing a decision, and saying where the remedy for a list price is.
       const flagged = await page(campaignId);
@@ -217,6 +248,13 @@ describe("chaos: a market or wholesale price recaptured over a running sale (#11
       expect(marketsNotBeforeSentence(markets)).toMatch(
         new RegExp(`^1 market price reverts to this campaign's sale price, not the price before it: “.*” in ${list.name} reverts to .*40\\.00, not .*50\\.00\\.`),
       );
+      // 6a. And the export has a row for it (#1171), with its market and the price before: the
+      // sentence names three, and the export listed base prices only.
+      const csv = await exported(campaignId);
+      expect(csv[0]).toBe('"variant_gid","title","state","applied","live_now","reverts_to","before_campaign","market"');
+      expect(csv.slice(1), "the export left the market price out").toEqual([
+        expect.stringMatching(new RegExp(`^"${board}","[^"]*","clean","[^"]*40\\.00","[^"]*40\\.00","[^"]*40\\.00","[^"]*50\\.00","${list.name}"$`)),
+      ]);
 
       // 7. Which is what reverting does: the sale price stays on the list as the merchant's own.
       const reverted = await press(campaignId, { intent: "revert" });
@@ -247,6 +285,143 @@ describe("chaos: a market or wholesale price recaptured over a running sale (#11
       const reverted = await press(campaignId, { intent: "revert" });
       expect(reverted.ok, reverted.message).toBe(true);
       expect(chaos.fake.priceOf(board, LISTS[0].id)).toBe("50.00");
+    });
+  });
+});
+
+/** A list with no fixed prices of its own: its 10% off the base price, so every price on it follows the base price. */
+const FOLLOWING = {
+  id: "gid://shopify/PriceList/recapture-follows",
+  name: "Europe",
+  currency: "EUR",
+  catalog: { id: "gid://shopify/MarketCatalog/recapture-follows", title: "EU", __typename: "MarketCatalog" },
+} as const;
+
+/**
+ * A 20% sale on that list alone, over the board, recaptured over with the phrase. The list works
+ * the board's price out from the base price, so the sale is a fixed price of the board's own there,
+ * and the recapture records that fixed price as the board's baseline, set by hand.
+ */
+async function recapturedOverAFollowingSale(chaos: ChaosContext) {
+  const { shopId, campaignId, variantGids, domain } = chaos.fixture;
+  pending = { shop: domain, endpoint: chaos.server.endpoint() };
+  const board = variantGids[0]!;
+  const client = fixtureAdminClient(domain, chaos.server.endpoint())!;
+  chaos.fake.addPriceList({
+    id: FOLLOWING.id,
+    name: FOLLOWING.name,
+    currency: FOLLOWING.currency,
+    country: "DE",
+    adjustment: { type: "PERCENTAGE_DECREASE", value: 10 },
+    catalog: FOLLOWING.catalog,
+    prices: [],
+  });
+  const { syncMarkets } = await import("../../app/services/markets-sync.server");
+  await syncMarkets(chaosAdminClient(chaos.server.endpoint()), shopId);
+  await prisma.campaign.update({ where: { id: campaignId }, data: { surfaces: { base: false, priceLists: [FOLLOWING.id] } as never } });
+  await redefine(campaignId, { ast: { groups: [{ conditions: [{ field: "variantGid", value: [board] }] }] } });
+  const before = chaos.fake.priceOf(board, FOLLOWING.id)!;
+
+  const applied = await press(campaignId, { intent: "apply" });
+  expect(applied.ok, applied.message).toBe(true);
+  const sale = chaos.fake.fixedPricesOn(FOLLOWING.id).get(board)?.amount;
+  expect(sale, "the premise: the sale is a fixed price on a list that otherwise follows the base price").toBeDefined();
+  expect(sale).not.toBe(before);
+  expect(await marketBaseline(shopId, board, FOLLOWING.id), "the premise: the price followed the list").toMatchObject({ handSet: false });
+
+  const plan = await planRecapture(shopId);
+  await recapture(shopId, { confirmation: DANGEROUS_PHRASE, actor: `staff:${STAFF}`, expectedScope: plan.scope, client });
+  expect(await marketBaseline(shopId, board, FOLLOWING.id), "the premise: the recapture made it hand-set").toMatchObject({
+    handSet: true,
+    basePrice: BigInt(parseMoney(sale!, FOLLOWING.currency).amount),
+  });
+  return { board, before, sale: sale!, client };
+}
+
+/** The board's current baselines on that list that are set by hand. */
+const handSetBaselines = (shopId: string, variantGid: string) =>
+  prisma.baseline.count({ where: { shopId, variantGid, priceListGid: FOLLOWING.id, surfaceKind: "MARKET", supersededAt: null, handSet: true } });
+
+describe("chaos: a list price that followed the base price, recaptured over its sale as set by hand (#1171)", () => {
+  it("follows the list again once reverted, and the next sale is priced from the list's own price", async () => {
+    await withChaos("recapture-market-following", CATALOG, async (chaos) => {
+      const { shopId, campaignId } = chaos.fixture;
+      const { board, before, sale } = await recapturedOverAFollowingSale(chaos);
+
+      // The Revert tab says reverting lets it follow the list again, and gives no row claiming
+      // it reverts to the sale price: the export has none.
+      const flagged = await page(campaignId);
+      expect(flagged.lifecycle.label).toBe("Active — needs a decision");
+      expect(flagged.rollback?.marketsNotBefore).toMatchObject({ count: 0, following: 1 });
+      expect(marketsNotBeforeSentence(flagged.rollback!.marketsNotBefore)).toMatch(
+        /^1 market price that followed its list before this campaign was recaptured at its sale price as a fixed price\. Reverting removes it, so it follows the list again/,
+      );
+      expect((await exported(campaignId)).slice(1)).toEqual([]);
+
+      // Reverting removes the fixed price: the board follows the list, at its price from before the sale.
+      const reverted = await press(campaignId, { intent: "revert" });
+      expect(reverted.ok, reverted.message).toBe(true);
+      expect(chaos.fake.fixedPricesOn(FOLLOWING.id).has(board), "the revert wrote the sale price back as a fixed price").toBe(false);
+      expect(chaos.fake.priceOf(board, FOLLOWING.id)).toBe(before);
+      expect(await handSetBaselines(shopId, board), "the sale price stayed its baseline, set by hand").toBe(0);
+
+      // The next sale is computed from the list's own price, not from the old sale price.
+      const again = await press(campaignId, { intent: "apply" });
+      expect(again.ok, again.message).toBe(true);
+      expect(chaos.fake.fixedPricesOn(FOLLOWING.id).get(board)?.amount, "the next sale compounded the old one").toBe(sale);
+      expect(await marketBaseline(shopId, board, FOLLOWING.id)).toMatchObject({ handSet: false });
+    });
+  });
+
+  it("follows the list again when only that variant is taken out of the sale", async () => {
+    await withChaos("recapture-market-following-variant", CATALOG, async (chaos) => {
+      const { shopId, campaignId } = chaos.fixture;
+      const { board, before, client } = await recapturedOverAFollowingSale(chaos);
+
+      const result = await revertVariant(shopId, campaignId, board, client, { actor: `staff:${STAFF}` });
+      expect(result.outcome?.clean, result.message).toBe(true);
+      expect(chaos.fake.fixedPricesOn(FOLLOWING.id).has(board), "Revert this variant wrote the sale price back as a fixed price").toBe(false);
+      expect(chaos.fake.priceOf(board, FOLLOWING.id)).toBe(before);
+      expect(await handSetBaselines(shopId, board)).toBe(0);
+    });
+  });
+});
+
+describe("chaos: a market price past the change threshold asks for the word, as a base price does (#1171)", () => {
+  it("asks before 60% off on the list alone: on the page, on the run's own plan and for a start nobody confirmed", async () => {
+    await withChaos("market-depth-confirmation", { ...CATALOG, percent: -60 }, async (chaos) => {
+      const { shopId, campaignId, domain } = chaos.fixture;
+      const { board } = await saleOnTheList(chaos, LISTS[0]);
+      const client = fixtureAdminClient(domain, chaos.server.endpoint())!;
+
+      const preview = (await page(campaignId)).preview;
+      expect(preview.counts.planned, "the premise: no base price moves").toBe(0);
+      expect(preview.blastRadius, "60% off in Europe applied from a one-click dialog").toBe(true);
+      expect(preview.confirm).toMatchObject({
+        planned: 0,
+        largeChanges: 1,
+        marketLargeChanges: 1,
+        largest: { title: board, market: "Europe", basisPoints: 6_000, direction: "down" },
+      });
+      expect(preview.confirm?.largest?.before).toMatch(/50\.00/);
+      expect(preview.confirm?.largest?.after).toMatch(/20\.00/);
+
+      const refused = await press(campaignId, { intent: "apply" });
+      expect(refused.ok, "Apply took the list 60% down without asking").toBe(false);
+      expect(refused.message).toMatch(/1 price moves more than 50% from its baseline.*the largest is “.*” in Europe, down 60%/);
+      expect(chaos.fake.priceOf(board, LISTS[0].id)).toBe("50.00");
+      // The run's own plan refuses an untyped press, and a start with nobody to type the word.
+      await expect(runCampaign(shopId, campaignId, client, { actor: `staff:${STAFF}`, untypedPress: true })).rejects.toThrow(
+        /in Europe, down 60%/,
+      );
+      const unconfirmed = (await startCheck(shopId, await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } }))).unconfirmed;
+      expect(unconfirmed).toMatch(/in Europe, down 60%\. Nobody has confirmed it/);
+      expect(chaos.fake.priceOf(board, LISTS[0].id)).toBe("50.00");
+
+      // Typed, it applies.
+      const typed = await press(campaignId, { intent: "apply", confirmation: "apply" });
+      expect(typed.ok, typed.message).toBe(true);
+      expect(chaos.fake.priceOf(board, LISTS[0].id)).toBe("20.00");
     });
   });
 });

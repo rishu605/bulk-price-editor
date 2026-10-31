@@ -20,7 +20,8 @@ clock, or keep the new time.
 
 When a campaign writes more prices, or moves a price further, than your typed-confirmation
 settings allow (**Settings**, 1,000 prices and 50% unless you changed them), the Apply button
-asks you to type *apply*. The scheduler starts a sale with nobody there to ask, so the
+asks you to type *apply*. A price in a market or wholesale catalogue counts toward how far a
+price moves, against its own baseline there, as a base price does. The scheduler starts a sale with nobody there to ask, so the
 question comes when you save the dates instead, and again when you change them if the sale
 has grown since. Your
 confirmation is kept with the campaign: who gave it, when, and what the sale reached then.

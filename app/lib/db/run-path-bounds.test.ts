@@ -59,6 +59,7 @@ const BOUNDED_ELSEWHERE: Record<string, Record<string, string>> = {
   },
   "app/services/campaigns/market-plan.server.ts": {
     retiringInBatch: "the superseded baselines of one RUN_CHUNK batch of variants, at most one per variant in it",
+    "surfaces.priceLists": "the price lists a campaign targets: markets a merchant picked, not one per variant (#1171)",
   },
   "app/services/campaigns/candidates.server.ts": {
     "[...importIds]": "the price imports a campaign's rules name, a handful at most",

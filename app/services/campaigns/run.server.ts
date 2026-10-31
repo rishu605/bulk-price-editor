@@ -841,12 +841,12 @@ async function executeCampaignRun(
   // campaign must carry a confirmation that covers what this plan writes. Checked on this
   // plan, before the run row, so a refusal writes nothing and is a refusal for good.
   if (unattendedStart) {
-    await refuseUnconfirmedStart(shopId, campaignRecord, options.actor, { ...outcome, candidates });
+    await refuseUnconfirmedStart(shopId, campaignRecord, options.actor, { ...outcome, candidates, campaigns: resolvable });
   }
   // An Apply pressed without the word over a stored preview that did not ask for it (#812):
   // the same check, on this plan, so a stale stored number can never be what skipped it.
   if (options.untypedPress && !options.revert && !options.variantGids) {
-    await refuseUntypedPress(shopId, campaignId, { ...outcome, candidates });
+    await refuseUntypedPress(shopId, campaignId, { ...outcome, candidates, campaigns: resolvable });
   }
 
   const kind = options.revert ? "REVERT" : "APPLY";

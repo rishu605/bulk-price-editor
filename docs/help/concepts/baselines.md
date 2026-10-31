@@ -53,6 +53,11 @@ The same goes for a price in a market or a wholesale catalogue the campaign pric
 recapture records the campaign's price there as one you set by hand, so applying again would
 discount it a second time, and reverting would write the sale price back on the list.
 
+Except where the list worked that price out from your base price before the sale, with no
+price of its own set there. Reverting then removes the sale's price from the list, so it
+follows your base price again, and the next campaign there reads the list's own price from
+Shopify before changing it.
+
 To end the sale at the old price, import that price as the baseline (Prices → Baselines),
 then revert. An import sets the base price only, so for a market or wholesale price, revert
 first, then set the old price on the list in Shopify and recapture its baseline.

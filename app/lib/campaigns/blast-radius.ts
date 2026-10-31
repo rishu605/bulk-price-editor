@@ -11,7 +11,8 @@
  * - **Size.** More written prices than the store's variant threshold (Settings, default
  *   1,000).
  * - **Depth.** Any written price moving more than the store's change threshold (Settings,
- *   default 50%) away from its baseline, or landing that far below its cost.
+ *   default 50%) away from its baseline, or landing that far below its cost. A market's or
+ *   wholesale catalogue's price as well as the base price (#1171), against its own baseline.
  * - **Prices taken to nothing.** More than a handful of prices the rule would take to zero
  *   or below, which are written at the smallest price instead. Not a setting: a merchant
  *   who raises the change threshold has not asked for a page of one-cent prices.
@@ -78,6 +79,8 @@ export interface WrittenPrice {
   after: Money;
   /** The baseline's cost, when the variant has one. */
   cost?: Money;
+  /** The market or wholesale catalogue the price is on, by name; absent for the base price (#1171). */
+  market?: string;
 }
 
 /**
@@ -152,11 +155,18 @@ export interface BlastRadius {
   largeChanges: number;
   largest: {
     title: string;
+    /** Its market or wholesale catalogue, when it is a price there (#1171). */
+    market?: string;
     before: string;
     after: string;
     basisPoints: number;
     direction: "down" | "up";
   } | null;
+  /**
+   * Of `largeChanges`, how many are a market's or wholesale catalogue's prices (#1171), which
+   * the depth now counts as it counts the base price's. Absent on a preview stored before it did.
+   */
+  marketLargeChanges?: number;
   /** Prices the rule takes to zero or below, written at the smallest price instead. */
   atMinimum: number;
   /**
@@ -212,7 +222,7 @@ export function confirmationReasons(radius: BlastRadius): string[] {
       `${formatCount(large)} ${one ? "price moves" : "prices move"} more than ${thresholds.changePercent}% from ` +
         `${one ? "its" : "their"} baseline, or ${one ? "lands" : "land"} that far below cost` +
         (largest
-          ? `; the largest is “${largest.title}”, ${largest.direction} ${percentText(largest.basisPoints)}.`
+          ? `; the largest is ${largestName(largest)}, ${largest.direction} ${percentText(largest.basisPoints)}.`
           : "."),
     );
   }
@@ -227,6 +237,11 @@ export function confirmationReasons(radius: BlastRadius): string[] {
   if (radius.compounding && radius.compounding.count > 0) reasons.unshift(compoundingReason(radius.compounding));
 
   return reasons;
+}
+
+/** The largest change's product, in quotes, and the market it is in when it is a market's price (#1171). */
+export function largestName(largest: { title: string; market?: string }): string {
+  return `“${largest.title}”${largest.market ? ` in ${largest.market}` : ""}`;
 }
 
 /**

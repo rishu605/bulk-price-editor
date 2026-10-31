@@ -159,6 +159,42 @@ describe("a start that would discount a sale price again (#781)", () => {
   });
 });
 
+describe("a start whose market prices move past the change threshold (#1171)", () => {
+  /** 60% off 8 base prices and the same 8 in Europe, one of them 75% off there. */
+  const withMarkets = radius({
+    planned: 8,
+    largeChanges: 16,
+    marketLargeChanges: 8,
+    largest: { title: "Wool coat", market: "Europe", before: "€200.00", after: "€50.00", basisPoints: 7_500, direction: "down" },
+  });
+
+  it("records how many were market prices, and none when it counted none", () => {
+    expect(confirmationOf(withMarkets, "staff:1", new Date(0))).toMatchObject({ largeChanges: 16, marketLargeChanges: 8 });
+    expect(confirmationOf(radius({ marketLargeChanges: 0 }), "staff:1", new Date(0)).marketLargeChanges).toBe(0);
+    // A preview that never counted them says nothing about them.
+    expect(confirmationOf(radius(), "staff:1", new Date(0))).not.toHaveProperty("marketLargeChanges");
+  });
+
+  it("is covered by a confirmation that counted them", () => {
+    expect(beyondConfirmation(withMarkets, confirmed({ largeChanges: 16, marketLargeChanges: 8, largestBasisPoints: 7_500 }))).toEqual([]);
+  });
+
+  it("holds one confirmed before they were counted to its base prices, and still to the largest change it confirmed", () => {
+    // The same 60% sale, confirmed over its base prices alone: its markets are no reason to stop it.
+    const sameSale = radius({ ...withMarkets, largest: { ...withMarkets.largest!, basisPoints: 6_000 } });
+    expect(beyondConfirmation(sameSale, confirmed({ largeChanges: 8, largestBasisPoints: 6_000 }))).toEqual([]);
+    // But a market price moving further than anything confirmed is named, market and all.
+    expect(beyondConfirmation(withMarkets, confirmed({ largeChanges: 8, largestBasisPoints: 6_000 }))).toEqual([
+      "its largest change is now “Wool coat” in Europe, down 75%, and the largest confirmed was 60%",
+    ]);
+  });
+
+  it("is refused when nobody confirmed it, though no base price moves that far", () => {
+    const marketsOnly = radius({ planned: 0, largeChanges: 4, marketLargeChanges: 4, largest: withMarkets.largest });
+    expect(unconfirmedStart(marketsOnly, null)).toMatch(/^4 prices move more than 50% .* “Wool coat” in Europe, down 75%\. Nobody has confirmed it/);
+  });
+});
+
 describe("a start nobody is watching", () => {
   it("needs nothing when the preview does not ask for the word", () => {
     expect(unconfirmedStart(radius({ planned: 1_000 }), null)).toBeNull();

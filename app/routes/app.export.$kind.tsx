@@ -85,7 +85,8 @@ export const loader = withGuard("/app/export/$kind", async ({ request, params }:
         return refuse(409, `${writingText(campaign.status)} Export the rollback report once it has finished.`);
       }
       const report = await currentRollback(shop.id, campaign.id);
-      if (report.rows.length > EXPORT_ROW_LIMIT) return tooLarge(report.rows.length);
+      const rows = report.rows.length + (report.marketRows?.length ?? 0); // a market price's row too (#1171)
+      if (rows > EXPORT_ROW_LIMIT) return tooLarge(rows);
       return csv(`rollback-${filenameSlug(campaign.name) || "campaign"}.csv`, rollbackReportCsv(report));
     }
 

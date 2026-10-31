@@ -37,7 +37,7 @@ import {
   type RollbackRowKind,
 } from "../../lib/reporting/rollback";
 import { LANDED } from "../../lib/execution/landed";
-import { priceBeforeStint, sinceItEnded, stintOf } from "../../lib/campaigns/recaptured";
+import { priceBeforeStint, recapturedKey, sinceItEnded, stintOf } from "../../lib/campaigns/recaptured";
 import { labelled } from "../../lib/markets/display-name";
 import { recapturedBaselines, type RecapturedBaseline } from "./recaptured.server";
 
@@ -199,7 +199,7 @@ export async function rollbackReport(
   // recaptured, a market's or wholesale price's for a sentence of its own (#1166).
   const differing = rows.filter((row) => row.before);
   const recaptured = await recapturedBaselines(shopId, campaignId);
-  const markets = await marketsNotBefore(shopId, recaptured, keptBy, titles);
+  const markets = await marketsNotBefore(shopId, recaptured, keptBy);
 
   return {
     campaignId,
@@ -218,7 +218,7 @@ export async function rollbackReport(
           },
         }
       : {}),
-    ...(markets ? { marketsNotBefore: markets } : {}),
+    ...(markets ? { marketsNotBefore: markets.summary, marketRows: markets.rows } : {}),
   };
 }
 
@@ -227,26 +227,29 @@ const NOT_BEFORE_EXAMPLES = 3;
 
 /**
  * The market and wholesale prices reverting puts back at this campaign's sale price, recaptured
- * as their baseline while it ran (#1166), or none.
+ * as their baseline while it ran (#1166), or none: the sentence, and a row each for the export
+ * (#1171), which listed base prices only.
  *
  * A revert writes a market's hand-set baseline back (#930), and a recapture records every fixed
  * price on a list as hand-set, the campaign's own among them: so a market price recaptured at
  * the sale price stays at it after the sale ends, and the report's rows, the base price's, said
  * nothing. Not where another campaign keeps the variant, whose price reverting gives it, nor a
- * baseline that follows the list, which reverting lets follow it again.
+ * baseline that follows the list, which reverting lets follow it again. Nor one that followed
+ * the list before the sale, which the recapture made hand-set: reverting lets that follow the
+ * list again too (#1171), and it is counted for the sentence to say so, with no row.
  */
 async function marketsNotBefore(
   shopId: string,
   recaptured: ReadonlyMap<string, RecapturedBaseline>,
   keptBy: ReadonlySet<string>,
-  titles: ReadonlyMap<string, string>,
-): Promise<RollbackReport["marketsNotBefore"]> {
-  const back = [...recaptured.values()].filter((entry) => entry.priceListGid !== "" && entry.handSet && !keptBy.has(entry.variantGid));
-  if (back.length === 0) return undefined;
+): Promise<{ summary: NonNullable<RollbackReport["marketsNotBefore"]>; rows: RollbackRow[] } | undefined> {
+  const recapturedHere = [...recaptured.values()].filter((entry) => entry.priceListGid !== "" && entry.handSet && !keptBy.has(entry.variantGid));
+  const back = recapturedHere.filter((entry) => !entry.followedList);
+  const following = recapturedHere.length - back.length;
+  if (recapturedHere.length === 0) return undefined;
 
-  const shown = back.slice(0, NOT_BEFORE_EXAMPLES);
-  const [lists, untitled] = await Promise.all([
-    inChunks([...new Set(shown.map((entry) => entry.priceListGid))], (batch) =>
+  const [lists, mirror] = await Promise.all([
+    inChunks([...new Set(back.map((entry) => entry.priceListGid))], (batch) =>
       prisma.priceListRecord
         .findMany({
           where: { shopId, priceListGid: { in: batch } },
@@ -254,18 +257,71 @@ async function marketsNotBefore(
         })
         .then((rows) => rows.map(labelled)),
     ),
-    titleMapFor(shopId, shown.map((entry) => entry.variantGid).filter((gid) => !titles.has(gid))),
+    marketMirror(shopId, back),
   ]);
   const names = new Map(lists.map((list) => [list.priceListGid, list.name]));
 
-  return {
-    count: back.length,
-    examples: shown.map((entry) => ({
-      title: titles.get(entry.variantGid) ?? untitled.get(entry.variantGid) ?? entry.variantGid,
+  const rows: RollbackRow[] = back.map((entry) => {
+    const price = (amount: bigint) => format(money(Number(amount), entry.currency));
+    const variant = mirror.variants.get(entry.variantGid);
+    const live = mirror.prices.get(recapturedKey(entry.variantGid, entry.priceListGid)) ?? null;
+    const kind = classifyRollbackRow({
+      deleted: variant === undefined || variant.deleted,
+      applied: entry.latest === null ? null : Number(entry.latest),
+      live: live === null ? null : Number(live),
+      revertsTo: Number(entry.baseline),
+    });
+    return {
+      variantGid: entry.variantGid,
+      title: variant?.title ?? entry.variantGid,
+      kind,
+      applied: entry.latest === null ? null : price(entry.latest),
+      live: live === null ? null : price(live),
+      revertsTo: kind === "deleted" ? null : price(entry.baseline),
+      before: price(entry.before),
       market: names.get(entry.priceListGid) ?? entry.priceListGid,
-      before: format(money(Number(entry.before), entry.currency)),
-      revertsTo: format(money(Number(entry.baseline), entry.currency)),
-    })),
+    };
+  });
+
+  return {
+    summary: {
+      count: rows.length,
+      examples: rows
+        .slice(0, NOT_BEFORE_EXAMPLES)
+        .map((row) => ({ title: row.title, market: row.market!, before: row.before!, revertsTo: row.revertsTo ?? "" })),
+      ...(following > 0 ? { following } : {}),
+    },
+    rows,
+  };
+}
+
+/**
+ * What the mirror holds for these market prices (#1171): each one's fixed price on its list, by
+ * `recapturedKey` -- none for a price the list works out -- and each variant's title and
+ * whether it is gone, as the base rows read them.
+ */
+async function marketMirror(
+  shopId: string,
+  entries: readonly RecapturedBaseline[],
+): Promise<{ prices: Map<string, bigint | null>; variants: Map<string, { title: string; deleted: boolean }> }> {
+  const gids = [...new Set(entries.map((entry) => entry.variantGid))];
+  const [prices, index] = await Promise.all([
+    inChunks(gids, (batch) =>
+      prisma.priceSurfaceEntry.findMany({
+        where: { shopId, variantGid: { in: batch }, priceListGid: { not: "" } },
+        select: { variantGid: true, priceListGid: true, livePrice: true },
+      }),
+    ),
+    inChunks(gids, (batch) =>
+      prisma.variantIndex.findMany({
+        where: { shopId, variantGid: { in: batch } },
+        select: { variantGid: true, title: true, deletedAt: true },
+      }),
+    ),
+  ]);
+  return {
+    prices: new Map(prices.map((row) => [recapturedKey(row.variantGid, row.priceListGid), row.livePrice])),
+    variants: new Map(index.map((row) => [row.variantGid, { title: row.title ?? row.variantGid, deleted: row.deletedAt !== null }])),
   };
 }
 

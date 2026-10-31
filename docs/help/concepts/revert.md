@@ -50,8 +50,13 @@ export of the rollback report gives that price for every such product, in its
 A market or wholesale catalogue price recaptured during the sale is said separately, with
 the market's name: "reverts to €40.00, not €50.00". Reverting writes a market's baseline back,
 so the sale price stays on the list. An import cannot set a market's price, so revert, then
-set the old price on the list in Shopify and recapture its baseline. The export lists base
-prices only.
+set the old price on the list in Shopify and recapture its baseline. The export has a row for
+each of these prices too, with the market's name in its `market` column.
+
+A price the list worked out from your base price before the sale is different. The recapture
+recorded the sale's price there as one set by hand, but reverting removes it instead of
+writing it back, so the product follows the list again. The Revert tab says so, and there is
+nothing else to do.
 
 ## A product another campaign handed over
 
