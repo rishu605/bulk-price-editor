@@ -29,6 +29,7 @@ import { DEFINITION, isPractice, loadCampaignContext, scopeOf, importIdsOf, segm
 import { astToWhere } from "../segments.server";
 import { DEFAULT_THRESHOLD } from "../../lib/planning/write-path";
 import { AppError, toAppError } from "../../lib/errors/app-error";
+import { classifyFailure } from "../../lib/execution/classify";
 import { LANDED } from "../../lib/execution/landed";
 import { guardrailsFor } from "../settings.server";
 import type { RunOutcome } from "./types";
@@ -134,6 +135,9 @@ export interface RunOptions {
    * Rows the previous attempt verified are left untouched, so a resumed run converges
    * on the state a clean run would have produced (E2) without paying to rewrite work
    * that already landed.
+   *
+   * A whole revert resumed leaves alone every price the revert it continues kept as edited
+   * (#1157), with the reason it was kept: nobody is asked again, so the answer stays theirs.
    */
   resume?: boolean;
   /**
@@ -839,7 +843,13 @@ async function executeCampaignRun(
   // the rollback report says somebody edited since this campaign set it. Asked of the report
   // here, after the claim and this run's own plan, so it is the edit as the revert finds it.
   const keptEdits = options.keepEdited && wholeRevert ? await editedVariants(shopId, campaignId) : [];
-  const leaveAlone = new Set([...(options.skipVariantGids ?? []), ...keptEdits]);
+  // And a resumed revert keeps what the revert it continues kept (#1157), whichever way it
+  // kept them: the Revert tab's "Leave as it is", a held sale's scheduled end (#784), Flow's
+  // End campaign (#794). Resume posts no list and was planned as a fresh revert, so it wrote
+  // the campaign-free price over every one. Read back from that revert's ledger, reasons and
+  // all, and ledgered again below, so a resume of this run keeps them too.
+  const keptBefore = wholeRevert && options.resume ? await editsKeptByResumed(campaignId) : new Map<string, string>();
+  const leaveAlone = new Set([...(options.skipVariantGids ?? []), ...keptEdits, ...keptBefore.keys()]);
 
   let writable = outcome.rows.filter(
     (row) => row.status !== "skipped" && !leaveAlone.has(row.ref.variantGid),
@@ -1007,7 +1017,7 @@ async function executeCampaignRun(
   }
 
   await writeLedgerRows(run.id, shopId, writable);
-  await writeSparedRows(run.id, shopId, spared, options.skipReason);
+  await writeSparedRows(run.id, shopId, spared, options.skipReason, keptBefore);
 
   // Record intents before writing: every price we write produces a products/update
   // webhook moments later, and without this the drift detector would flag our own
@@ -1339,8 +1349,9 @@ async function executeCampaignRun(
     reason:
       `${options.revert ? "revert" : "apply"} finished: ${verifiedRows} verified, ${failedRows} failed` +
       (settledNote ? `. ${settledNote}` : "") +
-      // Nobody ticked these (#794), so the history is where the merchant reads that they stayed.
-      (options.keepEdited && spared.length > 0 ? `. ${editsLeft(spared.length)}` : ""),
+      // Nobody ticked these (#794), nor on a resume (#1157), so the history is where the
+      // merchant reads that they stayed.
+      ((options.keepEdited || keptBefore.size > 0) && spared.length > 0 ? `. ${editsLeft(spared.length)}` : ""),
     runId: run.id,
     actor: options.actor,
   });
@@ -1393,6 +1404,9 @@ async function executeCampaignRun(
     ...(options.keepEdited ? { keptEdits: spared.length } : {}),
     messages: [
       ...(settledNote ? [settledNote] : []),
+      // What the resume left alone, under "Resumed" (#1157): the banner it was pressed under
+      // said it would.
+      ...(keptBefore.size > 0 && spared.length > 0 ? [editsLeft(spared.length)] : []),
       // Lead with what was skipped. "Applied 3 variants" after a 1,500-row campaign
       // looks like a catastrophe until you know the other 1,497 were already correct
       // and deliberately left alone.
@@ -1668,7 +1682,9 @@ async function writeSparedRows(
   runId: string,
   shopId: string,
   rows: PlannedRow[],
-  reason = "Left as it is: this price was changed outside the app and you chose to keep that edit.",
+  reason = SPARED_REASON,
+  /** A resumed revert's carried rows (#1157), each with the reason it was first kept for. */
+  keptFor: ReadonlyMap<string, string> = new Map(),
 ): Promise<void> {
   if (rows.length === 0) return;
 
@@ -1689,12 +1705,43 @@ async function writeSparedRows(
         intendedCompareAt: row.intendedCompareAt ? BigInt(row.intendedCompareAt.amount) : null,
         intendedCompareAtSet: row.intendedCompareAtSet,
         status: "SKIPPED" as const,
-        failureReason: reason,
+        failureReason: keptFor.get(row.ref.variantGid) ?? reason,
         appliedAt: new Date(),
       })),
       skipDuplicates: true,
     }),
   );
+}
+
+/** The Revert tab's "Leave as it is", which posts no reason of its own. */
+const SPARED_REASON = "Left as it is: this price was changed outside the app and you chose to keep that edit.";
+
+/**
+ * The prices a run left as edited, by variant, with why (#1157): the base rows
+ * `writeSparedRows` ledgered SKIPPED, each carrying the reason it was kept.
+ *
+ * Less a variant deleted while the run was in flight, which the executors also ledger
+ * SKIPPED, in Shopify's words (E4): it was never an edit, and there is no price to keep.
+ */
+export async function editsKeptBy(runId: string): Promise<Map<string, string>> {
+  const rows = await prisma.variantChange.findMany({
+    where: { runId, status: "SKIPPED", surfaceKind: "BASE", priceListGid: "" },
+    select: { variantGid: true, failureReason: true },
+  });
+  return new Map(
+    rows
+      .filter((row) => classifyFailure(row.failureReason ?? "").reason !== "variant-deleted")
+      .map((row) => [row.variantGid, row.failureReason ?? SPARED_REASON]),
+  );
+}
+
+/**
+ * What the revert a Resume continues kept as edited (#1157); nothing when the run it
+ * continues is an apply, which keeps no edits.
+ */
+async function editsKeptByResumed(campaignId: string): Promise<Map<string, string>> {
+  const resumed = await runToResume(campaignId);
+  return resumed?.kind === "REVERT" ? editsKeptBy(resumed.id) : new Map();
 }
 
 /**

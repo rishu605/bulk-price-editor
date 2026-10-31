@@ -215,6 +215,23 @@ describe("a Partial campaign's explanation follows what its run got done (#927)"
   });
 });
 
+describe("a Partial revert that kept edits says Resume leaves them alone (#1157)", () => {
+  it("counts them, after what the revert got done", () => {
+    const one = describeState("PARTIAL", { resumes: "REVERT", progress: { confirmed: 2, unconfirmed: 0 }, kept: 1 }).explanation;
+    expect(one).toMatch(/^Some prices were put back and verified/);
+    expect(one).toMatch(/Resuming finishes the revert\. 1 price edited outside Anchor that the revert kept stays as edited: Resume leaves it alone\.$/);
+    const three = describeState("PARTIAL", { resumes: "REVERT", progress: { confirmed: 0, unconfirmed: 0 }, kept: 3 }).explanation;
+    expect(three).toMatch(/3 prices edited outside Anchor that the revert kept stay as edited: Resume leaves them alone\.$/);
+  });
+
+  it("says nothing of edits when it kept none, or when the run it resumes is an apply", () => {
+    const none = describeState("PARTIAL", { resumes: "REVERT", kept: 0 }).explanation;
+    expect(none).toBe(describeState("PARTIAL", { resumes: "REVERT" }).explanation);
+    expect(none).not.toMatch(/edited outside Anchor/);
+    expect(describeState("PARTIAL", { resumes: "APPLY", kept: 2 }).explanation).not.toMatch(/edited outside Anchor/);
+  });
+});
+
 describe("an active campaign that a higher-priority one outranks everywhere (#837)", () => {
   it("does not claim the storefront shows its price, and names who does", () => {
     const described = describeState("ACTIVE", { outrankedBy: ["QA 687 high"] });
