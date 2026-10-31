@@ -311,6 +311,11 @@ export interface RunOutcome {
    * or never had in scope, is not here; a put-back closes a drift only for these.
    */
   unchanged?: string[];
+  /**
+   * For a run asked to keep edits (`keepEdited`, #794): how many variants it left as edited
+   * outside Anchor rather than revert them, so Flow's answer can say so.
+   */
+  keptEdits?: number;
 }
 
 export interface RunSummary {
