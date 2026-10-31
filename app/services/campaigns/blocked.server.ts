@@ -3,6 +3,7 @@
  * `lib/planning/blocked-message.ts`.
  */
 
+import type { BreachPolicy } from "../../lib/campaigns/breach-policy";
 import { BLOCKED_NAMED, blockedMessage } from "../../lib/planning/blocked-message";
 import type { BlockedVariant } from "../../lib/planning/types";
 import { titleMapFor } from "./candidates.server";
@@ -11,6 +12,8 @@ export async function describeBlocked(
   shopId: string,
   blocked: readonly BlockedVariant[],
   when: "preview" | "run",
+  /** The planned campaign's floor-breach policy, which decides what it is told to do (#1161). */
+  breach?: BreachPolicy,
 ): Promise<string> {
   // Titles for the ones named only; the rest are a count.
   const titles = await titleMapFor(shopId, [...new Set(blocked.slice(0, BLOCKED_NAMED).map((entry) => entry.ref.variantGid))]);
@@ -22,6 +25,7 @@ export async function describeBlocked(
       ...(entry.floor ? { floor: entry.floor } : {}),
     })),
     when,
+    breach,
   );
 }
 

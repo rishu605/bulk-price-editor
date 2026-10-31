@@ -133,7 +133,7 @@ export async function previewCampaign(
   campaignId: string,
   options: PreviewOptions = {},
 ): Promise<CampaignPreview> {
-  const { campaign, resolvable, heldEdits, others, ast } = await loadCampaignContext(shopId, campaignId);
+  const { campaign, resolvable, heldEdits, others, ast, breach } = await loadCampaignContext(shopId, campaignId);
   const [scoped, storeGuardrails, written] = await Promise.all([
     loadCandidates(shopId, ast, undefined, importIdsOf(resolvable)),
     guardrailsFor(shopId),
@@ -164,7 +164,9 @@ export async function previewCampaign(
       blocked: {
         reason: outcome.reason,
         variantGid: outcome.ref.variantGid,
-        message: await describeBlocked(shopId, outcome.blocked, "preview"),
+        // What to do, as the run says it (#1161). None for a revert's: the campaign is out of its
+        // own plan, so what stops it is another campaign's policy.
+        message: await describeBlocked(shopId, outcome.blocked, "preview", options.revert ? undefined : breach),
       },
       writePath: "none",
       writePathReason: "Blocked before planning completed.",

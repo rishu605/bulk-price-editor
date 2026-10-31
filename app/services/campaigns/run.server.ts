@@ -45,6 +45,7 @@ import { queuedVerb } from "../../lib/campaigns/queued-refusal";
 import { editsLeft } from "../../lib/campaigns/kept-edits";
 import { refusedForGood, startRefusedEntry } from "../../lib/scheduling/start-refusal";
 import type { CampaignState } from "../../lib/lifecycle/transitions";
+import { breachPolicyFor } from "../../lib/campaigns/breach-policy";
 import { SKIP_REASON_GROUP } from "../../lib/planning/reasons";
 import { baseRowsOnly, type LedgerState, planResume } from "../../lib/execution/resume";
 import { applyCampaignTags, applyTakeoverTags, removeCampaignTags } from "./tags.server";
@@ -224,7 +225,7 @@ export async function runCampaign(
     //
     // Merges with the job's context when there is one, so a queued run keeps its job id.
     const outcome = await withLogContext({ shopId, campaignId }, () =>
-      executeCampaignRun(shopId, campaignId, client, options, started),
+      executeCampaignRun(shopId, campaignId, client, options, started, stateBefore),
     );
 
     // A refusal -- waiting for approval, over the inline limit, refused by the plan -- is
@@ -519,6 +520,11 @@ async function executeCampaignRun(
    * failure path, which by definition never reaches a return. See `failRun`.
    */
   started: Started = {},
+  /**
+   * Where the campaign was before this run claimed it, which says whether the store's
+   * floor-breach setting still reaches it (#1161): by the time it plans it is Applying.
+   */
+  stateBefore?: CampaignState,
 ): Promise<RunOutcome> {
   // Practice campaigns never write. Refused here, in the one function that writes
   // prices, rather than only in the UI that offers the button: the merchant was told
@@ -757,7 +763,7 @@ async function executeCampaignRun(
   }
 
   const startedAt = Date.now();
-  const { campaign: campaignRecord, resolvable, heldEdits, ast } = await loadCampaignContext(shopId, campaignId);
+  const { campaign: campaignRecord, resolvable, heldEdits, ast, breach } = await loadCampaignContext(shopId, campaignId);
   const campaignName = campaignRecord.name;
   const [scoped, storeGuardrails] = await Promise.all([
     loadCandidates(shopId, ast, options.variantGids, importIdsOf(resolvable)),
@@ -812,11 +818,15 @@ async function executeCampaignRun(
   }
 
   // Each blocking variant by name, with its price, its floor and what to do (#1076): the
-  // history, the scheduler's refusal and Flow's run log all read this sentence.
+  // history, the scheduler's refusal and Flow's run log all read this sentence. What to do is
+  // asked of the state before this run's claim (#1161): a draft's claim is given back and the
+  // store's setting reaches it again, while a running campaign keeps its policy. None for a
+  // revert, as for its preview: what stops it is another campaign's policy.
   if (outcome.kind === "blocked") {
+    const told = options.revert || !stateBefore ? undefined : breachPolicyFor(stateBefore, breach.policy, breach.store);
     throw new AppError({
       code: "GUARDRAIL_BLOCKED",
-      userMessage: await describeBlocked(shopId, outcome.blocked, "run"),
+      userMessage: await describeBlocked(shopId, outcome.blocked, "run", told),
       context: { campaignId, blocked: outcome.blocked.length, firstVariantGid: outcome.ref.variantGid, reason: outcome.reason },
     });
   }
@@ -1205,8 +1215,14 @@ async function executeCampaignRun(
           client,
           refusedMarkets,
           // A variant taken out of a sale follows a percentage list again, rather than being
-          // pinned at the price the list derives today (#1002).
-          { perProductOnly: true, onProgress: beat, letFollow: options.revert === true },
+          // pinned at the price the list derives today (#1002). A market it stops says what to
+          // do by the campaign's policy (#1161), except on a revert, which plans without it.
+          {
+            perProductOnly: true,
+            onProgress: beat,
+            letFollow: options.revert === true,
+            ...(options.revert ? {} : { breach }),
+          },
         )
       : options.revert
         ? await revertMarketSurfaces(shopId, campaignId, client, beat, {
@@ -1221,7 +1237,9 @@ async function executeCampaignRun(
             marketVariants,
             client,
             refusedMarkets,
-            { onProgress: beat, alreadyLandedIn: marketsLandedIn },
+            // As this run keeps it, not as it was before the claim (#1161): a market is planned
+            // once the base prices are up, so whatever stops one, the campaign has started.
+            { onProgress: beat, alreadyLandedIn: marketsLandedIn, breach },
           );
 
     for (const market of markets) {
