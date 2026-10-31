@@ -41,7 +41,7 @@ recaptured during the sale, because the recapture recorded the sale price as nor
 
 So the Revert tab and the Revert dialog say when a product will revert to a different
 price from the one the ledger recorded before this campaign, and name it: "reverts to
-£80.00, not £100.00". When the reason is a recapture at the sale price, they say that too.
+80.00, not 100.00". When the reason is a recapture at the sale price, they say that too.
 To put the old price back, import it as the product's baseline first
 ([Importing your own prices](../how-to/import-baselines.md)), then revert. The
 export of the rollback report gives that price for every such product, in its
