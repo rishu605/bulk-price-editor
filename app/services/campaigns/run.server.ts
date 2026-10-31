@@ -1186,6 +1186,8 @@ async function executeCampaignRun(
   // see the old price for the whole sale. A failure here does not stop the run -- the base
   // prices already landed -- but it does leave it unfinished: see below (#1001).
   let marketsStopped = false;
+  // Market-wide percentages a whole revert could not put back, which no row counts (#706).
+  let percentagesLeft = 0;
   try {
     const markets = options.variantGids
       ? // A scoped run prices its own variants' markets and nobody else's (#763). It used
@@ -1236,11 +1238,12 @@ async function executeCampaignRun(
         messages.push(`${market.name}: priced product by product rather than with one market-wide change, because ${market.pathReason}.`);
       }
       messages.push(...market.messages);
+      percentagesLeft += market.percentagesLeft ?? 0;
     }
   } catch (error) {
     marketsStopped = true;
     messages.push(
-      `Base prices were applied, but market prices did not finish: ${
+      `Base prices were ${options.revert ? "put back" : "applied"}, but market prices did not finish: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -1252,22 +1255,27 @@ async function executeCampaignRun(
   // and verified" -- and EUR shoppers paid full price with nothing offering to fix it. Now it
   // is Partial, and Resume retries the market rows that did not land and nothing else.
   //
-  // Not a whole-campaign revert: its market deletes settle the apply's rows rather than its
-  // own, and Resume does not retry them yet (#706).
-  const markets = wholeRevert ? { verified: 0, failed: 0, unverified: 0 } : await outstandingMarketRows(run.id);
-  if (marketsStopped && !wholeRevert) result.clean = false;
-  if (markets.failed + markets.unverified > 0) result.clean = false;
+  // A whole revert's too (#706). Its deletes settle the apply's rows rather than its own, so
+  // none it failed was counted, and the campaign read Completed -- "prices are back" -- with
+  // Europe still on sale and nothing offering to finish it. A delete Shopify refuses is now a
+  // FAILED row of the revert's, and a market-wide percentage it could not put back is counted
+  // beside them, so the revert is Partial and Resume sends what is outstanding again.
+  const markets = await outstandingMarketRows(run.id);
+  if (marketsStopped) result.clean = false;
+  if (markets.failed + markets.unverified + percentagesLeft > 0) result.clean = false;
   // Every surface, for what the merchant reads: "Partial · 0 failed" over three euro prices
   // that failed reads as nothing being wrong. The metrics below stay the base surface's;
   // the market writer reports its own.
-  const failedRows = result.failed + markets.failed;
+  const failedRows = result.failed + markets.failed + percentagesLeft;
   const unverifiedRows = result.unverified + markets.unverified;
   // And its verified prices, where the market prices are all it writes (#1111). A campaign
   // for Europe alone that verified every euro price said "apply finished: 0 verified" -- in
   // its history, its run row, its outcome and its email. A campaign that also prices the base
-  // price still counts that one: its "N verified" has always been the store prices.
+  // price still counts that one: its "N verified" has always been the store prices. Not a
+  // whole revert's, whose market rows are only the few it wrote back: what it deleted settles
+  // the apply's rows, and its count stays the store prices it put back.
   const marketsOnly = resolvable.some((campaign) => campaign.id === campaignId && campaign.marketsOnly);
-  const verifiedRows = result.verified + (marketsOnly ? markets.verified : 0);
+  const verifiedRows = result.verified + (marketsOnly && !wholeRevert ? markets.verified : 0);
 
   // The mirror, before anything says this run is over (#906). It was refreshed row by row
   // -- two queries a variant, 204,000 for a 102,132-variant apply -- *after* the campaign

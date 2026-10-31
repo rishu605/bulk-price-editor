@@ -81,6 +81,8 @@ const props = (over: Partial<CampaignDetailProps> = {}) =>
     heldEdits: 0,
     // Nothing on record and nothing asked (#1009).
     startConfirmation: { confirmed: null, unconfirmed: null },
+    // A draft follows the store's setting (#789).
+    breachPolicy: { policy: "clamp", kept: false, store: "clamp" },
     ...over,
   }) as unknown as CampaignDetailProps;
 
@@ -1130,5 +1132,47 @@ describe("archiving a campaign that is still running asks first (#748)", () => {
     expect(
       badge(render(<CampaignHeader {...live({ archived: true, state: "COMPLETED", lifecycle: describeState("COMPLETED") } as never)} />)),
     ).toBe("neutral");
+  });
+});
+
+describe("the campaign's floor-breach policy is said where it is decided (#789)", () => {
+  /** Apostrophes come back escaped from `renderToStaticMarkup`. */
+  const text = (html: string) => html.replace(/&#x27;/g, "'");
+
+  it("names the store's policy in the Apply dialog of a campaign that has not started, which it then keeps", () => {
+    const dialog = text(
+      modalOf(render(<CampaignHeader {...props({ breachPolicy: { policy: "block", kept: false, store: "block" } } as never)} />), "apply-confirmation"),
+    );
+    expect(dialog).toContain('<s-text color="subdued">If a price breaches a floor</s-text>');
+    expect(dialog).toContain("Block the whole campaign: the store's setting, which this campaign keeps until it ends");
+  });
+
+  it("names a running campaign's own policy, and the store's when they differ", () => {
+    const dialog = text(
+      modalOf(
+        render(
+          <CampaignHeader
+            {...props({ lifecycle: describeState("PARTIAL"), state: "PARTIAL", breachPolicy: { policy: "clamp", kept: true, store: "block" } } as never)}
+          />,
+        ),
+        "apply-confirmation",
+      ),
+    );
+    expect(dialog).toContain(
+      "Clamp it to the floor and carry on: the one it started with. Settings now says “Block the whole campaign”, which it does not follow",
+    );
+  });
+
+  it("is on the Overview tab, with whose policy it is", () => {
+    const draft = text(render(<CampaignOverviewTab {...props({ breachPolicy: { policy: "skip", kept: false, store: "skip" } } as never)} />));
+    expect(draft).toContain("When a price would breach a floor");
+    expect(draft).toContain("Skip that variant, price the rest");
+    expect(draft).toContain("The store's setting, which this campaign follows until it starts.");
+
+    const running = text(
+      render(<CampaignOverviewTab {...props({ lifecycle: describeState("ACTIVE"), state: "ACTIVE", breachPolicy: { policy: "clamp", kept: true, store: "block" } } as never)} />),
+    );
+    expect(running).toContain("Clamp it to the floor and carry on");
+    expect(running).toContain("Settings now says “Block the whole campaign”, for new campaigns and anything not yet started.");
   });
 });

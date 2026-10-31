@@ -286,7 +286,10 @@ export async function revertMarketWide(
         ? // The moment the market is the merchant's again: `priorAdjustment` reads the
           // campaign's history on this list from here on (#705).
           { status: "REVERTED", verifiedAt: new Date() }
-        : { status: "FAILED", failureReason: write.errors.join("; ") },
+        : // Not FAILED (#706): the campaign's percentage is still on the list, which is what
+          // these rows say, and a FAILED one is never asked about again, so Resume ended the
+          // revert Completed with the sale still on. The run counts it as not put back.
+          { failureReason: write.errors.join("; ") },
     });
 
     if (!write.ok) {
@@ -322,7 +325,8 @@ async function priorAdjustment(
   // stamps that moment on the rows it settles as REVERTED, and only once its write landed;
   // a revert that failed here leaves them unreverted, the campaign's percentage still on
   // the list, and their prior still the one to keep. Per list rather than from the REVERT
-  // run's status, which reads COMPLETED when a market's write failed (#706). And the
+  // run's status, which read COMPLETED when a market's write failed until #706, and reads
+  // PARTIAL now over a revert that put one market back and not another. And the
   // moment, not the reverted row's own age: a write Shopify rejected mid-sale stays FAILED,
   // never REVERTED, and is history once the revert lands however recently it was made.
   const lastRevert = await prisma.priceListChange.aggregate({

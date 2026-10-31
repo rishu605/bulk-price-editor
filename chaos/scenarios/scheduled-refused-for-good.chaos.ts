@@ -182,9 +182,9 @@ describe("chaos: a scheduled start refused for good", () => {
   it("by a blocking guardrail is left alone until its dates move, and the new start runs", async () => {
     await withChaos("scheduled-refused-guardrail", CATALOG, async (chaos) => {
       const { shopId, campaignId, variantGids, baseline } = chaos.fixture;
-      // A floor above every price, set to block rather than clamp (as stranded-claim does).
-      await writeSettings(shopId, { ...DEFAULT_SETTINGS, minPrice: 100_000 });
-      await prisma.campaign.update({ where: { id: campaignId }, data: { guardrailViolationPolicy: "block" } });
+      // A floor above every price, set to block rather than clamp (as stranded-claim does): the
+      // store's setting, which a scheduled campaign follows until it starts (#789).
+      await writeSettings(shopId, { ...DEFAULT_SETTINGS, minPrice: 100_000, violationPolicy: "block" });
       await dueToStart(chaos);
       sent.length = 0;
 
