@@ -34,6 +34,7 @@ import {
   type ValidRow,
 } from "../lib/baselines/csv-rows";
 import { logger } from "../lib/logging/logger";
+import { recordRecapturedAtSale } from "./campaigns/recaptured.server";
 
 export interface ImportProblem {
   line: number;
@@ -241,6 +242,9 @@ export async function importBaselines(
   });
 
   logger.info("baselines imported", { shopId, ...summary(result) });
+  // An imported baseline can make a running campaign's its sale price, or put back the price
+  // before it, which is what the status tells the merchant to do (#1166). Never throws.
+  if (result.written > 0) await recordRecapturedAtSale(shopId);
   return result;
 }
 

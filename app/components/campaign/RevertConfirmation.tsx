@@ -1,5 +1,5 @@
 import { formatCount } from "../../lib/format/display";
-import { notBeforeSentence, unaffectedSentence, type RollbackReport } from "../../lib/reporting/rollback";
+import { marketsNotBeforeSentence, notBeforeSentence, unaffectedSentence, type RollbackReport } from "../../lib/reporting/rollback";
 import { SPACE } from "../../lib/ui/spacing";
 import type { KeepersAfterRevert } from "../../services/campaigns/keepers.server";
 import { Secondary } from "../Type";
@@ -32,6 +32,7 @@ export function RevertConfirmation({
   campaignName,
   counts,
   notBefore,
+  marketsNotBefore,
   keepers,
   pending,
   busy,
@@ -42,6 +43,8 @@ export function RevertConfirmation({
   counts: { total: number; drifted: number; deleted: number; unaffected: number };
   /** The variants reverting does not put back at their price from before the campaign (#781). */
   notBefore?: RollbackReport["notBefore"];
+  /** The market and wholesale prices reverting leaves at the sale price (#1166). */
+  marketsNotBefore?: RollbackReport["marketsNotBefore"];
   /** Asked for when the modal opens, because answering means planning the scope again. */
   keepers: KeepersAfterRevert | null;
   pending: boolean;
@@ -92,6 +95,11 @@ export function RevertConfirmation({
           {notBeforeSentence(notBefore) ? (
             <s-paragraph>
               <s-text tone="caution">{notBeforeSentence(notBefore)}</s-text>
+            </s-paragraph>
+          ) : null}
+          {marketsNotBeforeSentence(marketsNotBefore) ? (
+            <s-paragraph>
+              <s-text tone="caution">{marketsNotBeforeSentence(marketsNotBefore)}</s-text>
             </s-paragraph>
           ) : null}
 

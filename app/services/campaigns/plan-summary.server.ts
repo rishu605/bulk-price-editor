@@ -54,6 +54,7 @@ import type { QueueRuntime } from "../../worker/queue-runtime.server";
 import { enqueueWithin, webQueue } from "../../worker/web-queue.server";
 import { keepersOf, type KeepersAfterRevert } from "./keepers.server";
 import { planlessPreview, previewCampaign, refusedRule, writingText } from "./preview.server";
+import { keepRecapturedCount } from "./recaptured.server";
 import { rollbackReport, type RollbackReport } from "./rollback-report.server";
 import { scopeSize } from "./scope-size.server";
 import type { CampaignPreview } from "./types";
@@ -174,6 +175,9 @@ export async function refreshPlanSummary(
     // Not `requestedAt`: a plan asked of the worker after this one began is still owed.
     update: answers,
   });
+  // The count the campaigns list, Home and the calendar read (#1166), as this plan found it:
+  // begun at its snapshot, so a recapture counted since is not overwritten by it.
+  if (preview.recapturedAtSale !== undefined) await keepRecapturedCount(shopId, campaignId, preview.recapturedAtSale, at);
 
   // Durations and counts, never a price.
   metric("plan.summary_ms", Date.now() - started, {

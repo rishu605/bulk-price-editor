@@ -224,9 +224,15 @@ export interface CampaignPreview {
   /**
    * Of the variants this campaign prices, how many have a baseline recaptured at its own sale
    * price while it was live (#781): its status says so rather than "verified". Absent on a
-   * revert's preview, on one with no plan, and on one stored before it was counted.
+   * revert's preview, on one with no plan, and on one stored before it was counted. A base,
+   * market or wholesale price recaptured so counts its variant once (#1166).
    */
   recapturedAtSale?: number;
+  /**
+   * Of those prices, how many are a market's or a wholesale catalogue's (#1166), which a
+   * baseline import cannot set back, so the status says where to look instead.
+   */
+  recapturedInMarkets?: number;
   /**
    * Set instead of a plan while a run is writing this campaign (#803): why the page shows
    * no preview. Planning the whole scope on every load held database connections the run

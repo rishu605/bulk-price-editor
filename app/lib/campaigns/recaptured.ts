@@ -12,7 +12,7 @@
  * so the page's status, the Apply confirmation and the revert report all read one rule.
  */
 
-/** One ledger row of a campaign's for one variant's base price, as these read it. */
+/** One ledger row of a campaign's for one of a variant's prices, as these read it. */
 export interface StintRow {
   /** Written by the campaign's revert, which ends a stint, rather than by one of its applies. */
   revert: boolean;
@@ -36,6 +36,26 @@ export function stintOf<T extends Pick<StintRow, "revert">>(rows: readonly T[]):
     stint.push(row);
   }
   return stint;
+}
+
+/** One of a campaign's runs, newest first, as `sinceItEnded` reads them. */
+export interface StintRun {
+  kind: string;
+  status: string;
+  /** `VARIANT-…` for a run over named variants, not the whole campaign. */
+  occurrenceKey: string;
+}
+
+/**
+ * The campaign's runs since it last ended, newest first: those after its newest whole revert
+ * that completed (#1166). That revert ended every stint, including on a variant it wrote
+ * nothing for because its price was already the revert's answer -- a baseline recaptured at
+ * the sale price, reverted -- which has no revert row of its own to end it. Without this the
+ * next sale, a new one from the price the merchant kept, read as compounding the old one.
+ */
+export function sinceItEnded<T extends StintRun>(runs: readonly T[]): T[] {
+  const ended = runs.findIndex((run) => run.kind === "REVERT" && run.status === "COMPLETED" && !run.occurrenceKey.startsWith("VARIANT-"));
+  return ended === -1 ? [...runs] : runs.slice(0, ended);
 }
 
 /**
@@ -65,4 +85,30 @@ export function recapturedAtSale(
   if (first.before === null || first.before === baseline.price) return false;
   if (baseline.capturedAt.getTime() <= first.at.getTime()) return false;
   return stint.some((row) => row.intended === baseline.price);
+}
+
+/**
+ * A market's or wholesale catalogue's stint, read with the price before it (#1166).
+ *
+ * The market writer ledgers what it intends and nothing before it, so its rows' `before` is
+ * always null and the rule above would never find one. The price its first write was computed
+ * from is the market baseline in force then (rule 1), which a recapture supersedes rather than
+ * overwrites: given here as that first write's `before`. Null leaves the stint as it was.
+ */
+export function marketStint(stint: readonly StintRow[], before: bigint | null): StintRow[] {
+  if (stint.length === 0 || before === null) return [...stint];
+  return [...stint.slice(0, -1), { ...stint[stint.length - 1]!, before }];
+}
+
+/** One price's key among a campaign's recaptured baselines: the variant for the base price, and the variant on its list for a market's. */
+export function recapturedKey(variantGid: string, priceListGid: string): string {
+  return priceListGid === "" ? variantGid : `${variantGid}@${priceListGid}`;
+}
+
+/**
+ * How many variants a campaign's recaptured prices are on: what its status counts (#1166). A
+ * variant recaptured on its base price and in two markets is one variant needing a decision.
+ */
+export function recapturedVariants(found: { values(): Iterable<{ variantGid: string }> }): number {
+  return new Set([...found.values()].map((entry) => entry.variantGid)).size;
 }

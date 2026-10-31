@@ -272,6 +272,15 @@ describe("an active campaign whose baseline was recaptured at its sale price (#7
     );
   });
 
+  it("says a market's or wholesale price cannot be imported back, and where to look (#1166)", () => {
+    const one = describeState("ACTIVE", { recapturedAtSale: 1, recapturedInMarkets: 1 }).explanation;
+    expect(one).toContain("One is a market's or wholesale catalogue's price, which an import cannot set: the Revert tab says what to do for it.");
+    expect(describeState("ACTIVE", { recapturedAtSale: 2, recapturedInMarkets: 3 }).explanation).toContain(
+      "3 are prices in a market or wholesale catalogue, which an import cannot set: the Revert tab says what to do for them.",
+    );
+    expect(describeState("ACTIVE", { recapturedAtSale: 1 }).explanation).not.toContain("market");
+  });
+
   it("reads as before with none", () => {
     expect(describeState("ACTIVE", { recapturedAtSale: 0 }).label).toBe("Active");
     expect(describeState("ACTIVE", { recapturedAtSale: 0 }).explanation).toContain("every row was read back and verified");
