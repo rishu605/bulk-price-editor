@@ -54,5 +54,12 @@ does not reach it. Its message says so, and offers what does: lower or remove th
 or revert the campaign and apply it again, so it starts under the setting as it is then.
 If the setting is still Block, change it before you apply again.
 
+Sometimes what stops a campaign is another campaign's Block. Reverting a campaign hands its
+products to the next campaign that covers them, and a running campaign with a higher
+priority prices a product before yours does. If that other campaign started under Block and
+its price breaches a floor, it stops the whole run. Neither the setting nor changing your
+campaign reaches it. The message names that campaign, and what does reach it: lower or
+remove the floor, or revert that campaign and apply it again.
+
 If most of your catalogue has no cost, cost-based floors are protecting less than you
 think — the Settings page shows what percentage of your variants have one.

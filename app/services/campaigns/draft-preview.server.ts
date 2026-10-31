@@ -243,7 +243,9 @@ export async function previewDraft(
       blocked: {
         reason: outcome.reason,
         variantGid: outcome.ref.variantGid,
-        message: await describeBlocked(shopId, outcome.blocked, "preview"),
+        // The store's setting decides what the draft is told; a running campaign that outranks
+        // it on a variant and stops it is named, with what reaches that one (#1169).
+        message: await describeBlocked(shopId, outcome.blocked, "preview", { campaignId: DRAFT_ID }),
       },
     };
   }
