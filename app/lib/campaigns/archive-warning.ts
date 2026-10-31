@@ -1,7 +1,7 @@
 /**
  * What archiving a campaign leaves running, said before it is archived (#748).
  *
- * Archiving is allowed in any state (`setArchived`, D18): it files a campaign away and
+ * Archiving is allowed in any state (`setArchived`, D19): it files a campaign away and
  * changes nothing it does. That was true and said nowhere. "Sale · 21/09/2026", Active, went
  * from More actions → Archive straight out of the list with its prices live, and a "Black
  * Friday 2026" archived in October would still go live on 27 Nov, from a list the merchant

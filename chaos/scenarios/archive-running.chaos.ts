@@ -6,7 +6,7 @@
  * scheduled "Black Friday 2026" archived in October would still go live on 27 Nov, from a list
  * that no longer showed it.
  *
- * Archiving stays allowed (D18). Driven through the campaign page's own loader and action, the
+ * Archiving stays allowed (D19). Driven through the campaign page's own loader and action, the
  * campaigns index's loader and the real `tick`: the page says what archiving leaves running
  * before the press; the archived campaign still starts on its date and still ends at its end;
  * and from the press to its end the index counts it and lists it where the count links. Only

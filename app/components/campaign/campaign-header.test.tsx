@@ -1059,7 +1059,7 @@ describe("archiving a campaign that is still running asks first (#748)", () => {
   /**
    * "Sale · 21/09/2026", Active, was archived from the overflow in one click: no
    * confirmation, and the page then read "Active · Archived" in a neutral tag. Archiving
-   * stays allowed (D18); what it leaves running is said before it, and after it the badge
+   * stays allowed (D19); what it leaves running is said before it, and after it the badge
    * reads as the warning it is.
    */
   const live = (over: Partial<CampaignDetailProps> = {}) =>

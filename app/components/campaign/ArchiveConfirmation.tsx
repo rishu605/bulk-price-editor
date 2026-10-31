@@ -15,7 +15,7 @@ export type ArchiveModal = HTMLElement & { showOverlay?: () => void };
  *
  * Archive sat beside Duplicate in the overflow, at the same weight and with nothing in
  * between, and took an Active campaign out of the list with its prices live. Archiving stays
- * allowed (D18): this is the sentence that was missing, said first. A draft, a finished
+ * allowed (D19): this is the sentence that was missing, said first. A draft, a finished
  * campaign and a cancelled one have nothing running, and are archived in one click as before.
  *
  * Opened by `showOverlay` from the menu item's click rather than `commandFor`: Polaris
