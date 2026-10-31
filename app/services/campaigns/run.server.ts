@@ -825,12 +825,13 @@ async function executeCampaignRun(
   // history, the scheduler's refusal and Flow's run log all read this sentence. What to do is
   // asked of the state before this run's claim (#1161): a draft's claim is given back and the
   // store's setting reaches it again, while a running campaign keeps its policy. None for a
-  // revert, as for its preview: what stops it is another campaign's policy.
+  // revert, as for its preview: what stops it is another campaign's policy, and the sentence
+  // names that campaign, as it does one that outranks this one on a variant (#1169).
   if (outcome.kind === "blocked") {
     const told = options.revert || !stateBefore ? undefined : breachPolicyFor(stateBefore, breach.policy, breach.store);
     throw new AppError({
       code: "GUARDRAIL_BLOCKED",
-      userMessage: await describeBlocked(shopId, outcome.blocked, "run", told),
+      userMessage: await describeBlocked(shopId, outcome.blocked, "run", { campaignId, breach: told }),
       context: { campaignId, blocked: outcome.blocked.length, firstVariantGid: outcome.ref.variantGid, reason: outcome.reason },
     });
   }

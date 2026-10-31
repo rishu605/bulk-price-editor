@@ -236,6 +236,23 @@ describe("guardrail policy at plan time", () => {
     expect(out.blocked[0].wouldBe?.amount).toBeLessThan(9_000);
     expect(out).not.toHaveProperty("rows");
   });
+
+  it("says whose policy stopped each variant, which need not be the campaign planned (#1169)", () => {
+    const floor = { storeGuardrails: { neverBelowCost: true }, candidates: [candidate({ baseline: { price: usd(10_000), cost: usd(9_000) } })] };
+    const kept = campaign({ id: "winter", priority: 50, guardrailViolationPolicy: "block" });
+
+    // Its own Block.
+    const own = planRun({ ...floor, campaigns: [campaign({ guardrailViolationPolicy: "block" })], campaignId: "c1" });
+    expect(own.kind === "blocked" && own.blocked.map((entry) => entry.campaignId)).toEqual(["c1"]);
+
+    // A revert handing the variant to a campaign under it that keeps Block.
+    const revert = planRun({ ...floor, campaigns: [campaign({ priority: 100 }), kept], excludeCampaignId: "c1" });
+    expect(revert.kind === "blocked" && revert.blocked.map((entry) => entry.campaignId)).toEqual(["winter"]);
+
+    // A draft on Clamp, outranked on the variant by a campaign that keeps Block.
+    const draft = planRun({ ...floor, campaigns: [campaign({ priority: 10 }), kept], campaignId: "c1" });
+    expect(draft.kind === "blocked" && draft.blocked.map((entry) => entry.campaignId)).toEqual(["winter"]);
+  });
 });
 
 describe("revert planning (invariant I3)", () => {

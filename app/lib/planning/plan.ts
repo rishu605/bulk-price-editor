@@ -189,6 +189,8 @@ export function planRun(input: PlanInput): PlanOutcome {
         reason: resolution.meta.reason ?? "below-floor",
         ...(resolution.meta.unroundedPrice ? { wouldBe: resolution.meta.unroundedPrice } : {}),
         ...(resolution.meta.floor ? { floor: resolution.meta.floor } : {}),
+        // Whose policy it was, so the message can name a campaign other than the one planned (#1169).
+        ...(resolution.meta.controlledBy ? { campaignId: resolution.meta.controlledBy } : {}),
       });
       continue;
     }

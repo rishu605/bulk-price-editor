@@ -70,7 +70,55 @@ describe("what a campaign that has started under Block is told to do (#1161)", (
       expect(blockedMessage([gloves], "run", { policy: store, kept: false, store })).toBe(blockedMessage([gloves], "run"));
     }
     expect(blockedMessage([gloves], "run")).toContain(SETTING);
-    // Keeping Clamp and stopped anyway is another campaign's Block, which this does not name.
+    // Keeping Clamp and stopped anyway, with no other campaign named: a cost it needs, say.
     expect(blockedMessage([gloves], "run", { policy: "clamp", kept: true, store: "clamp" })).toContain(SETTING);
+  });
+});
+
+describe("what a variant another running campaign's kept Block stops is told to do (#1169)", () => {
+  const SETTING = 'or set "When a price would breach a floor" to clamp or skip instead of blocking.';
+  const winter = { name: "Winter Sale", breach: { policy: "block", kept: true, store: "clamp" } } as const;
+
+  it("names that campaign, and what reaches it: the floor, or starting it again", () => {
+    // A revert handing the variant to "Winter Sale", or a draft "Winter Sale" outranks on it.
+    expect(blockedMessage([{ ...gloves, by: winter }], "run")).toBe(
+      'A guardrail stopped this run before anything was written: "Cascade Gloves 44 · L" would be $0.33 in "Winter Sale", ' +
+        'under its $10.00 floor. "Winter Sale" is a running campaign that started under "Block the whole campaign" and keeps ' +
+        "that until it ends, whatever Settings says. Lower or remove the floor in Settings, or revert \"Winter Sale\" and apply it " +
+        'again, so it starts under the store\'s policy now, "Clamp it to the floor and carry on".',
+    );
+  });
+
+  it("is told to change the setting before starting that campaign again, while the store's is Block too", () => {
+    const text = blockedMessage([{ ...gloves, by: { ...winter, breach: { ...winter.breach, store: "block" } } }], "preview");
+    expect(text).toContain(
+      'Lower or remove the floor in Settings, or set "When a price would breach a floor" to clamp or skip, then revert "Winter Sale" and apply it again.',
+    );
+    expect(text).not.toContain(SETTING);
+    expect(text).not.toContain("out of the campaign's products");
+  });
+
+  it("is told what reaches the campaign planned for its own variants, and what reaches the other for its", () => {
+    const socks: BlockedLine = { title: "Socks", reason: "missing-cost" };
+    const text = blockedMessage([gloves, { ...gloves, title: "Cascade Gloves 44 · M", by: winter }, { ...socks, by: winter }], "run");
+    expect(text).toContain('"Cascade Gloves 44 · L" would be $0.33, under its $10.00 floor; "Cascade Gloves 44 · M" would be $0.33 in "Winter Sale"');
+    expect(text).toContain('; "Socks" in "Winter Sale": no cost recorded.');
+    // The planned campaign's one variant, then Winter Sale's two, the costs among them.
+    expect(text).toContain(`take this variant out of the campaign's products, ${SETTING} "Winter Sale" is a running campaign`);
+    expect(text).toContain('Lower or remove the floor in Settings, record the missing costs, or revert "Winter Sale" and apply it again');
+  });
+
+  it("names each campaign that keeps Block, once", () => {
+    const autumn = { ...winter, name: "Autumn Sale" };
+    const text = blockedMessage([{ ...gloves, by: winter }, { ...gloves, by: autumn }, { ...gloves, by: winter }], "run");
+    expect(text).toContain('"Winter Sale" and "Autumn Sale" are running campaigns that each started under "Block the whole campaign"');
+    expect(text).toContain("or revert each and apply it again, so it starts under the store's policy now");
+  });
+
+  it("does not name a campaign that keeps Clamp or Skip, which is not what stopped it", () => {
+    for (const policy of ["clamp", "skip"] as const) {
+      const by = { name: "Winter Sale", breach: { policy, kept: true, store: "clamp" } } as const;
+      expect(blockedMessage([{ ...gloves, by }], "run")).toBe(blockedMessage([gloves], "run"));
+    }
   });
 });

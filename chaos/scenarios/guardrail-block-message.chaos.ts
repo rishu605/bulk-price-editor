@@ -8,16 +8,19 @@
  *
  * And what to do is what reaches the campaign (#1161). One that had started under Block was
  * told to set Clamp or Skip in Settings, which reaches a campaign only until it starts (D21).
+ * So was one stopped by another running campaign's kept Block, which neither the setting nor
+ * anything done to the campaign planned reaches: that one is named now (#1169).
  *
- * Through the campaign's real preview, the real run, and Flow's Start campaign through its
- * route, with only `authenticate` replaced (no signed request) and Flow's admin the chaos client.
+ * Through the campaign's real preview, the real run, and Flow's Start and End campaign through
+ * their routes, with only `authenticate` replaced (no signed request) and Flow's admin the chaos
+ * client.
  */
 
 import { describe, expect, it, vi } from "vitest";
 
 import prisma from "../../app/db.server";
 import { AppError } from "../../app/lib/errors/app-error";
-import { breachPolicyOf } from "../../app/services/campaigns/model.server";
+import { breachPolicyOf, createCampaign } from "../../app/services/campaigns/model.server";
 import { previewCampaign } from "../../app/services/campaigns/preview.server";
 import { runCampaign } from "../../app/services/campaigns/run.server";
 import { DEFAULT_SETTINGS, writeSettings } from "../../app/services/settings.server";
@@ -46,14 +49,22 @@ vi.mock("../../app/services/admin-client.server", async (importOriginal) => {
 
 /** Flow's Start campaign for the fixture campaign, through the route, and what Flow is told. */
 async function flowStart(chaos: ChaosContext) {
+  return flowAction(chaos, "start-campaign", await import("../../app/routes/flow.actions.start-campaign"));
+}
+
+/** Flow's End campaign, likewise. */
+async function flowEnd(chaos: ChaosContext) {
+  return flowAction(chaos, "end-campaign", await import("../../app/routes/flow.actions.end-campaign"));
+}
+
+async function flowAction(chaos: ChaosContext, name: string, route: { action: (args: never) => Promise<unknown> }) {
   flowRequest = {
     shop: chaos.fixture.domain,
     properties: { "campaign-id": chaos.fixture.campaignId },
     admin: { __chaos: chaosAdminClient(endpoint) },
   };
-  const { action } = await import("../../app/routes/flow.actions.start-campaign");
-  const response = (await action({
-    request: new Request("https://example.invalid/flow/actions/start-campaign", { method: "POST" }),
+  const response = (await route.action({
+    request: new Request(`https://example.invalid/flow/actions/${name}`, { method: "POST" }),
     params: {},
     context: {},
   } as never)) as Response;
@@ -160,6 +171,108 @@ describe("chaos: a campaign a blocking guardrail stops", () => {
         'Lower or remove the floor in Settings, or set "When a price would breach a floor" to clamp or skip, then revert the campaign and apply it again.',
       );
       expect(chaos.fake.writeLog, "a blocked run wrote").toHaveLength(written);
+    });
+  });
+
+  it("names the running campaign kept on Block that stops a revert, or a draft, and what reaches it (#1169)", async () => {
+    await withChaos("guardrail-block-other", { catalog: { products: 3, variantsPerProduct: 1 }, percent: -10 }, async (chaos) => {
+      const { shopId, campaignId } = chaos.fixture;
+      endpoint = chaos.server.endpoint();
+      const client = chaosAdminClient(endpoint);
+      const campaign = () => prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
+      const refusal = async (options: { revert?: boolean } = {}) => {
+        const refused = await runCampaign(shopId, campaignId, client, { actor: "chaos", ...options }).then(
+          () => null,
+          (error: unknown) => error,
+        );
+        expect(refused, "the run was not refused by the guardrail").toBeInstanceOf(AppError);
+        expect((refused as AppError).code).toBe("GUARDRAIL_BLOCKED");
+        return (refused as AppError).userMessage;
+      };
+      /** What every one of them says, and none of the advice that reaches nothing stopping it. */
+      const namesWinter = (said: Record<string, string>, store: "clamp" | "block" = "clamp") => {
+        for (const [where, text] of Object.entries(said)) {
+          expect(text, where).toContain('in "Winter Sale", under its');
+          expect(text, where).toContain(
+            '"Winter Sale" is a running campaign that started under "Block the whole campaign" and keeps that until it ends',
+          );
+          expect(text, where).toContain(
+            store === "clamp"
+              ? 'Lower or remove the floor in Settings, or revert "Winter Sale" and apply it again, so it starts under the ' +
+                  'store\'s policy now, "Clamp it to the floor and carry on".'
+              : 'Lower or remove the floor in Settings, or set "When a price would breach a floor" to clamp or skip, then ' +
+                  'revert "Winter Sale" and apply it again.',
+          );
+          expect(text, `${where} told it to change a setting that does not reach "Winter Sale"`).not.toContain(SETTING);
+          expect(text, `${where} told it to take out variants that are not what stops it`).not.toContain("campaign's products");
+        }
+        // The preview's sentence is the run's after its opening: one sentence, from one place.
+        const after = (text: string) => text.slice(text.indexOf(": ") + 2);
+        if (said.preview && said.run) expect(after(said.preview)).toBe(after(said.run));
+      };
+
+      // "Winter Sale", 30% off the same variants, started under the store's Block with no floor in
+      // the way. It keeps Block until it ends.
+      await writeSettings(shopId, { ...DEFAULT_SETTINGS, violationPolicy: "block" });
+      const winter = await createCampaign(shopId, {
+        name: "Winter Sale",
+        priority: 500,
+        rule: { kind: "percent-change", percent: -30 },
+        compareAtPolicy: { kind: "leave" },
+        rounding: { default: "none", byCurrency: {} },
+        ast: { groups: [{ conditions: [{ field: "tag", value: "chaos" }] }] },
+        schedule: { kind: "manual" },
+      } as never);
+      expect((await runCampaign(shopId, winter.id, client, { actor: "chaos", verifySampleRate: 1 })).clean).toBe(true);
+
+      // Then a floor over every price, and Clamp saved in Settings.
+      await writeSettings(shopId, { ...DEFAULT_SETTINGS, minPrice: 100_000 });
+      expect(await breachPolicyOf(shopId, await prisma.campaign.findUniqueOrThrow({ where: { id: winter.id } }))).toEqual({
+        policy: "block",
+        kept: true,
+        store: "clamp",
+      });
+      const before = chaos.fake.writeLog.length;
+
+      // A draft under it: Winter Sale wins every variant, and its Block stops the draft. The draft
+      // follows Clamp, so the setting is not what stops it either.
+      await prisma.campaign.update({ where: { id: campaignId }, data: { priority: 100 } });
+      const draftFlow = await flowStart(chaos);
+      expect(draftFlow.status).toBe(422);
+      const draft = {
+        preview: (await previewCampaign(shopId, campaignId, { limit: 100 })).blocked?.message ?? "",
+        run: await refusal(),
+        flow: draftFlow.message,
+      };
+      namesWinter(draft);
+      expect(draft.flow).toBe(`"${(await campaign()).name}" was not applied: ${draft.run}`);
+      expect((await campaign()).status, "a blocked apply kept the draft's claim").toBe("DRAFT");
+      expect(chaos.fake.writeLog, "a blocked draft wrote").toHaveLength(before);
+
+      // Over Winter Sale and applied with no floor in the way, then the floor again.
+      await prisma.campaign.update({ where: { id: campaignId }, data: { priority: 900 } });
+      await writeSettings(shopId, DEFAULT_SETTINGS);
+      await chaos.expectHonest((await chaos.apply()).runId);
+      const written = chaos.fake.writeLog.length;
+      await writeSettings(shopId, { ...DEFAULT_SETTINGS, minPrice: 100_000 });
+
+      // Its revert hands every variant to Winter Sale, under the floor: the revert's preview, its run
+      // and Flow's End campaign name Winter Sale, and what reaches it.
+      const endFlow = await flowEnd(chaos);
+      expect(endFlow.status).toBe(422);
+      const revert = {
+        preview: (await previewCampaign(shopId, campaignId, { limit: 100, revert: true })).blocked?.message ?? "",
+        run: await refusal({ revert: true }),
+        flow: endFlow.message,
+      };
+      namesWinter(revert);
+      expect(revert.flow).toBe(`"${(await campaign()).name}" was not ended: ${revert.run}`);
+      expect((await campaign()).status, "a blocked revert did not give the campaign back").toBe("ACTIVE");
+
+      // With Block saved too, starting Winter Sale again would block again: the setting comes first.
+      await writeSettings(shopId, { ...DEFAULT_SETTINGS, minPrice: 100_000, violationPolicy: "block" });
+      namesWinter({ run: await refusal({ revert: true }) }, "block");
+      expect(chaos.fake.writeLog, "a blocked revert wrote").toHaveLength(written);
     });
   });
 });

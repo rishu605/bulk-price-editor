@@ -324,7 +324,9 @@ export async function applyMarketSurfaces(
         failed: 0,
         chunks: 0,
         // By name, as the base surface's refusal is (#1076), never the reason code.
-        messages: [`${priceListLabel(list)}: ${await describeBlocked(shopId, outcome.blocked, "run", options.breach)}`],
+        messages: [
+          `${priceListLabel(list)}: ${await describeBlocked(shopId, outcome.blocked, "run", { campaignId, breach: options.breach })}`,
+        ],
         path: "per-product",
       });
       continue;

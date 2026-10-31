@@ -166,9 +166,12 @@ export async function previewCampaign(
       blocked: {
         reason: outcome.reason,
         variantGid: outcome.ref.variantGid,
-        // What to do, as the run says it (#1161). None for a revert's: the campaign is out of its
-        // own plan, so what stops it is another campaign's policy.
-        message: await describeBlocked(shopId, outcome.blocked, "preview", options.revert ? undefined : breach),
+        // What to do, as the run says it (#1161). No policy for a revert's: the campaign is out of
+        // its own plan, so what stops it is another campaign's policy, which names that one (#1169).
+        message: await describeBlocked(shopId, outcome.blocked, "preview", {
+          campaignId,
+          breach: options.revert ? undefined : breach,
+        }),
       },
       writePath: "none",
       writePathReason: "Blocked before planning completed.",

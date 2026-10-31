@@ -146,6 +146,12 @@ export interface BlockedVariant {
   wouldBe?: Money;
   /** The floor that price breaches. */
   floor?: Money;
+  /**
+   * The campaign whose policy stopped it: the one the resolver gives the variant (#1169). Not
+   * always the one planned. A revert hands its variants to whoever is under it, and a running
+   * campaign that outranks a draft prices that draft's variants, each by its own kept policy.
+   */
+  campaignId?: string;
 }
 
 export interface PlanInput {
