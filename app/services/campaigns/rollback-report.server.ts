@@ -37,8 +37,9 @@ import {
   type RollbackRowKind,
 } from "../../lib/reporting/rollback";
 import { LANDED } from "../../lib/execution/landed";
-import { priceBeforeStint, stintOf } from "../../lib/campaigns/recaptured";
-import { recapturedBaselines } from "./recaptured.server";
+import { priceBeforeStint, sinceItEnded, stintOf } from "../../lib/campaigns/recaptured";
+import { labelled } from "../../lib/markets/display-name";
+import { recapturedBaselines, type RecapturedBaseline } from "./recaptured.server";
 
 export {
   classifyRollbackRow,
@@ -194,9 +195,11 @@ export async function rollbackReport(
   };
 
   // Said above the table, which shows some rows only: how many, a few by name, and why when the
-  // baseline was recaptured at this campaign's own sale price (#781).
+  // baseline was recaptured at this campaign's own sale price (#781). Every price of its so
+  // recaptured, a market's or wholesale price's for a sentence of its own (#1166).
   const differing = rows.filter((row) => row.before);
-  const recaptured = differing.length > 0 ? await recapturedBaselines(shopId, campaignId, differing.map((row) => row.variantGid)) : null;
+  const recaptured = await recapturedBaselines(shopId, campaignId);
+  const markets = await marketsNotBefore(shopId, recaptured, keptBy, titles);
 
   return {
     campaignId,
@@ -204,22 +207,67 @@ export async function rollbackReport(
     rows,
     counts,
     straightforward: counts.drifted === 0,
-    ...(recaptured
+    ...(differing.length > 0
       ? {
           notBefore: {
             count: differing.length,
-            recaptured: recaptured.size,
+            recaptured: differing.filter((row) => recaptured.has(row.variantGid)).length,
             examples: differing
               .slice(0, NOT_BEFORE_EXAMPLES)
               .map((row) => ({ title: row.title, before: row.before!, revertsTo: row.revertsTo ?? "" })),
           },
         }
       : {}),
+    ...(markets ? { marketsNotBefore: markets } : {}),
   };
 }
 
 /** How many of the variants reverting does not put back at their price from before are named. */
 const NOT_BEFORE_EXAMPLES = 3;
+
+/**
+ * The market and wholesale prices reverting puts back at this campaign's sale price, recaptured
+ * as their baseline while it ran (#1166), or none.
+ *
+ * A revert writes a market's hand-set baseline back (#930), and a recapture records every fixed
+ * price on a list as hand-set, the campaign's own among them: so a market price recaptured at
+ * the sale price stays at it after the sale ends, and the report's rows, the base price's, said
+ * nothing. Not where another campaign keeps the variant, whose price reverting gives it, nor a
+ * baseline that follows the list, which reverting lets follow it again.
+ */
+async function marketsNotBefore(
+  shopId: string,
+  recaptured: ReadonlyMap<string, RecapturedBaseline>,
+  keptBy: ReadonlySet<string>,
+  titles: ReadonlyMap<string, string>,
+): Promise<RollbackReport["marketsNotBefore"]> {
+  const back = [...recaptured.values()].filter((entry) => entry.priceListGid !== "" && entry.handSet && !keptBy.has(entry.variantGid));
+  if (back.length === 0) return undefined;
+
+  const shown = back.slice(0, NOT_BEFORE_EXAMPLES);
+  const [lists, untitled] = await Promise.all([
+    inChunks([...new Set(shown.map((entry) => entry.priceListGid))], (batch) =>
+      prisma.priceListRecord
+        .findMany({
+          where: { shopId, priceListGid: { in: batch } },
+          select: { priceListGid: true, name: true, catalogTitle: true, surfaceKind: true },
+        })
+        .then((rows) => rows.map(labelled)),
+    ),
+    titleMapFor(shopId, shown.map((entry) => entry.variantGid).filter((gid) => !titles.has(gid))),
+  ]);
+  const names = new Map(lists.map((list) => [list.priceListGid, list.name]));
+
+  return {
+    count: back.length,
+    examples: shown.map((entry) => ({
+      title: titles.get(entry.variantGid) ?? untitled.get(entry.variantGid) ?? entry.variantGid,
+      market: names.get(entry.priceListGid) ?? entry.priceListGid,
+      before: format(money(Number(entry.before), entry.currency)),
+      revertsTo: format(money(Number(entry.baseline), entry.currency)),
+    })),
+  };
+}
 
 /**
  * The variants this report lists as edited: the ones the Revert tab asks about before it
@@ -306,10 +354,13 @@ async function appliedValues(
   const runs = await prisma.campaignRun.findMany({
     where: { campaignId, kind: { in: ["APPLY", "REVERT"] } },
     orderBy: { createdAt: "desc" },
-    select: { id: true, kind: true },
+    select: { id: true, kind: true, status: true, occurrenceKey: true },
     take: 20,
   });
   if (runs.length === 0) return { latest: new Map(), before: new Map() };
+  // The price before is the current sale's (#1166): from the runs since it last ended, as
+  // `recapturedBaselines` reads them. What it last wrote is still read from them all.
+  const sale = new Set(sinceItEnded(runs).map((run) => run.id));
 
   const changes = await prisma.variantChange.findMany({
     where: {
@@ -339,6 +390,7 @@ async function appliedValues(
   const rowsOf = new Map<string, Array<{ revert: boolean; before: bigint | null }>>();
   for (const change of changes) {
     if (!latest.has(change.variantGid)) latest.set(change.variantGid, change.intendedPrice);
+    if (!sale.has(change.runId)) continue;
     const row = { revert: reverts.has(change.runId), before: change.beforePrice };
     const list = rowsOf.get(change.variantGid);
     if (list) list.push(row);

@@ -192,6 +192,8 @@ export function describeState(
     outrankedBy?: readonly string[];
     /** How many of its variants have a baseline recaptured at its own sale price (#781); see `recapturedBaselines`. */
     recapturedAtSale?: number;
+    /** How many of those prices are a market's or wholesale catalogue's (#1166), which no import sets back. */
+    recapturedInMarkets?: number;
     /** Why its start was refused for good, so the schedule left it (#975); see `startRefusal`. */
     startRefused?: string | null;
     /** Why a scheduled campaign past its start has not started yet (#851); see `lateStart`. */
@@ -364,7 +366,7 @@ export function describeState(
         return {
           label: "Active — needs a decision",
           tone: "warning",
-          explanation: recapturedText(context.recapturedAtSale),
+          explanation: recapturedText(context.recapturedAtSale, context.recapturedInMarkets ?? 0),
           nextAction: { label: "Revert", intent: "revert" },
         };
       }
@@ -475,14 +477,19 @@ function outranked(names: readonly string[]): string {
  * An active campaign's status line when the baselines of some of its variants were recaptured
  * at its sale price (#781): what that does to applying and reverting it, and what to do.
  */
-function recapturedText(variants: number): string {
+function recapturedText(variants: number, inMarkets: number): string {
   const one = variants === 1;
   return (
     `Running, but ${one ? "the baseline of 1 of its variants was" : `the baselines of ${formatCount(variants)} of its variants were`} ` +
     `recaptured at the sale price, so the app now takes this campaign's price for ${one ? "that variant's" : "their"} normal ` +
     `price. Applying again would discount ${one ? "it" : "them"} a second time, and reverting would leave ` +
     `${one ? "it" : "them"} at the sale price instead of the price before the campaign, which the Revert tab shows. To ` +
-    "end the sale at that price, import it as the baseline on Prices → Baselines, then revert."
+    "end the sale at that price, import it as the baseline on Prices → Baselines, then revert." +
+    // A baseline import sets the base price only (#1166).
+    (inMarkets > 0
+      ? ` ${inMarkets === 1 ? "One is a market's or wholesale catalogue's price" : `${formatCount(inMarkets)} are prices in a market or wholesale catalogue`}, ` +
+        `which an import cannot set: the Revert tab says what to do for ${inMarkets === 1 ? "it" : "them"}.`
+      : "")
   );
 }
 

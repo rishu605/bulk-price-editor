@@ -49,6 +49,7 @@ import { rowsThatFit } from "../../lib/ui/table-budget";
 import { inChunks } from "../../lib/db/chunk";
 import { describeBlocked } from "./blocked.server";
 import { recapturedBaselines, type RecapturedBaseline } from "./recaptured.server";
+import { recapturedVariants } from "../../lib/campaigns/recaptured";
 
 export interface PreviewOptions {
   /** Preview the revert instead of the apply. */
@@ -243,7 +244,7 @@ export async function previewCampaign(
     candidates,
     confirmThresholdsOf(storeSettings),
     titles,
-    { campaignId, recaptured },
+    { campaignId, recaptured, unchanged: outcome.unchanged },
   );
 
   const margin = marginImpact(
@@ -298,7 +299,9 @@ export async function previewCampaign(
     // would turn down. Not on a revert: taking such a campaign back is always allowed.
     ...(options.revert ? {} : refusedRule(campaign.ruleRows)),
     staleBaselines,
-    recapturedAtSale: recaptured.size,
+    // Variants, a market's or wholesale price among them (#1166), and how many of the prices are those.
+    recapturedAtSale: recapturedVariants(recaptured),
+    recapturedInMarkets: [...recaptured.values()].filter((entry) => entry.priceListGid !== "").length,
     // From the planner's coverage, every candidate included: a variant another campaign
     // keeps is usually already at its price, and the rows leave those out (#821).
     overlaps: overlapsFrom(outcome.coverage, campaignId, others),
@@ -357,7 +360,9 @@ function marketsOnlyRows(
  *
  * `own` is the campaign whose apply this is, so a write that would discount its own sale price
  * again is counted (#781), and its baselines recaptured at that price when the caller already
- * has them; otherwise they are read for the rows written.
+ * has them; otherwise they are read for the rows written. With the plan's `unchanged`, so a
+ * market or wholesale price is counted too (#1166): the apply prices the markets of every
+ * variant the campaign wins, already at its base price or not (`marketScope`).
  */
 export async function blastRadiusOf(
   shopId: string,
@@ -366,7 +371,11 @@ export async function blastRadiusOf(
   candidates: readonly PlanCandidate[],
   thresholds: ConfirmThresholds,
   titles: Map<string, string>,
-  own: { campaignId: string; recaptured?: ReadonlyMap<string, RecapturedBaseline> },
+  own: {
+    campaignId: string;
+    recaptured?: ReadonlyMap<string, RecapturedBaseline>;
+    unchanged?: readonly { ref: { variantGid: string }; campaignId?: string }[];
+  },
 ): Promise<BlastRadius> {
   const baselines = new Map(candidates.map((candidate) => [refKey(candidate.ref), candidate.baseline]));
   const written: WrittenPrice[] = [];
@@ -386,9 +395,21 @@ export async function blastRadiusOf(
   const titleOf = async (gid: string) => titles.get(gid) ?? (await titleMapFor(shopId, [gid])).get(gid) ?? gid;
   const title = top ? await titleOf(top.variantGid) : null;
 
-  // Its own writes over a baseline recaptured at its sale price, which compound (#781).
-  const recaptured = own.recaptured ?? (mine.length > 0 ? await recapturedBaselines(shopId, own.campaignId, mine) : new Map());
-  const compounded = mine.filter((gid) => recaptured.has(gid));
+  // Its own writes over a baseline recaptured at its sale price, which compound (#781). And
+  // its market prices over one (#1166), on the lists it still prices, for the variants whose
+  // markets this apply prices: those compound as surely, and nothing else asked about them.
+  // Read whole rather than for these variants: only what was captured since the campaign
+  // first wrote is read either way, and a scope of 102,132 is twenty-one chunks of nothing.
+  const priced = marketScope(own.campaignId, rows, own.unchanged ?? []);
+  const recaptured: ReadonlyMap<string, RecapturedBaseline> =
+    own.recaptured ?? (priced.length > 0 ? await recapturedBaselines(shopId, own.campaignId) : new Map());
+  const marketsPriced = new Set(priced);
+  const compounded = [
+    ...mine.filter((gid) => recaptured.has(gid)),
+    ...[...recaptured.values()]
+      .filter((entry) => entry.priceListGid !== "" && entry.targeted && marketsPriced.has(entry.variantGid))
+      .map((entry) => entry.variantGid),
+  ];
 
   return {
     thresholds,

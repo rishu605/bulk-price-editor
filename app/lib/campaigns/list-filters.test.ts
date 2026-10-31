@@ -33,11 +33,25 @@ describe("the where clause both views read", () => {
     });
   });
 
-  it("expands Needs a decision into the states that need one", () => {
+  it("expands Needs a decision into the states that need one, and an Active campaign recaptured at its sale price", () => {
     expect(campaignFilterWhere({ ...NONE, status: "attention" })).toEqual({
       archivedAt: null,
-      status: { in: ["PARTIAL", "HELD"] },
+      AND: [
+        {
+          OR: [
+            { status: { in: ["PARTIAL", "HELD"] } },
+            // By the count kept beside its stored plan (#1166), not by planning it.
+            { status: "ACTIVE", planSummary: { is: { recapturedAtSale: { gt: 0 } } } },
+          ],
+        },
+      ],
     });
+  });
+
+  it("keeps a search beside Needs a decision, whose own OR would otherwise replace it (#1166)", () => {
+    const where = campaignFilterWhere({ ...NONE, q: "spring", status: "attention" });
+    expect(where.OR).toEqual([{ name: { contains: "spring", mode: "insensitive" } }, { note: { contains: "spring", mode: "insensitive" } }]);
+    expect(where.AND).toHaveLength(1);
   });
 
   it("expands Live or scheduled into every state an archived campaign still runs in (#748)", () => {

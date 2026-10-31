@@ -27,6 +27,7 @@ import { AppError } from "../../lib/errors/app-error";
 import { logger } from "../../lib/logging/logger";
 import { startsKeepingPolicy } from "../../lib/campaigns/breach-policy";
 import { readSettings } from "../settings.server";
+import { recordRecapturedAtSale } from "./recaptured.server";
 
 export interface TransitionResult {
   changed: boolean;
@@ -93,6 +94,11 @@ export async function transitionCampaign(
   if (updated.count === 0) return { changed: false, from, to };
 
   await recordTransition(shopId, campaignId, from, to, options);
+
+  // Into Active, its count of baselines recaptured at its sale price is taken again (#1166):
+  // the list, Home and the calendar read it, and an apply changes it -- one after a revert
+  // starts its writes afresh, from baselines captured before them. Never throws.
+  if (to === "ACTIVE") await recordRecapturedAtSale(shopId, [campaignId]);
 
   return { changed: true, from, to };
 }

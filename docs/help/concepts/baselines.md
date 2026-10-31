@@ -39,7 +39,9 @@ live at the time.
 
 The running campaign is affected too. Its baseline is now its own sale price, so:
 
-- **Its status says so.** It reads *Active — needs a decision* rather than *verified*.
+- **Its status says so.** It reads *Active — needs a decision* rather than *verified*, on its
+  own page and wherever campaigns are listed: the campaigns list and its *Needs a decision*
+  filter, Home's *Need attention* count, and the calendar.
 - **Applying it again asks first.** A second apply would take the discount off the sale
   price, so 20% off £100 becomes £64 rather than £80. The app asks you to type *apply*, and
   says which product would be discounted again.
@@ -47,8 +49,16 @@ The running campaign is affected too. Its baseline is now its own sale price, so
   different price from the one the ledger recorded before the campaign, and what that
   price was.
 
+The same goes for a price in a market or a wholesale catalogue the campaign prices. The
+recapture records the campaign's price there as one you set by hand, so applying again would
+discount it a second time, and reverting would write the sale price back on the list.
+
 To end the sale at the old price, import that price as the baseline (Prices → Baselines),
-then revert.
+then revert. An import sets the base price only, so for a market or wholesale price, revert
+first, then set the old price on the list in Shopify and recapture its baseline.
+
+Once you revert the campaign, the decision is made. If you apply it again later, it starts a
+new sale from the price you kept, and nothing asks about the old one.
 
 A wholesale price is recaptured with its quantity breaks, which are read from Shopify first.
 When a scope has more wholesale prices than the page can read while you wait, the recapture

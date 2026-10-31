@@ -32,7 +32,7 @@ import {
 } from "../../lib/campaigns/start-confirmation";
 import { AppError } from "../../lib/errors/app-error";
 import { planRun } from "../../lib/planning/plan";
-import type { PlanCandidate, PlannedRow } from "../../lib/planning/types";
+import type { PlanCandidate, PlannedRow, PlanUnchanged } from "../../lib/planning/types";
 import { guardrailsFor, readSettings } from "../settings.server";
 import { loadCandidates, withWritten } from "./candidates.server";
 import { campaignContext, importIdsOf, isPractice, type PlannableCampaign } from "./model.server";
@@ -43,6 +43,8 @@ export interface StartPlan {
   rows: readonly PlannedRow[];
   counts: { planned: number; clampedToMinimum: number };
   candidates: readonly PlanCandidate[];
+  /** The variants already at its price, whose markets the apply prices too (#1166): see `blastRadiusOf`. */
+  unchanged?: readonly PlanUnchanged[];
 }
 
 export interface StartCheck {
@@ -64,7 +66,7 @@ async function planApply(shopId: string, campaign: PlannableCampaign): Promise<S
   const [scoped, storeGuardrails] = await Promise.all([loadCandidates(shopId, ast, undefined, importIds), guardrailsFor(shopId)]);
   const candidates = await withWritten(shopId, scoped, [], importIds);
   const outcome = planRun({ campaigns: resolvable, candidates, storeGuardrails, heldEdits, campaignId: campaign.id });
-  return outcome.kind === "ok" ? { rows: outcome.rows, counts: outcome.counts, candidates } : null;
+  return outcome.kind === "ok" ? { rows: outcome.rows, counts: outcome.counts, candidates, unchanged: outcome.unchanged } : null;
 }
 
 /**
@@ -78,6 +80,7 @@ export async function startCheck(shopId: string, campaign: PlannableCampaign, pl
   const thresholds = confirmThresholdsOf(await readSettings(shopId));
   const radius = await blastRadiusOf(shopId, planned.rows, planned.counts, planned.candidates, thresholds, new Map(), {
     campaignId: campaign.id,
+    unchanged: planned.unchanged,
   });
   return { radius, unconfirmed: unconfirmedStart(radius, startConfirmationOf(campaign.schedule)) };
 }
@@ -122,7 +125,10 @@ export async function refuseUnconfirmedStart(
  */
 export async function refuseUntypedPress(shopId: string, campaignId: string, plan: StartPlan): Promise<void> {
   const thresholds = confirmThresholdsOf(await readSettings(shopId));
-  const radius = await blastRadiusOf(shopId, plan.rows, plan.counts, plan.candidates, thresholds, new Map(), { campaignId });
+  const radius = await blastRadiusOf(shopId, plan.rows, plan.counts, plan.candidates, thresholds, new Map(), {
+    campaignId,
+    unchanged: plan.unchanged,
+  });
   if (!asksForConfirmation(radius)) return;
 
   throw new AppError({

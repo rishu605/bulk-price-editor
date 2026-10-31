@@ -34,7 +34,8 @@ import { UpcomingCampaigns } from "../components/UpcomingCampaigns";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { baselinesCaptured, onboarding } from "../lib/onboarding/steps";
 import { homeSections } from "../lib/dashboard/home";
-import { lifecycleBadge } from "../lib/campaigns/lifecycle-of";
+import { lifecycleBadge, recapturedAtSaleOf } from "../lib/campaigns/lifecycle-of";
+import { NEEDS_A_DECISION, RECAPTURED_ACTIVE, RECAPTURED_COUNT } from "../lib/campaigns/list-filters";
 import { RUNS_WHEN_ARCHIVED } from "../lib/campaigns/archive-warning";
 import type { CampaignState } from "../lib/lifecycle/transitions";
 import { ResultBanner } from "../components/ResultBanner";
@@ -105,7 +106,7 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
       },
       orderBy: { startAt: "asc" },
       take: 8,
-      select: { id: true, name: true, status: true, startAt: true, endAt: true, schedule: true },
+      select: { id: true, name: true, status: true, startAt: true, endAt: true, schedule: true, ...RECAPTURED_COUNT },
     }),
     // What the plan covers. One indexed count and the shop's tier — see `plan-usage`
     // for why it is the catalogue size and not the largest campaign's scope.
@@ -124,9 +125,13 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
   // twelve seconds went: the first batch is 21ms and this one is 2ms. It is folded in
   // because two round trips where one would do is still one too many, not because it was
   // ever the problem.
-  const [notices, needsAttention, drafts, archivedRunning, cleanRuns, practiceCampaigns, onSale, zoneShifts] = await Promise.all([
+  const [notices, needsAttention, recapturedAtSale, drafts, archivedRunning, cleanRuns, practiceCampaigns, onSale, zoneShifts] = await Promise.all([
     openNotices(shop.id),
-    prisma.campaign.count({ where: { shopId: shop.id, archivedAt: null, status: { in: ["PARTIAL", "HELD"] } } }),
+    // The list's own "Needs a decision" clause: Partial and Held, and an Active campaign whose
+    // baseline was recaptured at its sale price (#1166), which is also counted alone, because
+    // it did not stop part way and the banner says what each one is.
+    prisma.campaign.count({ where: { shopId: shop.id, archivedAt: null, ...NEEDS_A_DECISION } }),
+    prisma.campaign.count({ where: { shopId: shop.id, archivedAt: null, ...RECAPTURED_ACTIVE } }),
     // Campaigns the merchant made and has not applied. Counted because Home used to
     // decide "is anything live" from every campaign row, drafts included — see #613.
     prisma.campaign.count({ where: { shopId: shop.id, archivedAt: null, status: "DRAFT" } }),
@@ -198,6 +203,7 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
       campaigns: notice.campaignIds.length,
     })),
     needsAttention,
+    recapturedAtSale,
     lastRun: lastRun
       ? {
           id: lastRun.id,
@@ -215,8 +221,14 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
         id: campaign.id,
         name: campaign.name,
         status: campaign.status,
-        // As the campaigns list labels it, ending or starting late included (#1056).
-        lifecycle: lifecycleBadge(campaign.status as CampaignState, campaign.schedule, new Date()),
+        // As the campaigns list labels it, ending or starting late included (#1056), and
+        // needing a decision over a baseline recaptured at its sale price (#1166).
+        lifecycle: lifecycleBadge(
+          campaign.status as CampaignState,
+          campaign.schedule,
+          new Date(),
+          recapturedAtSaleOf(campaign.status as CampaignState, campaign.planSummary),
+        ),
         startAt: campaign.startAt?.toISOString() ?? null,
         endAt: campaign.endAt?.toISOString() ?? null,
       })),
@@ -323,6 +335,7 @@ export default function Dashboard() {
     notices,
     zoneShifts,
     needsAttention,
+    recapturedAtSale,
     lastRun,
     recent,
     timeZone,
@@ -387,7 +400,9 @@ export default function Dashboard() {
     body: ReactNode;
   }> = [];
 
-  if (needsAttention > 0) {
+  // The tile counts both; the banner says which is which (#1166).
+  const unclean = needsAttention - recapturedAtSale;
+  if (unclean > 0) {
     attention.push({
       id: "unclean-runs",
       heading: "Some campaigns did not finish cleanly",
@@ -395,12 +410,37 @@ export default function Dashboard() {
       body: (
         <>
               <s-paragraph>
-            {formatCount(needsAttention)} campaign{needsAttention === 1 ? "" : "s"} stopped part
+            {formatCount(unclean)} campaign{unclean === 1 ? "" : "s"} stopped part
             way. Every row that did not complete has a reason recorded, and resuming retries only
             those.
           </s-paragraph>
           <ActionRow>
             <s-button href="/app/campaigns">Review campaigns</s-button>
+          </ActionRow>
+        </>
+      ),
+    });
+  }
+
+  // Running, with a baseline recaptured at its own sale price (#1166): nothing stopped, so the
+  // sentence above is not true of it, and it still needs a decision before it is applied again
+  // or reverted. Its page said so and nothing else did.
+  if (recapturedAtSale > 0) {
+    const one = recapturedAtSale === 1;
+    attention.push({
+      id: "recaptured-at-sale",
+      heading: one ? "A running campaign's baseline is its own sale price" : "Some running campaigns' baselines are their own sale prices",
+      tone: "warning",
+      body: (
+        <>
+          <s-paragraph>
+            {one ? "1 running campaign has" : `${formatCount(recapturedAtSale)} running campaigns have`} baselines
+            recaptured at the sale price, so applying {one ? "it" : "them"} again would discount the sale price a second
+            time, and reverting would leave the sale price in place. Each campaign&apos;s page says which prices, and
+            what to do.
+          </s-paragraph>
+          <ActionRow>
+            <s-button href="/app/campaigns?status=attention">Review campaigns</s-button>
           </ActionRow>
         </>
       ),

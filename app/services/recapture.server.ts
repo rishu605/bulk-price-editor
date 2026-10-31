@@ -29,6 +29,7 @@ import { astToWhere, type FilterAst } from "./segments.server";
 import { DEFINITION, scopeOf } from "./campaigns/model.server";
 import type { RecaptureScope } from "../lib/baselines/recapture-scope";
 import { staleBaselineVariants } from "./reconciliation.server";
+import { recordRecapturedAtSale } from "./campaigns/recaptured.server";
 
 export type { RecaptureScope } from "../lib/baselines/recapture-scope";
 
@@ -182,6 +183,11 @@ export async function recaptureChecked(shopId: string, plan: RecapturePlan, opti
       },
     },
   });
+
+  // A running campaign whose baseline this made its own sale price needs a decision, and the
+  // campaigns list, Home and the calendar say so from this count (#1166). The page, Flow's
+  // Capture baselines and the worker's recapture all come through here. Never throws.
+  if (result.captured > 0) await recordRecapturedAtSale(shopId);
 
   return { ...result, scope: plan.scope, overlaps: plan.overlaps };
 }
