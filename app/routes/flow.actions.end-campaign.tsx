@@ -4,6 +4,12 @@
  * Never gated on plan, on any tier, for the same reason the Revert button is not: a
  * merchant whose plan lapsed must still be able to end a sale, and a storefront left
  * discounted because an automation was refused is a revenue incident we caused.
+ *
+ * Nor does it write over a price somebody edited outside Anchor (#794). The Revert button
+ * will not revert over one without a review, where the merchant ticks the edits to keep;
+ * Flow cannot tick anything, and reverted a held campaign straight over every edit that
+ * held it. So it keeps them all, as the scheduled end of a held sale does (#784): every
+ * other price reverts, and each edited one is ledgered as left alone, with why.
  */
 
 import type { ActionFunctionArgs } from "react-router";
@@ -12,6 +18,7 @@ import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 import { toAdminClient } from "../services/admin-client.server";
 import { runCampaign } from "../services/campaigns/index.server";
+import { KEPT_EDIT_REASON } from "../lib/campaigns/kept-edits";
 import {
   answerForError,
   answerForRun,
@@ -58,6 +65,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       actor: FLOW_ACTOR,
       revert: true,
       inlineBudgetMs: FLOW_INLINE_BUDGET_MS,
+      // Every price the rollback report lists as edited, found by whichever process writes.
+      keepEdited: true,
+      skipReason: KEPT_EDIT_REASON,
     });
     answer = answerForRun(outcome, campaign.name, "ended");
   } catch (error) {

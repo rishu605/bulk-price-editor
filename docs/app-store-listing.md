@@ -1,15 +1,14 @@
 # App Store listing — draft copy
 
-Everything here is written and ready. What is missing needs a Partner account or a
-deployed app: the name availability check, the screenshots, the screencast, and the
-published privacy policy. Those are marked.
+The first draft of the listing. The copy that was submitted is `docs/listing/copy.md`;
+where the two differ, that file is what the App Store shows.
 
 ---
 
 ## Name
 
 **App name:** Anchor
-**Listing name:** Anchor: Bulk Price Editor & Market Pricing
+**Listing name:** Anchor: Bulk Price Editor
 
 The category uses keyword-bearing listing names and search rank depends on them, so the
 listing name carries the terms merchants actually type — "bulk price editor", "market
@@ -20,8 +19,9 @@ sidebar every day.
 reference price rather than from whatever the storefront happens to show. It is also the
 one thing this app does that the category does not.
 
-**Still needed:** availability check in the Partner dashboard. **D6 cannot be closed until
-that comes back**, because a name that is taken makes every other decision here moot.
+The listing name field is capped at 30 characters, so "& Market Pricing" (42 in all) did
+not fit; the subtitle carries markets instead ("Schedule sales across markets…"). The dashboard accepted the name and
+the app was submitted under it on 2026-10-31 (reference 136925), which closes D6.
 
 ---
 

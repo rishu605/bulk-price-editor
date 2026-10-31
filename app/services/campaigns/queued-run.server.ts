@@ -29,6 +29,8 @@ export interface QueuedRunOptions {
   /** The rollback report's "leave as it is" (#790): carried to the worker, never dropped. */
   skipVariantGids?: string[];
   skipReason?: string;
+  /** Flow's End campaign (#794): the worker's run works out which prices are edited, and keeps them. */
+  keepEdited?: boolean;
   /** An Apply pressed without the word, which the worker's run checks on its own plan (#812). */
   untypedPress?: boolean;
 }
@@ -47,7 +49,7 @@ export async function queueRun(
   campaignId: string,
   /** Why it cannot run here, from `overBudget`: names the size and the reason. */
   reason: string,
-  { revert, actor, resume, skipVariantGids, skipReason, untypedPress }: QueuedRunOptions,
+  { revert, actor, resume, skipVariantGids, skipReason, keepEdited, untypedPress }: QueuedRunOptions,
 ): Promise<RunOutcome | null> {
   const verb = revert ? "reverting" : "applying";
   const queue = webQueue();
@@ -83,6 +85,7 @@ export async function queueRun(
       ...(resume ? { resume } : {}),
       ...(actor ? { actor } : {}),
       ...(skipVariantGids?.length ? { skipVariantGids, skipReason } : {}),
+      ...(keepEdited && revert ? { keepEdited: true, skipReason } : {}),
       ...(untypedPress && !revert ? { untypedPress: true } : {}),
     });
   } catch (error) {

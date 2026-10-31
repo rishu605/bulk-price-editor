@@ -79,6 +79,8 @@ async function runCampaignJob(ref: JobRef): Promise<void> {
     actor: ref.actor ?? SCHEDULER_ACTOR,
     skipVariantGids: ref.skipVariantGids,
     skipReason: ref.skipReason,
+    // Flow's End campaign, whose edited prices this run finds and keeps (#794).
+    ...(ref.keepEdited ? { keepEdited: true } : {}),
     // A press of Apply without the word, checked again on this run's own plan (#812).
     ...(ref.untypedPress ? { untypedPress: true } : {}),
     ...(ref.claimedFrom ? { claimedFrom: ref.claimedFrom as CampaignState } : {}),

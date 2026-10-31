@@ -13,6 +13,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import prisma from "../../app/db.server";
+import { KEPT_EDIT_REASON } from "../../app/lib/campaigns/kept-edits";
 import type { JobRef, QueueName } from "../../app/worker/queues";
 import { redefine } from "../harness/definition";
 import { chaosAdminClient } from "../harness/http-client";
@@ -155,7 +156,13 @@ describe("chaos: Flow's End campaign", () => {
       const answer = await flow("end-campaign", chaos, { "campaign-id": campaignId });
 
       expect(answer.status).toBe(200);
-      expect(enqueued).toEqual([{ name: "execution", ref: { shopId, campaignId, revert: true, claimedFrom: "ACTIVE", actor: "shopify-flow" } }]);
+      // The worker's run works out which prices are edited, and keeps them (#794).
+      expect(enqueued).toEqual([
+        {
+          name: "execution",
+          ref: { shopId, campaignId, revert: true, claimedFrom: "ACTIVE", actor: "shopify-flow", keepEdited: true, skipReason: KEPT_EDIT_REASON },
+        },
+      ]);
       expect(await statusOf(campaignId)).toBe("REVERTING");
     });
   });

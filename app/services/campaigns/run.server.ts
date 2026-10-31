@@ -23,6 +23,7 @@ import { planRun } from "../../lib/planning/plan";
 import { recordWriteIntents, resolveOverwrittenDrift } from "../drift.server";
 import { loadCandidates, productMapFor, withWritten } from "./candidates.server";
 import { revertTakesBack } from "./handover.server";
+import { editedVariants } from "./rollback-report.server";
 import { refreshBasePrices } from "../live-prices.server";
 import { DEFINITION, isPractice, loadCampaignContext, scopeOf, importIdsOf, segmentGone } from "./model.server";
 import { astToWhere } from "../segments.server";
@@ -41,6 +42,7 @@ import { refuseUnconfirmedStart, refuseUntypedPress } from "./start-confirmation
 import { clearEndedWindow } from "./schedule-control.server";
 import { startsUnattended } from "../../lib/audit/actor";
 import { queuedVerb } from "../../lib/campaigns/queued-refusal";
+import { editsLeft } from "../../lib/campaigns/kept-edits";
 import { refusedForGood, startRefusedEntry } from "../../lib/scheduling/start-refusal";
 import type { CampaignState } from "../../lib/lifecycle/transitions";
 import { SKIP_REASON_GROUP } from "../../lib/planning/reasons";
@@ -161,6 +163,17 @@ export interface RunOptions {
   skipVariantGids?: string[];
   /** Why `skipVariantGids` were left alone, for their ledger rows. */
   skipReason?: string;
+  /**
+   * Leave every variant the rollback report lists as edited, as a merchant keeping each edit
+   * would, ledgered as spared with `skipReason` (#794). Set by Shopify Flow's End campaign,
+   * which has nobody to ask: the Revert button refuses to revert over an edit without a
+   * review, and Flow wrote over every one.
+   *
+   * Worked out by the run that writes, on a whole revert only: here for one that fits the
+   * request, in the worker for one handed there, so it is what is edited when the revert runs
+   * and Flow's ten seconds never wait on a report of the whole campaign.
+   */
+  keepEdited?: boolean;
   /**
    * An Apply pressed on the campaign page without "apply" typed (#812). The press was let
    * through on the campaign's stored preview, which did not ask for the word; this run checks
@@ -694,6 +707,7 @@ async function executeCampaignRun(
       actor: options.actor,
       skipVariantGids: options.skipVariantGids,
       skipReason: options.skipReason,
+      keepEdited: options.keepEdited,
       untypedPress: options.untypedPress,
     });
     if (queued) return queued;
@@ -821,7 +835,11 @@ async function executeCampaignRun(
   }
 
   const kind = options.revert ? "REVERT" : "APPLY";
-  const leaveAlone = new Set(options.skipVariantGids ?? []);
+  // Flow's End campaign keeps what the Revert tab would have asked about (#794): every price
+  // the rollback report says somebody edited since this campaign set it. Asked of the report
+  // here, after the claim and this run's own plan, so it is the edit as the revert finds it.
+  const keptEdits = options.keepEdited && wholeRevert ? await editedVariants(shopId, campaignId) : [];
+  const leaveAlone = new Set([...(options.skipVariantGids ?? []), ...keptEdits]);
 
   let writable = outcome.rows.filter(
     (row) => row.status !== "skipped" && !leaveAlone.has(row.ref.variantGid),
@@ -1320,7 +1338,9 @@ async function executeCampaignRun(
   await transitionCampaign(shopId, campaignId, finalState, {
     reason:
       `${options.revert ? "revert" : "apply"} finished: ${verifiedRows} verified, ${failedRows} failed` +
-      (settledNote ? `. ${settledNote}` : ""),
+      (settledNote ? `. ${settledNote}` : "") +
+      // Nobody ticked these (#794), so the history is where the merchant reads that they stayed.
+      (options.keepEdited && spared.length > 0 ? `. ${editsLeft(spared.length)}` : ""),
     runId: run.id,
     actor: options.actor,
   });
@@ -1370,6 +1390,7 @@ async function executeCampaignRun(
     failed: failedRows,
     unverified: unverifiedRows,
     clean: result.clean,
+    ...(options.keepEdited ? { keptEdits: spared.length } : {}),
     messages: [
       ...(settledNote ? [settledNote] : []),
       // Lead with what was skipped. "Applied 3 variants" after a 1,500-row campaign

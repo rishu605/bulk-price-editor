@@ -16,6 +16,7 @@
 
 import prisma from "../../db.server";
 import { FLOW_ACTOR } from "../../lib/audit/actor";
+import { EDITS_WILL_BE_LEFT, editsLeft } from "../../lib/campaigns/kept-edits";
 import { toAppError } from "../../lib/errors/app-error";
 import { countOf, formatCount } from "../../lib/format/display";
 import { logger } from "../../lib/logging/logger";
@@ -60,8 +61,16 @@ export interface FlowAnswer {
 
 /** The answer for a campaign run, from its outcome. */
 export function answerForRun(outcome: RunOutcome, campaignName: string, verb: "applied" | "ended"): FlowAnswer {
+  // What an end did with the prices edited outside Anchor, which End campaign keeps (#794): a
+  // run here counts them, and one handed to the worker finds them when it runs.
+  const kept = outcome.keptEdits ?? 0;
+  const edits = kept > 0 ? ` ${editsLeft(kept)} The campaign's Ledger tab lists ${kept === 1 ? "it" : "them"}.` : "";
   if (outcome.queued) {
-    return { status: 200, outcome: "queued", message: `"${campaignName}": ${outcome.messages[0] ?? "handed to the background worker."}` };
+    return {
+      status: 200,
+      outcome: "queued",
+      message: `"${campaignName}": ${outcome.messages[0] ?? "handed to the background worker."}` + (verb === "ended" ? ` ${EDITS_WILL_BE_LEFT}` : ""),
+    };
   }
   // Will clear on its own -- a single-variant change in the way (#763), the worker's queue
   // unreachable -- so Flow's resend is exactly the retry it needs.
@@ -81,8 +90,11 @@ export function answerForRun(outcome: RunOutcome, campaignName: string, verb: "a
     return {
       status: 200,
       outcome: "partial",
-      message: `"${campaignName}" ${verb} with ${formatCount(outcome.failed)} failed and ${formatCount(outcome.unverified)} unverified. Resume it from the campaign page.`,
+      message: `"${campaignName}" ${verb} with ${formatCount(outcome.failed)} failed and ${formatCount(outcome.unverified)} unverified. Resume it from the campaign page.${edits}`,
     };
+  }
+  if (kept > 0) {
+    return { status: 200, outcome: "done", message: `"${campaignName}" ${verb}: ${countOf(outcome.verified, "variant")} reverted and verified.${edits}` };
   }
   return { status: 200, outcome: "done", message: `"${campaignName}" ${verb}: ${countOf(outcome.verified, "variant")}, all verified.` };
 }
