@@ -54,6 +54,7 @@ import { tallyStatuses } from "../../lib/campaigns/run-result";
 import type { PlannedRow } from "../../lib/planning/types";
 import { marketsHandedTo } from "./handover.server";
 import { describeBlocked } from "./blocked.server";
+import type { BreachPolicy } from "../../lib/campaigns/breach-policy";
 import { mirrorMarketDelete, mirrorMarketWrite } from "./mirror.server";
 import { parseSurfaces } from "../../lib/campaigns/surfaces";
 
@@ -197,6 +198,8 @@ export async function applyMarketSurfaces(
      * follows the list again, rather than pinned at the price the list derives today (#1002).
      */
     letFollow?: boolean;
+    /** The campaign's floor-breach policy, for what a market it stops is told to do (#1161). */
+    breach?: BreachPolicy;
   } = {},
 ): Promise<MarketSurfaceOutcome[]> {
   const campaign = await prisma.campaign.findUnique({
@@ -321,7 +324,7 @@ export async function applyMarketSurfaces(
         failed: 0,
         chunks: 0,
         // By name, as the base surface's refusal is (#1076), never the reason code.
-        messages: [`${priceListLabel(list)}: ${await describeBlocked(shopId, outcome.blocked, "run")}`],
+        messages: [`${priceListLabel(list)}: ${await describeBlocked(shopId, outcome.blocked, "run", options.breach)}`],
         path: "per-product",
       });
       continue;

@@ -47,5 +47,12 @@ would let that through, so the order is: compute, round, then check.
 The message names the product and the floor it breached. Either lower the floor in
 Settings, exclude that product from the campaign, or change the rule.
 
+What else it offers depends on whether the campaign has started. One that has not, like a
+draft or a scheduled campaign, follows the setting, so the message offers Clamp or Skip
+instead of Block. One that has started keeps Block until it ends, and changing the setting
+does not reach it. Its message says so, and offers what does: lower or remove the floor,
+or revert the campaign and apply it again, so it starts under the setting as it is then.
+If the setting is still Block, change it before you apply again.
+
 If most of your catalogue has no cost, cost-based floors are protecting less than you
 think — the Settings page shows what percentage of your variants have one.

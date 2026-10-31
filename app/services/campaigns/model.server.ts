@@ -551,6 +551,8 @@ export async function campaignContext(shopId: string, campaign: PlannableCampaig
       ...(await withScopes(shopId, others)),
     ],
     heldEdits: await heldEditsOf(shopId, others),
+    // The one it is planned with, for what a plan it stops is told to do (#1161).
+    breach,
     // By name, priority and state, for saying who wins what (#821).
     others: others.map(({ id, name, priority, status }) => ({ id, name, priority, status })),
     ast: await scopeOf(shopId, campaign),
