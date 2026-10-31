@@ -185,6 +185,19 @@ export async function rollbackReport(
   };
 }
 
+/**
+ * The variants this report lists as edited: the ones the Revert tab asks about before it
+ * reverts, and Shopify Flow's End campaign, which cannot ask, leaves as they are (#794).
+ *
+ * The report itself, not pending drift events. An edit the merchant chose to "Leave it for
+ * now" in the drift queue has no pending event and is still an edit the Revert tab asks
+ * about, so only the report can say Flow keeps exactly what the button would have asked.
+ */
+export async function editedVariants(shopId: string, campaignId: string): Promise<string[]> {
+  const report = await rollbackReport(shopId, campaignId);
+  return report.rows.filter((row) => row.kind === "drifted").map((row) => row.variantGid);
+}
+
 /** Live value, currency and tombstone state for the variants a campaign wrote. */
 async function mirrorState(
   shopId: string,

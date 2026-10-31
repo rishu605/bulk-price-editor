@@ -111,6 +111,11 @@ export interface JobRef {
   skipVariantGids?: string[];
   skipReason?: string;
   /**
+   * A revert from Flow's End campaign, which keeps every price edited outside Anchor (#794).
+   * Which ones is worked out by the worker's run, when it runs, and ledgered with `skipReason`.
+   */
+  keepEdited?: boolean;
+  /**
    * One decision over a filtered set of the campaign's drifted prices (#822), too many to
    * resolve while the page waits. The filters and the moment the merchant saw them, not
    * the events: the handler reads those again, as every handler does.
