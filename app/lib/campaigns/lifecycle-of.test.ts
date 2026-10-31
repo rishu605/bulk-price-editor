@@ -4,7 +4,7 @@ import { entryLabel } from "../scheduling/calendar";
 import { STARTING_LATE_GRACE_MS, startingLateText } from "../scheduling/ending-late";
 import { nextMoments } from "../scheduling/upcoming";
 import { describeSchedule, parseSchedule } from "../scheduling/window";
-import { lifecycleBadge, lifecycleOf } from "./lifecycle-of";
+import { lifecycleBadge, lifecycleOf, recapturedAtSaleOf } from "./lifecycle-of";
 
 const start = "2026-10-15T10:00:00.000Z";
 const end = "2026-10-15T12:00:00.000Z";
@@ -45,5 +45,23 @@ describe("a campaign still applying past its start or its end (#1056)", () => {
     expect(describeSchedule(schedule, "UTC", "APPLYING", at(end))).toMatch(
       /^Starts .*, reverts .* \(UTC\)\. It is still applying, so its revert waits for that to finish and begins as soon as it does\.$/,
     );
+  });
+});
+
+describe("an active campaign whose baseline was recaptured at its sale price, in a list (#1166)", () => {
+  it("needs a decision wherever a list shows it, from the count kept beside its plan", () => {
+    const now = at(start, 30 * 60_000);
+    expect(lifecycleOf("ACTIVE", window, now, 1)).toMatchObject({ label: "Active — needs a decision", tone: "warning" });
+    expect(lifecycleBadge("ACTIVE", window, now, 2)).toEqual({ label: "Active — needs a decision", tone: "warning" });
+    expect(lifecycleBadge("ACTIVE", window, now)).toEqual({ label: "Active", tone: "success" });
+  });
+
+  it("reads the count for an Active campaign only: Partial and Held need a decision already", () => {
+    expect(recapturedAtSaleOf("ACTIVE", { recapturedAtSale: 3 })).toBe(3);
+    expect(recapturedAtSaleOf("ACTIVE", { recapturedAtSale: null })).toBe(0);
+    expect(recapturedAtSaleOf("ACTIVE", null)).toBe(0);
+    // A count kept from before its revert says nothing about a campaign that has ended.
+    expect(recapturedAtSaleOf("COMPLETED", { recapturedAtSale: 3 })).toBe(0);
+    expect(recapturedAtSaleOf("PARTIAL", { recapturedAtSale: 3 })).toBe(0);
   });
 });

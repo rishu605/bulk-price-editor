@@ -26,7 +26,7 @@ export async function lifecycleContext(
   /** Its schedule, which the caller selects beside its definition (#1141), and its practice column (#884). */
   campaign: Pick<Campaign, "schedule" | "practice">,
   timeZone: string,
-  preview: Pick<CampaignPreview, "outrankedBy" | "confirm" | "recapturedAtSale">,
+  preview: Pick<CampaignPreview, "outrankedBy" | "confirm" | "recapturedAtSale" | "recapturedInMarkets">,
 ) {
   const { schedule } = campaign;
   return {
@@ -35,6 +35,7 @@ export async function lifecycleContext(
     neverStarts: state === "SCHEDULED" ? neverStarts(parseSchedule(schedule), new Date(), timeZone) : null, // #824
     outrankedBy: preview.outrankedBy, // a higher campaign prices every variant (#837)
     recapturedAtSale: preview.recapturedAtSale ?? 0, // its baseline recaptured at its sale price (#781)
+    recapturedInMarkets: preview.recapturedInMarkets ?? 0, // a market's or wholesale price among them (#1166)
     startRefused: state === "SCHEDULED" ? startRefusal(schedule) : null, // #975
     lateStart: state === "SCHEDULED" ? await lateStart(shopId, campaignId, schedule) : null, // #851
     endMissed: state === "ACTIVE" ? endMissed(schedule) : null, // #1005

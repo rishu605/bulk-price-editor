@@ -61,6 +61,15 @@ export interface RollbackReport {
     recaptured: number;
     examples: Array<{ title: string; before: string; revertsTo: string }>;
   };
+  /**
+   * The market and wholesale prices reverting puts back at this campaign's sale price, their
+   * baseline recaptured at it while the campaign ran (#1166): how many, and the first few with
+   * the market and the price before. The rows are base prices, so these are said on their own.
+   */
+  marketsNotBefore?: {
+    count: number;
+    examples: Array<{ title: string; market: string; before: string; revertsTo: string }>;
+  };
 }
 
 /**
@@ -161,6 +170,28 @@ export function notBeforeSentence(notBefore: RollbackReport["notBefore"]): strin
   return (
     `${countOf(count, "variant")} ${one ? "reverts" : "revert"} to a different price from the one the ledger recorded ` +
     `before this campaign: ${named}${more}.${why}`
+  );
+}
+
+/**
+ * What the Revert tab and dialog say about the market and wholesale prices reverting leaves at
+ * this campaign's sale price (#1166), or null when there are none.
+ *
+ * The base price's remedy is a baseline import, and an import sets the base price only. A market
+ * price is the merchant's to set in Shopify once the sale has ended, and then to recapture.
+ */
+export function marketsNotBeforeSentence(markets: RollbackReport["marketsNotBefore"]): string | null {
+  if (!markets || markets.count === 0) return null;
+  const { count, examples } = markets;
+  const one = count === 1;
+  const named = examples.map((row) => `“${row.title}” in ${row.market} reverts to ${row.revertsTo}, not ${row.before}`).join("; ");
+  const more = count > examples.length ? `; and ${formatCount(count - examples.length)} more` : "";
+  return (
+    `${countOf(count, "market price")} ${one ? "reverts" : "revert"} to this campaign's sale price, not the price before ` +
+    `it: ${named}${more}. ${one ? "Its baseline was" : "Their baselines were"} recaptured at the sale price, and reverting ` +
+    `writes a market's baseline back. An import cannot set a market's price, so to end the sale at the price from ` +
+    `before it, revert, then set ${one ? "that price" : "those prices"} in Shopify and recapture ${one ? "its baseline" : "their baselines"} on ` +
+    "Prices → Baselines."
   );
 }
 

@@ -7,13 +7,13 @@
  * both views read, which means it cannot live inside either one.
  */
 
-import { lifecycleOf } from "../../lib/campaigns/lifecycle-of";
+import { lifecycleOf, recapturedAtSaleOf } from "../../lib/campaigns/lifecycle-of";
 import type { RunKind } from "@prisma/client";
 import prisma from "../../db.server";
 import { describeCampaign } from "../../lib/campaigns/describe";
 import { astOf, ruleOf, segmentNameOf } from "./model.server";
 import { ROWS_PER_VIEW } from "../../lib/ui/table-budget";
-import { ATTENTION_STATES, campaignFilterWhere, type StatusFilter } from "../../lib/campaigns/list-filters";
+import { campaignFilterWhere, NEEDS_A_DECISION, RECAPTURED_COUNT, type StatusFilter } from "../../lib/campaigns/list-filters";
 import { RUNS_WHEN_ARCHIVED } from "../../lib/campaigns/archive-warning";
 import {
   ALL_STATES,
@@ -113,6 +113,8 @@ export async function listCampaigns(shopId: string, filters: CampaignFilters) {
         // inline filter rather than narrowing it, so where there is one it *is* the
         // scope — see `describeScope`.
         segments: { select: { name: true }, take: 1 },
+        // Its count of baselines recaptured at its sale price, kept beside its stored plan (#1166).
+        ...RECAPTURED_COUNT,
       },
     }),
     prisma.campaign.count({ where }),
@@ -122,8 +124,9 @@ export async function listCampaigns(shopId: string, filters: CampaignFilters) {
     // Archived is the one exception. A campaign a merchant has deliberately filed away
     // should not go on demanding a decision from the top of a list it is no longer in —
     // that is a badge counting something the merchant cannot see.
+    // An Active one recaptured at its sale price as well (#1166), by the filter's own clause.
     prisma.campaign.count({
-      where: { shopId, status: { in: ATTENTION_STATES }, archivedAt: null },
+      where: { shopId, archivedAt: null, ...NEEDS_A_DECISION },
     }),
     // And what that exception would hide (#748): archived campaigns still live or scheduled.
     // Archiving files a campaign away without ending it, so its prices are on the storefront,
@@ -137,14 +140,16 @@ export async function listCampaigns(shopId: string, filters: CampaignFilters) {
   const now = new Date();
   const rows = campaigns.map((c) => {
     const state = c.status as CampaignState;
+    // An Active campaign whose baseline was recaptured at its own sale price (#1166).
+    const recaptured = recapturedAtSaleOf(state, c.planSummary);
     return {
       id: c.id,
       name: c.name,
       state,
       // As Home and the calendar show it (#1056): a window that can never open (#824), a
       // start refused for good (#975), a sale applying past its start or its end (#829).
-      lifecycle: lifecycleOf(state, c.schedule, now),
-      attention: needsAttention(state),
+      lifecycle: lifecycleOf(state, c.schedule, now, recaptured),
+      attention: needsAttention(state) || recaptured > 0,
       priority: c.priority,
       // What it does and what to, as sentences, through the one formatter every surface
       // uses. The index used to say everything *about* a campaign and nothing about what

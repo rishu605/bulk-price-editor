@@ -1245,6 +1245,15 @@ model PlanSummary {
   /// When a background plan was last asked for, so a page asks once rather than every load.
   requestedAt  DateTime?
 
+  /// How many of the campaign's variants have a baseline recaptured at its own sale price
+  /// (#1166), as last counted: by its plan, or by the recapture, import or run that could have
+  /// changed it. The campaigns list, Home and the calendar read it to say "needs a decision"
+  /// without planning. Null until first counted. Not a plan input: writing it stales nothing.
+  recapturedAtSale    Int?
+  /// When that count began. A count begun earlier never replaces one begun later, so a plan
+  /// that started before a recapture cannot put back the number from before it.
+  recapturedCountedAt DateTime?
+
   shop     Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
   campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 

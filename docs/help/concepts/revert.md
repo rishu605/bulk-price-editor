@@ -47,6 +47,12 @@ To put the old price back, import it as the product's baseline first
 export of the rollback report gives that price for every such product, in its
 `before_campaign` column.
 
+A market or wholesale catalogue price recaptured during the sale is said separately, with
+the market's name: "reverts to €40.00, not €50.00". Reverting writes a market's baseline back,
+so the sale price stays on the list. An import cannot set a market's price, so revert, then
+set the old price on the list in Shopify and recapture its baseline. The export lists base
+prices only.
+
 ## A product another campaign handed over
 
 The other way round works too. When a higher-priority campaign ends, its revert puts this

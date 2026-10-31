@@ -313,6 +313,7 @@ export function CampaignHeader({
           campaignName={preview.name}
           counts={rollback.counts}
           notBefore={rollback.notBefore}
+          marketsNotBefore={rollback.marketsNotBefore}
           keepers={keepers}
           pending={keepersPending}
           busy={busy}

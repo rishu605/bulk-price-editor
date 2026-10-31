@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   classifyRollbackRow,
+  marketsNotBeforeSentence,
   notBeforeSentence,
   rollbackReportCsv,
   rollbackSummary,
@@ -149,6 +150,32 @@ describe("the variants reverting does not put back at their price from before (#
     expect(sentence).toContain("; and 1,201 more, in the export.");
     expect(sentence).toContain(" 4 of them had their baseline recaptured at this campaign's sale price");
     expect(notBeforeSentence({ count: 2, recaptured: 0, examples: [board, board] })).not.toContain("recaptured");
+  });
+});
+
+describe("the market prices reverting leaves at this campaign's sale price (#1166)", () => {
+  const board = { title: "QA Recapture Board", market: "Europe", before: "€50.00", revertsTo: "€40.00" };
+
+  it("says nothing when there are none", () => {
+    expect(marketsNotBeforeSentence(undefined)).toBeNull();
+    expect(marketsNotBeforeSentence({ count: 0, examples: [] })).toBeNull();
+  });
+
+  it("names the market and the price before, and says what to do, which is not an import", () => {
+    expect(marketsNotBeforeSentence({ count: 1, examples: [board] })).toBe(
+      "1 market price reverts to this campaign's sale price, not the price before it: “QA Recapture Board” in Europe " +
+        "reverts to €40.00, not €50.00. Its baseline was recaptured at the sale price, and reverting writes a market's " +
+        "baseline back. An import cannot set a market's price, so to end the sale at the price from before it, revert, " +
+        "then set that price in Shopify and recapture its baseline on Prices → Baselines.",
+    );
+  });
+
+  it("names a few and counts the rest", () => {
+    const sentence = marketsNotBeforeSentence({ count: 40, examples: [board, board, board] })!;
+    expect(sentence).toMatch(/^40 market prices revert to this campaign's sale price/);
+    expect(sentence).toContain("; and 37 more.");
+    expect(sentence).toContain("Their baselines were recaptured");
+    expect(sentence).toContain("set those prices in Shopify and recapture their baselines");
   });
 });
 

@@ -14,6 +14,9 @@
  *
  * Driven through the campaign page's own loader and action and the recapture service the page
  * and Flow call. Only `authenticate.admin` and `adminClientForShop` are replaced.
+ *
+ * And the campaigns list, Home and the calendar say so too, before anyone opens the campaign,
+ * from the count the recapture kept beside its stored plan (#1166).
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -21,6 +24,8 @@ import { describe, expect, it, vi } from "vitest";
 import prisma from "../../app/db.server";
 import { DANGEROUS_PHRASE, recapturedMessage } from "../../app/lib/baselines/recapture";
 import { notBeforeSentence } from "../../app/lib/reporting/rollback";
+import { calendarFor, todayIn } from "../../app/services/calendar.server";
+import { filtersFrom, listCampaigns } from "../../app/services/campaigns/list.server";
 import { runCampaign } from "../../app/services/campaigns/run.server";
 import { planRecapture, recapture } from "../../app/services/recapture.server";
 import { redefine } from "../harness/definition";
@@ -95,6 +100,37 @@ async function onlyTheBoard(chaos: ChaosContext) {
 
 const current = (shopId: string, variantGid: string) =>
   prisma.baseline.findFirstOrThrow({ where: { shopId, variantGid, surfaceKind: "BASE", supersededAt: null } });
+
+/**
+ * The campaign as every list of campaigns shows it (#1166): its row on the list, and whether
+ * the list's "Needs a decision" filter finds it; Home's tile and banner; its calendar badge.
+ */
+async function everywhere(shopId: string, campaignId: string) {
+  const [all, attention] = await Promise.all([
+    listCampaigns(shopId, filtersFrom(new URLSearchParams())),
+    listCampaigns(shopId, filtersFrom(new URLSearchParams("status=attention"))),
+  ]);
+  const row = all.campaigns.find((campaign) => campaign.id === campaignId)!;
+
+  const { loader } = await import("../../app/routes/app._index");
+  const home = (await loader({ request: new Request("https://example.invalid/app"), params: {}, context: {} } as never)) as unknown as {
+    needsAttention: number;
+    recapturedAtSale: number;
+  };
+
+  const shop = await prisma.shop.findUniqueOrThrow({ where: { id: shopId } });
+  const calendar = await calendarFor(shopId, shop.timezone, { view: "week", on: todayIn(shop.timezone), status: "attention" });
+  const drawn = calendar.days.flatMap((day) => day.entries).find((entry) => entry.campaignId === campaignId);
+
+  return {
+    label: row.lifecycle.label,
+    attention: row.attention,
+    filtered: attention.campaigns.map((campaign) => campaign.id),
+    badge: all.attentionCount,
+    home: { needsAttention: home.needsAttention, recapturedAtSale: home.recapturedAtSale },
+    calendar: drawn?.lifecycle?.label ?? null,
+  };
+}
 
 describe("chaos: a recapture over a running sale (#781)", () => {
   it("leaves unchanged baselines, flags the campaign, asks before compounding, and gives the price before it", async () => {
@@ -178,6 +214,60 @@ describe("chaos: a recapture over a running sale (#781)", () => {
       const compounded = await page(campaignId);
       expect(compounded.lifecycle.label).toBe("Active — needs a decision");
       expect(compounded.rollback!.rows.find((entry) => entry.variantGid === board)!.before).toContain("100.00");
+    });
+  });
+
+  it("is said on the list, Home and the calendar without anyone opening it, and stops once a new sale starts (#1166)", async () => {
+    await withChaos("recapture-during-sale-lists", CATALOG, async (chaos) => {
+      const { shopId, campaignId } = chaos.fixture;
+      await onlyTheBoard(chaos);
+
+      const applied = await press(campaignId, { intent: "apply" });
+      expect(applied.ok, applied.message).toBe(true);
+      expect(await everywhere(shopId, campaignId), "the premise: a sale that needs nothing").toEqual({
+        label: "Active",
+        attention: false,
+        filtered: [],
+        badge: 0,
+        home: { needsAttention: 0, recapturedAtSale: 0 },
+        calendar: null,
+      });
+
+      const plan = await planRecapture(shopId);
+      await recapture(shopId, { confirmation: DANGEROUS_PHRASE, actor: `staff:${STAFF}`, expectedScope: plan.scope });
+
+      // Nobody has opened the campaign: the count is the recapture's, kept beside the stored
+      // plan without planning anything.
+      const kept = await prisma.planSummary.findUniqueOrThrow({ where: { campaignId } });
+      expect(kept.recapturedAtSale).toBe(1);
+      expect(await everywhere(shopId, campaignId), "a list said plain Active over a baseline at its sale price").toEqual({
+        label: "Active — needs a decision",
+        attention: true,
+        filtered: [campaignId],
+        badge: 1,
+        // The tile counts it; the banner says it is running, not that it stopped part way.
+        home: { needsAttention: 1, recapturedAtSale: 1 },
+        calendar: "Active — needs a decision",
+      });
+
+      // Its own page agrees, and planning it keeps the same count.
+      expect((await page(campaignId)).lifecycle.label).toBe("Active — needs a decision");
+      expect((await prisma.planSummary.findUniqueOrThrow({ where: { campaignId } })).recapturedAtSale).toBe(1);
+
+      // Reverted, it ends at the recaptured price, and an apply after that is a new sale whose
+      // baseline was captured before it: Active again everywhere, counted as it went Active.
+      const reverted = await press(campaignId, { intent: "revert" });
+      expect(reverted.ok, reverted.message).toBe(true);
+      const again = await press(campaignId, { intent: "apply" });
+      expect(again.ok, again.message).toBe(true);
+      expect((await prisma.planSummary.findUniqueOrThrow({ where: { campaignId } })).recapturedAtSale).toBe(0);
+      expect(await everywhere(shopId, campaignId)).toMatchObject({
+        label: "Active",
+        attention: false,
+        filtered: [],
+        badge: 0,
+        home: { needsAttention: 0, recapturedAtSale: 0 },
+      });
     });
   });
 

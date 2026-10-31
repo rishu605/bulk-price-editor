@@ -10,7 +10,7 @@
 import { RollbackReportTable } from "../../components/RollbackReportTable";
 import { ActionRow } from "../ActionRow";
 import { filenameSlug } from "../../lib/reporting/csv";
-import { notBeforeSentence, rollbackSummary, unaffectedSentence } from "../../lib/reporting/rollback";
+import { marketsNotBeforeSentence, notBeforeSentence, rollbackSummary, unaffectedSentence } from "../../lib/reporting/rollback";
 import { ExportButton } from "../ExportButton";
 import type { CampaignDetailProps } from "./props";
 import { Card } from "../Card";
@@ -39,6 +39,12 @@ export function CampaignRevertTab({ rollback, preview, fetcher, busy }: Campaign
           {notBeforeSentence(rollback.notBefore) ? (
             <s-banner tone="warning">
               <s-paragraph>{notBeforeSentence(rollback.notBefore)}</s-paragraph>
+            </s-banner>
+          ) : null}
+          {/* And a market's or wholesale price, which the rows below do not list (#1166). */}
+          {marketsNotBeforeSentence(rollback.marketsNotBefore) ? (
+            <s-banner tone="warning">
+              <s-paragraph>{marketsNotBeforeSentence(rollback.marketsNotBefore)}</s-paragraph>
             </s-banner>
           ) : null}
 

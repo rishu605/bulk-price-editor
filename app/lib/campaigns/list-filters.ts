@@ -34,6 +34,23 @@ export interface ListFilters {
 /** The states `needsAttention` is true for, as the database sees them. */
 export const ATTENTION_STATES: CampaignState[] = ["PARTIAL", "HELD"];
 
+/**
+ * An Active campaign with a baseline recaptured at its own sale price (#1166), by the count
+ * kept beside its stored plan: its rows were read back, and it still needs a decision, because
+ * applying it again compounds and reverting leaves the sale price. Its page said so and the
+ * list, Home and the calendar said "Active". Read from that count, never by planning.
+ */
+export const RECAPTURED_ACTIVE = { status: "ACTIVE", planSummary: { is: { recapturedAtSale: { gt: 0 } } } } as const;
+
+/**
+ * Every campaign that needs a decision, as the list's filter and badge and Home's tile count
+ * them: one where clause, so the number a merchant clicks and the list it opens agree.
+ */
+export const NEEDS_A_DECISION = { OR: [{ status: { in: ATTENTION_STATES } }, RECAPTURED_ACTIVE] };
+
+/** What a list selects beside each campaign for `recapturedAtSaleOf` (#1166). */
+export const RECAPTURED_COUNT = { planSummary: { select: { recapturedAtSale: true } } } as const;
+
 /** The filters as a Prisma `campaign` where clause, without the shop. */
 export function campaignFilterWhere(filters: ListFilters) {
   const contains = { contains: filters.q, mode: "insensitive" as const };
@@ -55,9 +72,10 @@ export function campaignFilterWhere(filters: ListFilters) {
 /**
  * "attention" and "live" are not statuses — each is a property of several of them, so they
  * are expanded here rather than being magic strings the database has to understand.
+ * "attention" in an `AND`, so its `OR` cannot replace the search's.
  */
 function statusWhere(status: StatusFilter) {
-  if (status === "attention") return { status: { in: ATTENTION_STATES } };
+  if (status === "attention") return { AND: [NEEDS_A_DECISION] };
   if (status === "live") return { status: { in: [...RUNS_WHEN_ARCHIVED] } };
   return status ? { status } : {};
 }
