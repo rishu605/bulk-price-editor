@@ -2,6 +2,7 @@ import { alreadyCorrectFacts, overlapSentences } from "../../lib/planning/overla
 import { useRef, type ElementRef } from "react";
 
 import { confirmationReasons } from "../../lib/campaigns/blast-radius";
+import { breachPolicyAtApply, type BreachPolicy } from "../../lib/campaigns/breach-policy";
 import { describeRunDuration } from "../../lib/planning/duration";
 import { describeTagKit } from "../../lib/tags/plan";
 import { formatCount } from "../../lib/format/display";
@@ -47,6 +48,7 @@ export function ApplyConfirmation({
   scheduleText,
   busy,
   heldEdits = 0,
+  breachPolicy,
   onConfirm,
 }: {
   preview: CampaignPreview;
@@ -67,6 +69,8 @@ export function ApplyConfirmation({
   busy?: boolean;
   /** Prices changed in Shopify that hold this campaign, which applying writes over (#755). */
   heldEdits?: number;
+  /** What it does when a price would breach a floor, as its plan does (#789). */
+  breachPolicy: BreachPolicy;
   /**
    * Commit, carrying whatever was typed into the confirmation box.
    *
@@ -149,6 +153,10 @@ export function ApplyConfirmation({
               written at the smallest price instead
             </Fact>
           ) : null}
+
+          {/* Always said (#789): nothing told a merchant which policy a campaign would use, and
+              one created before they chose Block went on clamping, which can raise a price. */}
+          <Fact label="If a price breaches a floor">{breachPolicyAtApply(breachPolicy)}</Fact>
 
           {/* Who else prices these variants, and who wins (#821): the decision is being
               made here, and the campaign a merchant is about to write over may be held or

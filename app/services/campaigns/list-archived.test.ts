@@ -28,6 +28,8 @@ beforeEach(() => {
 const rowQuery = () => prisma.campaign.findMany.mock.calls[0]![0].where;
 /** The second `count` is the attention badge; the first is the page total. */
 const attentionQuery = () => prisma.campaign.count.mock.calls[1]![0].where;
+/** The third is the archived campaigns still running (#748). */
+const archivedRunningQuery = () => prisma.campaign.count.mock.calls[2]![0].where;
 
 describe("the default list", () => {
   it("leaves out what the merchant filed away", async () => {
@@ -43,6 +45,36 @@ describe("the default list", () => {
     await listCampaigns("shop", filters());
 
     expect(attentionQuery()).toMatchObject({ shopId: "shop", archivedAt: null });
+  });
+});
+
+describe("what archiving leaves running (#748)", () => {
+  /**
+   * The other side of the badge's exception. An archived campaign is out of the list, and
+   * archiving does not end one: an Active campaign's prices stay live and a scheduled one
+   * still starts. So they are counted, wherever the list is filtered, or a live price is one
+   * the list cannot account for.
+   */
+  it("counts archived campaigns still live or scheduled, across the shop", async () => {
+    await listCampaigns("shop", filters("status=DRAFT&q=summer"));
+
+    expect(archivedRunningQuery()).toEqual({
+      shopId: "shop",
+      archivedAt: { not: null },
+      status: { in: ["APPLYING", "ACTIVE", "HELD", "REVERTING", "PARTIAL", "SCHEDULED"] },
+    });
+  });
+
+  it("hands the count to the page", async () => {
+    prisma.campaign.count.mockResolvedValueOnce(0).mockResolvedValueOnce(0).mockResolvedValueOnce(2);
+
+    expect((await listCampaigns("shop", filters())).archivedRunning).toBe(2);
+  });
+
+  it("lists exactly those where the count links", async () => {
+    await listCampaigns("shop", filters("archived=1&status=live"));
+
+    expect(rowQuery()).toMatchObject({ archivedAt: { not: null }, status: archivedRunningQuery().status });
   });
 });
 

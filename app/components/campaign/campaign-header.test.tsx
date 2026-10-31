@@ -26,6 +26,7 @@ import { CampaignOverviewTab } from "./CampaignOverviewTab";
 import { CampaignRevertTab } from "./CampaignRevertTab";
 import { describeState } from "../../lib/lifecycle/transitions";
 import { describeCampaign } from "../../lib/campaigns/describe";
+import { archiveWarning } from "../../lib/campaigns/archive-warning";
 import { formatWhen } from "../../lib/format/display";
 import type { CampaignDetailProps } from "./props";
 
@@ -80,6 +81,8 @@ const props = (over: Partial<CampaignDetailProps> = {}) =>
     heldEdits: 0,
     // Nothing on record and nothing asked (#1009).
     startConfirmation: { confirmed: null, unconfirmed: null },
+    // A draft follows the store's setting (#789).
+    breachPolicy: { policy: "clamp", kept: false, store: "clamp" },
     ...over,
   }) as unknown as CampaignDetailProps;
 
@@ -1051,5 +1054,125 @@ describe("a stored plan that is not current (#812)", () => {
     );
     expect(html).toContain("Revert is offered once its rollback report is worked out.");
     expect(html).not.toContain(">Revert<");
+  });
+});
+
+describe("archiving a campaign that is still running asks first (#748)", () => {
+  /**
+   * "Sale · 21/09/2026", Active, was archived from the overflow in one click: no
+   * confirmation, and the page then read "Active · Archived" in a neutral tag. Archiving
+   * stays allowed (D19); what it leaves running is said before it, and after it the badge
+   * reads as the warning it is.
+   */
+  const live = (over: Partial<CampaignDetailProps> = {}) =>
+    props({
+      state: "ACTIVE",
+      lifecycle: describeState("ACTIVE"),
+      archived: false,
+      archiving: archiveWarning("ACTIVE", { kind: "manual" }, "Europe/London", "Active", false),
+      ...over,
+    } as never);
+  const dialog = (html: string) => {
+    const start = html.indexOf('<s-modal id="archive-confirmation"');
+    return start === -1 ? "" : html.slice(start, html.indexOf("</s-modal>", start));
+  };
+
+  it("names what keeps happening, in a dialog with Archive as its action", () => {
+    const html = dialog(render(<CampaignHeader {...live()} />));
+
+    expect(html).toContain('heading="Archive Autumn sale?"');
+    expect(html).toContain("Its prices stay live on your storefront. It runs until you revert it.");
+    expect(html).toContain("To take its prices down, revert it instead.");
+    expect(html).toMatch(/slot="primary-action"[^>]*>Archive campaign/);
+  });
+
+  it("says a scheduled campaign will still start, on the date the page shows", () => {
+    const schedule = { kind: "window", startAt: "2026-11-27T09:00:00.000Z" };
+    const html = dialog(
+      render(
+        <CampaignHeader
+          {...live({
+            state: "SCHEDULED",
+            lifecycle: describeState("SCHEDULED"),
+            archiving: archiveWarning("SCHEDULED", schedule, "Europe/London", "Scheduled", false),
+          } as never)}
+        />,
+      ),
+    );
+
+    expect(html).toContain("It will still start 27 Nov 2026, 09:00 (Europe/London), and its prices go live then.");
+    expect(html).toContain("Cancel or unschedule");
+  });
+
+  it("opens the dialog from the menu rather than posting", () => {
+    // A menu's buttons act through onClick or href (Polaris' own types), so the item opens
+    // the dialog by its overlay, and the dialog's own button is what posts the archive.
+    const header = sourceOf("app/components/campaign/CampaignHeader.tsx");
+    expect(header).toMatch(/askFirst\s*\?\s*archiveModal\.current\?\.showOverlay\?\.\(\)/);
+    expect(header).toMatch(/onConfirm=\{\(\) => fetcher\.submit\(\{ intent: "archive" \}/);
+  });
+
+  it("keeps the header's one black button, the dialog's being in a closed overlay", () => {
+    const html = render(<CampaignHeader {...live({ canApply: true })} />);
+    const row = html.split("<s-modal")[0];
+
+    expect(row).not.toContain("Archive campaign");
+    expect((row.match(/variant="primary"/g) ?? []).length).toBeLessThanOrEqual(1);
+  });
+
+  it("stays one click for a campaign with nothing running, and for Restore", () => {
+    expect(dialog(render(<CampaignHeader {...live({ state: "DRAFT", archiving: null } as never)} />))).toBe("");
+    expect(dialog(render(<CampaignHeader {...live({ archived: true })} />)), "Restore asked first").toBe("");
+  });
+
+  it("draws the Archived badge as a warning while it runs, and as a tag once it is done", () => {
+    const badge = (html: string) => html.match(/<s-badge tone="(\w+)">Archived<\/s-badge>/)?.[1];
+
+    expect(badge(render(<CampaignHeader {...live({ archived: true })} />))).toBe("warning");
+    expect(
+      badge(render(<CampaignHeader {...live({ archived: true, state: "COMPLETED", lifecycle: describeState("COMPLETED") } as never)} />)),
+    ).toBe("neutral");
+  });
+});
+
+describe("the campaign's floor-breach policy is said where it is decided (#789)", () => {
+  /** Apostrophes come back escaped from `renderToStaticMarkup`. */
+  const text = (html: string) => html.replace(/&#x27;/g, "'");
+
+  it("names the store's policy in the Apply dialog of a campaign that has not started, which it then keeps", () => {
+    const dialog = text(
+      modalOf(render(<CampaignHeader {...props({ breachPolicy: { policy: "block", kept: false, store: "block" } } as never)} />), "apply-confirmation"),
+    );
+    expect(dialog).toContain('<s-text color="subdued">If a price breaches a floor</s-text>');
+    expect(dialog).toContain("Block the whole campaign: the store's setting, which this campaign keeps until it ends");
+  });
+
+  it("names a running campaign's own policy, and the store's when they differ", () => {
+    const dialog = text(
+      modalOf(
+        render(
+          <CampaignHeader
+            {...props({ lifecycle: describeState("PARTIAL"), state: "PARTIAL", breachPolicy: { policy: "clamp", kept: true, store: "block" } } as never)}
+          />,
+        ),
+        "apply-confirmation",
+      ),
+    );
+    expect(dialog).toContain(
+      "Clamp it to the floor and carry on: the one it started with. Settings now says “Block the whole campaign”, which it does not follow",
+    );
+  });
+
+  it("is on the Overview tab, with whose policy it is", () => {
+    const draft = text(render(<CampaignOverviewTab {...props({ breachPolicy: { policy: "skip", kept: false, store: "skip" } } as never)} />));
+    expect(draft).toContain("When a price would breach a floor");
+    expect(draft).toContain("Skip that variant, price the rest");
+    expect(draft).toContain("The store's setting, which this campaign follows until it starts.");
+
+    const running = text(
+      render(<CampaignOverviewTab {...props({ lifecycle: describeState("ACTIVE"), state: "ACTIVE", breachPolicy: { policy: "clamp", kept: true, store: "block" } } as never)} />),
+    );
+    expect(running).toContain("Clamp it to the floor and carry on");
+    expect(running).toContain("Settings now says “Block the whole campaign”, for new campaigns and anything not yet started.");
   });
 });

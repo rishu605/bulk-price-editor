@@ -21,7 +21,7 @@
 import { describe, expect, it } from "vitest";
 
 import prisma from "../../app/db.server";
-import { createCampaign } from "../../app/services/campaigns/model.server";
+import { breachPolicyOf, createCampaign } from "../../app/services/campaigns/model.server";
 import { DEFAULT_SETTINGS, writeSettings } from "../../app/services/settings.server";
 import { withChaos } from "../harness/scenario";
 
@@ -42,15 +42,9 @@ describe("chaos: a run that never starts gives the campaign back", () => {
         // Blocking is the merchant saying "do not quietly do something else" -- which
         // is exactly why it must not quietly break the campaign either.
         //
-        // The policy goes on the campaign because that is where resolution reads it
-        // (#338): a campaign copies the shop's setting when it is created, so changing
-        // the shop default afterwards must not retroactively change a running campaign.
-        // The fixture's campaign already exists, so set it directly.
-        await writeSettings(shopId, { ...DEFAULT_SETTINGS, minPrice: 100_000 });
-        await prisma.campaign.update({
-          where: { id: campaignId },
-          data: { guardrailViolationPolicy: "block" },
-        });
+        // The shop's setting: the fixture's campaign has not started, so it follows it
+        // (#789). Only a running campaign keeps the policy it started with.
+        await writeSettings(shopId, { ...DEFAULT_SETTINGS, minPrice: 100_000, violationPolicy: "block" });
 
         await expect(ctx.apply()).rejects.toThrow(/guardrail/i);
 
@@ -91,11 +85,7 @@ describe("chaos: a run that never starts gives the campaign back", () => {
       async (ctx) => {
         const { shopId, campaignId } = ctx.fixture;
 
-        await writeSettings(shopId, { ...DEFAULT_SETTINGS, minPrice: 100_000 });
-        await prisma.campaign.update({
-          where: { id: campaignId },
-          data: { guardrailViolationPolicy: "block" },
-        });
+        await writeSettings(shopId, { ...DEFAULT_SETTINGS, minPrice: 100_000, violationPolicy: "block" });
         await expect(ctx.apply()).rejects.toThrow(/guardrail/i);
 
         // The point of releasing the claim: the merchant fixes the floor and retries.
@@ -146,9 +136,9 @@ describe("chaos: the floor-violation policy reaches the resolver", () => {
     );
   });
 
-  it("does not retroactively change a campaign when the shop default changes", async () => {
+  it("lets a campaign that has not started follow the shop's setting when it changes (#789)", async () => {
     await withChaos(
-      "violation-policy-frozen",
+      "violation-policy-follows",
       { catalog: { products: 1, variantsPerProduct: 1 }, percent: -10 },
       async (ctx) => {
         const { shopId } = ctx.fixture;
@@ -163,15 +153,12 @@ describe("chaos: the floor-violation policy reaches the resolver", () => {
           schedule: { kind: "manual" },
         } as never);
 
-        // Changing the store default must not reach back into a campaign that may
-        // already have prices on a storefront.
+        // It has nothing on a storefront to keep a policy for, so the shop's new one is its
+        // own. A running campaign keeps the one it started with: `breach-policy-follows-store`.
         await writeSettings(shopId, { ...DEFAULT_SETTINGS, violationPolicy: "clamp" });
 
-        const after = await prisma.campaign.findUniqueOrThrow({
-          where: { id: created.id },
-          select: { guardrailViolationPolicy: true },
-        });
-        expect(after.guardrailViolationPolicy).toBe("block");
+        const after = await prisma.campaign.findUniqueOrThrow({ where: { id: created.id } });
+        expect(await breachPolicyOf(shopId, after)).toEqual({ policy: "clamp", kept: false, store: "clamp" });
       },
     );
   });
@@ -183,18 +170,21 @@ describe("chaos: the floor-violation policy reaches the resolver", () => {
       async (ctx) => {
         const { shopId, campaignId } = ctx.fixture;
 
-        // An older row, a rolled-back release, a hand-edited record. Refusing to
-        // resolve would put the merchant's live prices out of our reach entirely,
-        // which is worse than the safest valid answer.
+        // A floor between the discounted price and the normal one: $100 baselines, 10% off
+        // makes $90, and the floor will be $95. Clamping is "don't discount past this" -- a
+        // floor above the baseline is a different case, which a discount leaves alone (#740).
+        await prisma.baseline.updateMany({ where: { shopId, supersededAt: null }, data: { basePrice: 10_000n } });
+        expect((await ctx.apply()).clean).toBe(true);
+
+        // On a running campaign, which reads its own (#789): an older row, a rolled-back
+        // release, a hand-edited record. Refusing to resolve would put the merchant's live
+        // prices out of our reach entirely, which is worse than the safest valid answer --
+        // and the shop's Block is not its answer either, since it is already running.
         await prisma.campaign.update({
           where: { id: campaignId },
           data: { guardrailViolationPolicy: "obliterate" },
         });
-        // A floor between the discounted price and the normal one: $100 baselines, 10% off
-        // makes $90, and the floor is $95. Clamping is "don't discount past this" -- a floor
-        // above the baseline is a different case, which a discount leaves alone (#740).
-        await prisma.baseline.updateMany({ where: { shopId, supersededAt: null }, data: { basePrice: 10_000n } });
-        await writeSettings(shopId, { ...DEFAULT_SETTINGS, minPrice: 95 });
+        await writeSettings(shopId, { ...DEFAULT_SETTINGS, minPrice: 95, violationPolicy: "block" });
 
         const outcome = await ctx.apply();
         expect(outcome.clean, "an unknown policy must not stop the run").toBe(true);
