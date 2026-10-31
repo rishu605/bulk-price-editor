@@ -15,6 +15,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import prisma from "../../app/db.server";
 import { createCampaign } from "../../app/services/campaigns/model.server";
+import { listCampaigns } from "../../app/services/campaigns/list.server";
 import { withChaos } from "../harness/scenario";
 
 let pending = { shop: "" };
@@ -38,7 +39,7 @@ async function home() {
 const archive = (id: string) => prisma.campaign.update({ where: { id }, data: { archivedAt: new Date() } });
 
 describe("chaos: Home and archived campaigns", () => {
-  it("counts neither an archived partial campaign nor an archived draft, and still reports an archived live one", async () => {
+  it("counts neither an archived partial campaign nor an archived draft on a tile, and reports every archived one still running", async () => {
     await withChaos("home-archived", { catalog: { products: 4, variantsPerProduct: 1 }, percent: -20 }, async (chaos) => {
       const { shopId, domain, campaignId } = chaos.fixture;
       pending = { shop: domain };
@@ -62,16 +63,24 @@ describe("chaos: Home and archived campaigns", () => {
 
       await archive(campaignId);
       await archive(draft.id);
+      // Off the tiles, which link to a list that hides archived campaigns. But a partial one
+      // may have prices live, so it is in the archived-and-running line, which links to the
+      // list's own "live or scheduled" view of exactly those (#1163).
       expect(await home(), "Home counted campaigns the list it links to hides").toMatchObject({
         needsAttention: 0,
         drafts: 0,
         running: 0,
-        archivedRunning: 0,
+        archivedRunning: 1,
       });
 
-      // Archived and live: not on a tile, which links to a list that hides it, but not gone.
-      await prisma.campaign.update({ where: { id: campaignId }, data: { status: "ACTIVE" } });
-      expect(await home()).toMatchObject({ running: 0, archivedRunning: 1 });
+      // Each state the list's banner counts, and the same number (#1163): Home counted only
+      // Active and Applying, so a held or scheduled one was missing here and there.
+      const listCount = async () => (await listCampaigns(shopId, { q: "", status: "", archived: false, page: 1 })).archivedRunning;
+      for (const status of ["ACTIVE", "HELD", "SCHEDULED"] as const) {
+        await prisma.campaign.update({ where: { id: campaignId }, data: { status } });
+        expect(await home(), status).toMatchObject({ running: 0, archivedRunning: 1 });
+        expect(await listCount(), status).toBe(1);
+      }
     });
   });
 });
