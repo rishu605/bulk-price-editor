@@ -43,8 +43,9 @@ export type CampaignState =
 /**
  * Where each state may legally go.
  *
- * COMPLETED → SCHEDULED exists for recurrence: a finished occurrence re-arms for the
- * next one rather than creating a second campaign. CANCELLED is the only truly
+ * COMPLETED → SCHEDULED is kept for recurrence, so a finished occurrence can re-arm for
+ * the next one rather than creating a second campaign. Recurrence is not built yet (#815):
+ * nothing makes that move today. CANCELLED is the only truly
  * terminal state -- everything else can still be acted on.
  */
 const LEGAL: Record<CampaignState, readonly CampaignState[]> = {

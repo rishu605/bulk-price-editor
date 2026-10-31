@@ -91,7 +91,7 @@ export function VariantRevertConfirmation({
         ) : (
           <s-paragraph>
             <s-text tone="caution">
-              It leaves {campaignName} for good. Every later run — scheduled, recurring, or
+              It leaves {campaignName} for good. Every later run — scheduled, or
               applying the campaign again — leaves this variant at that price.
             </s-text>
           </s-paragraph>

@@ -271,7 +271,7 @@ export function CampaignListView({
                     </s-table-cell>
                     <s-table-cell>
                       <ActionRow>
-                        {/* Duplicate is not recurrence, which we already have. It is how
+                        {/* Duplicate is not recurrence, which is not built yet (#815). It is how
                             next month's different sale gets built out of last month's
                             sale that worked, and the row is where a merchant is when
                             they recognise the one that worked. */}

@@ -1,8 +1,8 @@
 /**
  * What a duplicate is called.
  *
- * Duplicate is not recurrence. Recurrence re-arms the same campaign for its next
- * occurrence and keeps one history; duplicate is how a merchant builds *next month's
+ * Duplicate is not recurrence, which is not built yet (#815). Recurrence would re-arm the
+ * same campaign for its next occurrence and keep one history; duplicate is how a merchant builds *next month's
  * different sale* out of *last month's sale that worked*. So the name has to say where
  * this one came from, and it has to stay distinguishable when it happens four times —
  * a list of four rows all called "Summer sale (copy)" is the same problem the copy was

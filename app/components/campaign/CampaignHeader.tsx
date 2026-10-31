@@ -241,7 +241,7 @@ export function CampaignHeader({
             it is *not* what the page is for, and a merchant who has to open a menu to
             find Apply has been given the wrong menu.
 
-            Duplicate is not recurrence, which this app already has. Recurrence re-arms
+            Duplicate is not recurrence, which is not built yet (#815). Recurrence would re-arm
             the same sale; Duplicate is how next month's different sale gets built out of
             last month's sale that worked. NA offers `Copy to new job` in place of
             recurrence; Sami offers both, and both is right.
