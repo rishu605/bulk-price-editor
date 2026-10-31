@@ -55,6 +55,21 @@ describe("assessRecapture", () => {
     expect(warning).toContain("Revert those campaigns first");
   });
 
+  it("says what it does to the campaign that is running, not only to future ones (#781)", () => {
+    const { warning } = assessRecapture(3_670, [{ campaignId: "c1", campaignName: "QA · recapture", variants: 1 }]);
+    expect(warning).toContain(
+      "That campaign would then read its own sale price as the normal one: applying it again would discount the sale " +
+        "price a second time, and reverting would leave the sale price in place instead of the price from before the sale.",
+    );
+    expect(warning).toContain("Every future campaign would compute its discount from the discounted price too.");
+    expect(
+      assessRecapture(10, [
+        { campaignId: "c1", campaignName: "A", variants: 4 },
+        { campaignId: "c2", campaignName: "B", variants: 6 },
+      ]).warning,
+    ).toContain("Those campaigns would then read their own sale price as the normal one: applying them again");
+  });
+
   it("ignores a campaign that overlaps no variants in scope", () => {
     // Running elsewhere in the catalogue is not a reason to alarm somebody recapturing
     // a segment it does not touch.

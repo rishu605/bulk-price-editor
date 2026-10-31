@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   classifyRollbackRow,
+  notBeforeSentence,
   rollbackReportCsv,
   rollbackSummary,
   unaffectedSentence,
@@ -125,6 +126,32 @@ describe("what the Revert tab says about the rows (#836)", () => {
   });
 });
 
+describe("the variants reverting does not put back at their price from before (#781)", () => {
+  const board = { title: "QA Recapture Board", before: "100.00", revertsTo: "80.00" };
+
+  it("says nothing when there are none", () => {
+    expect(notBeforeSentence(undefined)).toBeNull();
+    expect(notBeforeSentence({ count: 0, recaptured: 0, examples: [] })).toBeNull();
+  });
+
+  it("names the live case: the price from before, the recapture, and what to do", () => {
+    expect(notBeforeSentence({ count: 1, recaptured: 1, examples: [board] })).toBe(
+      "1 variant reverts to a different price from the one the ledger recorded before this campaign: " +
+        "“QA Recapture Board” reverts to 80.00, not 100.00. Its baseline was recaptured at this campaign's sale price, " +
+        "so reverting leaves the sale price in place. To end the sale at the price from before it, import that price " +
+        "as the baseline on Prices → Baselines, then revert.",
+    );
+  });
+
+  it("names a few, counts the rest, and claims a recapture only of the ones that had one", () => {
+    const sentence = notBeforeSentence({ count: 1_204, recaptured: 4, examples: [board, board, board] })!;
+    expect(sentence).toMatch(/^1,204 variants revert to a different price/);
+    expect(sentence).toContain("; and 1,201 more, in the export.");
+    expect(sentence).toContain(" 4 of them had their baseline recaptured at this campaign's sale price");
+    expect(notBeforeSentence({ count: 2, recaptured: 0, examples: [board, board] })).not.toContain("recaptured");
+  });
+});
+
 describe("rollbackReportCsv", () => {
   const report = (rows: RollbackReport["rows"]): RollbackReport => ({
     campaignId: "c1",
@@ -152,11 +179,29 @@ describe("rollbackReportCsv", () => {
     // Header quoted like every other cell. Uniform quoting means there is no cell
     // whose safety depends on someone having checked it could not contain a comma.
     expect(lines[0]).toBe(
-      '"variant_gid","title","state","applied","live_now","reverts_to"',
+      '"variant_gid","title","state","applied","live_now","reverts_to","before_campaign"',
     );
     expect(lines[1]).toBe(
-      '"gid://Variant/1","Blue shirt","drifted","$80.00","$75.00","$100.00"',
+      '"gid://Variant/1","Blue shirt","drifted","$80.00","$75.00","$100.00",""',
     );
+  });
+
+  it("gives the price from before the campaign where reverting does not put it back (#781)", () => {
+    const csv = rollbackReportCsv(
+      report([
+        {
+          variantGid: "gid://Variant/4",
+          title: "QA Recapture Board",
+          kind: "clean",
+          applied: "$80.00",
+          live: "$80.00",
+          revertsTo: "$80.00",
+          before: "$100.00",
+        },
+      ]),
+    );
+
+    expect(csv.trim().split("\n")[1]).toBe('"gid://Variant/4","QA Recapture Board","clean","$80.00","$80.00","$80.00","$100.00"');
   });
 
   it("survives titles containing commas and quotes", () => {

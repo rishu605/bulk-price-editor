@@ -189,6 +189,9 @@ describe("chaos: Flow's Capture baselines", () => {
       const { shopId, variantGids } = chaos.fixture;
       const { createSegment } = await import("../../app/services/segments-crud.server");
       const segment = await createSegment(shopId, { name: "flow-capture", kind: "FROZEN", variantGids });
+      // New normal prices, as a sync mirrors them: what a capture is for. A price already at its
+      // baseline is left alone (#781), so a capture of the prices as seeded writes nothing.
+      await prisma.priceSurfaceEntry.updateMany({ where: { shopId, surfaceKind: "BASE" }, data: { livePrice: { increment: 100n } } });
 
       const answer = await flow("capture-baselines", chaos, { "segment-id": segment.id });
 

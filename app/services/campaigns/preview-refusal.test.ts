@@ -54,6 +54,9 @@ vi.mock("./candidates.server", () => ({
   withWritten: vi.fn(async (_shopId: string, scoped: unknown[]) => scoped),
 }));
 
+// No campaign here has written a price, so none has a baseline recaptured at its sale price (#781).
+vi.mock("./recaptured.server", () => ({ recapturedBaselines: vi.fn().mockResolvedValue(new Map()) }));
+
 vi.mock("../settings.server", () => ({
   guardrailsFor: vi.fn().mockResolvedValue({}),
   readSettings: vi.fn().mockResolvedValue({ minMarginPercent: null }),

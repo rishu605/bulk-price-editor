@@ -40,6 +40,8 @@ const RUN_PATH = [
   "app/services/campaigns/handover.server.ts",
   // Flow's End campaign asks the rollback report which prices are edited (#794).
   "app/services/campaigns/rollback-report.server.ts",
+  // An Apply's own plan is checked for prices it would discount again (#781).
+  "app/services/campaigns/recaptured.server.ts",
   "app/services/live-prices.server.ts",
 ];
 
@@ -63,6 +65,9 @@ const BOUNDED_ELSEWHERE: Record<string, Record<string, string>> = {
   },
   "app/services/campaigns/rollback-report.server.ts": {
     "runs.map((r) => r.id)": "the newest apply and revert runs of one campaign, `take: 20`, not one per variant",
+  },
+  "app/services/campaigns/recaptured.server.ts": {
+    "runs.map((r) => r.id)": "the newest write and revert runs of one campaign, `take: 20`, not one per variant",
   },
 };
 

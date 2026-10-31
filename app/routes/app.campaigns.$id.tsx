@@ -151,7 +151,7 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     practice,
     lifecycle,
     approval: approvalSummary(approval),
-    needsAttention: needsAttention(state),
+    needsAttention: needsAttention(state) || (preview.recapturedAtSale ?? 0) > 0, // its baseline at its sale price (#781)
     heldEdits,
     history,
     // Whether the scheduler and Flow may start it as it is now (#1009), from this preview.

@@ -37,6 +37,8 @@ import {
   type RollbackRowKind,
 } from "../../lib/reporting/rollback";
 import { LANDED } from "../../lib/execution/landed";
+import { priceBeforeStint, stintOf } from "../../lib/campaigns/recaptured";
+import { recapturedBaselines } from "./recaptured.server";
 
 export {
   classifyRollbackRow,
@@ -52,7 +54,7 @@ export async function rollbackReport(
 ): Promise<RollbackReport> {
   const { campaign, resolvable, heldEdits, ast } = await loadCampaignContext(shopId, campaignId);
 
-  const [scoped, storeGuardrails, applied, written, inherited] = await Promise.all([
+  const [scoped, storeGuardrails, ledger, written, inherited] = await Promise.all([
     loadCandidates(shopId, ast, undefined, importIdsOf(resolvable)),
     guardrailsFor(shopId),
     appliedValues(campaignId, campaign.excludedVariantGids),
@@ -98,7 +100,7 @@ export async function rollbackReport(
   // measured against. Without it, an edited one was in neither list -- not this campaign's
   // write, no longer at its price -- and the revert rewrote the edit without asking.
   const inScope = new Map(candidates.map((c) => [c.ref.variantGid, c]));
-  const owned = new Map<string, bigint | null>([...applied, ...inherited]);
+  const owned = new Map<string, bigint | null>([...ledger.latest, ...inherited]);
   const current = planRun({ campaigns: resolvable, candidates, storeGuardrails, heldEdits });
   for (const { ref, campaignId: winner } of current.kind === "ok" ? current.unchanged : []) {
     const price = inScope.get(ref.variantGid)?.livePrice;
@@ -129,6 +131,15 @@ export async function rollbackReport(
     for (const row of outcome.rows) if (row.intendedPrice) writes.set(row.ref.variantGid, row.intendedPrice.amount);
   }
   const alreadyThere = new Set(outcome.kind === "ok" ? outcome.unchanged.map((row) => row.ref.variantGid) : []);
+  // The variants the revert leaves with another campaign's price, which explains a price that
+  // is not the one from before this campaign (#781). The rest go back to their baseline.
+  const keptBy = new Set(
+    outcome.kind === "ok"
+      ? [...outcome.rows, ...outcome.unchanged]
+          .filter((row) => row.campaignId && row.ref.priceListGid === "")
+          .map((row) => row.ref.variantGid)
+      : [],
+  );
 
   const rows: RollbackRow[] = [];
 
@@ -137,14 +148,19 @@ export async function rollbackReport(
     const currency = state?.currency ?? inScope.get(gid)?.ref.currency ?? "USD";
     const live = state?.livePrice ?? null;
 
+    const answer = writes.get(gid) ?? (alreadyThere.has(gid) && live !== null ? Number(live) : null);
     const kind = classifyRollbackRow({
       // Absent from the mirror entirely counts as gone, not as unchanged: we have no
       // basis to claim anything about a variant we can no longer see.
       deleted: state === undefined || state.deleted,
       applied: wrote === null ? null : Number(wrote),
       live: live === null ? null : Number(live),
-      revertsTo: writes.get(gid) ?? (alreadyThere.has(gid) && live !== null ? Number(live) : null),
+      revertsTo: answer,
     });
+    // The price before this campaign, where reverting puts back a baseline that is not it: one
+    // recaptured at the sale price (#781), or changed outside the app before the sale (#745).
+    const prior = ledger.before.get(gid);
+    const notBefore = kind !== "deleted" && prior !== undefined && answer !== null && answer !== Number(prior) && !keptBy.has(gid);
 
     rows.push({
       variantGid: gid,
@@ -160,6 +176,7 @@ export async function rollbackReport(
           ? null
           : (revertsTo.get(gid) ??
             (live === null ? null : format(money(Number(live), currency)))),
+      before: notBefore ? format(money(Number(prior), currency)) : null,
     });
   }
 
@@ -176,14 +193,33 @@ export async function rollbackReport(
     unaffected: rows.filter((r) => r.kind === "unaffected").length,
   };
 
+  // Said above the table, which shows some rows only: how many, a few by name, and why when the
+  // baseline was recaptured at this campaign's own sale price (#781).
+  const differing = rows.filter((row) => row.before);
+  const recaptured = differing.length > 0 ? await recapturedBaselines(shopId, campaignId, differing.map((row) => row.variantGid)) : null;
+
   return {
     campaignId,
     campaignName: campaign.name,
     rows,
     counts,
     straightforward: counts.drifted === 0,
+    ...(recaptured
+      ? {
+          notBefore: {
+            count: differing.length,
+            recaptured: recaptured.size,
+            examples: differing
+              .slice(0, NOT_BEFORE_EXAMPLES)
+              .map((row) => ({ title: row.title, before: row.before!, revertsTo: row.revertsTo ?? "" })),
+          },
+        }
+      : {}),
   };
 }
+
+/** How many of the variants reverting does not put back at their price from before are named. */
+const NOT_BEFORE_EXAMPLES = 3;
 
 /**
  * The variants this report lists as edited: the ones the Revert tab asks about before it
@@ -241,7 +277,8 @@ async function mirrorState(
 
 /**
  * What this campaign last wrote for each variant, from the ledger: its sale price, or the
- * price its own revert put back.
+ * price its own revert put back. And, for each variant it is pricing, the price the ledger
+ * recorded before it (#781).
  *
  * The ledger, not the mirror: the mirror holds what is live, which is precisely the
  * value being compared against. Reading both from the same place would compare a
@@ -260,7 +297,7 @@ async function appliedValues(
    * purpose" and took the plain Revert away (#886). They are no longer the campaign's.
    */
   excluded: readonly string[] = [],
-): Promise<Map<string, bigint | null>> {
+): Promise<{ latest: Map<string, bigint | null>; before: Map<string, bigint> }> {
   // Reverts as well as applies (#910). A revert that stopped part-way has put some prices
   // back; measured against the sale price alone, every one of those read as "changed
   // since … someone edited those on purpose", and the header offered "Review 37 edited
@@ -269,10 +306,10 @@ async function appliedValues(
   const runs = await prisma.campaignRun.findMany({
     where: { campaignId, kind: { in: ["APPLY", "REVERT"] } },
     orderBy: { createdAt: "desc" },
-    select: { id: true },
+    select: { id: true, kind: true },
     take: 20,
   });
-  if (runs.length === 0) return new Map();
+  if (runs.length === 0) return { latest: new Map(), before: new Map() };
 
   const changes = await prisma.variantChange.findMany({
     where: {
@@ -290,14 +327,28 @@ async function appliedValues(
     // Newest by when it was written, so a revert's row outranks the apply before it and an
     // apply after the revert outranks both.
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    select: { variantGid: true, intendedPrice: true },
+    select: { variantGid: true, intendedPrice: true, beforePrice: true, runId: true },
   });
 
   // Newest wins. A recurring campaign writes the same variant on every occurrence,
   // and only the most recent value is the one drift is measured against.
   const latest = new Map<string, bigint | null>();
+  // And each variant's rows newest first, for the price the ledger recorded before the
+  // campaign: its first apply's since its last revert there (#781).
+  const reverts = new Set(runs.filter((run) => run.kind === "REVERT").map((run) => run.id));
+  const rowsOf = new Map<string, Array<{ revert: boolean; before: bigint | null }>>();
   for (const change of changes) {
     if (!latest.has(change.variantGid)) latest.set(change.variantGid, change.intendedPrice);
+    const row = { revert: reverts.has(change.runId), before: change.beforePrice };
+    const list = rowsOf.get(change.variantGid);
+    if (list) list.push(row);
+    else rowsOf.set(change.variantGid, [row]);
   }
-  return latest;
+
+  const before = new Map<string, bigint>();
+  for (const [variantGid, rows] of rowsOf) {
+    const price = priceBeforeStint(stintOf(rows));
+    if (price !== null) before.set(variantGid, price);
+  }
+  return { latest, before };
 }

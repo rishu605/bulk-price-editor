@@ -25,6 +25,7 @@
  */
 
 import type { QueuedRefusal } from "../campaigns/queued-refusal";
+import { formatCount } from "../format/display";
 
 export type CampaignState =
   | "DRAFT"
@@ -176,6 +177,8 @@ export function describeState(
      * itself (#837): the preview's `outrankedBy`. Empty or absent otherwise.
      */
     outrankedBy?: readonly string[];
+    /** How many of its variants have a baseline recaptured at its own sale price (#781); see `recapturedBaselines`. */
+    recapturedAtSale?: number;
     /** Why its start was refused for good, so the schedule left it (#975); see `startRefusal`. */
     startRefused?: string | null;
     /** Why a scheduled campaign past its start has not started yet (#851); see `lateStart`. */
@@ -342,6 +345,16 @@ export function describeState(
           nextAction: { label: "Revert", intent: "revert" },
         };
       }
+      // Its baseline recaptured at its own sale price while it ran (#781): its rows were read
+      // back, but "verified" is no comfort when the price they are measured from is the sale's.
+      if (context.recapturedAtSale) {
+        return {
+          label: "Active — needs a decision",
+          tone: "warning",
+          explanation: recapturedText(context.recapturedAtSale),
+          nextAction: { label: "Revert", intent: "revert" },
+        };
+      }
       return {
         label: "Active",
         tone: STATE_TONE.ACTIVE,
@@ -439,6 +452,21 @@ function outranked(names: readonly string[]): string {
     `Running, but ${who} ${one ? "outranks" : "outrank"} it on every variant it covers, so your ` +
     `storefront shows ${one ? "that campaign's" : "their"} price. This campaign's price takes over ` +
     `when ${one ? "it ends" : "they end"}.`
+  );
+}
+
+/**
+ * An active campaign's status line when the baselines of some of its variants were recaptured
+ * at its sale price (#781): what that does to applying and reverting it, and what to do.
+ */
+function recapturedText(variants: number): string {
+  const one = variants === 1;
+  return (
+    `Running, but ${one ? "the baseline of 1 of its variants was" : `the baselines of ${formatCount(variants)} of its variants were`} ` +
+    `recaptured at the sale price, so the app now takes this campaign's price for ${one ? "that variant's" : "their"} normal ` +
+    `price. Applying again would discount ${one ? "it" : "them"} a second time, and reverting would leave ` +
+    `${one ? "it" : "them"} at the sale price instead of the price before the campaign, which the Revert tab shows. To ` +
+    "end the sale at that price, import it as the baseline on Prices → Baselines, then revert."
   );
 }
 
