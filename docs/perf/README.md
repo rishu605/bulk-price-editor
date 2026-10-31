@@ -177,7 +177,8 @@ pages stayed blank for minutes, and the apply itself died of a pool timeout part
 What changed since: a run too long for its request goes to the worker, whose pool is its
 own (#790); the campaign page no longer plans while a run writes (#803); the Apply POST no
 longer plans to check a typed word (#803); `/healthz` reports how long that query waited
-and reads degraded past 2 s, and the alerting job pages past 5 s (#803).
+and reads degraded past 2 s — 1 s since #813, which also reads the queues — and the
+alerting job pages past 5 s (#803).
 
 Measured 2 Oct on a local dev preview (web and worker each with their own 10-connection
 pool, local Postgres): *QA 803*, 10% off all 102,132 anchor-perf variants, then reverted.
@@ -249,6 +250,18 @@ they run -- need the deployed services with the recommended values set and ancho
 take them: set the variables, redeploy, read both boot lines, start the apply, and read
 `db.pool_wait_ms{process="web"}` p95 and `db.transient_retries` for its duration; then the same
 for the revert.
+
+## Two shops at once: the gate (#813)
+
+```shell
+APP_URL=https://<web-domain> npm run gate:two-shops -- --load-campaign <id> --probe-campaign <id>
+```
+
+The measurement above is one shop on a local preview. The gate is the same load on a
+deployment with **another shop measured while it runs** — anchor-perf applies and reverts its
+whole catalogue while DartMode Labs' pages and a 1-variant campaign are timed against SLOs, and
+the run fails if any is missed. Run it before any release that touches runs, webhooks or
+pooling. How, what it needs and what it checks: [`two-shop-gate.md`](two-shop-gate.md).
 
 ## What these numbers do not cover
 

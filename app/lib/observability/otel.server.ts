@@ -47,6 +47,11 @@ export const INSTRUMENTS: Record<Metric, "counter" | "histogram" | "gauge"> = {
   "scheduler.tick": "counter",
   "budget.saturation": "gauge",
   "queue.depth": "gauge",
+  // A gauge, like depth: "how long has the front job waited now", which falls back to zero
+  // when the queue drains (#813).
+  "queue.oldest_wait_ms": "gauge",
+  // A distribution of individual waits, so a p95 per shop can be read off it (#813).
+  "queue.wait_ms": "histogram",
   "queue.enqueued": "counter",
   "queue.failed": "counter",
   "plan.summary_ms": "histogram",

@@ -101,6 +101,8 @@ describe("on-call expectations", () => {
     unpriceableVariants: 400,
     pagesDatabaseWaitMs: 60_000,
     shopRates: [{ shopId: "shop-1", errors: 40, requests: 100 }],
+    queues: [{ queue: "webhooks", depth: 3, oldestWaitMs: 60 * 60_000 }],
+    shopRunWaits: [{ shopId: "shop-2", waitMs: 30 * 60_000 }],
   };
 
   const raisable = evaluate(everythingWrong);
@@ -115,8 +117,8 @@ describe("on-call expectations", () => {
   it("finds the alerts it is protecting", () => {
     // A floor, so this cannot pass by parsing nothing — the failure mode of every census
     // check, and the reason the others in this repo carry a number.
-    expect(raisable.length).toBeGreaterThanOrEqual(7);
-    expect(documented.size).toBeGreaterThanOrEqual(7);
+    expect(raisable.length).toBeGreaterThanOrEqual(10);
+    expect(documented.size).toBeGreaterThanOrEqual(10);
   });
 
   it("documents every alert the app can raise", () => {
