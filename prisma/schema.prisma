@@ -577,6 +577,15 @@ model CampaignRun {
   /// dead run hanging for just as long.
   heartbeatAt DateTime?
 
+  /// Progress, beside the liveness above: how many of the prices this run writes the executor
+  /// has written (`writtenRows` of `writableRows`), stamped with `heartbeatAt` in the same
+  /// update and under its throttle (#820). The run's own counts are written at its end, and
+  /// the sync path settles its ledger rows in one batch once every product is written and read
+  /// back, so this is the only count that moves while prices are written. The campaign page's
+  /// time left reads it. Null before the first price, and on runs from before it.
+  writtenRows  Int?
+  writableRows Int?
+
   shop             Shop                  @relation(fields: [shopId], references: [id], onDelete: Cascade)
   campaign         Campaign              @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   changes          VariantChange[]

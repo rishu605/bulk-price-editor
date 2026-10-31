@@ -8,7 +8,19 @@ A campaign over a large catalogue takes minutes, sometimes longer. Shopify rate-
 store, and the app deliberately slows down rather than hammering — hammering gets the
 store throttled harder and takes longer overall.
 
-The ledger updates as it goes. If verified rows are still climbing, it is working.
+At the top of the campaign page, where the Apply button usually is, the run says when it
+started. While it writes prices, it also says how long it has left, for example "Started
+14:02 · about 4 minutes left". The time left appears once a twentieth of the prices are
+written, and keeps itself up to date without a reload. It goes away while the run adds tags
+and market prices, which come after the prices and are not in that count. It also goes away
+if the run has not been heard from for a minute.
+
+A large campaign is handed to Shopify to write in the background, as one operation, and its
+prices are confirmed together when Shopify finishes. There is no time left to show for one.
+The Runs tab says how many prices were sent to Shopify, when, and how far Shopify has got.
+
+The ledger fills in once the prices are written and read back, all at once rather than row
+by row. A ledger that has not moved yet does not mean anything is wrong.
 
 ## Shopify is rate-limiting
 

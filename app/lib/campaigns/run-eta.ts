@@ -2,21 +2,21 @@
  * How long a run that is still writing has left, from what it has been seen to write (#820).
  *
  * The PRD asks for an "ETA from observed throughput", and the word that matters is
- * *observed*. This divides the rows the ledger shows written by how long the run has been
- * going, and puts the rest at that rate. Where that would be a guess it says nothing,
- * because a merchant told "about 2 minutes" who is still waiting at ten stops believing
- * the page:
+ * *observed*. This divides the rows the run has written, as its heartbeat last said, by how
+ * long it has been going, and puts the rest at that rate. Where that would be a guess it says
+ * nothing, because a merchant told "about 2 minutes" who is still waiting at ten stops
+ * believing the page:
  *
  * - **Before 5% of its rows.** A run's first seconds are setup: the ledger written ahead,
  *   the write intents, the market baselines read before any price. A rate taken from a
  *   handful of rows mostly measures that.
- * - **A bulk operation.** Its rows go to Shopify as one operation and settle together when
- *   the result file is read, so until then there is no rate to observe. The run's summary
- *   already says what it is waiting on (`describeRun`).
+ * - **A bulk operation.** Its rows go to Shopify as one operation, which writes them all and
+ *   answers once, so the run counts none until it is over and there is no rate to observe.
+ *   The run's summary already says what it is waiting on (`describeRun`).
  * - **A run gone quiet.** Nothing heard from it for `QUIET_AFTER_MS`. An average from before
  *   it went quiet promises an end it is not working towards.
- * - **Every row written.** What is left after them (tags, market prices) is not in these
- *   rows, and "under a minute" over three minutes of tagging is exactly the guess this
+ * - **Every row written.** What is left after them (the read-back, tags, market prices) is
+ *   not in these rows, and "under a minute" over three minutes of tagging is exactly the guess this
  *   exists not to make. Past 100% is the same answer.
  * - **No start time.** Nothing to divide by.
  *
@@ -24,13 +24,13 @@
  * estimate does not have, and the page asks again every five of them.
  */
 
-/** What the ledger shows of a run in flight. */
+/** How far a run in flight has got, as its heartbeat last said (`runEtaOf`). */
 export interface RunProgress {
   /** How its rows go to Shopify. Null until the run has chosen. */
   path: "SYNC" | "BULK" | null;
   /** The rows it writes. */
   rows: number;
-  /** Of those, the ones the ledger shows settled: read back, written, or failed. */
+  /** Of those, the ones the executor has sent and had answered, failures included. */
   written: number;
   startedAt: Date | null;
   /** Stamped as it works (`heartbeat` in run.server.ts). */

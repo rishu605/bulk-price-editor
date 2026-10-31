@@ -6,8 +6,7 @@
  * and the page shows the last numbers it has until a newer plan is stored. The page has to
  * notice when either ends, and its own loader is the wrong thing to ask every few seconds.
  * This is two indexed reads, so the page polls here and reloads itself once, when the
- * answer changes. While a run writes, up to two more say how long it has left
- * (`runEtaOf`, #820).
+ * answer changes. While a run writes, one more says how long it has left (`runEtaOf`, #820).
  *
  * Outside `/app/campaigns/*` for the same reason `app.revert-preview` is:
  * `app.campaigns.$id` would read the segment as a campaign id.
