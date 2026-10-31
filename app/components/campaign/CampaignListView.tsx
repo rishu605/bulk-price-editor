@@ -8,6 +8,7 @@ import { EmptyState, NoMatches } from "../AsyncState";
 import { FilterForm } from "../FilterForm";
 import { TabBar } from "../TabBar";
 import { SPACE } from "../../lib/ui/spacing";
+import { archivedTone } from "../../lib/campaigns/archive-warning";
 import type { listCampaigns, CampaignFilters } from "../../services/campaigns/list.server";
 
 type List = Awaited<ReturnType<typeof listCampaigns>>;
@@ -49,6 +50,12 @@ const STATUSES = [
   { value: "ACTIVE", label: "Active" },
   { value: "COMPLETED", label: "Completed" },
 ];
+
+/**
+ * Where the count of archived campaigns still running lands (#748). Drawn only while it is
+ * the filter, so the page says what it is showing; it is not a seventh way to browse.
+ */
+const LIVE = { value: "live", label: "Live or scheduled" };
 
 /**
  * The campaigns list.
@@ -109,7 +116,7 @@ export function CampaignListView({
       <s-stack direction="block" gap={SPACE.section}>
         <TabBar
           label="Campaigns by status"
-          tabs={STATUSES.map((status) => ({
+          tabs={(filters.status === "live" ? [...STATUSES, LIVE] : STATUSES).map((status) => ({
             label: status.label,
             href: linkTo({ status: status.value }),
             current: status.value === filters.status,
@@ -247,7 +254,9 @@ export function CampaignListView({
                           campaign that turns up in a search from the active list —
                           which is the case that would otherwise be confusing, because
                           the row looks live and is not in the list. */}
-                      {campaign.archived ? <s-badge tone="neutral">Archived</s-badge> : null}
+                      {/* A warning on one still live or scheduled (#748), which archiving
+                          did not end: a neutral tag read as filed away and done. */}
+                      {campaign.archived ? <s-badge tone={archivedTone(campaign.state)}>Archived</s-badge> : null}
                     </s-table-cell>
                     <s-table-cell>
                       <s-badge tone={campaign.lifecycle.tone}>

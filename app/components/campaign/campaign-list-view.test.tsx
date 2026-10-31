@@ -20,6 +20,7 @@ import { describe, expect, it } from "vitest";
 import { sourceOf } from "../../lib/testing/source";
 
 import { CampaignListView } from "./CampaignListView";
+import { ArchivedRunningNotice } from "./ArchivedRunningNotice";
 import { describeState } from "../../lib/lifecycle/transitions";
 import { describeRule, describeScope } from "../../lib/campaigns/describe";
 
@@ -49,6 +50,7 @@ const list = (over: Partial<Props["list"]> = {}): Props["list"] => ({
   campaigns: [campaign()],
   total: 1,
   attentionCount: 0,
+  archivedRunning: 0,
   page: 1,
   pages: 1,
   ...over,
@@ -250,5 +252,54 @@ describe("a run still going (#829)", () => {
       atShopify: { done: 40_000, of: 100_139, live: true },
     });
     expect(html).toContain("Apply · In progress · 40,000 of 100,139 at Shopify");
+  });
+});
+
+describe("archived campaigns still live or scheduled (#748)", () => {
+  /**
+   * "Sale · 21/09/2026", archived while Active, left the list and its Active filter with its
+   * prices live, and only Home still mentioned it. The list counts them now, links to exactly
+   * them, and badges each as the warning it is.
+   */
+  const notice = (count: number) =>
+    renderToStaticMarkup(<ArchivedRunningNotice count={count} href="?archived=1&status=live&view=list" />);
+
+  it("says nothing when there are none", () => {
+    expect(notice(0)).toBe("");
+  });
+
+  it("counts them, says what archiving left running, and links to them", () => {
+    const one = notice(1);
+    expect(one).toContain("1 archived campaign is still live or scheduled.");
+    expect(one).toContain("its prices stay live, or go live on its start date.");
+    expect(one).toMatch(/<s-button href="\?archived=1&amp;status=live&amp;view=list">Show it<\/s-button>/);
+
+    expect(notice(1_204)).toContain("1,204 archived campaigns are still live or scheduled.");
+    expect(notice(2)).toContain("Show them");
+  });
+
+  it("is linked from the index to exactly those, whatever is being searched", () => {
+    const route = sourceOf(process.cwd(), "app", "routes", "app.campaigns._index.tsx");
+    expect(route).toContain('linkTo({ archived: "1", status: "live", q: "", view: "list" })');
+    expect(route).toContain("count={list.archivedRunning}");
+  });
+
+  it("badges an archived row still running as a warning, and a finished one as a tag", () => {
+    const badge = (state: string) =>
+      render({ list: list({ campaigns: [campaign({ state: state as never, archived: true })] }) }).match(
+        /<s-badge tone="(\w+)">Archived<\/s-badge>/,
+      )?.[1];
+
+    expect(badge("ACTIVE")).toBe("warning");
+    expect(badge("SCHEDULED")).toBe("warning");
+    expect(badge("HELD")).toBe("warning");
+    expect(badge("COMPLETED")).toBe("neutral");
+    expect(badge("CANCELLED")).toBe("neutral");
+  });
+
+  it("says which filter it is showing when the count's link is followed, and only then", () => {
+    const filtered = render({ filters: { q: "", status: "live", archived: true, page: 1 } });
+    expect(filtered).toContain("Live or scheduled");
+    expect(render(), "a seventh tab on the everyday list").not.toContain("Live or scheduled");
   });
 });

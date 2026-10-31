@@ -203,6 +203,7 @@ export const campaigns: LoaderData<typeof campaignsLoader> = {
     ],
     total: 2,
     attentionCount: 0,
+    archivedRunning: 0,
     page: 1,
     pages: 1,
   },
