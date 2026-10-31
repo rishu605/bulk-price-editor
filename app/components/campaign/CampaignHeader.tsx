@@ -30,11 +30,15 @@
  * when they chose practice. Its black button is "Make a real copy" (#1077).
  */
 
+import { useRef } from "react";
+
 import { ActionRow } from "../ActionRow";
 import { ScheduleButtons, ScheduleModals } from "./ScheduleControls";
 import { ZoneShiftNotice } from "./ZoneShiftNotice";
 import { ApplyConfirmation, APPLY_MODAL_ID } from "./ApplyConfirmation";
 import { RevertConfirmation, REVERT_MODAL_ID } from "./RevertConfirmation";
+import { ArchiveConfirmation, type ArchiveModal } from "./ArchiveConfirmation";
+import { archivedTone } from "../../lib/campaigns/archive-warning";
 import { SPACE } from "../../lib/ui/spacing";
 import { formatScheduleInstant } from "../../lib/scheduling/window";
 import { IN_FLIGHT } from "./useRunPolling";
@@ -51,6 +55,7 @@ export function CampaignHeader({
   rule,
   scope,
   archived,
+  archiving,
   notifyEmail,
   campaignId,
   needsAttention,
@@ -68,7 +73,11 @@ export function CampaignHeader({
   timeZone,
   zoneShift,
   startConfirmation,
+  breachPolicy,
 }: CampaignDetailProps) {
+  // Archiving a campaign that is still running asks first (#748); Restore never does.
+  const archiveModal = useRef<ArchiveModal | null>(null);
+  const askFirst = archived ? null : archiving;
   return (
     <>
     {/* With the page's other banners, above the row. It qualifies the whole page -- nothing
@@ -107,8 +116,9 @@ export function CampaignHeader({
         <s-badge tone={lifecycle.tone}>{lifecycle.label}</s-badge>
         {/* Beside the lifecycle badge and not instead of it. An archived campaign that
             is still ACTIVE still has prices live on the storefront, and a page that
-            replaced one badge with the other would be hiding the half that matters. */}
-        {archived ? <s-badge tone="neutral">Archived</s-badge> : null}
+            replaced one badge with the other would be hiding the half that matters.
+            A warning while it runs (#748): a neutral tag read as filed away and done. */}
+        {archived ? <s-badge tone={archivedTone(state)}>Archived</s-badge> : null}
         {scheduleText ? <s-text color="subdued">{scheduleText}</s-text> : null}
       </s-stack>
 
@@ -268,10 +278,15 @@ export function CampaignHeader({
             Duplicate
           </s-button>
 
+          {/* One click for a campaign with nothing running. One still live or scheduled
+              asks first, naming what keeps happening (#748): it left the list with its
+              prices live and nothing said so. */}
           <s-button
             icon="archive"
             onClick={() =>
-              fetcher.submit({ intent: archived ? "unarchive" : "archive" }, { method: "post" })
+              askFirst
+                ? archiveModal.current?.showOverlay?.()
+                : fetcher.submit({ intent: archived ? "unarchive" : "archive" }, { method: "post" })
             }
           >
             {archived ? "Restore" : "Archive"}
@@ -328,6 +343,16 @@ export function CampaignHeader({
         />
       ) : null}
 
+      {askFirst ? (
+        <ArchiveConfirmation
+          campaignName={preview.name}
+          warning={askFirst}
+          modalRef={archiveModal}
+          busy={busy}
+          onConfirm={() => fetcher.submit({ intent: "archive" }, { method: "post" })}
+        />
+      ) : null}
+
       {practice ? null : (
         <ApplyConfirmation
           preview={preview}
@@ -337,6 +362,7 @@ export function CampaignHeader({
           scheduleText={scheduleText}
           busy={busy}
           heldEdits={heldEdits}
+          breachPolicy={breachPolicy}
           onConfirm={(confirmation) =>
             fetcher.submit({ intent: "apply", confirmation }, { method: "post" })
           }

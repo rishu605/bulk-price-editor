@@ -13,13 +13,29 @@ to write a price rather than writing one you would not have wanted.
 
 That is a setting: *when a price would breach a floor*.
 
-- **Clamp** raises the price to the floor and carries on. The default.
+- **Clamp** raises the price to the floor and carries on. The default. A discount never
+  raises a price above its normal price, though: where the floor is above that, the
+  product is left alone, and the preview says why.
 - **Skip** leaves that product alone and prices the rest.
 - **Block** stops the whole campaign.
 
 Block exists for the case where one product breaching a floor means the rule itself is
 wrong — a misplaced decimal point in a percentage, say — and pricing the other forty
 thousand products would be the actual disaster.
+
+## Which campaigns the setting applies to
+
+New campaigns, and every campaign that has not started yet: drafts, scheduled campaigns,
+and finished ones you apply again. Change the setting and their previews follow it.
+
+A campaign that is running keeps the policy it started with until it ends. That covers
+campaigns that are applying, active, held, partly applied or reverting. Its prices are
+already on your storefront, and changing the setting should not change what it does to
+them. Under the setting, Settings lists every running campaign that is keeping a different
+policy. Revert one and apply it again to give it the new one.
+
+The campaign's Overview tab, and the dialog that opens when you press Apply, show which
+policy that campaign will use.
 
 ## Floors are checked after rounding
 

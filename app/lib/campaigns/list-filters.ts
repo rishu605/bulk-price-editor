@@ -11,9 +11,16 @@
 
 import { humanise } from "../format/label";
 import type { CampaignState } from "../lifecycle/transitions";
+import { RUNS_WHEN_ARCHIVED } from "./archive-warning";
 
-/** What the status filter can be: everything, the ones needing a decision, or one state. */
-export type StatusFilter = "" | "attention" | CampaignState;
+/**
+ * What the status filter can be: everything, the ones needing a decision, the ones live or
+ * scheduled, or one state.
+ *
+ * "live" is where the list's count of archived campaigns still running links (#748). No tab
+ * of its own: it is the answer to that count, and the tab bar draws it only while it is set.
+ */
+export type StatusFilter = "" | "attention" | "live" | CampaignState;
 
 /** The filters a view of the index is under. The list's paging is its own. */
 export interface ListFilters {
@@ -41,14 +48,18 @@ export function campaignFilterWhere(filters: ListFilters) {
     // called it. Prisma leaves a null note out of a `contains` match, so a shop with no
     // notes searches exactly as it did before.
     ...(filters.q ? { OR: [{ name: contains }, { note: contains }] } : {}),
-    // "attention" is not a status — it is a property of several of them, so it is
-    // expanded here rather than being a magic string the database has to understand.
-    ...(filters.status === "attention"
-      ? { status: { in: ATTENTION_STATES } }
-      : filters.status
-        ? { status: filters.status }
-        : {}),
+    ...statusWhere(filters.status),
   };
+}
+
+/**
+ * "attention" and "live" are not statuses — each is a property of several of them, so they
+ * are expanded here rather than being magic strings the database has to understand.
+ */
+function statusWhere(status: StatusFilter) {
+  if (status === "attention") return { status: { in: ATTENTION_STATES } };
+  if (status === "live") return { status: { in: [...RUNS_WHEN_ARCHIVED] } };
+  return status ? { status } : {};
 }
 
 /**
@@ -86,9 +97,11 @@ export function calendarFilterNote(
   const kind =
     filters.status === "attention"
       ? "campaigns that need a decision"
-      : filters.status
-        ? `${humanise(filters.status).toLowerCase()} campaigns`
-        : "campaigns";
+      : filters.status === "live"
+        ? "live or scheduled campaigns"
+        : filters.status
+          ? `${humanise(filters.status).toLowerCase()} campaigns`
+          : "campaigns";
   const what = `${filters.archived ? "archived " : ""}${kind}${filters.q ? ` matching “${filters.q}”` : ""}`;
 
   return {

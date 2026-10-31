@@ -11,6 +11,7 @@ import { withGuard } from "../lib/errors/guard.server";
 import { PageShell } from "../components/PageShell";
 import { CampaignCalendar } from "../components/campaign/CampaignCalendar";
 import { CampaignListView } from "../components/campaign/CampaignListView";
+import { ArchivedRunningNotice } from "../components/campaign/ArchivedRunningNotice";
 import { HelpNote } from "../components/HelpNote";
 import { filtersFrom, listCampaigns } from "../services/campaigns/list.server";
 import { duplicateOrRefusal } from "../services/campaigns/housekeeping.server";
@@ -181,7 +182,15 @@ export default function Campaigns() {
         </s-banner>
       ) : null}
 
-
+      {/* Archived and still live or scheduled (#748), counted across the shop like the
+          banner above, and linked to exactly those, whatever was being searched. Not over
+          the view that is already showing them. */}
+      {filters.archived && filters.status === "live" ? null : (
+        <ArchivedRunningNotice
+          count={list.archivedRunning}
+          href={linkTo({ archived: "1", status: "live", q: "", view: "list" })}
+        />
+      )}
 
       {view === "calendar" && calendar ? (
         <CampaignCalendar {...calendar} />

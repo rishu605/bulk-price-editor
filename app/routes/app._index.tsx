@@ -35,6 +35,7 @@ import { RouteBoundary } from "../components/RouteBoundary";
 import { baselinesCaptured, onboarding } from "../lib/onboarding/steps";
 import { homeSections } from "../lib/dashboard/home";
 import { lifecycleBadge } from "../lib/campaigns/lifecycle-of";
+import { RUNS_WHEN_ARCHIVED } from "../lib/campaigns/archive-warning";
 import type { CampaignState } from "../lib/lifecycle/transitions";
 import { ResultBanner } from "../components/ResultBanner";
 import { staleBaselineCount } from "../services/reconciliation.server";
@@ -129,9 +130,11 @@ export const loader = withGuard("/app", async ({ request }: LoaderFunctionArgs) 
     // Campaigns the merchant made and has not applied. Counted because Home used to
     // decide "is anything live" from every campaign row, drafts included — see #613.
     prisma.campaign.count({ where: { shopId: shop.id, archivedAt: null, status: "DRAFT" } }),
-    // Archived and still live: archiving files a campaign away without ending it, so its
-    // prices are on the storefront though the list's default view leaves it out.
-    prisma.campaign.count({ where: { shopId: shop.id, archivedAt: { not: null }, status: { in: ["ACTIVE", "APPLYING"] } } }),
+    // Archived and still live or scheduled: archiving files a campaign away without ending it,
+    // so its prices are on the storefront, or will be on its date, though the list's default
+    // view leaves it out. The same set the list's banner counts (#1163): this counted Active
+    // and Applying only, so a held, partial or scheduled one was missing here but not there.
+    prisma.campaign.count({ where: { shopId: shop.id, archivedAt: { not: null }, status: { in: [...RUNS_WHEN_ARCHIVED] } } }),
     // The onboarding goal, asked of the data rather than of a dismissed flag: a
     // merchant who clicked past a step has not run a campaign cleanly.
     prisma.campaignRun.count({
@@ -695,9 +698,9 @@ export default function Dashboard() {
               {archivedRunning > 0 ? (
                 <s-paragraph>
                   {archivedRunning === 1
-                    ? "1 archived campaign is still running: archiving filed it away, and its prices are still live. "
-                    : `${formatCount(archivedRunning)} archived campaigns are still running: archiving filed them away, and their prices are still live. `}
-                  <s-link href="/app/campaigns?archived=1&status=ACTIVE">
+                    ? "1 archived campaign is still live or scheduled: archiving filed it away without ending it. "
+                    : `${formatCount(archivedRunning)} archived campaigns are still live or scheduled: archiving filed them away without ending them. `}
+                  <s-link href="/app/campaigns?archived=1&status=live">
                     {archivedRunning === 1 ? "See it" : "See them"}
                   </s-link>
                 </s-paragraph>

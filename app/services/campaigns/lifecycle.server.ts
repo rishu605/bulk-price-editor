@@ -25,6 +25,8 @@ import {
 } from "../../lib/lifecycle/transitions";
 import { AppError } from "../../lib/errors/app-error";
 import { logger } from "../../lib/logging/logger";
+import { startsKeepingPolicy } from "../../lib/campaigns/breach-policy";
+import { readSettings } from "../settings.server";
 
 export interface TransitionResult {
   changed: boolean;
@@ -85,7 +87,7 @@ export async function transitionCampaign(
   // reads the old state first wins, and the other sees changed: false.
   const updated = await prisma.campaign.updateMany({
     where: { id: campaignId, shopId, status: from },
-    data: { status: to },
+    data: { status: to, ...(await keptPolicy(shopId, from, to)) },
   });
 
   if (updated.count === 0) return { changed: false, from, to };
@@ -93,6 +95,18 @@ export async function transitionCampaign(
   await recordTransition(shopId, campaignId, from, to, options);
 
   return { changed: true, from, to };
+}
+
+/**
+ * What a campaign starting keeps (#789): the store's floor-breach policy as it is now, which it
+ * was previewed with and its run plans with, written with the move that starts it. Until then
+ * it follows the store's setting, and from then on it keeps this one while its prices may be up,
+ * so changing the setting does not change what it does to prices already on a storefront. Every
+ * move into a state with prices live comes through `transitionCampaign` or `claimForSchedule`.
+ */
+async function keptPolicy(shopId: string, from: CampaignState, to: CampaignState) {
+  if (!startsKeepingPolicy(from, to)) return {};
+  return { guardrailViolationPolicy: (await readSettings(shopId)).violationPolicy };
 }
 
 /** The two states that mean "a run has claimed this campaign and may be writing". */
@@ -145,7 +159,7 @@ export async function claimForSchedule(
 
   const claimed = await prisma.campaign.updateMany({
     where: { id: campaignId, shopId, status: from },
-    data: { status: to },
+    data: { status: to, ...(await keptPolicy(shopId, from, to)) },
   });
   if (claimed.count === 0) return null; // someone else took it
 

@@ -133,9 +133,9 @@ describe("chaos: a queued run refused before it starts", () => {
     await withChaos("queued-refused-guardrail", CATALOG, async (chaos) => {
       const { shopId, campaignId } = chaos.fixture;
       useShop(chaos);
-      // A floor above every price, set to block rather than clamp: only planning finds it.
-      await writeSettings(shopId, { ...DEFAULT_SETTINGS, minPrice: 100_000 });
-      await prisma.campaign.update({ where: { id: campaignId }, data: { guardrailViolationPolicy: "block" } });
+      // A floor above every price, set to block rather than clamp: only planning finds it. The
+      // store's setting, which a campaign that has not started follows (#789).
+      await writeSettings(shopId, { ...DEFAULT_SETTINGS, minPrice: 100_000, violationPolicy: "block" });
 
       const started = await flowStart(campaignId);
       expect(started.status, started.message).toBe(200);

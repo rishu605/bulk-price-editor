@@ -14,6 +14,7 @@ import { describeCampaign } from "../../lib/campaigns/describe";
 import { astOf, ruleOf, segmentNameOf } from "./model.server";
 import { ROWS_PER_VIEW } from "../../lib/ui/table-budget";
 import { ATTENTION_STATES, campaignFilterWhere, type StatusFilter } from "../../lib/campaigns/list-filters";
+import { RUNS_WHEN_ARCHIVED } from "../../lib/campaigns/archive-warning";
 import {
   ALL_STATES,
   needsAttention,
@@ -27,7 +28,10 @@ export type { StatusFilter };
 export interface CampaignFilters {
   /** Matches the campaign name. */
   q: string;
-  /** A single lifecycle state, or "" for all, or "attention" for the ones needing one. */
+  /**
+   * A single lifecycle state, or "" for all, "attention" for the ones needing one, or "live"
+   * for the ones live or scheduled (#748).
+   */
   status: StatusFilter;
   /**
    * Whether to show the campaigns that have been filed away.
@@ -67,6 +71,7 @@ export function filtersFrom(params: URLSearchParams): CampaignFilters {
 export function statusFrom(raw: string | null): StatusFilter {
   const value = (raw ?? "").trim().toUpperCase();
   if (value === "ATTENTION") return "attention";
+  if (value === "LIVE") return "live";
   return (ALL_STATES as readonly string[]).includes(value) ? (value as CampaignState) : "";
 }
 
@@ -83,7 +88,7 @@ function whereFor(shopId: string, filters: CampaignFilters) {
 export async function listCampaigns(shopId: string, filters: CampaignFilters) {
   const where = whereFor(shopId, filters);
 
-  const [campaigns, total, attentionCount] = await Promise.all([
+  const [campaigns, total, attentionCount, archivedRunning] = await Promise.all([
     prisma.campaign.findMany({
       where,
       orderBy: { createdAt: "desc" },
@@ -120,6 +125,13 @@ export async function listCampaigns(shopId: string, filters: CampaignFilters) {
     prisma.campaign.count({
       where: { shopId, status: { in: ATTENTION_STATES }, archivedAt: null },
     }),
+    // And what that exception would hide (#748): archived campaigns still live or scheduled.
+    // Archiving files a campaign away without ending it, so its prices are on the storefront,
+    // or will be on its date, from a list that left it out. Counted across the shop, as the
+    // badge is, so no filter can hide a live price.
+    prisma.campaign.count({
+      where: { shopId, status: { in: [...RUNS_WHEN_ARCHIVED] }, archivedAt: { not: null } },
+    }),
   ]);
 
   const now = new Date();
@@ -153,6 +165,7 @@ export async function listCampaigns(shopId: string, filters: CampaignFilters) {
     campaigns: rows,
     total,
     attentionCount,
+    archivedRunning,
     page: filters.page,
     pages: Math.max(1, Math.ceil(total / PAGE_SIZE)),
   };
