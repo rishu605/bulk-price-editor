@@ -50,6 +50,11 @@ describe("reading the filters", () => {
   it("treats 'attention' as a filter, since it spans several states", () => {
     expect(from("status=attention").status).toBe("attention");
   });
+
+  it("treats 'live' as a filter too: where the count of archived campaigns still running links (#748)", () => {
+    expect(from("status=live").status).toBe("live");
+    expect(from("status=LIVE").status).toBe("live");
+  });
 });
 
 describe("a status the page did not write (#747)", () => {
@@ -77,7 +82,7 @@ describe("a status the page did not write (#747)", () => {
   );
 
   it("never hands the query a value outside the enum, whatever the link says", () => {
-    const allowed = new Set<string>(["", "attention", ...ALL_STATES]);
+    const allowed = new Set<string>(["", "attention", "live", ...ALL_STATES]);
     fc.assert(
       fc.property(fc.string(), (typed) => {
         expect(allowed.has(statusFrom(typed))).toBe(true);

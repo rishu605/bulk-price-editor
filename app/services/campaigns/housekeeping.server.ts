@@ -166,6 +166,9 @@ export async function duplicateOrRefusal(
  * running campaign away has made a filing decision, not a pricing one, and refusing it
  * would only teach them that archive is unreliable. The campaign keeps running, the
  * scheduler keeps seeing it — `archivedAt` is read by the index and by nothing else.
+ *
+ * Allowed, and no longer silent (#748, D18): in a state where something keeps running, the
+ * page's Archive says what before it posts here, and the list counts what this files away.
  */
 export async function setArchived(
   shopId: string,

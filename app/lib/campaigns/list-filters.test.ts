@@ -40,6 +40,15 @@ describe("the where clause both views read", () => {
     });
   });
 
+  it("expands Live or scheduled into every state an archived campaign still runs in (#748)", () => {
+    // Where the list's count of archived campaigns still running links: the prices that may
+    // be live, and the starts still to come.
+    expect(campaignFilterWhere({ ...NONE, status: "live", archived: true })).toEqual({
+      archivedAt: { not: null },
+      status: { in: ["APPLYING", "ACTIVE", "HELD", "REVERTING", "PARTIAL", "SCHEDULED"] },
+    });
+  });
+
   it("filters to one state", () => {
     expect(campaignFilterWhere({ ...NONE, status: "SCHEDULED" })).toEqual({ archivedAt: null, status: "SCHEDULED" });
   });
@@ -87,6 +96,9 @@ describe("what the calendar says it is showing", () => {
   it("names a status filter the calendar would otherwise apply silently", () => {
     expect(calendarFilterNote({ ...NONE, status: "attention" })?.text).toBe(
       "Showing only campaigns that need a decision, as the list’s filter is set.",
+    );
+    expect(calendarFilterNote({ ...NONE, status: "live", archived: true })?.text).toBe(
+      "Showing only archived live or scheduled campaigns, as the list’s filters are set.",
     );
     expect(calendarFilterNote({ ...NONE, status: "PARTIAL" })?.text).toBe(
       "Showing only partial campaigns, as the list’s filter is set.",

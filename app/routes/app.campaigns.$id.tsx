@@ -27,6 +27,7 @@ import { reportError } from "../services/error-report.server";
 import { withGuard } from "../lib/errors/guard.server";
 import { pressCheck } from "../services/campaigns/blast-radius.server";
 import { describeCampaign } from "../lib/campaigns/describe";
+import { archiveWarning } from "../lib/campaigns/archive-warning";
 import { astOf, DEFINITION, isPractice, ruleOf, segmentNameOf } from "../services/campaigns/model.server";
 import { actorFor } from "../lib/audit/actor";
 import {
@@ -141,6 +142,8 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     campaignId,
     note: record.note,
     archived: record.archivedAt !== null,
+    // What archiving it would leave running, which Archive says before it files it (#748).
+    archiving: archiveWarning(state, record.schedule, shop.timezone, lifecycle.label, practice),
     // Where the run report goes, so the confirmation can say so at the moment a merchant
     // decides whether they have to sit and watch. See #475. Undefined while this deployment
     // cannot send email: the app does not offer email then, and says nothing about it.

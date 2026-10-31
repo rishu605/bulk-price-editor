@@ -92,6 +92,7 @@ describe("the campaigns index picks the right one of the two", () => {
     campaigns: campaigns as never,
     total: campaigns.length,
     attentionCount: 0,
+    archivedRunning: 0,
     page: 1,
     pages: 1,
   });
