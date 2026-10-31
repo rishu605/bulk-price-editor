@@ -93,3 +93,38 @@ describe("the counts Flow's run log reads (#759)", () => {
     );
   });
 });
+
+describe("what an end did with the prices edited outside Anchor (#794)", () => {
+  it("counts the edits it kept, and says where they are listed", () => {
+    expect(answerForRun({ ...ran, verified: 3, keptEdits: 1 }, "Autumn sale", "ended")).toEqual({
+      status: 200,
+      outcome: "done",
+      message:
+        '"Autumn sale" ended: 3 variants reverted and verified. 1 price edited outside Anchor was left as edited, not reverted. ' +
+        "The campaign's Ledger tab lists it.",
+    });
+    expect(answerForRun({ ...ran, verified: 0, keptEdits: 2 }, "Autumn sale", "ended").message).toBe(
+      '"Autumn sale" ended: 0 variants reverted and verified. 2 prices edited outside Anchor were left as edited, not reverted. ' +
+        "The campaign's Ledger tab lists them.",
+    );
+  });
+
+  it("says so on a partial end too", () => {
+    const answer = answerForRun({ ...ran, clean: false, failed: 1, keptEdits: 1 }, "Autumn sale", "ended");
+    expect(answer.outcome).toBe("partial");
+    expect(answer.message).toContain("Resume it from the campaign page. 1 price edited outside Anchor was left as edited");
+  });
+
+  it("says edits are kept for an end handed to the worker, which finds them when it runs", () => {
+    const queued = { ...ran, verified: 0, queued: true, messages: ["The worker is reverting it."] };
+    expect(answerForRun(queued, "Autumn sale", "ended").message).toBe(
+      '"Autumn sale": The worker is reverting it. Any price edited outside Anchor since the campaign set it is left as edited, not reverted.',
+    );
+    // A start has no edits to keep.
+    expect(answerForRun(queued, "Autumn sale", "applied").message).toBe('"Autumn sale": The worker is reverting it.');
+  });
+
+  it("reads as before when there was no edit to keep", () => {
+    expect(answerForRun({ ...ran, keptEdits: 0 }, "Autumn sale", "ended").message).toBe('"Autumn sale" ended: 4 variants, all verified.');
+  });
+});
