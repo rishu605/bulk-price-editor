@@ -232,6 +232,23 @@ describe("a Partial revert that kept edits says Resume leaves them alone (#1157)
   });
 });
 
+describe("a Partial revert over a percentage only the merchant can clear says so above Resume (#1162)", () => {
+  it("names each market, and what to do before resuming", () => {
+    const one = describeState("PARTIAL", { resumes: "REVERT", progress: { confirmed: 0, unconfirmed: 0 }, clearByHand: ["Europe"] }).explanation;
+    expect(one).toMatch(
+      /Resuming finishes the revert\. Europe had no market-wide percentage of its own before this campaign, and the app cannot remove the one the campaign gave it\. Clear it in Shopify's Markets settings, then Resume the revert\.$/,
+    );
+    const three = describeState("PARTIAL", { resumes: "REVERT", clearByHand: ["Europe", "Japan", "Canada"] }).explanation;
+    expect(three).toMatch(/Europe, Japan and Canada had no market-wide percentage of their own before this campaign, and the app cannot remove the ones the campaign gave them\./);
+    expect(three).toMatch(/Clear each in Shopify's Markets settings, then Resume the revert\.$/);
+  });
+
+  it("says nothing of it when there is none, or when the run it resumes is an apply", () => {
+    expect(describeState("PARTIAL", { resumes: "REVERT", clearByHand: [] }).explanation).toBe(describeState("PARTIAL", { resumes: "REVERT" }).explanation);
+    expect(describeState("PARTIAL", { resumes: "APPLY", clearByHand: ["Europe"] }).explanation).not.toMatch(/Markets settings/);
+  });
+});
+
 describe("an active campaign that a higher-priority one outranks everywhere (#837)", () => {
   it("does not claim the storefront shows its price, and names who does", () => {
     const described = describeState("ACTIVE", { outrankedBy: ["QA 687 high"] });

@@ -52,7 +52,7 @@ import { inChunks } from "../../lib/db/chunk";
 import { inRunChunks, retryTransient } from "../../lib/db/run-writes.server";
 import { tallyStatuses } from "../../lib/campaigns/run-result";
 import type { PlannedRow } from "../../lib/planning/types";
-import { marketsHandedTo } from "./handover.server";
+import { marketsHandedTo, sinceLastEnded } from "./handover.server";
 import { describeBlocked } from "./blocked.server";
 import type { BreachPolicy } from "../../lib/campaigns/breach-policy";
 import { mirrorMarketDelete, mirrorMarketWrite } from "./mirror.server";
@@ -556,19 +556,27 @@ export async function revertMarketSurfaces(
   // own percentage, not by deleting per-product prices — there are none to delete.
   const wideMessages = await revertMarketWide(campaignId, client);
 
+  const campaign = await prisma.campaign.findUnique({ where: { id: campaignId }, select: { surfaces: true, createdAt: true } });
+  // Not what an earlier attempt at this revert wrote back or let go (#1162). Those rows are
+  // the price without the campaign, not the campaign's, and a resume read them as written:
+  // every hand-set price the partial revert had put back was written again. What it did not
+  // put back is still the campaign's own row, which is what this sends again. Only whole
+  // reverts since the campaign last finished ending: the revert of a later sale reads a
+  // completed one's rows as it always has.
+  const since = campaign ? await sinceLastEnded({ id: campaignId, createdAt: campaign.createdAt }) : null;
   const written = await prisma.variantChange.findMany({
     where: {
       shopId,
       surfaceKind: "MARKET",
       status: { in: ["APPLIED", ...LANDED] },
       run: { campaignId },
+      ...(since ? { NOT: { run: { kind: "REVERT", createdAt: { gt: since }, NOT: { occurrenceKey: { startsWith: "VARIANT-" } } } } } : {}),
     },
     select: { variantGid: true, priceListGid: true },
   });
   // And the prices another campaign's revert handed this one there (#1043), which no run of
   // this campaign's wrote: on the lists it prices now or has written. Only with somewhere to
   // ledger taking them back (I4).
-  const campaign = await prisma.campaign.findUnique({ where: { id: campaignId }, select: { surfaces: true } });
   const lists = [...new Set([...parseSurfaces(campaign?.surfaces).priceLists, ...written.map((row) => row.priceListGid)])];
   const handed = recompute ? await marketsHandedTo(shopId, campaignId, lists) : [];
   const own = new Set(written.map((row) => `${row.variantGid}@${row.priceListGid}`));
@@ -629,6 +637,7 @@ export async function revertMarketSurfaces(
     // is live there, which it is, and the revert ledgers the refusal as its own (rule 5), so it
     // is counted and sent again. Not on a list gone from Shopify, which holds none of its
     // prices: there a refusal is settled FAILED, as it always was.
+    let told = deleted;
     if (deleted) {
       // A deleted fixed price leaves no row behind, as the sync would mirror it (#779).
       await mirrorMarketDelete(shopId, { priceListGid, currency: list?.currency ?? "" }, deleted);
@@ -643,6 +652,12 @@ export async function revertMarketSurfaces(
         }),
       );
       if (refused.length > 0) await ledgerRefusedDeletes(recompute!.runId, shopId, list!, refused);
+      // And said as its row says it (#1162). The executor's guidance -- "It will be retried
+      // automatically" -- is a write's, retried in the run, and nothing retries a refused
+      // delete until Resume is pressed or a scheduled end comes round again.
+      if (refused.length > 0) {
+        told = { ...deleted, rows: deleted.rows.map((row) => (kept.has(row.variantGid) ? { ...row, guidance: DELETE_REFUSED } : row)) };
+      }
     }
 
     const restored = recompute && list && rewrite.size > 0 ? await rewriteHandSet(shopId, list, [...rewrite], recompute, client, onProgress) : null;
@@ -659,7 +674,7 @@ export async function revertMarketSurfaces(
     }
 
     outcomes.push({
-      ...summarise(list ?? { priceListGid, name: priceListGid, currency: "" }, combine(combine(deleted, letGo), restored)),
+      ...summarise(list ?? { priceListGid, name: priceListGid, currency: "" }, combine(combine(told, letGo), restored)),
       path: "per-product",
     });
   }
@@ -829,15 +844,17 @@ async function ledgerRefusedDeletes(
         intendedCompareAt: null,
         intendedCompareAtSet: false,
         status: "FAILED" as const,
-        failureReason:
-          "Its fixed price could not be removed, so this market may still show the campaign's price. " +
-          `Resume the revert to retry. (Shopify said: ${row.failureReason ?? "nothing"})`,
+        failureReason: `${DELETE_REFUSED} (Shopify said: ${row.failureReason ?? "nothing"})`,
         attempt: 1,
       })),
       skipDuplicates: true,
     }),
   );
 }
+
+/** What a refused delete says to do, on its ledger row and in the run's messages alike (#1162). */
+const DELETE_REFUSED =
+  "This variant's fixed price could not be removed, so this market may still show the campaign's price. Resume the revert to retry.";
 
 /**
  * A run's market rows that did not land: refused, or never confirmed (#1001). And the ones

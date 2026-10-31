@@ -194,9 +194,10 @@ export async function laddersHandedTo(
 
 /**
  * Since this campaign last finished ending, as for what it wrote (`pricesWrittenBy`):
- * nothing handed to it before then is still its own.
+ * nothing handed to it before then is still its own. And every whole revert after it is
+ * the one ending it now or an attempt that stopped part-way (#1162).
  */
-async function sinceLastEnded(campaign: { id: string; createdAt: Date }, besidesRunId?: string): Promise<Date> {
+export async function sinceLastEnded(campaign: { id: string; createdAt: Date }, besidesRunId?: string): Promise<Date> {
   const lastRevert = await prisma.campaignRun.findFirst({
     where: {
       campaignId: campaign.id,

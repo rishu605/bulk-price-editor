@@ -25,6 +25,7 @@
  */
 
 import { resumeLeaves } from "../campaigns/kept-edits";
+import { handClearText } from "../markets/uniform";
 import type { QueuedRefusal } from "../campaigns/queued-refusal";
 import { formatCount } from "../format/display";
 
@@ -178,6 +179,12 @@ export function describeState(
      * Resume leaves alone: the banner is the only place it is said before the press.
      */
     kept?: number;
+    /**
+     * The markets the revert it would resume cannot give back (#1162): each had no
+     * percentage of its own before the campaign, so only the merchant can clear the
+     * campaign's, and Resume ends Partial again until they do.
+     */
+    clearByHand?: readonly string[];
     /**
      * The campaigns pricing every variant an active campaign covers, when it prices none
      * itself (#837): the preview's `outrankedBy`. Empty or absent otherwise.
@@ -400,7 +407,8 @@ export function describeState(
         tone: STATE_TONE.PARTIAL,
         explanation:
           partialExplanation(context.resumes === "REVERT", context.progress) +
-          (context.resumes === "REVERT" && context.kept ? ` ${resumeLeaves(context.kept)}` : ""),
+          (context.resumes === "REVERT" && context.kept ? ` ${resumeLeaves(context.kept)}` : "") +
+          (context.resumes === "REVERT" && context.clearByHand?.length ? ` ${handClearText(context.clearByHand)}` : ""),
         nextAction: {
           label:
             context.resumes === "REVERT"

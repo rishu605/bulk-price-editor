@@ -9,6 +9,8 @@
 import prisma from "../../db.server";
 import { readSettings } from "../settings.server";
 import { formatClock } from "../../lib/format/display";
+import { sinceLastEnded } from "./handover.server";
+import { percentagesToClear } from "./market-wide.server";
 import { editsKeptBy, runToResume } from "./run.server";
 import {
   describeRun,
@@ -196,7 +198,12 @@ async function marginRows(shopId: string, runId: string): Promise<ResultRow[]> {
 export async function partialProgress(
   shopId: string,
   campaignId: string,
-): Promise<{ resumes?: "APPLY" | "REVERT"; progress?: { confirmed: number; unconfirmed: number }; kept?: number }> {
+): Promise<{
+  resumes?: "APPLY" | "REVERT";
+  progress?: { confirmed: number; unconfirmed: number };
+  kept?: number;
+  clearByHand?: string[];
+}> {
   const run = await runToResume(campaignId);
   if (!run) return {};
   const byStatus = await prisma.variantChange.groupBy({
@@ -205,11 +212,54 @@ export async function partialProgress(
     _count: { _all: true },
   });
   const counts = tallyStatuses(byStatus.map((entry) => ({ status: entry.status, count: entry._count._all })));
+  const reverting = run.kind === "REVERT";
+  // The markets a revert cannot give back, which Resume will not finish until the merchant
+  // clears them (#1162): said here, before the press, as the run said it after.
+  const clearByHand = reverting ? await percentagesToClear(campaignId) : [];
   return {
     resumes: run.kind,
-    progress: { confirmed: counts.verified + counts.clamped, unconfirmed: counts.unverified + counts.sent },
+    progress: {
+      confirmed: counts.verified + counts.clamped + (reverting ? await marketPricesTakenBack(shopId, campaignId) : 0),
+      unconfirmed: counts.unverified + counts.sent,
+    },
     // The edits a resumed revert will leave alone (#1157), from the rows Resume reads them
     // from. Only read when the revert skipped anything at all.
-    ...(run.kind === "REVERT" && counts.skipped > 0 ? { kept: (await editsKeptBy(run.id)).size } : {}),
+    ...(reverting && counts.skipped > 0 ? { kept: (await editsKeptBy(run.id)).size } : {}),
+    ...(clearByHand.length > 0 ? { clearByHand } : {}),
   };
+}
+
+/**
+ * The campaign's market prices its revert has taken back, by deleting the fixed price or
+ * putting the market's percentage back (#1162). Those settle the campaign's own rows as
+ * REVERTED and leave none on the revert, so a markets-only revert whose deletes landed in
+ * Japan and not in Europe has only Europe's refusals in its ledger, and its banner said "it
+ * stopped before any price was put back" with Japan back to normal.
+ *
+ * Read from the campaign's rows, not the revert's, so a revert resumed again counts what the
+ * attempt it continues put back too. Only since the campaign last finished ending: before
+ * that, the rows were taken back by a revert that is over. And not on a market that still
+ * has the campaign's percentage on it, whose prices the sweep settles while the sale's
+ * percentage still prices them.
+ */
+async function marketPricesTakenBack(shopId: string, campaignId: string): Promise<number> {
+  const campaign = await prisma.campaign.findUnique({ where: { id: campaignId }, select: { id: true, createdAt: true } });
+  if (!campaign) return 0;
+  const [since, stillOn] = await Promise.all([
+    sinceLastEnded(campaign),
+    prisma.priceListChange.findMany({
+      where: { campaignId, status: { in: ["WRITING", "APPLIED", "VERIFIED"] } },
+      select: { priceListGid: true },
+      distinct: ["priceListGid"],
+    }),
+  ]);
+  return prisma.variantChange.count({
+    where: {
+      shopId,
+      surfaceKind: "MARKET",
+      status: "REVERTED",
+      priceListGid: { notIn: stillOn.map((change) => change.priceListGid) },
+      run: { campaignId, kind: "APPLY", createdAt: { gt: since } },
+    },
+  });
 }

@@ -335,3 +335,23 @@ export function describeCorrections(market: string, corrected: Partial<Record<Co
     return count > 0 ? [`${market}: ${countOf(count, "product")} needed an exact price because ${because[cause](count)}.`] : [];
   });
 }
+
+/**
+ * What a revert says of the markets it cannot give back, in the run's messages and on the
+ * Partial banner above Resume (#1162): a market with no percentage of its own before the
+ * campaign, whose campaign percentage only the merchant can clear. Until they do, Resume
+ * ends Partial again, so both places say what to do and where. Nothing in it says whether
+ * the percentage is on the market now: the banner reads the ledger, and is read again by a
+ * merchant who has just cleared it.
+ *
+ * "Europe had no market-wide percentage of its own before this campaign, and the app …"
+ */
+export function handClearText(markets: readonly string[]): string {
+  const one = markets.length === 1;
+  const which = one ? markets[0] : `${markets.slice(0, -1).join(", ")} and ${markets[markets.length - 1]}`;
+  return (
+    `${which} had no market-wide percentage of ${one ? "its" : "their"} own before this campaign, and the app cannot ` +
+    `remove the ${one ? "one" : "ones"} the campaign gave ${one ? "it" : "them"}. ` +
+    `Clear ${one ? "it" : "each"} in Shopify's Markets settings, then Resume the revert.`
+  );
+}
