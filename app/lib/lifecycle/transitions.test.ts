@@ -236,6 +236,31 @@ describe("an active campaign that a higher-priority one outranks everywhere (#83
   });
 });
 
+describe("an active campaign whose baseline was recaptured at its sale price (#781)", () => {
+  it("does not read verified, needs a decision, and says what applying and reverting would do", () => {
+    const described = describeState("ACTIVE", { recapturedAtSale: 1, outrankedBy: [] });
+    expect(described.label).toBe("Active — needs a decision");
+    expect(described.tone).toBe("warning");
+    expect(described.explanation).not.toContain("verified");
+    expect(described.explanation).toContain("the baseline of 1 of its variants was recaptured at the sale price");
+    expect(described.explanation).toContain("Applying again would discount it a second time");
+    expect(described.explanation).toContain("reverting would leave it at the sale price instead of the price before the campaign");
+    expect(described.explanation).toContain("import it as the baseline on Prices → Baselines, then revert");
+    expect(described.nextAction?.intent).toBe("revert");
+  });
+
+  it("counts several, grouped", () => {
+    expect(describeState("ACTIVE", { recapturedAtSale: 3_673 }).explanation).toContain(
+      "the baselines of 3,673 of its variants were recaptured",
+    );
+  });
+
+  it("reads as before with none", () => {
+    expect(describeState("ACTIVE", { recapturedAtSale: 0 }).label).toBe("Active");
+    expect(describeState("ACTIVE", { recapturedAtSale: 0 }).explanation).toContain("every row was read back and verified");
+  });
+});
+
 describe("a scheduled campaign whose start was refused for good (#975)", () => {
   const reason = "This campaign's segment was deleted, so it has no products to price.";
 

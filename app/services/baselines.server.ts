@@ -92,7 +92,8 @@ export async function captureBaselines(
 
   const existing = await prisma.baseline.findMany({
     where: { shopId, supersededAt: null },
-    select: { id: true, variantGid: true, surfaceKind: true, priceListGid: true },
+    // With what a recapture would write, so one that would write the same is left alone (#781).
+    select: { id: true, variantGid: true, surfaceKind: true, priceListGid: true, ...WRITTEN },
   });
 
   // A wholesale baseline filed as B2B: the sync's before #1071, and the release before this
@@ -114,6 +115,7 @@ export async function captureBaselines(
       .filter((b) => b.surfaceKind !== "B2B")
       .map((b) => [cellKey(b.variantGid, b.surfaceKind, b.priceListGid), b.id]),
   );
+  const currentById = new Map(existing.map((b) => [b.id, b]));
 
   // Costs are fetched once for the whole batch. Looking them up per variant meant
   // three round trips each, which on a 1,600-variant catalogue is thousands of
@@ -165,8 +167,22 @@ export async function captureBaselines(
   // Wholesale prices with their ladders, or not at all: see `client`.
   const laddered = options.client ? await withLadders(shopId, options.client, wholesale, options.onLadders) : [];
   planned.push(...laddered);
-  result.wholesale = laddered.length;
   result.wholesaleLeft = wholesale.length - laddered.length;
+
+  // A recapture leaves a baseline that already says what it would write: the live price is
+  // the baseline, and so is everything recorded with it (#781). Superseding it anyway gave
+  // every variant in the catalogue a no-op entry in its history and reset "Oldest baseline
+  // captured" for the whole shop, when only the prices on sale had moved. Counted as already
+  // correct, as a capture counts the baselines it does not replace. After the ladder reads,
+  // because a wholesale price's quantity breaks are part of what it would write.
+  const writing = options.recapture
+    ? planned.filter((baseline) => {
+        const current = baseline.supersedes ? currentById.get(baseline.supersedes) : undefined;
+        return !current || !writesTheSame(current, baseline.row);
+      })
+    : planned;
+  result.alreadyCurrent += planned.length - writing.length;
+  result.wholesale = writing.filter((baseline) => baseline.row.ladderRead === true).length;
 
   // Supersede and create together per chunk. The partial unique index allows only
   // one current baseline per variant per surface, so the old row must be retired in
@@ -174,8 +190,8 @@ export async function captureBaselines(
   // leaves either two current baselines or none, and campaign maths depends on
   // exactly one. Each chunk retires the rows its own baselines replace.
   const CHUNK = 1_000;
-  for (let i = 0; i < planned.length; i += CHUNK) {
-    const createChunk = planned.slice(i, i + CHUNK);
+  for (let i = 0; i < writing.length; i += CHUNK) {
+    const createChunk = writing.slice(i, i + CHUNK);
     const supersedeChunk = createChunk.flatMap((baseline) => (baseline.supersedes ? [baseline.supersedes] : []));
 
     await prisma.$transaction([
@@ -189,13 +205,60 @@ export async function captureBaselines(
         : []),
       prisma.baseline.createMany({ data: createChunk.map((baseline) => baseline.row) }),
     ]);
-    await options.onProgress?.(Math.min(i + CHUNK, planned.length), planned.length);
+    await options.onProgress?.(Math.min(i + CHUNK, writing.length), writing.length);
 
     result.captured += createChunk.length;
     result.superseded += supersedeChunk.length;
   }
 
   return result;
+}
+
+/** What a capture writes on a baseline beside its key: what `writesTheSame` compares. */
+const WRITTEN = {
+  currency: true,
+  basePrice: true,
+  baseCompareAt: true,
+  cost: true,
+  handSet: true,
+  listAdjustmentBps: true,
+  quantityBreaks: true,
+  ladderRead: true,
+} as const;
+
+/**
+ * Whether the current baseline already holds what this capture would write for it (#781).
+ *
+ * Its price, compare-at, currency and hand-set flag; a wholesale price's quantity breaks, read
+ * this time, and only over a baseline whose ladder was read too (#1103); and its cost where
+ * Shopify has one, since where it has none a capture would empty a cost the merchant imported,
+ * which a sync keeps (D11). Any difference, and the baseline is recaptured as before.
+ */
+function writesTheSame(
+  current: Prisma.BaselineGetPayload<{ select: typeof WRITTEN }>,
+  row: PlannedBaseline["row"],
+): boolean {
+  const cost = minor(row.cost);
+  return (
+    current.currency === row.currency &&
+    current.basePrice === minor(row.basePrice) &&
+    current.baseCompareAt === minor(row.baseCompareAt) &&
+    (cost === null || current.cost === cost) &&
+    (current.handSet ?? null) === (row.handSet ?? null) &&
+    current.listAdjustmentBps === null &&
+    (row.ladderRead !== true || (current.ladderRead === true && ladderKey(current.quantityBreaks) === ladderKey(row.quantityBreaks)))
+  );
+}
+
+/** A money column as Prisma's create input types it, as the bigint it reads back as. */
+function minor(value: bigint | number | null | undefined): bigint | null {
+  return value === null || value === undefined ? null : BigInt(value);
+}
+
+/** A stored or serialised ladder, comparable whatever order its JSON keys came back in. */
+function ladderKey(value: unknown): string {
+  if (!Array.isArray(value)) return "";
+  return value.map((rung: { minimumQuantity?: unknown; amount?: unknown }) => `${rung.minimumQuantity}@${rung.amount}`).join(",");
 }
 
 /**

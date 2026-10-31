@@ -59,18 +59,22 @@ export function assessRecapture(scope: number, overlaps: readonly ActiveOverlap[
 
   const total = affected.reduce((sum, overlap) => sum + overlap.variants, 0);
   const names = affected.map((overlap) => `"${overlap.campaignName}" (${formatCount(overlap.variants)})`);
+  const one = affected.length === 1;
 
   return {
     risk: "overlaps-active-campaign",
     scope,
     overlaps: affected,
     confirmationPhrase: DANGEROUS_PHRASE,
+    // The running campaign first, which is what goes wrong today (#781): it was the one thing
+    // this left out, and on DartMode Labs the next Apply took a 20% sale to 36% off.
     warning:
       `${formatCount(total)} of these ${formatCount(scope)} variants ${total === 1 ? "is" : "are"} on sale right now under ` +
-      `${names.join(", ")}. Recapturing would make the sale price their new normal ` +
-      `price, permanently — every future campaign would compute its discount from the ` +
-      `discounted price. Revert those campaigns first unless that is genuinely what you ` +
-      `want.`,
+      `${names.join(", ")}. Recapturing would make the sale price their new normal price, permanently. ` +
+      `${one ? "That campaign" : "Those campaigns"} would then read ${one ? "its" : "their"} own sale price as the normal ` +
+      `one: applying ${one ? "it" : "them"} again would discount the sale price a second time, and reverting would leave ` +
+      `the sale price in place instead of the price from before the sale. Every future campaign would compute its ` +
+      `discount from the discounted price too. Revert those campaigns first unless that is genuinely what you want.`,
   };
 }
 

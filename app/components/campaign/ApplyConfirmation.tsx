@@ -201,11 +201,14 @@ export function ApplyConfirmation({
 
         {/* The one thing this app can say that none of the three competitors can. It is
             here rather than only in the help centre because this is the moment a merchant
-            is deciding whether it is safe to press the button. */}
+            is deciding whether it is safe to press the button. Not promised where it is
+            untrue (#781): a baseline recaptured at this campaign's sale price makes a second
+            apply discount the discount, as the banner below says. */}
         <Secondary>
-          Every price is computed from its baseline, so applying twice gives the same
-          result. Reverting recomputes without this campaign rather than restoring a
-          saved number.
+          {confirm?.compounding
+            ? "Every price is computed from its baseline, and some of this campaign's baselines are now its own sale price."
+            : "Every price is computed from its baseline, so applying twice gives the same result."}{" "}
+          Reverting recomputes without this campaign rather than restoring a saved number.
         </Secondary>
 
         {heldEdits > 0 ? (

@@ -32,6 +32,21 @@ revert asks nothing about it. That is usually a higher-priority campaign that to
 product over: its price is live, and it stays when this campaign ends. The report lists such
 a product as **Already there**.
 
+## If the baseline changed during the sale
+
+Reverting writes the baseline, so a baseline that changed while the sale ran is the price
+the product goes back to. Usually that is what you want: a supplier price rise imported
+mid-sale should be the new normal price. It is not what you want when the baseline was
+recaptured during the sale, because the recapture recorded the sale price as normal.
+
+So the Revert tab and the Revert dialog say when a product will revert to a different
+price from the one the ledger recorded before this campaign, and name it: "reverts to
+80.00, not 100.00". When the reason is a recapture at the sale price, they say that too.
+To put the old price back, import it as the product's baseline first
+([Importing your own prices](../how-to/import-baselines.md)), then revert. The
+export of the rollback report gives that price for every such product, in its
+`before_campaign` column.
+
 ## A product another campaign handed over
 
 The other way round works too. When a higher-priority campaign ends, its revert puts this

@@ -155,7 +155,7 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     practice,
     lifecycle,
     approval: approvalSummary(approval),
-    needsAttention: needsAttention(state),
+    needsAttention: needsAttention(state) || (preview.recapturedAtSale ?? 0) > 0, // its baseline at its sale price (#781)
     heldEdits,
     history,
     // What it does when a price would breach a floor, as its plan does (#789): the store's until it starts.

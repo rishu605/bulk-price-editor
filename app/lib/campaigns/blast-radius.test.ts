@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import { money } from "../money/money";
 import {
   asksForConfirmation,
+  compoundingReason,
   confirmationReasons,
   DEFAULT_CONFIRM_ABOVE_CHANGE_PERCENT,
   DEFAULT_CONFIRM_ABOVE_VARIANTS,
@@ -169,5 +170,34 @@ describe("what it says", () => {
 
   it("says nothing for a handful taken to zero, which does not ask", () => {
     expect(confirmationReasons(radius({ atMinimum: MINIMUM_PRICE_HANDFUL }))).toEqual([]);
+  });
+});
+
+describe("a price this campaign already set, discounted again (#781)", () => {
+  // Live: 80.00 → 64.00 on a 20% sale whose baseline was recaptured at 80.00. Twenty percent
+  // is under every threshold, so nothing asked.
+  const compounding = { count: 1, title: "QA Recapture Board" };
+
+  it("asks, however small the campaign and the move", () => {
+    expect(asksForConfirmation(radius({ planned: 1 }))).toBe(false);
+    expect(asksForConfirmation(radius({ planned: 1, compounding }))).toBe(true);
+    expect(asksForConfirmation(radius({ planned: 1, compounding: { ...compounding, count: 0 } }))).toBe(false);
+  });
+
+  it("names the compounding first, by title, and carries no price", () => {
+    const reasons = confirmationReasons(radius({ planned: 5_000, compounding }));
+    expect(reasons[0]).toBe(
+      "“QA Recapture Board” already shows this campaign's price, and would be discounted again: its baseline was " +
+        "recaptured at the sale price while the campaign was live, so applying it now compounds the discount, taking " +
+        "it off the sale price rather than the price before the sale.",
+    );
+    expect(reasons).toHaveLength(2);
+    expect(reasons.join(" ")).not.toMatch(/\d+\.\d\d/);
+  });
+
+  it("counts several and names the first", () => {
+    expect(compoundingReason({ count: 1_204, title: "Wool coat" })).toMatch(
+      /^1,204 prices this campaign already set would be discounted again, the first “Wool coat”: their baselines were recaptured/,
+    );
   });
 });

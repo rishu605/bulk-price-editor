@@ -148,7 +148,7 @@ describe("chaos: a revert that respects a merchant's edit", () => {
         // Exportable, and intact.
         const csv = rollbackReportCsv(report);
         expect(csv.split("\n")[0]).toBe(
-          '"variant_gid","title","state","applied","live_now","reverts_to"',
+          '"variant_gid","title","state","applied","live_now","reverts_to","before_campaign"',
         );
         expect(csv).toContain(edited);
 

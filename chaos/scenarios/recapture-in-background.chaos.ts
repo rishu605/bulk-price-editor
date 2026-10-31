@@ -282,8 +282,10 @@ describe("chaos: a recapture from the page with more ladder reads than the page 
 
       const done = await pollStatus(id);
       expect(done).toMatchObject({ id, running: false, failure: null, partial: false });
+      // The store prices did not change, so their baselines are left alone and counted (#781).
       expect(done!.outcome).toBe(
-        "Recaptured 8 baselines across 4 variants, superseding 8, including 4 wholesale prices with their quantity breaks.",
+        "Recaptured 4 baselines across 4 variants, superseding 4, including 4 wholesale prices with their quantity breaks. " +
+          "4 were already correct.",
       );
       expect((await load(`?recapture=${id}`)).background, "the page that reloads does not say how it ended").toMatchObject({
         outcome: done!.outcome,
@@ -297,7 +299,7 @@ describe("chaos: a recapture from the page with more ladder reads than the page 
       // A resent job finds it finished and adds nothing.
       enqueued.push({ name: "sync", ref: { shopId, recaptureId: id } });
       await runTheJob();
-      expect(await recapturedCount(shopId), "a resent job recaptured again").toBe(8);
+      expect(await recapturedCount(shopId), "a resent job recaptured again").toBe(4);
     });
   });
 
@@ -334,7 +336,7 @@ describe("chaos: a recapture from the page with more ladder reads than the page 
       const typed = await press({ segment: "", scope: "4", confirmation: "replace baselines" });
       expect(typed.ok, typed.message).toBe(true);
       await runTheJob();
-      expect((await pollStatus(typed.recapture!))!.outcome).toMatch(/^Recaptured 8 baselines/);
+      expect((await pollStatus(typed.recapture!))!.outcome).toMatch(/^Recaptured 4 baselines/);
       expect(await wholesaleBaselines(chaos)).toEqual(recaptured(chaos));
     });
   });
@@ -399,8 +401,9 @@ describe("chaos: a recapture from the page with more ladder reads than the page 
       const done = await pollStatus(answer.recapture!);
       expect(done, "a recapture that left wholesale prices was shown as clean").toMatchObject({ running: false, partial: true, failure: null });
       expect(done!.outcome).toBe(
-        "Recaptured 6 baselines across 4 variants, superseding 6, including 2 wholesale prices with their quantity breaks. " +
-          "2 wholesale prices were left as they were: their quantity breaks could not be read from Shopify. Recapture again to include them.",
+        "Recaptured 2 baselines across 4 variants, superseding 2, including 2 wholesale prices with their quantity breaks. " +
+          "4 were already correct. 2 wholesale prices were left as they were: their quantity breaks could not be read from " +
+          "Shopify. Recapture again to include them.",
       );
       const left = await prisma.baseline.findMany({ where: { shopId, priceListGid: LISTS[1]!.id, supersededAt: null } });
       expect(left.map((baseline) => baseline.source), "a price whose ladder was not read was recaptured anyway").toEqual(["INSTALL_CAPTURE", "INSTALL_CAPTURE"]);
@@ -431,17 +434,20 @@ describe("chaos: a recapture from the page with more ladder reads than the page 
       inlineLadderReads = 2;
       const within = await press({ segment: "", scope: "4" });
       expect(enqueued, "a recapture within the budget was handed to the worker").toEqual([]);
-      expect(within).toMatchObject({ ok: true, message: expect.stringMatching(/^Recaptured 8 baselines .* including 4 wholesale prices/) });
+      expect(within).toMatchObject({ ok: true, message: expect.stringMatching(/^Recaptured 4 baselines .* including 4 wholesale prices/) });
       expect(within.recapture).toBeUndefined();
       expect(await wholesaleBaselines(chaos)).toEqual(recaptured(chaos));
 
       // Over the budget with nowhere to send it: here, as before (#1105 changes nothing without a queue).
       inlineLadderReads = 1;
       queue = false;
+      const reads = chaos.fake.ladderReads;
       const noWorker = await press({ segment: "", scope: "4" });
       expect(noWorker.ok, noWorker.message).toBe(true);
-      expect(noWorker.message).toMatch(/^Recaptured 8 baselines/);
-      expect(await recapturedCount(shopId)).toBe(16);
+      expect(chaos.fake.ladderReads, "the recapture did not run here").toBeGreaterThan(reads);
+      // Everything it read is what the first one recorded, so nothing is superseded again (#781).
+      expect(noWorker.message).toBe("Recaptured 0 baselines across 4 variants. 8 were already correct.");
+      expect(await recapturedCount(shopId)).toBe(4);
       expect(await prisma.baselineRecapture.count({ where: { shopId, finishedAt: null } }), "an inline recapture held the shop after it ended").toBe(0);
     });
   });

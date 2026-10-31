@@ -141,6 +141,24 @@ describe("what a confirmation covers", () => {
   });
 });
 
+describe("a start that would discount a sale price again (#781)", () => {
+  const compounding = { count: 1, title: "QA Recapture Board" };
+
+  it("is never covered by a confirmation given before its baseline was recaptured", () => {
+    expect(beyondConfirmation(radius({ compounding }), confirmed({ largeChanges: 0, largestBasisPoints: 0 }))).toEqual([
+      "1 price it already set would now be discounted again, from a baseline recaptured at its sale price, and 0 were confirmed",
+    ]);
+    expect(unconfirmedStart(radius({ compounding }), null)).toMatch(/^“QA Recapture Board” already shows this campaign's price/);
+  });
+
+  it("is covered by one given over that, and records it", () => {
+    const given = confirmationOf(radius({ compounding }), "staff:1", new Date(0));
+    expect(given.compounding).toBe(1);
+    expect(beyondConfirmation(radius({ compounding }), given)).toEqual([]);
+    expect(confirmationOf(radius(), "staff:1", new Date(0))).not.toHaveProperty("compounding");
+  });
+});
+
 describe("a start nobody is watching", () => {
   it("needs nothing when the preview does not ask for the word", () => {
     expect(unconfirmedStart(radius({ planned: 1_000 }), null)).toBeNull();
