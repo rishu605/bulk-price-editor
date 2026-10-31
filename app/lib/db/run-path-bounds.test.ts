@@ -38,6 +38,8 @@ const RUN_PATH = [
   "app/services/campaigns/tags.server.ts",
   "app/services/campaigns/candidates.server.ts",
   "app/services/campaigns/handover.server.ts",
+  // Flow's End campaign asks the rollback report which prices are edited (#794).
+  "app/services/campaigns/rollback-report.server.ts",
   "app/services/live-prices.server.ts",
 ];
 
@@ -58,6 +60,9 @@ const BOUNDED_ELSEWHERE: Record<string, Record<string, string>> = {
   },
   "app/services/campaigns/candidates.server.ts": {
     "[...importIds]": "the price imports a campaign's rules name, a handful at most",
+  },
+  "app/services/campaigns/rollback-report.server.ts": {
+    "runs.map((r) => r.id)": "the newest apply and revert runs of one campaign, `take: 20`, not one per variant",
   },
 };
 

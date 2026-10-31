@@ -24,13 +24,29 @@ Flow asks Anchor to do something.
 | Action | What it does | Asks for |
 |---|---|---|
 | Start a price campaign | Exactly what the Apply button does, including your guardrails and your plan's limits | The campaign's ID |
-| End a price campaign | Reverts it. Works on every plan, including free | The campaign's ID |
+| End a price campaign | Reverts it, leaving any price edited outside Anchor as edited. Works on every plan, including free | The campaign's ID |
 | Capture baselines for a segment | Records today's prices as the new normal | The segment's ID |
 
 Where to find each ID is at the end of this page.
 
-Each action does exactly what the equivalent button does. An action that could start a
-campaign the app would have refused would be a way round every safety feature in it.
+Each action does what the equivalent button does, with one difference, below. An action
+that could start a campaign the app would have refused would be a way round every safety
+feature in it.
+
+**Ending a campaign never writes over a price somebody edited outside Anchor.** When one of
+a campaign's prices has been changed in Shopify since the campaign set it, the Revert button
+doesn't revert straight away. It asks you to review the edits first, on the campaign's
+**Revert** tab, and tick the ones to keep. Flow can't tick anything, so *End a price campaign*
+keeps every edit: each edited price stays as it is, and every other price reverts. That
+includes the edit that put a campaign on hold, and one you chose to leave for now in
+**Prices → Price drift**.
+
+Flow's run log says the edits were kept, and how many when the campaign ended straight away.
+A large campaign is ended in the background, so its count is in the campaign's
+**How it got here** history once it finishes. The campaign's **Ledger** tab lists each kept
+price, with why it was left. An edit still waiting in **Price drift** stays there for you to
+decide. If you want an edited price reverted too, end the campaign with its Revert button
+instead, and leave that edit unticked.
 
 **A large or deep campaign has to be confirmed before Flow can start it.** When a campaign
 writes more prices, or moves a price further, than your typed-confirmation settings allow,
@@ -69,6 +85,10 @@ can chain a Slack message onto the same Flow if you want to be told.
 This is the one worth setting up. A held campaign is waiting for a decision, and the sooner
 somebody makes it the shorter the window where prices are neither the sale price nor the
 normal one.
+
+You can also end the sale from this trigger, with *End a price campaign* as the action. Every
+price reverts except the edited one that held the campaign. That one stays as it was edited,
+and waits in **Price drift** for you to decide.
 
 ## Finding a campaign or segment ID
 
