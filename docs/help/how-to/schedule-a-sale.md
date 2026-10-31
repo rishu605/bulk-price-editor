@@ -42,6 +42,14 @@ over. Merchants get complaints about that, and they are right to.
 
 Adjust the buffer per campaign if your catalogue is large enough to need longer.
 
+## Applying a scheduled sale by hand
+
+Apply runs a campaign now, whatever its dates say. If its end is still ahead, before the
+window or inside it, the sale keeps that end and the schedule reverts it then. If its window
+has already ended, as for a sale that finished last month, applying it clears those old dates
+first, as **Unschedule** does, and it runs until you revert it. The Apply dialog says which
+before you press it.
+
 ## What happens if the app is down at the moment it should start
 
 It starts when the app recovers. Scheduled runs are due-based, not moment-based: the
