@@ -39,3 +39,7 @@ never chose.
 follows the percentage again. A price you had set by hand in that market before the sale is
 put back as you set it, and if another sale still covers the variant, it gets that sale's
 price.
+
+If Shopify does not let the revert take a market's prices back, that market still shows the
+sale, so the campaign is **Partial** rather than Completed. **Resume revert** tries those
+market prices again. Prices the revert already put back stay as they are.

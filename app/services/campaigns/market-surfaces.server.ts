@@ -39,6 +39,7 @@ import {
   deleteMarketPrices,
   writeMarketPrices,
   type MarketPriceRow,
+  type MarketRowResult,
   type MarketWriteResult,
 } from "../../lib/execution/market-executor";
 import type { AdminClient } from "../../lib/execution/sync-executor";
@@ -79,6 +80,11 @@ export interface MarketSurfaceOutcome {
   path: MarketWritePath;
   /** Why the one-mutation path was not used, when it was not. */
   pathReason?: string;
+  /**
+   * Market-wide percentages a whole revert could not put back (#706). A percentage is the
+   * list's, not a variant's, so no ledger row of the run counts it, and the run counts these.
+   */
+  percentagesLeft?: number;
 }
 
 /**
@@ -612,23 +618,39 @@ export async function revertMarketSurfaces(
     const deleted = followed.length > 0 ? await deleteMarketPrices(client, priceListGid, followed, onProgress) : null;
     // Settled in batches, each retried (#810). These were one `IN` list per market of every
     // variant the campaign wrote there -- a whole-catalogue revert's worth, unbounded.
+    //
+    // Only what was taken back is REVERTED (#706). One refused delete marked every row the
+    // campaign had on the market FAILED, the ones taken back with it, and a revert takes back
+    // only rows that say a price landed, so none was sent again: Resume ended Completed with
+    // the sale still on the list. A row Shopify refused now goes on saying the campaign's price
+    // is live there, which it is, and the revert ledgers the refusal as its own (rule 5), so it
+    // is counted and sent again. Not on a list gone from Shopify, which holds none of its
+    // prices: there a refusal is settled FAILED, as it always was.
     if (deleted) {
       // A deleted fixed price leaves no row behind, as the sync would mirror it (#779).
       await mirrorMarketDelete(shopId, { priceListGid, currency: list?.currency ?? "" }, deleted);
-      await inRunChunks("ledger.market.reverted", followed, (batch) =>
+      const retried = Boolean(recompute && list);
+      const refused = retried ? deleted.rows.filter((row) => row.status !== "verified") : [];
+      const kept = new Set(refused.map((row) => row.variantGid));
+      // Once the refused are kept, what is left was taken back; a gone list's, as before.
+      await inRunChunks("ledger.market.reverted", followed.filter((gid) => !kept.has(gid)), (batch) =>
         prisma.variantChange.updateMany({
           where: { shopId, priceListGid, variantGid: { in: batch }, run: { campaignId } },
-          data: { status: deleted.clean ? "REVERTED" : "FAILED" },
+          data: { status: retried || deleted.clean ? "REVERTED" : "FAILED" },
         }),
       );
+      if (refused.length > 0) await ledgerRefusedDeletes(recompute!.runId, shopId, list!, refused);
     }
 
     const restored = recompute && list && rewrite.size > 0 ? await rewriteHandSet(shopId, list, [...rewrite], recompute, client, onProgress) : null;
     if (restored) {
-      await inRunChunks("ledger.market.rewritten", [...rewrite], (batch) =>
+      // Only the ones written back, as for a delete (#706): the revert's own row already says
+      // why one was not, and the campaign's row left as it is is what the next revert retries.
+      const notBack = new Set(restored.rows.filter((row) => row.status !== "verified").map((row) => row.variantGid));
+      await inRunChunks("ledger.market.rewritten", [...rewrite].filter((gid) => !notBack.has(gid)), (batch) =>
         prisma.variantChange.updateMany({
           where: { shopId, priceListGid, variantGid: { in: batch }, run: { campaignId }, NOT: { runId: recompute!.runId } },
-          data: { status: restored.clean ? "REVERTED" : "FAILED" },
+          data: { status: "REVERTED" },
         }),
       );
     }
@@ -776,9 +798,51 @@ async function releaseFixedPrices(
 }
 
 /**
+ * Fixed prices a whole revert asked Shopify to delete and could not, ledgered under the revert
+ * as FAILED (#706).
+ *
+ * After the delete, not before it: the delete is the campaign's own row being taken back, and
+ * that row was its write-ahead (I4). This is the record that it is not back yet. Without it
+ * the revert's ledger held nothing about the market, so the run had nothing to count and the
+ * Partial banner nothing to name. With no intended price, as a release's row has none: what
+ * the variant should show here is whatever the list derives.
+ */
+async function ledgerRefusedDeletes(
+  runId: string,
+  shopId: string,
+  list: { priceListGid: string; currency: string },
+  rows: readonly MarketRowResult[],
+): Promise<void> {
+  await inRunChunks("ledger.market.refused", rows, (batch) =>
+    prisma.variantChange.createMany({
+      data: batch.map((row) => ({
+        runId,
+        shopId,
+        variantGid: row.variantGid,
+        surfaceKind: "MARKET" as const,
+        priceListGid: list.priceListGid,
+        currency: list.currency,
+        intendedPrice: null,
+        intendedCompareAt: null,
+        intendedCompareAtSet: false,
+        status: "FAILED" as const,
+        failureReason:
+          "Its fixed price could not be removed, so this market may still show the campaign's price. " +
+          `Resume the revert to retry. (Shopify said: ${row.failureReason ?? "nothing"})`,
+        attempt: 1,
+      })),
+      skipDuplicates: true,
+    }),
+  );
+}
+
+/**
  * A run's market rows that did not land: refused, or never confirmed (#1001). And the ones
  * that did, read back, which a campaign that prices only its markets counts as its verified
  * prices: it has no others (#1111).
+ *
+ * A whole revert's are what it wrote back or let go, and the deletes Shopify refused it
+ * (#706); the deletes that landed settle the campaign's own rows, not the revert's.
  *
  * Bucketed by `tallyStatuses`, the one classification the run summary and the Partial banner
  * use, so the run's status cannot disagree with the page that explains it.
@@ -853,6 +917,7 @@ function wideOutcomes(messages: string[]): MarketSurfaceOutcome[] {
       chunks: 0,
       messages,
       path: "market-wide",
+      percentagesLeft: messages.length,
     },
   ];
 }
