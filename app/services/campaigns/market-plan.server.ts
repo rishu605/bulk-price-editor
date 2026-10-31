@@ -26,7 +26,8 @@ import { money, parseMoney, type Money } from "../../lib/money/money";
 import { planRun } from "../../lib/planning/plan";
 import type { PlanOutcome } from "../../lib/planning/types";
 import type { ResolvableCampaign } from "../../lib/pricing/types";
-import type { CampaignSurfaces } from "../../lib/campaigns/surfaces";
+import { parseSurfaces, type CampaignSurfaces } from "../../lib/campaigns/surfaces";
+import { labelled } from "../../lib/markets/display-name";
 import { marketGuardrails, type MovedCause } from "../../lib/markets/guardrails";
 import { guardrailsFor, shopCurrency } from "../settings.server";
 import { chunk, inChunks } from "../../lib/db/chunk";
@@ -123,8 +124,24 @@ export async function planMarket(
   const { prices: baselines, compareAts, moved, movedBy, stale, ladderUnread } = await marketBaselines(shopId, list, [...variantGids], client);
   if (baselines.size === 0 && moved.length === 0 && stale.length === 0 && !ladderUnread) return null;
 
+  const { outcome, inStoreCurrency } = await planOnBaselines(shopId, list, baselines, compareAts, campaigns);
+  return { shopId, list, baselines, outcome, moved, movedBy, stale, ladderUnread, inStoreCurrency };
+}
+
+/**
+ * The campaigns planned onto one market from these baselines: what `planMarket` does once it
+ * has read them, and what the typed confirmation's depth does with the ones already recorded
+ * (#1171), so the two cannot price a market differently.
+ */
+async function planOnBaselines(
+  shopId: string,
+  list: MarketList,
+  baselines: ReadonlyMap<string, Money>,
+  compareAts: ReadonlyMap<string, Money>,
+  campaigns: readonly ResolvableCampaign[],
+): Promise<{ outcome: PlanOutcome; costs: Map<string, Money>; inStoreCurrency: boolean }> {
   const inStoreCurrency = list.currency === (await shopCurrency(shopId));
-  const costs = inStoreCurrency ? await recordedCosts(shopId, list.currency, [...baselines.keys()]) : new Map();
+  const costs: Map<string, Money> = inStoreCurrency ? await recordedCosts(shopId, list.currency, [...baselines.keys()]) : new Map();
 
   const outcome = planRun({
     campaigns: [...campaigns],
@@ -154,7 +171,74 @@ export async function planMarket(
     })),
   });
 
-  return { shopId, list, baselines, outcome, moved, movedBy, stale, ladderUnread, inStoreCurrency };
+  return { outcome, costs, inStoreCurrency };
+}
+
+/** A market or wholesale price an apply would write, with the baseline it moves from (#1171). */
+export interface MarketWrite {
+  variantGid: string;
+  /** Its market or catalogue, by the name the editor gave it. */
+  market: string;
+  baseline: Money;
+  after: Money;
+  /** Its cost, on a list in the store's currency, where one is recorded. */
+  cost?: Money;
+}
+
+/**
+ * The market and wholesale prices an apply of this campaign writes for these variants, each with
+ * the baseline it moves from: what the typed confirmation measures their depth on (#1171). It
+ * measured the base price only, so 60% off in Europe alone -- a sale for its markets, or an exact
+ * price that lands far lower there -- applied from a one-click dialog.
+ *
+ * Planned as `planMarket` plans, from the market baselines already recorded and nothing else: no
+ * call to Shopify, so the Apply dialog, the run's own plan and the scheduled and Flow start check
+ * read one answer, with a client or without one (rule 4). The page records a market's baselines
+ * as it previews it, before the dialog asks. A price with no baseline yet is not counted, as a
+ * base price with none is not planned; the run records it before writing (D27).
+ */
+export async function recordedMarketWrites(
+  shopId: string,
+  campaignId: string,
+  campaigns: readonly ResolvableCampaign[],
+  variantGids: readonly string[],
+): Promise<MarketWrite[]> {
+  if (variantGids.length === 0) return [];
+  const campaign = await prisma.campaign.findUnique({ where: { id: campaignId }, select: { surfaces: true } });
+  const surfaces = parseSurfaces(campaign?.surfaces);
+  if (surfaces.priceLists.length === 0) return [];
+
+  const lists = (
+    await prisma.priceListRecord.findMany({
+      where: { shopId, priceListGid: { in: surfaces.priceLists } },
+      select: { priceListGid: true, name: true, currency: true, adjustmentBps: true, contextCountry: true, catalogTitle: true, surfaceKind: true },
+    })
+  ).map(labelled);
+
+  const writes: MarketWrite[] = [];
+  for (const list of lists) {
+    const stored = await inChunks([...variantGids], (batch) =>
+      prisma.baseline.findMany({
+        where: { shopId, surfaceKind: "MARKET", priceListGid: list.priceListGid, supersededAt: null, variantGid: { in: batch } },
+        select: { variantGid: true, basePrice: true, baseCompareAt: true, currency: true },
+      }),
+    );
+    if (stored.length === 0) continue;
+    const priced = (amount: bigint, currency: string) => money(Number(amount), currency || list.currency);
+    const baselines = new Map(stored.map((row) => [row.variantGid, priced(row.basePrice, row.currency)]));
+    const compareAts = new Map(
+      stored.filter((row) => row.baseCompareAt !== null).map((row) => [row.variantGid, priced(row.baseCompareAt!, row.currency)]),
+    );
+
+    const { outcome, costs } = await planOnBaselines(shopId, list, baselines, compareAts, campaigns);
+    if (outcome.kind !== "ok") continue;
+    for (const row of outcome.rows) {
+      const baseline = baselines.get(row.ref.variantGid);
+      if (row.status === "skipped" || !row.intendedPrice || !baseline) continue;
+      writes.push({ variantGid: row.ref.variantGid, market: list.name, baseline, after: row.intendedPrice, cost: costs.get(row.ref.variantGid) });
+    }
+  }
+  return writes;
 }
 
 /** Each variant's recorded cost, the way the base surface reads it: baseline first, then mirror. */

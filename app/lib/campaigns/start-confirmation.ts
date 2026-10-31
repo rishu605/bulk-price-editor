@@ -22,6 +22,7 @@ import { formatCount } from "../format/display";
 import {
   asksForConfirmation,
   confirmationReasons,
+  largestName,
   MINIMUM_PRICE_HANDFUL,
   percentText,
   type BlastRadius,
@@ -56,6 +57,11 @@ export interface StartConfirmation {
    * Absent from a confirmation stored before it was counted, which covered none.
    */
   compounding?: number;
+  /**
+   * Of `largeChanges`, how many were market or wholesale prices (#1171). Absent from one stored
+   * before the depth counted them, which saw the base prices alone: see `beyondConfirmation`.
+   */
+  marketLargeChanges?: number;
 }
 
 /** What a person confirms by typing the word over this preview. */
@@ -69,6 +75,8 @@ export function confirmationOf(radius: BlastRadius, by: string, at: Date): Start
     atMinimum: radius.atMinimum,
     // Only where there is some, as a confirmation stored before it was counted reads.
     ...(radius.compounding ? { compounding: radius.compounding.count } : {}),
+    // Wherever the market prices were counted, none included: that it is there says so (#1171).
+    ...(radius.marketLargeChanges !== undefined ? { marketLargeChanges: radius.marketLargeChanges } : {}),
   };
 }
 
@@ -122,15 +130,21 @@ export function beyondConfirmation(radius: BlastRadius, confirmed: StartConfirma
   if (!withinCount(radius.planned, confirmed.planned)) {
     grown.push(`it now writes ${prices(radius.planned)}, and ${formatCount(confirmed.planned)} were confirmed`);
   }
-  if (radius.largeChanges > 0 && !withinCount(radius.largeChanges, confirmed.largeChanges)) {
+  // One confirmed before the depth counted market prices (#1171) saw the base prices alone, and is
+  // held to those: a sale it confirmed at 60% is 60% in its markets too, and refusing its start
+  // for counting them now would stop a sale nobody changed. A market price moving further than
+  // the largest change it confirmed is still refused, below, by name.
+  const large =
+    confirmed.marketLargeChanges === undefined ? radius.largeChanges - (radius.marketLargeChanges ?? 0) : radius.largeChanges;
+  if (large > 0 && !withinCount(large, confirmed.largeChanges)) {
     grown.push(
-      `${prices(radius.largeChanges)} now move more than ${radius.thresholds.changePercent}% from their baseline ` +
+      `${prices(large)} now move more than ${radius.thresholds.changePercent}% from their baseline ` +
         `or land that far below cost, and ${formatCount(confirmed.largeChanges)} did when it was confirmed`,
     );
   }
   if (radius.largest && radius.largest.basisPoints > confirmed.largestBasisPoints + DEPTH_ALLOWANCE_BASIS_POINTS) {
     grown.push(
-      `its largest change is now “${radius.largest.title}”, ${radius.largest.direction} ${percentText(radius.largest.basisPoints)}, ` +
+      `its largest change is now ${largestName(radius.largest)}, ${radius.largest.direction} ${percentText(radius.largest.basisPoints)}, ` +
         (confirmed.largestBasisPoints > 0
           ? `and the largest confirmed was ${percentText(confirmed.largestBasisPoints)}`
           : "and no price moved that far when it was confirmed"),

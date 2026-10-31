@@ -57,6 +57,7 @@ import { describeBlocked } from "./blocked.server";
 import type { BreachPolicy } from "../../lib/campaigns/breach-policy";
 import { mirrorMarketDelete, mirrorMarketWrite } from "./mirror.server";
 import { parseSurfaces } from "../../lib/campaigns/surfaces";
+import { recapturedBaselines } from "./recaptured.server";
 
 // Read here and by the planner's input alike (#1094), so it lives where both can reach it.
 export { parseSurfaces, type CampaignSurfaces } from "../../lib/campaigns/surfaces";
@@ -248,6 +249,9 @@ export async function applyMarketSurfaces(
   }
 
   const refused = new Set(refusedPriceListGids);
+  // The prices a recapture over the sale made hand-set, which a variant taken out of it lets
+  // follow its list again too (#1171).
+  const recaptured = options.letFollow ? await recapturedFollowing(shopId, campaignId, variantGids) : new Map<string, Map<string, string>>();
 
   for (const list of lists) {
     // A market already refused before the base surface moved. Pricing it now would use a
@@ -338,9 +342,14 @@ export async function applyMarketSurfaces(
     // deletes the campaign's fixed price instead (#930); this does the same, for the same
     // variants -- those nobody else prices here, whose price before the campaign the list
     // derived. A hand-set one is written back below, as the whole revert writes it.
-    const following = options.letFollow ? await followersAmong(shopId, list.priceListGid, outcome.rows) : [];
+    const recapturedHere = recaptured.get(list.priceListGid) ?? new Map<string, string>();
+    const following = options.letFollow ? await followersAmong(shopId, list.priceListGid, outcome.rows, recapturedHere) : [];
     if (following.length > 0) {
       const freed = await releaseFixedPrices(runId, shopId, list, following, client, options.onProgress);
+      // And the sale price the recapture left as its baseline, once the list is read back without it (#1171).
+      await retireRecaptured(
+        freed.rows.filter((row) => row.status === "verified" && recapturedHere.has(row.variantGid)).map((row) => recapturedHere.get(row.variantGid)!),
+      );
       outcomes.push({
         ...summarise(list, freed),
         path: "per-product",
@@ -601,6 +610,9 @@ export async function revertMarketSurfaces(
   for (const cell of inherited) inheritedOn.set(cell.priceListGid, (inheritedOn.get(cell.priceListGid) ?? new Set()).add(cell.variantGid));
 
   const outcomes: MarketSurfaceOutcome[] = [];
+  // The prices that followed their list before the sale, recorded as set by hand by a recapture
+  // over it (#1171): let follow the list again, not written back at the sale price.
+  const recaptured = recompute ? await recapturedFollowing(shopId, campaignId) : new Map<string, Map<string, string>>();
 
   for (const [priceListGid, variantGids] of byList) {
     const list = await prisma.priceListRecord.findFirst({ where: { shopId, priceListGid } }).then((found) => found && labelled(found));
@@ -610,8 +622,10 @@ export async function revertMarketSurfaces(
     // right for one that followed the store price and wrong for one the merchant set by
     // hand: their ¥15,000 came back as whatever the percentage derived. Such a variant is
     // planned without this campaign -- its own baseline, or another campaign's price --
-    // and written back, ledgered under the revert like any other write.
-    const handSet = recompute && list ? await handSetAmong(shopId, priceListGid, variantGids) : new Set<string>();
+    // and written back, ledgered under the revert like any other write. Not one only a
+    // recapture over the sale made hand-set (#1171): the merchant's own price there was the list's.
+    const freed = recaptured.get(priceListGid) ?? new Map<string, string>();
+    const handSet = recompute && list ? await handSetAmong(shopId, priceListGid, variantGids, freed) : new Set<string>();
     // And where another campaign still prices the variant on this list (#1038): revert is
     // resolve(without C) (rule 6), so it gets that campaign's price, as "Revert this variant"
     // writes it (#1002) -- not the list's percentage, which deleting would have left.
@@ -646,6 +660,11 @@ export async function revertMarketSurfaces(
       const retried = Boolean(recompute && list);
       const refused = retried ? deleted.rows.filter((row) => row.status !== "verified") : [];
       const kept = new Set(refused.map((row) => row.variantGid));
+      // A price let follow the list again leaves behind the sale price a recapture recorded as
+      // its baseline (#1171), which the next sale there would be computed from, and its revert
+      // would write back. Retired once its delete lands, before its row says so: a revert that
+      // stops in between finds the row still the campaign's, and deletes and retires it again.
+      if (retried) await retireRecaptured(followed.filter((gid) => freed.has(gid) && !kept.has(gid)).map((gid) => freed.get(gid)!));
       // Once the refused are kept, what is left was taken back; a gone list's, as before.
       await inRunChunks("ledger.market.reverted", followed.filter((gid) => !kept.has(gid)), (batch) =>
         prisma.variantChange.updateMany({
@@ -714,16 +733,54 @@ async function pricedByOthers(
 /**
  * Which of these variants had a price on this list the merchant set by hand before the
  * campaign, as recorded when their market baseline was captured (#930). A revert writes those
- * back; every other one followed the list, and goes back to following it.
+ * back; every other one followed the list, and goes back to following it. So does one in
+ * `following` (#1171): hand-set only because a recapture read the campaign's fixed price as one.
  */
-async function handSetAmong(shopId: string, priceListGid: string, variantGids: readonly string[]): Promise<Set<string>> {
+async function handSetAmong(
+  shopId: string,
+  priceListGid: string,
+  variantGids: readonly string[],
+  following: ReadonlyMap<string, string> = new Map(),
+): Promise<Set<string>> {
   const rows = await inChunks([...variantGids], (batch) =>
     prisma.baseline.findMany({
       where: { shopId, surfaceKind: "MARKET", priceListGid, supersededAt: null, handSet: true, variantGid: { in: batch } },
       select: { variantGid: true },
     }),
   );
-  return new Set(rows.map((row) => row.variantGid));
+  return new Set(rows.map((row) => row.variantGid).filter((gid) => !following.has(gid)));
+}
+
+/**
+ * The prices that followed their list before this campaign, which a recapture over its sale
+ * recorded at its own fixed price as set by hand (#1171): by list, each variant's current
+ * baseline. Without this a revert wrote the sale price back as a fixed price, and the list
+ * never worked that price out from the base price again. Of `variantGids` only, when given;
+ * the let-go ones included, for "Revert this variant", which runs once one is let go.
+ */
+async function recapturedFollowing(
+  shopId: string,
+  campaignId: string,
+  variantGids?: readonly string[],
+): Promise<Map<string, Map<string, string>>> {
+  const byList = new Map<string, Map<string, string>>();
+  for (const entry of (await recapturedBaselines(shopId, campaignId, variantGids, { letGo: true })).values()) {
+    if (!entry.followedList) continue;
+    byList.set(entry.priceListGid, (byList.get(entry.priceListGid) ?? new Map<string, string>()).set(entry.variantGid, entry.baselineId));
+  }
+  return byList;
+}
+
+/**
+ * Retires the baselines a recapture recorded at the sale price for prices now following their
+ * list again (#1171). With none current, the next campaign to price one there reads the list's
+ * own price from Shopify before writing, as for a price no campaign has baselined.
+ */
+async function retireRecaptured(baselineIds: readonly string[]): Promise<void> {
+  if (baselineIds.length === 0) return;
+  await inRunChunks("baseline.market.retire", baselineIds, (batch) =>
+    prisma.baseline.updateMany({ where: { id: { in: batch }, supersededAt: null }, data: { supersededAt: new Date() } }),
+  );
 }
 
 /**
@@ -734,7 +791,13 @@ async function handSetAmong(shopId: string, priceListGid: string, variantGids: r
  * percentage is on the whole list: a variant left to follow it would follow the sale, so it
  * is priced on its own, as it always was.
  */
-async function followersAmong(shopId: string, priceListGid: string, rows: readonly PlannedRow[]): Promise<string[]> {
+async function followersAmong(
+  shopId: string,
+  priceListGid: string,
+  rows: readonly PlannedRow[],
+  /** The ones a recapture over the sale made hand-set (#1171), which follow the list again too. */
+  following: ReadonlyMap<string, string> = new Map(),
+): Promise<string[]> {
   // Pending only: a row a guardrail clamped is at the guardrail's price, not the list's.
   const unpriced = rows.filter((row) => row.status === "pending" && row.intendedPrice && !row.campaignId).map((row) => row.ref.variantGid);
   if (unpriced.length === 0) return [];
@@ -744,7 +807,7 @@ async function followersAmong(shopId: string, priceListGid: string, rows: readon
   });
   if (percentage > 0) return [];
 
-  const handSet = await handSetAmong(shopId, priceListGid, unpriced);
+  const handSet = await handSetAmong(shopId, priceListGid, unpriced, following);
   return unpriced.filter((gid) => !handSet.has(gid));
 }
 

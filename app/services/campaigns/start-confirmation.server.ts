@@ -33,6 +33,7 @@ import {
 import { AppError } from "../../lib/errors/app-error";
 import { planRun } from "../../lib/planning/plan";
 import type { PlanCandidate, PlannedRow, PlanUnchanged } from "../../lib/planning/types";
+import type { ResolvableCampaign } from "../../lib/pricing/types";
 import { guardrailsFor, readSettings } from "../settings.server";
 import { loadCandidates, withWritten } from "./candidates.server";
 import { campaignContext, importIdsOf, isPractice, type PlannableCampaign } from "./model.server";
@@ -45,6 +46,8 @@ export interface StartPlan {
   candidates: readonly PlanCandidate[];
   /** The variants already at its price, whose markets the apply prices too (#1166): see `blastRadiusOf`. */
   unchanged?: readonly PlanUnchanged[];
+  /** The campaigns it was planned with, so its market prices' depth is counted too (#1171). */
+  campaigns: readonly ResolvableCampaign[];
 }
 
 export interface StartCheck {
@@ -66,7 +69,9 @@ async function planApply(shopId: string, campaign: PlannableCampaign): Promise<S
   const [scoped, storeGuardrails] = await Promise.all([loadCandidates(shopId, ast, undefined, importIds), guardrailsFor(shopId)]);
   const candidates = await withWritten(shopId, scoped, [], importIds);
   const outcome = planRun({ campaigns: resolvable, candidates, storeGuardrails, heldEdits, campaignId: campaign.id });
-  return outcome.kind === "ok" ? { rows: outcome.rows, counts: outcome.counts, candidates, unchanged: outcome.unchanged } : null;
+  return outcome.kind === "ok"
+    ? { rows: outcome.rows, counts: outcome.counts, candidates, unchanged: outcome.unchanged, campaigns: resolvable }
+    : null;
 }
 
 /**
@@ -81,6 +86,7 @@ export async function startCheck(shopId: string, campaign: PlannableCampaign, pl
   const radius = await blastRadiusOf(shopId, planned.rows, planned.counts, planned.candidates, thresholds, new Map(), {
     campaignId: campaign.id,
     unchanged: planned.unchanged,
+    campaigns: planned.campaigns,
   });
   return { radius, unconfirmed: unconfirmedStart(radius, startConfirmationOf(campaign.schedule)) };
 }
@@ -128,6 +134,7 @@ export async function refuseUntypedPress(shopId: string, campaignId: string, pla
   const radius = await blastRadiusOf(shopId, plan.rows, plan.counts, plan.candidates, thresholds, new Map(), {
     campaignId,
     unchanged: plan.unchanged,
+    campaigns: plan.campaigns,
   });
   if (!asksForConfirmation(radius)) return;
 

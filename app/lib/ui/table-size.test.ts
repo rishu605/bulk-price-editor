@@ -86,6 +86,8 @@ describe("one number decides how many rows a view holds", () => {
       "the last APPLY runs to read applied values from, not rows",
     "app/services/campaigns/recaptured.server.ts: take: 20":
       "the last runs to read a campaign's writes from, for its baselines recaptured at its sale price (#781), not rows",
+    "app/services/campaigns/recaptured.server.ts: take: 50":
+      "the live campaigns one scheduler tick counts recaptured baselines for, never counted before (#1171), not rows",
     "app/services/cost-edit.server.ts: take: 10_000":
       "the bulk edit's working set, which is written rather than shown",
     "app/services/reconciliation.server.ts: take: 100": "campaign names, for the filter dropdown",

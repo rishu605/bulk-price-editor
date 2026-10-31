@@ -173,9 +173,24 @@ describe("the market prices reverting leaves at this campaign's sale price (#116
   it("names a few and counts the rest", () => {
     const sentence = marketsNotBeforeSentence({ count: 40, examples: [board, board, board] })!;
     expect(sentence).toMatch(/^40 market prices revert to this campaign's sale price/);
-    expect(sentence).toContain("; and 37 more.");
+    // Every one of them is in the export now (#1171).
+    expect(sentence).toContain("; and 37 more, in the export.");
     expect(sentence).toContain("Their baselines were recaptured");
     expect(sentence).toContain("set those prices in Shopify and recapture their baselines");
+  });
+
+  it("says a price that followed its list before the sale follows it again once reverted, and needs nothing else (#1171)", () => {
+    expect(marketsNotBeforeSentence({ count: 0, examples: [], following: 1 })).toBe(
+      "1 market price that followed its list before this campaign was recaptured at its sale price as a fixed price. " +
+        "Reverting removes it, so it follows the list again, and the next campaign there reads its price from Shopify " +
+        "before changing it.",
+    );
+  });
+
+  it("says both when some are written back and some follow the list again (#1171)", () => {
+    const sentence = marketsNotBeforeSentence({ count: 1, examples: [board], following: 2 })!;
+    expect(sentence).toMatch(/^1 market price reverts to this campaign's sale price, not the price before it: .*Prices → Baselines\. /);
+    expect(sentence).toMatch(/ 2 market prices that followed their list before this campaign were recaptured at its sale price as fixed prices\. Reverting removes them, so they follow the list again/);
   });
 });
 
@@ -206,11 +221,36 @@ describe("rollbackReportCsv", () => {
     // Header quoted like every other cell. Uniform quoting means there is no cell
     // whose safety depends on someone having checked it could not contain a comma.
     expect(lines[0]).toBe(
-      '"variant_gid","title","state","applied","live_now","reverts_to","before_campaign"',
+      '"variant_gid","title","state","applied","live_now","reverts_to","before_campaign","market"',
     );
     expect(lines[1]).toBe(
-      '"gid://Variant/1","Blue shirt","drifted","$80.00","$75.00","$100.00",""',
+      '"gid://Variant/1","Blue shirt","drifted","$80.00","$75.00","$100.00","",""',
     );
+  });
+
+  it("writes a row per market price reverting leaves at the sale price, after the base prices, with its market (#1171)", () => {
+    const csv = rollbackReportCsv({
+      ...report([
+        { variantGid: "gid://Variant/4", title: "QA Recapture Board", kind: "clean", applied: "$80.00", live: "$80.00", revertsTo: "$100.00" },
+      ]),
+      marketRows: [
+        {
+          variantGid: "gid://Variant/4",
+          title: "QA Recapture Board",
+          kind: "clean",
+          applied: "€40.00",
+          live: "€40.00",
+          revertsTo: "€40.00",
+          before: "€50.00",
+          market: "Europe",
+        },
+      ],
+    });
+
+    expect(csv.trim().split("\n").slice(1)).toEqual([
+      '"gid://Variant/4","QA Recapture Board","clean","$80.00","$80.00","$100.00","",""',
+      '"gid://Variant/4","QA Recapture Board","clean","€40.00","€40.00","€40.00","€50.00","Europe"',
+    ]);
   });
 
   it("gives the price from before the campaign where reverting does not put it back (#781)", () => {
@@ -228,7 +268,7 @@ describe("rollbackReportCsv", () => {
       ]),
     );
 
-    expect(csv.trim().split("\n")[1]).toBe('"gid://Variant/4","QA Recapture Board","clean","$80.00","$80.00","$80.00","$100.00"');
+    expect(csv.trim().split("\n")[1]).toBe('"gid://Variant/4","QA Recapture Board","clean","$80.00","$80.00","$80.00","$100.00",""');
   });
 
   it("survives titles containing commas and quotes", () => {

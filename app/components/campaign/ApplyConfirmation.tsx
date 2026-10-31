@@ -244,7 +244,8 @@ export function ApplyConfirmation({
             )}
             {confirm?.largest ? (
               <s-paragraph>
-                Largest change: {confirm.largest.title}, {confirm.largest.before} to {confirm.largest.after}.
+                Largest change: {confirm.largest.title}
+                {confirm.largest.market ? ` in ${confirm.largest.market}` : ""}, {confirm.largest.before} to {confirm.largest.after}.
               </s-paragraph>
             ) : null}
             <s-paragraph>

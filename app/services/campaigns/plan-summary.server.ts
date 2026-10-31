@@ -397,7 +397,9 @@ export async function revertKeepers(shopId: string, campaignId: string, client?:
 export async function currentRollback(shopId: string, campaignId: string): Promise<RollbackReport> {
   const row = await prisma.planSummary.findFirst({ where: { campaignId, shopId }, select: { ...STATE, preview: true, rollback: true } });
   const stored = storedReport(row?.rollback);
-  if (stored && (await stateOf(shopId, row, new Date())) === "current") return stored;
+  // Not one stored before its market prices had rows (#1171): it names them, and has none to export.
+  const rowless = stored?.marketsNotBefore !== undefined && stored.marketRows === undefined;
+  if (stored && !rowless && (await stateOf(shopId, row, new Date())) === "current") return stored;
   return rollbackReport(shopId, campaignId);
 }
 

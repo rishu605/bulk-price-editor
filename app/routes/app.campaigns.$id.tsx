@@ -120,8 +120,9 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
   const rollback = wantsRollback ? plan.rollback : null;
 
   return {
-    // The rows the Revert tab renders, not all 102,132: the export reads every one (#812).
-    rollback: rollback && { ...rollback, rows: rowsToShow(rollback.rows) },
+    // The rows the Revert tab renders, not all 102,132: the export reads every one (#812), and
+    // every market row, which the tab only names three of in a sentence (#1171).
+    rollback: rollback && { ...rollback, rows: rowsToShow(rollback.rows), marketRows: undefined },
     rollbackPending: wantsRollback && !rollback,
     preview,
     runs,

@@ -27,6 +27,7 @@ import { claimEnrollment, endingSinceLastApply, pendingEnrollments } from "./aut
 import { reclaimStaleRuns } from "./campaigns/reaper.server";
 import { claimForSchedule, noteCampaign } from "./campaigns/lifecycle.server";
 import { recordEndingLate } from "./campaigns/ending-late.server";
+import { countUncounted } from "./campaigns/recaptured.server";
 import { beat } from "./scheduler-heartbeat.server";
 import { checkAlerts } from "./alerting.server";
 import { sendDueDigests } from "./digest.server";
@@ -187,6 +188,12 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
   } catch (error) {
     logger.warn("could not prune the error log", { error: error instanceof Error ? error.message : String(error) });
   }
+
+  // The live campaigns whose count of baselines recaptured at their sale price was never taken
+  // (#1171), so one recaptured under before the count existed reads "needs a decision" on the
+  // list, Home and the calendar. Each is counted once; after that its plan, a recapture, an
+  // import or an apply keeps it. Last as well, on the same terms: it never throws.
+  await countUncounted();
 
   // The log of writes stored plans are judged against (#812), past the age any summary could
   // still be current about. Last as well, on the same terms.

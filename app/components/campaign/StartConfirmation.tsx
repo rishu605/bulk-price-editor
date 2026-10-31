@@ -34,7 +34,8 @@ export function StartConfirmationAsk({
         <s-paragraph>{unconfirmed}</s-paragraph>
         {radius?.largest ? (
           <s-paragraph>
-            Largest change: {radius.largest.title}, {radius.largest.before} to {radius.largest.after}.
+            Largest change: {radius.largest.title}
+            {radius.largest.market ? ` in ${radius.largest.market}` : ""}, {radius.largest.before} to {radius.largest.after}.
           </s-paragraph>
         ) : null}
         <s-paragraph>

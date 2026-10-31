@@ -42,6 +42,11 @@ export interface RollbackRow {
    * where another campaign's price is what reverting leaves, which explains the difference.
    */
   before?: string | null;
+  /**
+   * The market or wholesale catalogue this price is on, by name (#1171). Absent for the base
+   * price, which every row of `rows` is.
+   */
+  market?: string;
 }
 
 export interface RollbackReport {
@@ -69,7 +74,18 @@ export interface RollbackReport {
   marketsNotBefore?: {
     count: number;
     examples: Array<{ title: string; market: string; before: string; revertsTo: string }>;
+    /**
+     * Besides `count`, how many market prices followed their list before this campaign, worked out
+     * from the base price, and were recaptured at its sale price as a fixed price (#1171).
+     * Reverting removes that fixed price, so they follow the list again. Absent when none did.
+     */
+    following?: number;
   };
+  /**
+   * Every price `marketsNotBefore` counts, one row each with its market, for the export (#1171):
+   * the sentence names three. Not carried to the campaign page, which only says that sentence.
+   */
+  marketRows?: RollbackRow[];
 }
 
 /**
@@ -181,18 +197,32 @@ export function notBeforeSentence(notBefore: RollbackReport["notBefore"]): strin
  * price is the merchant's to set in Shopify once the sale has ended, and then to recapture.
  */
 export function marketsNotBeforeSentence(markets: RollbackReport["marketsNotBefore"]): string | null {
-  if (!markets || markets.count === 0) return null;
+  const following = markets?.following ?? 0;
+  if (!markets || (markets.count === 0 && following === 0)) return null;
   const { count, examples } = markets;
   const one = count === 1;
   const named = examples.map((row) => `“${row.title}” in ${row.market} reverts to ${row.revertsTo}, not ${row.before}`).join("; ");
-  const more = count > examples.length ? `; and ${formatCount(count - examples.length)} more` : "";
-  return (
-    `${countOf(count, "market price")} ${one ? "reverts" : "revert"} to this campaign's sale price, not the price before ` +
-    `it: ${named}${more}. ${one ? "Its baseline was" : "Their baselines were"} recaptured at the sale price, and reverting ` +
-    `writes a market's baseline back. An import cannot set a market's price, so to end the sale at the price from ` +
-    `before it, revert, then set ${one ? "that price" : "those prices"} in Shopify and recapture ${one ? "its baseline" : "their baselines"} on ` +
-    "Prices → Baselines."
-  );
+  const more = count > examples.length ? `; and ${formatCount(count - examples.length)} more, in the export` : "";
+  const setBack =
+    count === 0
+      ? ""
+      : `${countOf(count, "market price")} ${one ? "reverts" : "revert"} to this campaign's sale price, not the price before ` +
+        `it: ${named}${more}. ${one ? "Its baseline was" : "Their baselines were"} recaptured at the sale price, and reverting ` +
+        `writes a market's baseline back. An import cannot set a market's price, so to end the sale at the price from ` +
+        `before it, revert, then set ${one ? "that price" : "those prices"} in Shopify and recapture ${one ? "its baseline" : "their baselines"} on ` +
+        "Prices → Baselines.";
+  // One the list worked out from the base price before the sale (#1171): the recapture took the
+  // sale's fixed price there for the merchant's, and reverting removes it rather than writing it
+  // back, so there is nothing to do but revert. Said, because the status line sends them here.
+  const single = following === 1;
+  const followAgain =
+    following === 0
+      ? ""
+      : `${countOf(following, "market price")} that followed ${single ? "its" : "their"} list before this campaign ` +
+        `${single ? "was" : "were"} recaptured at its sale price as ${single ? "a fixed price" : "fixed prices"}. Reverting ` +
+        `removes ${single ? "it" : "them"}, so ${single ? "it follows" : "they follow"} the list again, and the next campaign there ` +
+        `reads ${single ? "its" : "their"} price from Shopify before changing ${single ? "it" : "them"}.`;
+  return [setBack, followAgain].filter(Boolean).join(" ");
 }
 
 /**
@@ -204,9 +234,11 @@ export function marketsNotBeforeSentence(markets: RollbackReport["marketsNotBefo
  */
 export function rollbackReportCsv(report: RollbackReport): string {
   return toCsv(
-    // `before_campaign` only where reverting does not put that price back (#781).
-    ["variant_gid", "title", "state", "applied", "live_now", "reverts_to", "before_campaign"],
-    report.rows.map((row) => [
+    // `before_campaign` only where reverting does not put that price back (#781). And a row per
+    // market or wholesale price reverting leaves at the sale price, after the base prices, with
+    // its market's name last, so the columns before it keep their places (#1171).
+    ["variant_gid", "title", "state", "applied", "live_now", "reverts_to", "before_campaign", "market"],
+    [...report.rows, ...(report.marketRows ?? [])].map((row) => [
       row.variantGid,
       row.title,
       row.kind,
@@ -214,6 +246,7 @@ export function rollbackReportCsv(report: RollbackReport): string {
       row.live ?? "",
       row.revertsTo ?? "",
       row.before ?? "",
+      row.market ?? "",
     ]),
   );
 }

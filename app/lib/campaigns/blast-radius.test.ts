@@ -17,6 +17,7 @@ import {
   DEFAULT_CONFIRM_ABOVE_VARIANTS,
   exceedsChange,
   largeChanges,
+  largestName,
   MINIMUM_PRICE_HANDFUL,
   movedBasisPoints,
   percentText,
@@ -199,5 +200,36 @@ describe("a price this campaign already set, discounted again (#781)", () => {
     expect(compoundingReason({ count: 1_204, title: "Wool coat" })).toMatch(
       /^1,204 prices this campaign already set would be discounted again, the first “Wool coat”: their baselines were recaptured/,
     );
+  });
+});
+
+describe("a market's or wholesale catalogue's price past the change threshold (#1171)", () => {
+  const eur = (amount: number) => money(amount, "EUR");
+
+  it("is measured against its own baseline, in its own currency, as a base price is", () => {
+    expect(exceedsChange({ variantGid: "v", baseline: eur(5_000), after: eur(2_000), market: "Europe" }, 50)).toBe(true);
+    expect(exceedsChange({ variantGid: "v", baseline: eur(5_000), after: eur(4_000), market: "Europe" }, 50)).toBe(false);
+  });
+
+  it("is the largest by how far it moves, and keeps its market", () => {
+    const found = largeChanges(
+      [row(10_000, 4_000), { variantGid: "w", baseline: eur(5_000), after: eur(1_000), market: "Europe" }],
+      50,
+    );
+    expect(found.count).toBe(2);
+    expect(found.largest).toMatchObject({ variantGid: "w", market: "Europe", basisPoints: 8_000 });
+  });
+
+  it("is named with its market", () => {
+    const [sentence] = confirmationReasons(
+      radius({
+        largeChanges: 1,
+        largest: { title: "Wool coat", market: "Europe", before: "€50.00", after: "€10.00", basisPoints: 8_000, direction: "down" },
+      }),
+    );
+    expect(sentence).toBe(
+      "1 price moves more than 50% from its baseline, or lands that far below cost; the largest is “Wool coat” in Europe, down 80%.",
+    );
+    expect(largestName({ title: "Wool coat" })).toBe("“Wool coat”");
   });
 });

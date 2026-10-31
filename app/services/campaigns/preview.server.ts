@@ -32,8 +32,10 @@ import {
   decideMarketPath,
   describePath,
   planMarket,
+  recordedMarketWrites,
   UnconvertedMarketError,
 } from "./market-plan.server";
+import type { ResolvableCampaign } from "../../lib/pricing/types";
 import { describeLadderUnread, describeMarketSkips, describeMovedMarket, describeStaleSettingMarket } from "../../lib/markets/guardrails";
 import { parseSurfaces } from "./market-surfaces.server";
 import { labelled } from "../../lib/markets/display-name";
@@ -239,7 +241,9 @@ export async function previewCampaign(
   // the status says so, and applying them again asks for the word. Not on a revert's preview.
   const recaptured = options.revert ? new Map<string, RecapturedBaseline>() : await recapturedBaselines(shopId, campaignId);
   // Whether applying this needs the word typed, and why (#818): the dialog says these
-  // reasons and `blastRadiusRefusal` re-checks them from a fresh preview.
+  // reasons and `blastRadiusRefusal` re-checks them from a fresh preview. Its market prices'
+  // depth with them (#1171), after `marketPathPreview` above has recorded their baselines; not
+  // on a revert's preview, whose plan leaves this campaign out.
   const confirm = await blastRadiusOf(
     shopId,
     outcome.rows,
@@ -247,7 +251,7 @@ export async function previewCampaign(
     candidates,
     confirmThresholdsOf(storeSettings),
     titles,
-    { campaignId, recaptured, unchanged: outcome.unchanged },
+    { campaignId, recaptured, unchanged: outcome.unchanged, ...(options.revert ? {} : { campaigns: resolvable }) },
   );
 
   const margin = marginImpact(
@@ -365,7 +369,11 @@ function marketsOnlyRows(
  * again is counted (#781), and its baselines recaptured at that price when the caller already
  * has them; otherwise they are read for the rows written. With the plan's `unchanged`, so a
  * market or wholesale price is counted too (#1166): the apply prices the markets of every
- * variant the campaign wins, already at its base price or not (`marketScope`).
+ * variant the campaign wins, already at its base price or not (`marketScope`). And with the
+ * campaigns the apply plans with, so a market or wholesale price moving past the change
+ * threshold counts as a base price does (#1171), planned from its recorded baseline
+ * (`recordedMarketWrites`). Its depth only: how many prices a campaign writes is still its base
+ * prices, so a sale over two markets does not start asking at a third of the variants it did.
  */
 export async function blastRadiusOf(
   shopId: string,
@@ -378,6 +386,8 @@ export async function blastRadiusOf(
     campaignId: string;
     recaptured?: ReadonlyMap<string, RecapturedBaseline>;
     unchanged?: readonly { ref: { variantGid: string }; campaignId?: string }[];
+    /** The campaigns the apply plans with, its own among them: its market prices are planned with them (#1171). */
+    campaigns?: readonly ResolvableCampaign[];
   },
 ): Promise<BlastRadius> {
   const baselines = new Map(candidates.map((candidate) => [refKey(candidate.ref), candidate.baseline]));
@@ -392,7 +402,11 @@ export async function blastRadiusOf(
     if (row.campaignId === own.campaignId) mine.push(row.ref.variantGid);
   }
 
-  const large = largeChanges(written, thresholds.changePercent);
+  // The variants whose markets this apply prices (`marketScope`), and its prices there (#1171).
+  const priced = marketScope(own.campaignId, rows, own.unchanged ?? []);
+  const markets = own.campaigns ? await recordedMarketWrites(shopId, own.campaignId, own.campaigns, priced) : [];
+  const large = largeChanges([...written, ...markets], thresholds.changePercent);
+  const marketLarge = largeChanges(markets, thresholds.changePercent).count;
   const top = large.largest;
   // Titled from the page of rows when it is on it, and looked up alone when it is not.
   const titleOf = async (gid: string) => titles.get(gid) ?? (await titleMapFor(shopId, [gid])).get(gid) ?? gid;
@@ -403,7 +417,6 @@ export async function blastRadiusOf(
   // markets this apply prices: those compound as surely, and nothing else asked about them.
   // Read whole rather than for these variants: only what was captured since the campaign
   // first wrote is read either way, and a scope of 102,132 is twenty-one chunks of nothing.
-  const priced = marketScope(own.campaignId, rows, own.unchanged ?? []);
   const recaptured: ReadonlyMap<string, RecapturedBaseline> =
     own.recaptured ?? (priced.length > 0 ? await recapturedBaselines(shopId, own.campaignId) : new Map());
   const marketsPriced = new Set(priced);
@@ -421,12 +434,15 @@ export async function blastRadiusOf(
     largest: top
       ? {
           title: title ?? top.variantGid,
+          ...(top.market ? { market: top.market } : {}),
           before: formatPrice(top.baseline.amount, top.baseline.currency),
           after: formatPrice(top.after.amount, top.after.currency),
           basisPoints: top.basisPoints,
           direction: top.after.amount < top.baseline.amount ? "down" : "up",
         }
       : null,
+    // Counted wherever the market prices were (#1171), none included, so a confirmation knows.
+    ...(own.campaigns ? { marketLargeChanges: marketLarge } : {}),
     atMinimum: counts.clampedToMinimum,
     ...(compounded.length > 0
       ? { compounding: { count: compounded.length, title: await titleOf(compounded[0]!) } }
