@@ -27,9 +27,9 @@ describe("chaos: a campaign a blocking guardrail stops", () => {
       for (const [i, gid] of variantGids.entries()) {
         await prisma.variantIndex.updateMany({ where: { shopId, variantGid: gid }, data: { title: names[i] } });
       }
-      // A floor above every price, and the whole campaign blocked by it.
-      await writeSettings(shopId, { ...DEFAULT_SETTINGS, minPrice: 100_000 });
-      await prisma.campaign.update({ where: { id: campaignId }, data: { guardrailViolationPolicy: "block" } });
+      // A floor above every price, and the whole campaign blocked by it: the store's setting,
+      // which a campaign that has not started follows (#789).
+      await writeSettings(shopId, { ...DEFAULT_SETTINGS, minPrice: 100_000, violationPolicy: "block" });
 
       const preview = await previewCampaign(shopId, campaignId, { limit: 100 });
       const said = preview.blocked?.message ?? "";

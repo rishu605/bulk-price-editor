@@ -7,6 +7,8 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { ensureShop } from "../services/shop.server";
 import { readSettings, shopCurrency, writeSettings } from "../services/settings.server";
+import { keepingOtherPolicies } from "../services/campaigns/model.server";
+import { BREACH_POLICY_LABELS, BREACH_POLICY_REACH } from "../lib/campaigns/breach-policy";
 import {
   APPROVAL_THRESHOLD_LABEL,
   approvalThresholdFrom,
@@ -78,6 +80,8 @@ export const loader = withGuard("/app/settings", async ({ request }: LoaderFunct
 
   return {
     settings,
+    // Running campaigns the breach policy does not reach, named beside it (#789).
+    keepingOther: await keepingOtherPolicies(shop.id, settings.violationPolicy),
     currency,
     currencies,
     // Currency-aware: a step is in minor units, so "Nearest 10" means ten cents on a USD
@@ -208,6 +212,7 @@ type TestResult = { ok: boolean; message: string };
 export default function Settings() {
   const {
     settings,
+    keepingOther,
     currency,
     currencies,
     roundingOptions,
@@ -336,16 +341,14 @@ export default function Settings() {
                 details="An absolute floor, whatever the rule computes. Leave blank for none."
               />
 
-              <s-select name="violationPolicy" label="When a price would breach a floor">
-                <s-option value="clamp" defaultSelected={settings.violationPolicy === "clamp"}>
-                  Clamp it to the floor and carry on
-                </s-option>
-                <s-option value="skip" defaultSelected={settings.violationPolicy === "skip"}>
-                  Skip that variant, price the rest
-                </s-option>
-                <s-option value="block" defaultSelected={settings.violationPolicy === "block"}>
-                  Block the whole campaign
-                </s-option>
+              {/* What it reaches, said on the field (#789): it read as store-wide, and every
+                  campaign that existed when it was saved went on with the policy it was made with. */}
+              <s-select name="violationPolicy" label="When a price would breach a floor" details={BREACH_POLICY_REACH}>
+                {(["clamp", "skip", "block"] as const).map((policy) => (
+                  <s-option key={policy} value={policy} defaultSelected={settings.violationPolicy === policy}>
+                    {BREACH_POLICY_LABELS[policy]}
+                  </s-option>
+                ))}
               </s-select>
 
               <s-select
@@ -360,6 +363,26 @@ export default function Settings() {
                 </s-option>
               </s-select>
             </FieldGrid>
+
+            {/* The running campaigns the saved policy does not reach, by name (#789). */}
+            {keepingOther.total > 0 ? (
+              <s-stack gap={SPACE.tight}>
+                <s-text>
+                  These are running, so they keep the policy they started with until they end, not the one saved above:
+                </s-text>
+                <s-unordered-list>
+                  {keepingOther.campaigns.map((campaign) => (
+                    <s-list-item key={campaign.id}>
+                      <s-link href={`/app/campaigns/${campaign.id}`}>{campaign.name}</s-link>:{" "}
+                      {BREACH_POLICY_LABELS[campaign.policy].toLowerCase()}
+                    </s-list-item>
+                  ))}
+                </s-unordered-list>
+                {keepingOther.total > keepingOther.campaigns.length ? (
+                  <Secondary>And {formatCount(keepingOther.total - keepingOther.campaigns.length)} more.</Secondary>
+                ) : null}
+              </s-stack>
+            ) : null}
         </Card>
 
         {/* The typed confirmation's two thresholds (A-3.11, #818). Beside the guardrails

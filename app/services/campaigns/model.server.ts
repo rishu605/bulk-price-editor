@@ -27,12 +27,14 @@ import type { AdjustmentRule,
   Guardrails,
   ResolvableCampaign,
 } from "../../lib/pricing/types";
-import { PRICING_STATES } from "../../lib/lifecycle/transitions";
+import { PRICES_MAY_BE_LIVE, PRICING_STATES, type CampaignState } from "../../lib/lifecycle/transitions";
+import { breachPolicyFor, type BreachPolicy } from "../../lib/campaigns/breach-policy";
 import { productStatusesOf, type ProductStatus } from "../../lib/campaigns/product-status";
 import { START_CONFIRMED_KEY } from "../../lib/campaigns/start-confirmation";
 import { parseSurfaces } from "../../lib/campaigns/surfaces";
 import { astToWhere, segmentToAst, type FilterAst } from "../segments.server";
 import { readSettings } from "../settings.server";
+import { ROWS_PER_VIEW } from "../../lib/ui/table-budget";
 import type { CampaignInput } from "./types";
 
 /**
@@ -48,10 +50,54 @@ function asViolationPolicy(stored: string): GuardrailViolationPolicy {
   return stored === "skip" || stored === "block" ? stored : "clamp";
 }
 
-/** The shop's floor-violation setting, for a campaign being created now. */
+/** The shop's floor-violation setting as it is now. */
 async function violationPolicyFor(shopId: string): Promise<GuardrailViolationPolicy> {
   const settings = await readSettings(shopId);
   return settings.violationPolicy;
+}
+
+/**
+ * The floor-breach policy this campaign is planned and run with (#789): the store's setting as
+ * it is now until the campaign starts, and the one it started with while its prices may be up.
+ * `campaignContext` plans with it and the campaign page names it, so the two cannot disagree.
+ */
+export async function breachPolicyOf(
+  shopId: string,
+  campaign: Pick<Campaign, "status" | "guardrailViolationPolicy">,
+): Promise<BreachPolicy> {
+  return breachPolicyFor(
+    campaign.status as CampaignState,
+    asViolationPolicy(campaign.guardrailViolationPolicy),
+    await violationPolicyFor(shopId),
+  );
+}
+
+/**
+ * Running campaigns keeping a policy other than the store's, for Settings to name beside the
+ * field (#789): changing it does not reach them, and nothing said so. The first page of them
+ * by name, and how many there are.
+ */
+export async function keepingOtherPolicies(shopId: string, store: GuardrailViolationPolicy) {
+  const where: Prisma.CampaignWhereInput = {
+    shopId,
+    status: { in: [...PRICES_MAY_BE_LIVE] },
+    // A value `asViolationPolicy` does not know reads as clamp, so it differs from skip and
+    // block and not from clamp.
+    guardrailViolationPolicy: store === "clamp" ? { in: ["skip", "block"] } : { not: store },
+  };
+  const [rows, total] = await Promise.all([
+    prisma.campaign.findMany({
+      where,
+      select: { id: true, name: true, guardrailViolationPolicy: true },
+      orderBy: { name: "asc" },
+      take: ROWS_PER_VIEW,
+    }),
+    prisma.campaign.count({ where }),
+  ]);
+  return {
+    campaigns: rows.map((row) => ({ id: row.id, name: row.name, policy: asViolationPolicy(row.guardrailViolationPolicy) })),
+    total,
+  };
 }
 
 /**
@@ -161,9 +207,10 @@ async function campaignRow(shopId: string, input: CampaignInput) {
       // picked -- including "leave those variants alone" and "refuse the run" -- was
       // silently replaced by "write the floor price anyway" (#338).
       //
-      // Copied onto the campaign rather than read live at resolution time, so changing
-      // the store default does not retroactively change what a running campaign does
-      // to prices already on a storefront.
+      // Only a record until the campaign starts: until then it is planned with the store's
+      // setting as it is (`breachPolicyOf`), and this is written again as it starts, so
+      // changing the store's setting does not change what a running campaign does to prices
+      // already on a storefront (#789).
       guardrailViolationPolicy: await violationPolicyFor(shopId),
       // What it prices, in its columns alone (#1141); the blob is when it runs and the
       // campaign's own record, here the typed confirmation of its start (#1009).
@@ -188,6 +235,7 @@ async function campaignRow(shopId: string, input: CampaignInput) {
 export type PlannableCampaign = Pick<
   Campaign,
   | "id"
+  | "status"
   | "priority"
   | "ruleRows"
   | "compareAtPolicy"
@@ -213,6 +261,7 @@ export async function unsavedCampaign(shopId: string, input: CampaignInput): Pro
   const row = await campaignRow(shopId, input);
   return {
     id: UNSAVED_CAMPAIGN_ID,
+    status: row.status,
     priority: row.priority,
     // The JSON columns exactly as the row writes them: no field of the plan is rebuilt here.
     ruleRows: row.ruleRows,
@@ -457,7 +506,8 @@ export function toResolvable(campaign: PlannableCampaign): ResolvableCampaign {
     guardrails: (campaign.guardrails ?? undefined) as unknown as Guardrails | undefined,
     // Read from the campaign, not hardcoded. See #338: every layer below this
     // implemented `skip` and `block` correctly and none of them could ever be reached,
-    // because this line threw the answer away.
+    // because this line threw the answer away. As handed over: `campaignContext` hands
+    // one that has not started the store's (#789).
     guardrailViolationPolicy: asViolationPolicy(campaign.guardrailViolationPolicy),
     // Variants reverted out of this campaign individually. Carried into resolution
     // rather than filtered out beforehand, so an excluded variant falls through to
@@ -489,12 +539,17 @@ export async function loadCampaignContext(shopId: string, campaignId: string) {
  * campaign about to be saved is planned against the others exactly as it will be once it is.
  */
 export async function campaignContext(shopId: string, campaign: PlannableCampaign) {
-  const others = await competingCampaigns(shopId, campaign.id);
+  const [others, breach] = await Promise.all([competingCampaigns(shopId, campaign.id), breachPolicyOf(shopId, campaign)]);
 
   return {
     // The campaign being planned covers its own candidates by construction; every other
-    // one is offered only the variants inside its own scope (#752).
-    resolvable: [toResolvable(campaign), ...(await withScopes(shopId, others))],
+    // one is offered only the variants inside its own scope (#752). With the breach policy
+    // it runs with (#789): the store's until it starts. The others are all pricing, so each
+    // keeps its own.
+    resolvable: [
+      toResolvable({ ...campaign, guardrailViolationPolicy: breach.policy }),
+      ...(await withScopes(shopId, others)),
+    ],
     heldEdits: await heldEditsOf(shopId, others),
     // By name, priority and state, for saying who wins what (#821).
     others: others.map(({ id, name, priority, status }) => ({ id, name, priority, status })),

@@ -27,7 +27,7 @@ import { reportError } from "../services/error-report.server";
 import { withGuard } from "../lib/errors/guard.server";
 import { pressCheck } from "../services/campaigns/blast-radius.server";
 import { describeCampaign } from "../lib/campaigns/describe";
-import { astOf, DEFINITION, isPractice, ruleOf, segmentNameOf } from "../services/campaigns/model.server";
+import { astOf, breachPolicyOf, DEFINITION, isPractice, ruleOf, segmentNameOf } from "../services/campaigns/model.server";
 import { actorFor } from "../lib/audit/actor";
 import {
   canTransition,
@@ -70,6 +70,7 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
         autoEnroll: true,
         enrollPendingAt: true,
         status: true,
+        guardrailViolationPolicy: true,
         ruleRows: true,
         note: true,
         archivedAt: true,
@@ -154,6 +155,8 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     needsAttention: needsAttention(state),
     heldEdits,
     history,
+    // What it does when a price would breach a floor, as its plan does (#789): the store's until it starts.
+    breachPolicy: await breachPolicyOf(shop.id, record),
     // Whether the scheduler and Flow may start it as it is now (#1009), from this preview.
     startConfirmation: startConfirmationView(record.schedule, preview.confirm, (at) => formatScheduleInstant(at, shop.timezone)),
   };

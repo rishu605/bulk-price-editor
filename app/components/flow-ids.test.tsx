@@ -37,6 +37,7 @@ const overview = (over: Partial<CampaignDetailProps> = {}) =>
     campaignId: CAMPAIGN_ID,
     // Nothing on record and nothing asked (#1009).
     startConfirmation: { confirmed: null, unconfirmed: null },
+    breachPolicy: { policy: "clamp", kept: true, store: "clamp" },
     ...over,
   }) as unknown as CampaignDetailProps;
 

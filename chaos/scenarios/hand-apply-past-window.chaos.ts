@@ -209,9 +209,9 @@ describe("chaos: applying by hand a campaign whose window has ended (#1146)", ()
       const { shopId, campaignId } = chaos.fixture;
       await windowed(chaos, "SCHEDULED", new Date(Date.now() - 2 * DAY), new Date(Date.now() - DAY));
       // A floor above every price, set to block: the run takes its claim, plans, and is stopped.
+      // The store's setting, which a campaign that has not started follows (#789).
       const { DEFAULT_SETTINGS, writeSettings } = await import("../../app/services/settings.server");
-      await writeSettings(shopId, { ...DEFAULT_SETTINGS, minPrice: 100_000 });
-      await prisma.campaign.update({ where: { id: campaignId }, data: { guardrailViolationPolicy: "block" } });
+      await writeSettings(shopId, { ...DEFAULT_SETTINGS, minPrice: 100_000, violationPolicy: "block" });
 
       const stopped = await chaos.apply().then(
         () => null,

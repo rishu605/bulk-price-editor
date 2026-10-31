@@ -68,6 +68,7 @@ export function CampaignHeader({
   timeZone,
   zoneShift,
   startConfirmation,
+  breachPolicy,
 }: CampaignDetailProps) {
   return (
     <>
@@ -337,6 +338,7 @@ export function CampaignHeader({
           scheduleText={scheduleText}
           busy={busy}
           heldEdits={heldEdits}
+          breachPolicy={breachPolicy}
           onConfirm={(confirmation) =>
             fetcher.submit({ intent: "apply", confirmation }, { method: "post" })
           }
