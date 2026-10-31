@@ -25,14 +25,17 @@ import {
   type MarketPriceRow,
 } from "../../lib/execution/market-executor";
 import {
+  readParentState,
   setParentAdjustment,
   type ParentState,
 } from "../../lib/execution/price-list-parent";
 import type { AdminClient } from "../../lib/execution/sync-executor";
+import { labelled, priceListLabel } from "../../lib/markets/display-name";
 import {
   composeBps,
   correctionCause,
   describeCorrections,
+  handClearText,
   toAdjustmentInput,
   type CorrectionCause,
 } from "../../lib/markets/uniform";
@@ -257,20 +260,28 @@ export async function revertMarketWide(
     // setting one: 0% is a pinned percentage, not the absence of one. Rather than
     // guess, we say so — the alternative is silently pinning a market the merchant
     // had deliberately left alone.
+    //
+    // And go on saying so until it is cleared (#1162). The rows were marked FAILED, which
+    // no revert asks about again, so the next Resume ended Completed without looking: the
+    // sale's percentage still on the market, and nothing left offering to finish it. They
+    // now keep saying the campaign's percentage is on the list, and each revert asks the
+    // list. Once it no longer holds one of the campaign's percentages -- the merchant
+    // cleared it, set their own, or deleted the market -- it is theirs again.
     if (change.priorAdjustmentBps === null) {
+      const live = await readParentState(client, change.priceListGid);
+      const ours = new Set(changes.filter((row) => row.priceListGid === change.priceListGid).map((row) => row.appliedAdjustmentBps));
+      const stillOn = live !== null && live.adjustmentBps !== null && ours.has(live.adjustmentBps);
       await prisma.priceListChange.updateMany({
         where: { campaignId, priceListGid: change.priceListGid, status: { in: ["APPLIED", "VERIFIED"] } },
-        data: {
-          status: "FAILED",
-          failureReason:
-            "This market had no percentage of its own before the campaign, and one " +
-            "cannot be removed through the API. Clear it in Shopify's Markets settings.",
-        },
+        data: stillOn
+          ? {
+              failureReason:
+                "This market had no percentage of its own before the campaign, and one " +
+                "cannot be removed through the API. Clear it in Shopify's Markets settings, then Resume the revert.",
+            }
+          : { status: "REVERTED", verifiedAt: new Date() },
       });
-      messages.push(
-        `${change.priceListGid} needs its market-wide percentage cleared by hand in ` +
-          `Shopify — it had none before this campaign.`,
-      );
+      if (stillOn) messages.push(handClearText([await marketName(change.shopId, change.priceListGid)]));
       continue;
     }
 
@@ -294,13 +305,40 @@ export async function revertMarketWide(
 
     if (!write.ok) {
       messages.push(
-        `${change.priceListGid} still has the campaign's percentage on it ` +
+        // By name, as the market a percentage cannot be cleared from is (#1162), not its id.
+        `${await marketName(change.shopId, change.priceListGid)} still has the campaign's percentage on it ` +
           `(${write.errors.join("; ")}).`,
       );
     }
   }
 
   return messages;
+}
+
+/**
+ * The markets this campaign's revert cannot give back: each list whose percentage the
+ * campaign set over none of the merchant's, and has not been cleared since (#1162). Asked by
+ * the Partial banner, which says so above Resume, as the run's messages do after it. The
+ * first row per list, as `revertMarketWide` reads them: that one knows the merchant's own.
+ */
+export async function percentagesToClear(campaignId: string): Promise<string[]> {
+  const changes = await prisma.priceListChange.findMany({
+    where: { campaignId, status: { in: ["APPLIED", "VERIFIED"] } },
+    orderBy: { createdAt: "asc" },
+    select: { shopId: true, priceListGid: true, priorAdjustmentBps: true },
+  });
+  const first = new Map<string, (typeof changes)[number]>();
+  for (const change of changes) if (!first.has(change.priceListGid)) first.set(change.priceListGid, change);
+  const lists = [...first.values()].filter((change) => change.priorAdjustmentBps === null);
+  return Promise.all(lists.map((change) => marketName(change.shopId, change.priceListGid)));
+}
+
+/** A market's name as the merchant reads it, from the mirror (#722). */
+async function marketName(shopId: string, priceListGid: string): Promise<string> {
+  const list = await prisma.priceListRecord
+    .findFirst({ where: { shopId, priceListGid }, select: { name: true, catalogTitle: true, surfaceKind: true } })
+    .then((found) => found && labelled(found));
+  return list?.name ?? priceListLabel({ name: "" });
 }
 
 /**

@@ -26,7 +26,14 @@ Open the campaign and read the ledger. Each unfinished row says why.
 **Resume** picks up exactly where it stopped. It does not replan and it does not rewrite
 products that already succeeded, so resuming is safe however many times you do it. When only
 a market's prices are outstanding, Resume sends those and nothing else. After a partial
-revert it finishes the revert, and takes back the market prices the revert could not.
+revert it finishes the revert, and takes back the market prices the revert could not. Market
+prices the revert already put back, including ones you had set by hand, are not written again.
+
+One thing Resume cannot do for you. If a market had no percentage adjustment of its own before
+the sale and the campaign gave it one, the app cannot remove it: Shopify only lets an app set
+a percentage, not clear one. The banner names the market. Clear its percentage in Shopify's
+Markets settings, then press **Resume revert**. Until you do, the campaign stays Partial, so
+it never says Completed while that market still shows the sale.
 
 A revert can leave a price someone edited by hand as it is: you ticked **Leave as it is** on
 the Revert tab, a held sale's scheduled end kept it, or Shopify Flow's **End a price

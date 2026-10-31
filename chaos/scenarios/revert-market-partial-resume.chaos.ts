@@ -219,6 +219,9 @@ describe("chaos: a revert whose market prices are not taken back (#706)", () => 
       // does not take it for the merchant's (#705).
       const changes = await prisma.priceListChange.findMany({ where: { campaignId, priceListGid: EUR } });
       expect(changes.map((change) => change.status)).toEqual(["VERIFIED"]);
+      // And the banner says nothing went back, though the sweep settled every euro row (#1162).
+      const banner = describeState("PARTIAL", await partialProgress(chaos.fixture.shopId, campaignId)).explanation;
+      expect(banner, "the banner counted prices still under the sale's percentage as put back").toMatch(/^It stopped before any price was put back/);
 
       const resumed = await chaos.revert({ resume: true });
       await chaos.expectHonest(resumed.runId);
@@ -248,6 +251,148 @@ describe("chaos: a revert whose market prices are not taken back (#706)", () => 
       await chaos.expectHonest(reverted.runId);
       expect(reverted.clean).toBe(true);
       expect(await statusOf(campaignId)).toBe("COMPLETED");
+    });
+  });
+});
+
+/**
+ * What #706 left (#1162). A market whose percentage the app cannot take off was Partial once
+ * and Completed at the next Resume, unchecked. A Resume wrote again the hand-set prices the
+ * revert had put back. The banner over a markets-only revert said nothing was put back when
+ * some was. And a refused delete's message said it would be retried automatically.
+ */
+describe("chaos: a market revert resumed after it stopped part-way (#1162)", () => {
+  it("stays Partial while a percentage the app cannot take off is on, says to clear it by hand, and completes once it is cleared", async () => {
+    await withChaos("revert-market-hand-clear", { catalog: { products: 4, variantsPerProduct: 1 }, percent: -20 }, async (chaos) => {
+      const { shopId, campaignId } = chaos.fixture;
+      percentageMarket(chaos, EUR, "EUR", "DE", { type: "PERCENTAGE_DECREASE", value: 10 });
+      await target(chaos, [EUR], false);
+      const euList = chaos.fake.priceLists.find((list) => list.id === EUR)!;
+      await chaos.expectHonest((await chaos.apply()).runId);
+      expect(euList.adjustment, "the sale did not go on as one percentage").toEqual({ type: "PERCENTAGE_DECREASE", value: 28 });
+      // A market with no percentage of its own before the sale. The fake derives no price on a
+      // list without one, so the market is given one and the ledger told it had none, which
+      // is how such a market reads to the revert.
+      await prisma.priceListChange.updateMany({ where: { campaignId, priceListGid: EUR }, data: { priorAdjustmentBps: null } });
+      const parentWrites = chaos.fake.parentWrites.length;
+
+      const reverted = await chaos.revert();
+      expect(chaos.fake.parentWrites.length, "the revert set a percentage the market never had").toBe(parentWrites);
+      expect(reverted.clean).toBe(false);
+      expect((await chaos.expectHonest(reverted.runId)).outcome).toBe("partial");
+      expect(await statusOf(campaignId)).toBe("PARTIAL");
+      const handClear = /DE percentage had no market-wide percentage of its own before this campaign.*Clear it in Shopify's Markets settings, then Resume the revert/;
+      expect(reverted.messages.join(" "), "the revert did not say, by name, what to clear and where").toMatch(handClear);
+      expect(describeState("PARTIAL", await partialProgress(shopId, campaignId)).explanation, "the banner did not say it").toMatch(handClear);
+
+      // Resumed with the percentage still on. This read Completed, with Europe still 28% off.
+      const again = await chaos.revert({ resume: true });
+      expect(again.clean, "Resume ended the revert without checking the market").toBe(false);
+      expect((await chaos.expectHonest(again.runId)).outcome).toBe("partial");
+      expect(await statusOf(campaignId)).toBe("PARTIAL");
+      expect(again.messages.join(" ")).toMatch(handClear);
+      expect(chaos.fake.parentWrites.length).toBe(parentWrites);
+      // Still the campaign's percentage, so nothing else takes the list for the merchant's.
+      const onList = await prisma.priceListChange.findMany({ where: { campaignId, priceListGid: EUR } });
+      expect(onList.map((change) => change.status)).toEqual(["VERIFIED"]);
+
+      // The merchant clears it in Shopify's Markets settings, then resumes.
+      euList.adjustment = null;
+      const resumed = await chaos.revert({ resume: true });
+      await chaos.expectHonest(resumed.runId);
+      expect(resumed.clean).toBe(true);
+      expect(await statusOf(campaignId)).toBe("COMPLETED");
+      const cleared = await prisma.priceListChange.findMany({ where: { campaignId, priceListGid: EUR } });
+      expect(cleared.map((change) => change.status)).toEqual(["REVERTED"]);
+    });
+  });
+
+  it("resumes without writing again the hand-set market prices the revert already put back", async () => {
+    await withChaos("revert-market-resume-outstanding", SPEC, async (chaos) => {
+      const { campaignId, variantGids } = chaos.fixture;
+      chaos.fake.addPriceList({
+        id: EUR,
+        name: "DE hand-set",
+        currency: "EUR",
+        country: "DE",
+        adjustment: null,
+        catalog: { id: `${EUR}/catalog`, title: "DE", __typename: "MarketCatalog" },
+        prices: variantGids.map((variantGid) => ({ variantGid, amount: "50.00", compareAt: null, originType: "FIXED" as const })),
+      });
+      percentageMarket(chaos, JPY, "JPY", "JP", { type: "PERCENTAGE_INCREASE", value: 20 });
+      await target(chaos, [EUR, JPY]);
+      await prisma.campaign.update({ where: { id: campaignId }, data: { compareAtPolicy: { kind: "set-to-baseline" } as never } });
+      const before = new Map(variantGids.map((gid) => [gid, chaos.fake.priceOf(gid, JPY)]));
+      await chaos.expectHonest((await chaos.apply()).runId);
+      expect(chaos.fake.fixedPricesOn(JPY).size).toBe(variantGids.length);
+
+      // Europe's own prices go back; Japan's sale prices cannot be taken off.
+      chaos.arm([
+        { fault: "server-error", match: (query, variables) => query.includes("priceListFixedPricesDelete") && variables.priceListId === JPY },
+      ]);
+      const reverted = await chaos.revert();
+      chaos.heal();
+      expect((await chaos.expectHonest(reverted.runId)).outcome).toBe("partial");
+      for (const gid of variantGids) expect(chaos.fake.priceOf(gid, EUR)).toBe("50.00");
+      expect(chaos.fake.fixedPricesOn(JPY).size, "the fault did not take, so this tests nothing").toBe(variantGids.length);
+      // Named as the ledger row names it, not as a write the executor will retry by itself.
+      expect(reverted.messages.join(" "), "the message said the delete would be retried automatically").not.toMatch(/retried automatically/);
+      expect(reverted.messages).toContain(
+        "JP percentage: This variant's fixed price could not be removed, so this market may still show the campaign's price. Resume the revert to retry.",
+      );
+
+      const writes = chaos.fake.writeLog.length;
+      const deletes = deletesSent(chaos);
+      const resumed = await chaos.revert({ resume: true });
+      chaos.heal();
+      await chaos.expectHonest(resumed.runId);
+      expect(resumed.clean).toBe(true);
+      expect(await statusOf(campaignId)).toBe("COMPLETED");
+      expect(deletes).toEqual([JPY]);
+      expect(chaos.fake.writeLog.slice(writes), "the resume wrote again the hand-set prices the revert had put back").toEqual([]);
+      for (const gid of variantGids) {
+        expect(chaos.fake.priceOf(gid, EUR)).toBe("50.00");
+        expect(chaos.fake.priceOf(gid, JPY)).toBe(before.get(gid));
+      }
+    });
+  });
+
+  it("counts on the Partial banner of a markets-only revert the market prices it put back", async () => {
+    await withChaos("revert-market-banner-counts", SPEC, async (chaos) => {
+      const { shopId, campaignId, variantGids } = chaos.fixture;
+      percentageMarket(chaos, EUR, "EUR", "DE", { type: "PERCENTAGE_DECREASE", value: 10 });
+      percentageMarket(chaos, JPY, "JPY", "JP", { type: "PERCENTAGE_INCREASE", value: 20 });
+      // Europe and Japan only, each given a price per variant for its strike-through.
+      await target(chaos, [EUR, JPY], false);
+      await prisma.campaign.update({ where: { id: campaignId }, data: { compareAtPolicy: { kind: "set-to-baseline" } as never } });
+      const before = new Map(variantGids.map((gid) => [gid, [chaos.fake.priceOf(gid, EUR), chaos.fake.priceOf(gid, JPY)]]));
+      await chaos.expectHonest((await chaos.apply()).runId);
+      expect(chaos.fake.fixedPricesOn(EUR).size).toBe(variantGids.length);
+      expect(chaos.fake.fixedPricesOn(JPY).size).toBe(variantGids.length);
+
+      const refuseEurope = () =>
+        chaos.arm([
+          { fault: "server-error", match: (query, variables) => query.includes("priceListFixedPricesDelete") && variables.priceListId === EUR },
+        ]);
+      refuseEurope();
+      const reverted = await chaos.revert();
+      chaos.heal();
+      expect((await chaos.expectHonest(reverted.runId)).outcome).toBe("partial");
+      for (const gid of variantGids) expect(chaos.fake.priceOf(gid, JPY), "Japan's prices did not go back").toBe(before.get(gid)![1]);
+      const banner = async () => describeState("PARTIAL", await partialProgress(shopId, campaignId)).explanation;
+      expect(await banner(), "the banner said nothing was put back with Japan back to normal").toMatch(/^Some prices were put back and verified/);
+
+      // Resumed while Europe still refuses: Japan's went back in the revert it continues.
+      refuseEurope();
+      const again = await chaos.revert({ resume: true });
+      chaos.heal();
+      expect((await chaos.expectHonest(again.runId)).outcome).toBe("partial");
+      expect(await banner()).toMatch(/^Some prices were put back and verified/);
+
+      const resumed = await chaos.revert({ resume: true });
+      await chaos.expectHonest(resumed.runId);
+      expect(await statusOf(campaignId)).toBe("COMPLETED");
+      for (const gid of variantGids) expect([chaos.fake.priceOf(gid, EUR), chaos.fake.priceOf(gid, JPY)]).toEqual(before.get(gid));
     });
   });
 });

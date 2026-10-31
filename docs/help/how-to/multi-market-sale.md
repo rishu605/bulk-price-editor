@@ -42,4 +42,11 @@ price.
 
 If Shopify does not let the revert take a market's prices back, that market still shows the
 sale, so the campaign is **Partial** rather than Completed. **Resume revert** tries those
-market prices again. Prices the revert already put back stay as they are.
+market prices again. Prices the revert already put back stay as they are, and are not
+written again.
+
+A sale applied as one market-wide percentage is undone by putting back the market's own
+percentage. If the market had none before the sale, there is nothing the app can put back,
+and Shopify does not let an app remove a percentage. The revert names the market and stays
+**Partial**. Clear the percentage in Shopify's Markets settings, then press **Resume
+revert**. The campaign completes once the market no longer has the sale's percentage.
