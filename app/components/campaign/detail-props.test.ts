@@ -41,8 +41,8 @@ describe("the campaign page's props bundle", () => {
 
   it("still supplies the names the loader does not have", () => {
     // `attention` is the components' shorter name for `needsAttention`, and the fetcher,
-    // busy flag, apply gate and revert keepers are all computed here.
-    for (const extra of ["fetcher", "busy", "canApply", "attention", "keepers", "keepersPending"]) {
+    // busy flag, apply gate, revert keepers and the run's time left (#820) are all computed here.
+    for (const extra of ["fetcher", "busy", "canApply", "attention", "keepers", "keepersPending", "eta"]) {
       expect(route, `${extra} is declared on the props type and has to be passed`).toContain(
         `\n    ${extra},`,
       );

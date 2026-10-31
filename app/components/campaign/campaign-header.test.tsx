@@ -627,6 +627,38 @@ describe("the confirmation says what is about to happen", () => {
     expect(queued).toContain("Waiting for the background worker");
   });
 
+  it("says how long the run has left once the poll can say (#820), and nothing before", () => {
+    const writing = (over: Record<string, unknown>) =>
+      render(
+        <CampaignHeader
+          {...props({
+            lifecycle: describeState("APPLYING"),
+            state: "APPLYING",
+            timeZone: "UTC",
+            runs: [{ id: "r1", kind: "APPLY", status: "EXECUTING", planned: 700, verified: 0, failed: 0, skipped: 0, startedAt: "2026-09-25T10:39:00.000Z", finishedAt: null }],
+            ...over,
+          } as never)}
+        />,
+      );
+
+    expect(writing({ eta: "about 4 minutes left" })).toContain(
+      "Started 25 Sep 2026, 10:39 · about 4 minutes left · this page updates when it finishes",
+    );
+    // Under 5%, a bulk operation, a run gone quiet: the poll has no estimate, and none is made up.
+    const silent = writing({ eta: null });
+    expect(silent).toContain("Started 25 Sep 2026, 10:39 · this page updates when it finishes");
+    expect(silent).not.toContain("left");
+
+    // Not beside a run the page has not seen start, which would contradict "Waiting".
+    const queued = writing({ eta: "about 4 minutes left", runs: [] });
+    expect(queued).toContain("Waiting for the background worker");
+    expect(queued).not.toContain("minutes left");
+  });
+
+  it("says nothing about time left on a campaign that is not writing", () => {
+    expect(render(<CampaignHeader {...props({ eta: "about 4 minutes left" } as never)} />)).not.toContain("minutes left");
+  });
+
   it("does not mention clamping when nothing clamps", () => {
     expect(render(<CampaignHeader {...props()} />)).not.toContain("Raised to a floor");
   });

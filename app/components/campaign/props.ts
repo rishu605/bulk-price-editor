@@ -29,4 +29,9 @@ export type CampaignDetailProps = Awaited<ReturnType<typeof loader>> & {
    */
   keepers: KeepersAfterRevert | null;
   keepersPending: boolean;
+  /**
+   * How long the run writing has left, from the status poll (#820). Null until a run has
+   * written enough to say, and wherever it cannot: see `runEta`.
+   */
+  eta: string | null;
 };

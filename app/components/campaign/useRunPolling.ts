@@ -13,6 +13,8 @@ import { useFetcher, useRevalidator } from "react-router";
  * Polls `app.campaign-status`, one indexed read, rather than revalidating the page: the
  * page's loader plans the whole campaign (#812), and doing that every few seconds for as
  * long as a run lasts would be its own outage.
+ *
+ * Returns how long the run has left, as the latest answer put it (#820): see `etaFrom`.
  */
 
 /** The states a run is writing in. Anything else is where a run ends up. */
@@ -32,8 +34,18 @@ export function finished(pageState: string, polled: string | null | undefined, a
   return askedThisRun && IN_FLIGHT.has(pageState) && !!polled && !IN_FLIGHT.has(polled);
 }
 
-export function useRunPolling(campaignId: string, state: string): void {
-  const status = useFetcher<{ status: string | null }>();
+/**
+ * The estimate to show beside a run: the latest answer's, kept while the next is asked for so
+ * the line does not blink every five seconds. None on a page no longer mid-run: another action
+ * can reload it into the finished campaign before a poll has heard the run end, and the
+ * fetcher still holds the estimate it gave before.
+ */
+export function etaFrom(pageState: string, polled: { eta?: string | null } | undefined): string | null {
+  return IN_FLIGHT.has(pageState) ? (polled?.eta ?? null) : null;
+}
+
+export function useRunPolling(campaignId: string, state: string): string | null {
+  const status = useFetcher<{ status: string | null; eta?: string | null }>();
   const revalidator = useRevalidator();
   const inFlight = IN_FLIGHT.has(state);
 
@@ -63,4 +75,6 @@ export function useRunPolling(campaignId: string, state: string): void {
     asked.current = false;
     void revalidator.revalidate();
   }, [state, polled, revalidator]);
+
+  return etaFrom(state, status.data);
 }
