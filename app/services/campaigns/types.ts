@@ -222,6 +222,12 @@ export interface CampaignPreview {
    */
   staleBaselines: number;
   /**
+   * Of the variants this campaign prices, how many have a baseline recaptured at its own sale
+   * price while it was live (#781): its status says so rather than "verified". Absent on a
+   * revert's preview, on one with no plan, and on one stored before it was counted.
+   */
+  recapturedAtSale?: number;
+  /**
    * Set instead of a plan while a run is writing this campaign (#803): why the page shows
    * no preview. Planning the whole scope on every load held database connections the run
    * itself needed -- on a 102,132-variant apply, enough to starve every shop's pages.

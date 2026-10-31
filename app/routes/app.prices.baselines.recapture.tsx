@@ -189,14 +189,16 @@ export default function Recapture() {
           <s-text>
             Recapturing replaces the reference price of every variant in scope with the
             price its storefront shows right now. Every campaign from then on computes
-            its discount from the new number.
+            its discount from the new number. A variant already showing its reference
+            price is left as it is.
           </s-text>
         </s-paragraph>
         <s-paragraph>
           <s-text>
             Do it when your real prices have genuinely changed — a supplier increase, a
             new season. Do not do it while a sale is running, or the sale price becomes
-            the price you discount from next time.
+            the price you discount from: by that sale too, if you apply it again, and its
+            revert leaves the sale price in place.
           </s-text>
         </s-paragraph>
 

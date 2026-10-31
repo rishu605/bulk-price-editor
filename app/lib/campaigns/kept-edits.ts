@@ -21,3 +21,15 @@ export function editsLeft(count: number): string {
 
 /** For an end handed to the worker, which works out which prices are edited when it runs. */
 export const EDITS_WILL_BE_LEFT = "Any price edited outside Anchor since the campaign set it is left as edited, not reverted.";
+
+/**
+ * Beside the Resume button of a revert that stopped part-way after keeping edits (#1157),
+ * whichever way it kept them: Resume has no confirmation box, so the banner above it is where
+ * the merchant reads, before pressing, that it will not write over them.
+ *
+ * "1 price edited outside Anchor that the revert kept stays as edited: Resume leaves it alone."
+ */
+export function resumeLeaves(count: number): string {
+  const one = count === 1;
+  return `${countOf(count, "price")} edited outside Anchor that the revert kept ${one ? "stays" : "stay"} as edited: Resume leaves ${one ? "it" : "them"} alone.`;
+}

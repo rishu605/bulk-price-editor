@@ -15,6 +15,9 @@
  * - **Prices taken to nothing.** More than a handful of prices the rule would take to zero
  *   or below, which are written at the smallest price instead. Not a setting: a merchant
  *   who raises the change threshold has not asked for a page of one-cent prices.
+ * - **A discount compounded.** Any price this campaign already set whose baseline was since
+ *   recaptured at that sale price (#781): applying again takes the discount off the discount,
+ *   a 20% sale at 36% off. Not a setting either, and one is enough.
  *
  * Pure, and the one place these are decided, so the dialog that asks and the server that
  * refuses cannot disagree (rule 4). Integer minor units throughout: a percentage of a price
@@ -156,6 +159,12 @@ export interface BlastRadius {
   } | null;
   /** Prices the rule takes to zero or below, written at the smallest price instead. */
   atMinimum: number;
+  /**
+   * Written prices this campaign already set, whose baseline was recaptured at that sale price
+   * since, so the write discounts its own discount (#781), with the first one's title. Absent
+   * when there are none, and on a preview stored before it was counted.
+   */
+  compounding?: { count: number; title: string };
 }
 
 /** Whether what was typed into a confirmation box is the word: "apply", in any case, spaces aside. */
@@ -168,7 +177,8 @@ export function asksForConfirmation(radius: BlastRadius): boolean {
   return (
     radius.planned > radius.thresholds.variants ||
     radius.largeChanges > 0 ||
-    radius.atMinimum > MINIMUM_PRICE_HANDFUL
+    radius.atMinimum > MINIMUM_PRICE_HANDFUL ||
+    (radius.compounding?.count ?? 0) > 0
   );
 }
 
@@ -213,5 +223,23 @@ export function confirmationReasons(radius: BlastRadius): string[] {
     );
   }
 
+  // First when it is there: it is the one reason that is a wrong price rather than a big one.
+  if (radius.compounding && radius.compounding.count > 0) reasons.unshift(compoundingReason(radius.compounding));
+
   return reasons;
+}
+
+/**
+ * The compounding, named (#781): "applying twice gives the same result" is the promise the
+ * dialog makes, and it is not true of these.
+ */
+export function compoundingReason({ count, title }: { count: number; title: string }): string {
+  const one = count === 1;
+  return (
+    (one
+      ? `“${title}” already shows this campaign's price, and would be discounted again: its baseline was`
+      : `${formatCount(count)} prices this campaign already set would be discounted again, the first “${title}”: their baselines were`) +
+    " recaptured at the sale price while the campaign was live, so applying it now compounds the discount, taking it " +
+    "off the sale price rather than the price before the sale."
+  );
 }

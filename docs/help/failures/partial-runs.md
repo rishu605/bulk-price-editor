@@ -28,6 +28,13 @@ products that already succeeded, so resuming is safe however many times you do i
 a market's prices are outstanding, Resume sends those and nothing else. After a partial
 revert it finishes the revert, and takes back the market prices the revert could not.
 
+A revert can leave a price someone edited by hand as it is: you ticked **Leave as it is** on
+the Revert tab, a held sale's scheduled end kept it, or Shopify Flow's **End a price
+campaign** did. Resuming that revert keeps every one of those edits too. The banner above
+Resume says how many, and the ledger lists each with why it was left. The scheduler's next
+attempt at a scheduled end keeps them the same way. To revert one of those prices after all,
+revert from the Revert tab and leave its **Leave as it is** box unticked.
+
 If the reason was a deleted product or a rejected variant, resuming will not help those
 rows — fix the product in Shopify first, or exclude it.
 

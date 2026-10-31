@@ -7,7 +7,7 @@
  * somebody clicked Export, with nothing at build time to warn about it.
  */
 
-import { formatCount } from "../format/display";
+import { countOf, formatCount } from "../format/display";
 import { toCsv } from "./csv";
 
 export type RollbackRowKind =
@@ -36,6 +36,12 @@ export interface RollbackRow {
   live: string | null;
   /** What `resolve(without this campaign)` would write. */
   revertsTo: string | null;
+  /**
+   * The price the ledger recorded before this campaign, set only where reverting puts back a
+   * baseline that is not it (#781): one recaptured at the sale price, say. Null otherwise, and
+   * where another campaign's price is what reverting leaves, which explains the difference.
+   */
+  before?: string | null;
 }
 
 export interface RollbackReport {
@@ -45,6 +51,16 @@ export interface RollbackReport {
   counts: { total: number; clean: number; drifted: number; deleted: number; unaffected: number };
   /** True when nothing needs a decision and the revert can just run. */
   straightforward: boolean;
+  /**
+   * The rows with a `before`, said above the table, which shows only some rows (#781): how
+   * many, the first few, and how many of them have a baseline recaptured at this campaign's
+   * own sale price. Absent when there are none, and on a report stored before it was counted.
+   */
+  notBefore?: {
+    count: number;
+    recaptured: number;
+    examples: Array<{ title: string; before: string; revertsTo: string }>;
+  };
 }
 
 /**
@@ -124,6 +140,31 @@ export function unaffectedSentence(unaffected: number): string | null {
 }
 
 /**
+ * What the Revert tab and dialog say about the variants reverting does not put back at their
+ * price from before this campaign (#781), or null when there are none.
+ *
+ * The page said "We applied 80.00 · Live now 80.00 · Reverts to 80.00" of a $100 product whose
+ * baseline had been recaptured at its sale price, and nothing about the $100 the ledger had.
+ */
+export function notBeforeSentence(notBefore: RollbackReport["notBefore"]): string | null {
+  if (!notBefore || notBefore.count === 0) return null;
+  const { count, recaptured, examples } = notBefore;
+  const one = count === 1;
+  const named = examples.map((row) => `“${row.title}” reverts to ${row.revertsTo}, not ${row.before}`).join("; ");
+  const more = count > examples.length ? `; and ${formatCount(count - examples.length)} more, in the export` : "";
+  const why =
+    recaptured === 0
+      ? ""
+      : ` ${recaptured === count ? (one ? "Its baseline was" : "Their baselines were") : `${formatCount(recaptured)} of them had their baseline`} ` +
+        "recaptured at this campaign's sale price, so reverting leaves the sale price in place. To end the sale at the price " +
+        "from before it, import that price as the baseline on Prices → Baselines, then revert.";
+  return (
+    `${countOf(count, "variant")} ${one ? "reverts" : "revert"} to a different price from the one the ledger recorded ` +
+    `before this campaign: ${named}${more}.${why}`
+  );
+}
+
+/**
  * The report as CSV.
  *
  * Exportable because this is the artefact somebody forwards to whoever made the
@@ -132,7 +173,8 @@ export function unaffectedSentence(unaffected: number): string | null {
  */
 export function rollbackReportCsv(report: RollbackReport): string {
   return toCsv(
-    ["variant_gid", "title", "state", "applied", "live_now", "reverts_to"],
+    // `before_campaign` only where reverting does not put that price back (#781).
+    ["variant_gid", "title", "state", "applied", "live_now", "reverts_to", "before_campaign"],
     report.rows.map((row) => [
       row.variantGid,
       row.title,
@@ -140,6 +182,7 @@ export function rollbackReportCsv(report: RollbackReport): string {
       row.applied ?? "",
       row.live ?? "",
       row.revertsTo ?? "",
+      row.before ?? "",
     ]),
   );
 }

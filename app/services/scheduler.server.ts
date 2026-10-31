@@ -491,6 +491,10 @@ async function runTransition(
     occurrenceKey,
     claimedFrom: claim.from,
     ...(claim.recorded ? {} : { claimUnrecorded: claim.reason }),
+    // An end tried again after one stopped part-way finishes that revert, as Resume does, so
+    // it keeps what that revert kept as edited (#1157). Run as a fresh revert, the next tick
+    // wrote over every one, before the merchant could press anything.
+    ...(transition === "revert" && claim.from === "PARTIAL" ? { resume: true } : {}),
     ...(edited.length > 0
       ? {
           skipVariantGids: edited,

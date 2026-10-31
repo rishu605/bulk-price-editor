@@ -48,6 +48,7 @@ import {
 import { rowsThatFit } from "../../lib/ui/table-budget";
 import { inChunks } from "../../lib/db/chunk";
 import { describeBlocked } from "./blocked.server";
+import { recapturedBaselines, type RecapturedBaseline } from "./recaptured.server";
 
 export interface PreviewOptions {
   /** Preview the revert instead of the apply. */
@@ -230,6 +231,9 @@ export async function previewCampaign(
       candidates,
     ),
   );
+  // Its variants whose baseline is its own sale price, recaptured while it was live (#781):
+  // the status says so, and applying them again asks for the word. Not on a revert's preview.
+  const recaptured = options.revert ? new Map<string, RecapturedBaseline>() : await recapturedBaselines(shopId, campaignId);
   // Whether applying this needs the word typed, and why (#818): the dialog says these
   // reasons and `blastRadiusRefusal` re-checks them from a fresh preview.
   const confirm = await blastRadiusOf(
@@ -239,6 +243,7 @@ export async function previewCampaign(
     candidates,
     confirmThresholdsOf(storeSettings),
     titles,
+    { campaignId, recaptured },
   );
 
   const margin = marginImpact(
@@ -293,6 +298,7 @@ export async function previewCampaign(
     // would turn down. Not on a revert: taking such a campaign back is always allowed.
     ...(options.revert ? {} : refusedRule(campaign.ruleRows)),
     staleBaselines,
+    recapturedAtSale: recaptured.size,
     // From the planner's coverage, every candidate included: a variant another campaign
     // keeps is usually already at its price, and the rows leave those out (#821).
     overlaps: overlapsFrom(outcome.coverage, campaignId, others),
@@ -348,6 +354,10 @@ function marketsOnlyRows(
  *
  * The one reading of a plan's reach: the Apply dialog's, and the start check's at save and at
  * start (#1009), which reads the run's own plan.
+ *
+ * `own` is the campaign whose apply this is, so a write that would discount its own sale price
+ * again is counted (#781), and its baselines recaptured at that price when the caller already
+ * has them; otherwise they are read for the rows written.
  */
 export async function blastRadiusOf(
   shopId: string,
@@ -356,20 +366,29 @@ export async function blastRadiusOf(
   candidates: readonly PlanCandidate[],
   thresholds: ConfirmThresholds,
   titles: Map<string, string>,
+  own: { campaignId: string; recaptured?: ReadonlyMap<string, RecapturedBaseline> },
 ): Promise<BlastRadius> {
   const baselines = new Map(candidates.map((candidate) => [refKey(candidate.ref), candidate.baseline]));
   const written: WrittenPrice[] = [];
+  // The ones this campaign's own price is written to: only those can discount its sale price again.
+  const mine: string[] = [];
   for (const row of rows) {
     if (row.status === "skipped" || !row.intendedPrice || row.ref.priceListGid !== "") continue;
     const baseline = baselines.get(refKey(row.ref));
     if (!baseline) continue;
     written.push({ variantGid: row.ref.variantGid, baseline: baseline.price, after: row.intendedPrice, cost: baseline.cost });
+    if (row.campaignId === own.campaignId) mine.push(row.ref.variantGid);
   }
 
   const large = largeChanges(written, thresholds.changePercent);
   const top = large.largest;
   // Titled from the page of rows when it is on it, and looked up alone when it is not.
-  const title = top ? (titles.get(top.variantGid) ?? (await titleMapFor(shopId, [top.variantGid])).get(top.variantGid)) : null;
+  const titleOf = async (gid: string) => titles.get(gid) ?? (await titleMapFor(shopId, [gid])).get(gid) ?? gid;
+  const title = top ? await titleOf(top.variantGid) : null;
+
+  // Its own writes over a baseline recaptured at its sale price, which compound (#781).
+  const recaptured = own.recaptured ?? (mine.length > 0 ? await recapturedBaselines(shopId, own.campaignId, mine) : new Map());
+  const compounded = mine.filter((gid) => recaptured.has(gid));
 
   return {
     thresholds,
@@ -385,6 +404,9 @@ export async function blastRadiusOf(
         }
       : null,
     atMinimum: counts.clampedToMinimum,
+    ...(compounded.length > 0
+      ? { compounding: { count: compounded.length, title: await titleOf(compounded[0]!) } }
+      : {}),
   };
 }
 

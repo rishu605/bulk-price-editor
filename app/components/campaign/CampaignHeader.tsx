@@ -312,6 +312,7 @@ export function CampaignHeader({
         <RevertConfirmation
           campaignName={preview.name}
           counts={rollback.counts}
+          notBefore={rollback.notBefore}
           keepers={keepers}
           pending={keepersPending}
           busy={busy}

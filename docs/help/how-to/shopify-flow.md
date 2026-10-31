@@ -48,6 +48,9 @@ price, with why it was left. An edit still waiting in **Price drift** stays ther
 decide. If you want an edited price reverted too, end the campaign with its Revert button
 instead, and leave that edit unticked.
 
+If the end stops part-way, Flow's run log says to resume it from the campaign page. **Resume**
+finishes the revert and keeps the same edits: the banner above it says how many.
+
 **A large or deep campaign has to be confirmed before Flow can start it.** When a campaign
 writes more prices, or moves a price further, than your typed-confirmation settings allow,
 the Apply button asks you to type *apply*. Flow cannot type it, so a start that needs it is

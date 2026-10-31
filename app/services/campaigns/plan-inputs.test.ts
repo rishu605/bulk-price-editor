@@ -31,6 +31,7 @@ const PLANNER = [
   "app/services/campaigns/market-surfaces.server.ts",
   "app/services/campaigns/handover.server.ts",
   "app/services/campaigns/blocked.server.ts",
+  "app/services/campaigns/recaptured.server.ts",
   "app/services/reconciliation.server.ts",
   "app/services/settings.server.ts",
   "app/services/segments.server.ts",

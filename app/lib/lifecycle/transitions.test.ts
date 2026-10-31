@@ -215,6 +215,23 @@ describe("a Partial campaign's explanation follows what its run got done (#927)"
   });
 });
 
+describe("a Partial revert that kept edits says Resume leaves them alone (#1157)", () => {
+  it("counts them, after what the revert got done", () => {
+    const one = describeState("PARTIAL", { resumes: "REVERT", progress: { confirmed: 2, unconfirmed: 0 }, kept: 1 }).explanation;
+    expect(one).toMatch(/^Some prices were put back and verified/);
+    expect(one).toMatch(/Resuming finishes the revert\. 1 price edited outside Anchor that the revert kept stays as edited: Resume leaves it alone\.$/);
+    const three = describeState("PARTIAL", { resumes: "REVERT", progress: { confirmed: 0, unconfirmed: 0 }, kept: 3 }).explanation;
+    expect(three).toMatch(/3 prices edited outside Anchor that the revert kept stay as edited: Resume leaves them alone\.$/);
+  });
+
+  it("says nothing of edits when it kept none, or when the run it resumes is an apply", () => {
+    const none = describeState("PARTIAL", { resumes: "REVERT", kept: 0 }).explanation;
+    expect(none).toBe(describeState("PARTIAL", { resumes: "REVERT" }).explanation);
+    expect(none).not.toMatch(/edited outside Anchor/);
+    expect(describeState("PARTIAL", { resumes: "APPLY", kept: 2 }).explanation).not.toMatch(/edited outside Anchor/);
+  });
+});
+
 describe("an active campaign that a higher-priority one outranks everywhere (#837)", () => {
   it("does not claim the storefront shows its price, and names who does", () => {
     const described = describeState("ACTIVE", { outrankedBy: ["QA 687 high"] });
@@ -233,6 +250,31 @@ describe("an active campaign that a higher-priority one outranks everywhere (#83
   it("says the storefront shows its price when nothing outranks it everywhere", () => {
     expect(describeState("ACTIVE", { outrankedBy: [] }).explanation).toContain("Your storefront shows the campaign price");
     expect(describeState("ACTIVE").explanation).toContain("Your storefront shows the campaign price");
+  });
+});
+
+describe("an active campaign whose baseline was recaptured at its sale price (#781)", () => {
+  it("does not read verified, needs a decision, and says what applying and reverting would do", () => {
+    const described = describeState("ACTIVE", { recapturedAtSale: 1, outrankedBy: [] });
+    expect(described.label).toBe("Active — needs a decision");
+    expect(described.tone).toBe("warning");
+    expect(described.explanation).not.toContain("verified");
+    expect(described.explanation).toContain("the baseline of 1 of its variants was recaptured at the sale price");
+    expect(described.explanation).toContain("Applying again would discount it a second time");
+    expect(described.explanation).toContain("reverting would leave it at the sale price instead of the price before the campaign");
+    expect(described.explanation).toContain("import it as the baseline on Prices → Baselines, then revert");
+    expect(described.nextAction?.intent).toBe("revert");
+  });
+
+  it("counts several, grouped", () => {
+    expect(describeState("ACTIVE", { recapturedAtSale: 3_673 }).explanation).toContain(
+      "the baselines of 3,673 of its variants were recaptured",
+    );
+  });
+
+  it("reads as before with none", () => {
+    expect(describeState("ACTIVE", { recapturedAtSale: 0 }).label).toBe("Active");
+    expect(describeState("ACTIVE", { recapturedAtSale: 0 }).explanation).toContain("every row was read back and verified");
   });
 });
 

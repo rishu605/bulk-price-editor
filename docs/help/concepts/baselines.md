@@ -28,10 +28,27 @@ know what £100 was, because we wrote it down before we touched anything.
 Recapture when your *normal* prices have genuinely changed — a supplier price rise, a new
 season.
 
+A recapture replaces only the baselines that have changed. A product whose storefront price
+is already its baseline keeps the baseline it has, and the recapture counts it as already
+correct, so its history gains no new entry.
+
 Do **not** recapture while a campaign is running. You would be recording the sale price as
 the new normal, and every future discount would come off the discounted number. The app
 asks you to type a confirmation for exactly this reason, and tells you which campaigns are
 live at the time.
+
+The running campaign is affected too. Its baseline is now its own sale price, so:
+
+- **Its status says so.** It reads *Active — needs a decision* rather than *verified*.
+- **Applying it again asks first.** A second apply would take the discount off the sale
+  price, so 20% off £100 becomes £64 rather than £80. The app asks you to type *apply*, and
+  says which product would be discounted again.
+- **Reverting it leaves the sale price.** The Revert tab says which products revert to a
+  different price from the one the ledger recorded before the campaign, and what that
+  price was.
+
+To end the sale at the old price, import that price as the baseline (Prices → Baselines),
+then revert.
 
 A wholesale price is recaptured with its quantity breaks, which are read from Shopify first.
 When a scope has more wholesale prices than the page can read while you wait, the recapture
