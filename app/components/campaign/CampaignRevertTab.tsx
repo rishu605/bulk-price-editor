@@ -10,7 +10,7 @@
 import { RollbackReportTable } from "../../components/RollbackReportTable";
 import { ActionRow } from "../ActionRow";
 import { filenameSlug } from "../../lib/reporting/csv";
-import { rollbackSummary, unaffectedSentence } from "../../lib/reporting/rollback";
+import { notBeforeSentence, rollbackSummary, unaffectedSentence } from "../../lib/reporting/rollback";
 import { ExportButton } from "../ExportButton";
 import type { CampaignDetailProps } from "./props";
 import { Card } from "../Card";
@@ -32,6 +32,14 @@ export function CampaignRevertTab({ rollback, preview, fetcher, busy }: Campaign
             <s-paragraph>
               <s-text>{unaffectedSentence(rollback.counts.unaffected)}</s-text>
             </s-paragraph>
+          ) : null}
+
+          {/* Reverting puts back a baseline that is not the price from before this campaign,
+              usually one recaptured at its own sale price (#781): said before the button. */}
+          {notBeforeSentence(rollback.notBefore) ? (
+            <s-banner tone="warning">
+              <s-paragraph>{notBeforeSentence(rollback.notBefore)}</s-paragraph>
+            </s-banner>
           ) : null}
 
           {/* Moved here from the actions card, which is gone. It is the one thing about

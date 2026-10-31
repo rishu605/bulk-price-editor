@@ -76,7 +76,9 @@ export async function startCheck(shopId: string, campaign: PlannableCampaign, pl
   if (!planned) return { radius: null, unconfirmed: null };
 
   const thresholds = confirmThresholdsOf(await readSettings(shopId));
-  const radius = await blastRadiusOf(shopId, planned.rows, planned.counts, planned.candidates, thresholds, new Map());
+  const radius = await blastRadiusOf(shopId, planned.rows, planned.counts, planned.candidates, thresholds, new Map(), {
+    campaignId: campaign.id,
+  });
   return { radius, unconfirmed: unconfirmedStart(radius, startConfirmationOf(campaign.schedule)) };
 }
 
@@ -120,7 +122,7 @@ export async function refuseUnconfirmedStart(
  */
 export async function refuseUntypedPress(shopId: string, campaignId: string, plan: StartPlan): Promise<void> {
   const thresholds = confirmThresholdsOf(await readSettings(shopId));
-  const radius = await blastRadiusOf(shopId, plan.rows, plan.counts, plan.candidates, thresholds, new Map());
+  const radius = await blastRadiusOf(shopId, plan.rows, plan.counts, plan.candidates, thresholds, new Map(), { campaignId });
   if (!asksForConfirmation(radius)) return;
 
   throw new AppError({

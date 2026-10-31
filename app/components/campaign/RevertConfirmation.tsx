@@ -1,5 +1,5 @@
 import { formatCount } from "../../lib/format/display";
-import { unaffectedSentence } from "../../lib/reporting/rollback";
+import { notBeforeSentence, unaffectedSentence, type RollbackReport } from "../../lib/reporting/rollback";
 import { SPACE } from "../../lib/ui/spacing";
 import type { KeepersAfterRevert } from "../../services/campaigns/keepers.server";
 import { Secondary } from "../Type";
@@ -31,6 +31,7 @@ export const REVERT_MODAL_ID = "revert-confirmation";
 export function RevertConfirmation({
   campaignName,
   counts,
+  notBefore,
   keepers,
   pending,
   busy,
@@ -39,6 +40,8 @@ export function RevertConfirmation({
   campaignName: string;
   /** From the rollback report the page already has. */
   counts: { total: number; drifted: number; deleted: number; unaffected: number };
+  /** The variants reverting does not put back at their price from before the campaign (#781). */
+  notBefore?: RollbackReport["notBefore"];
   /** Asked for when the modal opens, because answering means planning the scope again. */
   keepers: KeepersAfterRevert | null;
   pending: boolean;
@@ -82,6 +85,13 @@ export function RevertConfirmation({
                 set them. Open the Revert tab to choose which of those to leave alone —
                 reverting from here rewrites all of them.
               </s-text>
+            </s-paragraph>
+          ) : null}
+
+          {/* The header's Revert is pressed by somebody who may never open the Revert tab (#781). */}
+          {notBeforeSentence(notBefore) ? (
+            <s-paragraph>
+              <s-text tone="caution">{notBeforeSentence(notBefore)}</s-text>
             </s-paragraph>
           ) : null}
 

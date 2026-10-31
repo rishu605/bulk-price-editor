@@ -16,7 +16,7 @@ import type { CampaignPreview } from "./types";
 /**
  * Everything the campaign page's Status card needs beyond the state itself: what the state
  * means for this campaign right now. One place, because each fix that made the card tell
- * the truth (#702, #784, #824, #837, #851, #927, #975, #1005, #1009, #829, #1054) added a line to the page's
+ * the truth (#702, #784, #824, #837, #851, #927, #975, #1005, #1009, #829, #1054, #781) added a line to the page's
  * loader, and the route has a size it must stay under.
  */
 export async function lifecycleContext(
@@ -26,7 +26,7 @@ export async function lifecycleContext(
   /** Its schedule, which the caller selects beside its definition (#1141), and its practice column (#884). */
   campaign: Pick<Campaign, "schedule" | "practice">,
   timeZone: string,
-  preview: Pick<CampaignPreview, "outrankedBy" | "confirm">,
+  preview: Pick<CampaignPreview, "outrankedBy" | "confirm" | "recapturedAtSale">,
 ) {
   const { schedule } = campaign;
   return {
@@ -34,6 +34,7 @@ export async function lifecycleContext(
     heldUntil: state === "HELD" ? windowEndText(schedule, timeZone) : undefined, // #784
     neverStarts: state === "SCHEDULED" ? neverStarts(parseSchedule(schedule), new Date(), timeZone) : null, // #824
     outrankedBy: preview.outrankedBy, // a higher campaign prices every variant (#837)
+    recapturedAtSale: preview.recapturedAtSale ?? 0, // its baseline recaptured at its sale price (#781)
     startRefused: state === "SCHEDULED" ? startRefusal(schedule) : null, // #975
     lateStart: state === "SCHEDULED" ? await lateStart(shopId, campaignId, schedule) : null, // #851
     endMissed: state === "ACTIVE" ? endMissed(schedule) : null, // #1005

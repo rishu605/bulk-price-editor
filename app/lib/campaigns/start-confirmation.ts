@@ -51,6 +51,11 @@ export interface StartConfirmation {
   largestBasisPoints: number;
   /** Prices taken to zero or below and written at the smallest price. */
   atMinimum: number;
+  /**
+   * Prices it would discount again from a baseline recaptured at its own sale price (#781).
+   * Absent from a confirmation stored before it was counted, which covered none.
+   */
+  compounding?: number;
 }
 
 /** What a person confirms by typing the word over this preview. */
@@ -62,6 +67,8 @@ export function confirmationOf(radius: BlastRadius, by: string, at: Date): Start
     largeChanges: radius.largeChanges,
     largestBasisPoints: radius.largest?.basisPoints ?? 0,
     atMinimum: radius.atMinimum,
+    // Only where there is some, as a confirmation stored before it was counted reads.
+    ...(radius.compounding ? { compounding: radius.compounding.count } : {}),
   };
 }
 
@@ -127,6 +134,14 @@ export function beyondConfirmation(radius: BlastRadius, confirmed: StartConfirma
         (confirmed.largestBasisPoints > 0
           ? `and the largest confirmed was ${percentText(confirmed.largestBasisPoints)}`
           : "and no price moved that far when it was confirmed"),
+    );
+  }
+  // No slack at all: each one is a sale price discounted again, which nobody confirmed (#781).
+  const compounding = radius.compounding?.count ?? 0;
+  if (compounding > (confirmed.compounding ?? 0)) {
+    grown.push(
+      `${prices(compounding)} it already set would now be discounted again, from a baseline recaptured at its sale price, ` +
+        `and ${formatCount(confirmed.compounding ?? 0)} ${(confirmed.compounding ?? 0) === 1 ? "was" : "were"} confirmed`,
     );
   }
   if (radius.atMinimum > MINIMUM_PRICE_HANDFUL && !withinCount(radius.atMinimum, confirmed.atMinimum)) {
