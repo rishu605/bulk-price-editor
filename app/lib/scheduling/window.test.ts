@@ -9,6 +9,7 @@ import {
   describeSchedule,
   dueTransition,
   effectiveBufferMs,
+  handApplyClearsWindow,
   joinDateAndTime,
   localInputToUtc,
   parseSchedule,
@@ -222,6 +223,56 @@ describe("describeSchedule", () => {
     const closed = describeSchedule(window(), "UTC", "COMPLETED");
     expect(closed).toMatch(/^Was scheduled for .* to .* \(UTC\)\./);
     expect(closed).not.toMatch(/Starts|reverts|Reverting begins/);
+  });
+
+  it("says before the press what applying does with a window that has ended (#1146)", () => {
+    // "QA · 1h session": completed in its window, and the dialog said only that the start
+    // was done with. Its end, five weeks gone, reverted the hand apply a minute later.
+    const after = at("2026-08-22T09:00:00Z");
+    expect(describeSchedule(window(), "UTC", "COMPLETED", after)).toBe(
+      "Was scheduled for 20 Aug 2026, 09:00 to 22 Aug 2026, 09:00 (UTC). It has finished, so the schedule will not " +
+        "start it again. Its window has ended, so applying it now runs it by hand with no end: its old dates are " +
+        "cleared, and it runs until you revert it.",
+    );
+    expect(describeSchedule(window(), "UTC", "SCHEDULED", after)).toBe(
+      "Was scheduled for 20 Aug 2026, 09:00 to 22 Aug 2026, 09:00 (UTC). Its window ended before it was applied, so " +
+        "applying it now runs it by hand with no end: its old dates are cleared, and it runs until you revert it.",
+    );
+
+    // An end still ahead is kept, and said to be: inside the window, in its revert buffer, or before it.
+    for (const now of ["2026-08-19T00:00:00Z", "2026-08-21T00:00:00Z", "2026-08-22T08:58:00Z"]) {
+      expect(describeSchedule(window(), "UTC", "COMPLETED", at(now))).toMatch(
+        /It has finished, so the schedule will not start it again\. Applied by hand now, it keeps that end and reverts on schedule\.$/,
+      );
+      expect(describeSchedule(window(), "UTC", "SCHEDULED", at(now))).toMatch(/^Starts .*, reverts /);
+    }
+    // A live campaign's end is the sale's, already on the storefront.
+    expect(describeSchedule(window(), "UTC", "ACTIVE", after)).toMatch(/^Starts .*, reverts /);
+  });
+});
+
+describe("handApplyClearsWindow (#1146)", () => {
+  it("clears a window whose end has passed, for a hand apply that starts the sale", () => {
+    const end = at("2026-08-22T09:00:00Z");
+    for (const status of ["DRAFT", "SCHEDULED", "COMPLETED"] as const) {
+      expect(handApplyClearsWindow(window(), status, end), status).toBe(true);
+    }
+    // Live, being written, or never to run: Apply does not start a sale from any of these.
+    for (const status of ["APPLYING", "ACTIVE", "HELD", "PARTIAL", "REVERTING", "CANCELLED"] as const) {
+      expect(handApplyClearsWindow(window(), status, end), status).toBe(false);
+    }
+  });
+
+  it("keeps an end still ahead: before the window, inside it, and inside its revert buffer", () => {
+    for (const now of ["2026-08-19T00:00:00Z", "2026-08-21T00:00:00Z", "2026-08-22T08:58:00Z"]) {
+      expect(handApplyClearsWindow(window(), "COMPLETED", at(now)), now).toBe(false);
+    }
+  });
+
+  it("has nothing to clear without an end", () => {
+    const later = at("2027-01-01T00:00:00Z");
+    expect(handApplyClearsWindow(window({ endAt: undefined }), "COMPLETED", later)).toBe(false);
+    expect(handApplyClearsWindow({ kind: "manual" }, "COMPLETED", later)).toBe(false);
   });
 });
 

@@ -225,6 +225,26 @@ export function windowClosed(schedule: Schedule, now: Date): boolean {
 }
 
 /**
+ * Whether applying this campaign by hand now runs it with no end, its window cleared (#1146).
+ *
+ * Kept, a window whose end has passed is due the moment the apply finishes: `dueTransition`
+ * reverts any live campaign past its end, as it must for a sale the scheduler itself started
+ * late (#829). "QA · 1h session", scheduled 25 Sep 13:00-13:20 and completed then, was applied
+ * by hand on 30 Oct and reverted at "scheduled end" a minute later. So a hand apply that starts
+ * a sale -- from a draft, a schedule, or a finished run -- takes the dates away, as Unschedule
+ * does (#760). One whose end is still ahead keeps it: applying inside the window, or before
+ * it, still ends on schedule. A live campaign's end is the sale's already on the storefront,
+ * and pressing Apply on it again does not move it.
+ */
+export function handApplyClearsWindow(schedule: Schedule, status: SchedulableStatus, now: Date): boolean {
+  return (status === "DRAFT" || status === "SCHEDULED" || status === "COMPLETED") && windowClosed(schedule, now);
+}
+
+/** What applying does with a window that has ended, said before the press (#1146). */
+const RUNS_WITH_NO_END =
+  "applying it now runs it by hand with no end: its old dates are cleared, and it runs until you revert it.";
+
+/**
  * Human summary of a schedule, rendered in the store's zone.
  *
  * The zone is always shown. A merchant reading "starts at 09:00" needs to know
@@ -267,13 +287,23 @@ export function describeSchedule(
   // by hand days before the start it was set for, and its page went on promising "Starts
   // 30 Sep … Runs until you revert it" -- a run the scheduler, which picks up only
   // scheduled and live campaigns, was never going to make.
+  //
+  // And what pressing Apply does with its end (#1146): this is the line the Apply dialog
+  // restates. It said only that the start was done with, and the end -- five weeks gone on
+  // "QA · 1h session" -- reverted the sale a minute after the press.
+  const until = schedule.endAt ? ` to ${format(schedule.endAt)}` : "";
+  const was = `Was scheduled for ${format(schedule.startAt)}${until} (${timeZone}).`;
+  const ended = status !== undefined && handApplyClearsWindow(schedule, status, now);
   if (status === "COMPLETED") {
-    const until = schedule.endAt ? ` to ${format(schedule.endAt)}` : "";
-    return (
-      `Was scheduled for ${format(schedule.startAt)}${until} (${timeZone}). ` +
-      `It has finished, so the schedule will not start it again.`
-    );
+    const end = !schedule.endAt
+      ? ""
+      : ended
+        ? ` Its window has ended, so ${RUNS_WITH_NO_END}`
+        : " Applied by hand now, it keeps that end and reverts on schedule.";
+    return `${was} It has finished, so the schedule will not start it again.${end}`;
   }
+  // A window that closed before anything applied it (#824), which the scheduler never will.
+  if (ended) return `${was} Its window ended before it was applied, so ${RUNS_WITH_NO_END}`;
 
   const start = `Starts ${format(schedule.startAt)}`;
   if (!schedule.endAt) return `${start} (${timeZone}). Runs until you revert it.`;

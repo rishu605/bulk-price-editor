@@ -9,6 +9,9 @@
  * None of this writes a price. Each change is conditional on the campaign still being
  * SCHEDULED when it lands, so it cannot overtake the scheduler claiming the campaign to
  * apply it: whichever reads SCHEDULED first wins, and the other is told plainly.
+ *
+ * And a window that has ended, taken away by the hand apply that its end would otherwise
+ * revert a minute later (#1146): `clearEndedWindow`, which is Unschedule's write.
  */
 
 import prisma from "../../db.server";
@@ -17,10 +20,10 @@ import { ownRecordOf } from "../../lib/campaigns/own-record";
 import { START_CONFIRMED_KEY, type StartConfirmation } from "../../lib/campaigns/start-confirmation";
 import { describeState, type CampaignState } from "../../lib/lifecycle/transitions";
 import type { AdminClient } from "../../lib/execution/sync-executor";
-import { formatScheduleInstant } from "../../lib/scheduling/window";
+import { formatScheduleInstant, handApplyClearsWindow, parseSchedule } from "../../lib/scheduling/window";
 import { windowInputProblem } from "../../lib/scheduling/window-input";
 import { windowInStoreZone } from "../shop-timezone.server";
-import { transitionCampaign } from "./lifecycle.server";
+import { noteCampaign, transitionCampaign } from "./lifecycle.server";
 import { confirmStart, saveStart } from "./start-confirmation.server";
 import { keepShownTimes, keepTypedTimes } from "./zone-shift.server";
 
@@ -83,6 +86,52 @@ export async function unschedule(
   const result = await transitionCampaign(shopId, campaignId, "DRAFT", { reason, actor });
   if (!result.changed) throw notScheduled(campaign.name, result.from);
 
+  await withoutDates(shopId, campaignId, campaign, actor);
+  return `"${campaign.name}" is a draft again, with no dates. Nothing will run until you schedule or apply it.`;
+}
+
+/** The history's entry when a hand apply takes away a window that had ended (#1146). */
+export const ENDED_WINDOW_CLEARED = "its window had ended, so its old dates were cleared and it runs by hand, with no end";
+
+/**
+ * A hand apply of a campaign whose window has ended, made to run with no end (#1146): its
+ * dates cleared as Unschedule clears them, just before the apply takes its claim, so no tick
+ * ever finds it applying, or applied, past that end. See `handApplyClearsWindow`.
+ *
+ * A scheduled one is unscheduled outright, to a draft, so a claim the run gives back goes there
+ * rather than to Scheduled with no dates. A completed one stays completed, and its history says
+ * why its dates went. Returns the state the campaign is in now when it cleared a window, which a
+ * claim given back returns to, or null when it left the campaign as it was.
+ */
+export async function clearEndedWindow(
+  shopId: string,
+  campaignId: string,
+  actor: string,
+  now: Date = new Date(),
+): Promise<CampaignState | null> {
+  const campaign = await prisma.campaign.findFirst({
+    where: { id: campaignId, shopId },
+    // Its window, as `scheduled` reads it: what it prices is not touched here (#1141).
+    select: { id: true, name: true, status: true, schedule: true, startAt: true, endAt: true },
+  });
+  if (!campaign || !handApplyClearsWindow(parseSchedule(campaign.schedule), campaign.status, now)) return null;
+
+  if (campaign.status === "SCHEDULED") {
+    await unschedule(shopId, campaignId, actor, ENDED_WINDOW_CLEARED);
+    return "DRAFT";
+  }
+  await withoutDates(shopId, campaignId, campaign, actor);
+  await noteCampaign(shopId, campaignId, ENDED_WINDOW_CLEARED, { actor });
+  return campaign.status as CampaignState;
+}
+
+/** The dates gone, and what it prices kept: Unschedule's write, and its audit entry. */
+async function withoutDates(
+  shopId: string,
+  campaignId: string,
+  campaign: { schedule: unknown; startAt: Date | null; endAt: Date | null },
+  actor: string,
+): Promise<void> {
   await prisma.campaign.update({
     where: { id: campaignId },
     data: { schedule: { ...ownRecordOf(campaign.schedule), kind: "manual" } as never, startAt: null, endAt: null },
@@ -97,8 +146,6 @@ export async function unschedule(
       before: { startAt: campaign.startAt?.toISOString() ?? null, endAt: campaign.endAt?.toISOString() ?? null } as never,
     },
   });
-
-  return `"${campaign.name}" is a draft again, with no dates. Nothing will run until you schedule or apply it.`;
 }
 
 /**

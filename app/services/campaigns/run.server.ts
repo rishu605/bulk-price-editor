@@ -38,6 +38,7 @@ import { recordClaim, releaseClaim, transitionCampaign } from "./lifecycle.serve
 import { endingLateWatch } from "./ending-late.server";
 import { clearQueuedRefused, recordEndMissed, recordQueuedRefused, recordStartRefused } from "./start-refusal.server";
 import { refuseUnconfirmedStart, refuseUntypedPress } from "./start-confirmation.server";
+import { clearEndedWindow } from "./schedule-control.server";
 import { startsUnattended } from "../../lib/audit/actor";
 import { queuedVerb } from "../../lib/campaigns/queued-refusal";
 import { refusedForGood, startRefusedEntry } from "../../lib/scheduling/start-refusal";
@@ -192,10 +193,13 @@ export async function runCampaign(
     where: { id: campaignId },
     select: { status: true },
   });
-  const releaseTo = (options.claimedFrom ?? before?.status) as CampaignState | undefined;
+  const stateBefore = (options.claimedFrom ?? before?.status) as CampaignState | undefined;
 
   // Set by `executeCampaignRun` as soon as the run row exists; read by the catch below.
   const started: Started = {};
+  // Where a claim given back goes: where the campaign was before it, unless the run moved it
+  // first -- a scheduled campaign whose window had ended is a draft by its claim (#1146).
+  const releaseTarget = () => started.releaseTo ?? stateBefore;
 
   try {
     // Every line this run produces carries the shop and the campaign, and the run id
@@ -220,6 +224,7 @@ export async function runCampaign(
     if (options.queued && outcome.refused && !outcome.deferredTo) {
       await recordQueuedRefused(shopId, campaignId, { verb: queuedVerb(options), reason: outcome.refused }, { tell: true });
     }
+    const releaseTo = releaseTarget();
     if (
       outcome.refused &&
       releaseTo &&
@@ -284,6 +289,7 @@ export async function runCampaign(
     // Only release to a state that is not itself a claim. A campaign that was already
     // APPLYING when this was called -- a resume, a second worker -- has nowhere to be
     // put back to, and `releaseClaim` additionally refuses while any run is still live.
+    const releaseTo = releaseTarget();
     if (releaseTo && releaseTo !== "APPLYING" && releaseTo !== "REVERTING") {
       // A scheduled start refused for a reason no retry changes -- its segment deleted, a
       // blocking guardrail (#975). Put back to SCHEDULED as before, the claim being the
@@ -339,6 +345,8 @@ interface Started {
   runId?: string;
   /** Set as the first price is sent: from here, a failure may have changed the storefront. */
   writing?: boolean;
+  /** Where a claim given back goes, when the run moved the campaign before claiming it (#1146). */
+  releaseTo?: CampaignState;
 }
 
 interface FailedRun {
@@ -665,6 +673,18 @@ async function executeCampaignRun(
   const unattendedStart = !options.revert && !options.variantGids && startsUnattended(options.actor);
   if (tooLongHere && unattendedStart) {
     await refuseUnconfirmedStart(shopId, await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } }), options.actor);
+  }
+
+  // A hand apply of a campaign whose window has ended runs with no end (#1146). Kept, the end
+  // was due the moment this apply finished, and the next tick reverted the sale it had just
+  // started: "QA · 1h session", completed in a window five weeks gone, was on for a minute. Its
+  // dates are cleared as Unschedule clears them, and a scheduled one becomes a draft, which a
+  // claim given back then returns to. After the approval and plan gates, so a press they refuse
+  // leaves it as it was, and before either claim below -- the worker's or this one -- so no
+  // tick ever finds it applying past an end. Only a press or Flow: the scheduler's run and the
+  // worker's arrive claimed, and a resume or a scoped run starts no sale.
+  if (!options.revert && !options.resume && !options.variantGids && !options.claimedFrom) {
+    started.releaseTo = (await clearEndedWindow(shopId, campaignId, options.actor)) ?? undefined;
   }
   if (tooLongHere) {
     const { queueRun } = await import("./queued-run.server");
