@@ -24,6 +24,7 @@
  * delivery).
  */
 
+import { resumeLeaves } from "../campaigns/kept-edits";
 import type { QueuedRefusal } from "../campaigns/queued-refusal";
 import { formatCount } from "../format/display";
 
@@ -172,6 +173,11 @@ export function describeState(
      * written and verified" over a bulk run that had verified none.
      */
     progress?: { confirmed: number; unconfirmed: number };
+    /**
+     * How many prices edited outside Anchor the revert it would resume kept (#1157), which
+     * Resume leaves alone: the banner is the only place it is said before the press.
+     */
+    kept?: number;
     /**
      * The campaigns pricing every variant an active campaign covers, when it prices none
      * itself (#837): the preview's `outrankedBy`. Empty or absent otherwise.
@@ -392,7 +398,9 @@ export function describeState(
       return {
         label: "Partial — some rows did not complete",
         tone: STATE_TONE.PARTIAL,
-        explanation: partialExplanation(context.resumes === "REVERT", context.progress),
+        explanation:
+          partialExplanation(context.resumes === "REVERT", context.progress) +
+          (context.resumes === "REVERT" && context.kept ? ` ${resumeLeaves(context.kept)}` : ""),
         nextAction: {
           label:
             context.resumes === "REVERT"

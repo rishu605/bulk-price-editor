@@ -9,7 +9,7 @@
 import prisma from "../../db.server";
 import { readSettings } from "../settings.server";
 import { formatClock } from "../../lib/format/display";
-import { runToResume } from "./run.server";
+import { editsKeptBy, runToResume } from "./run.server";
 import {
   describeRun,
   isClean,
@@ -196,7 +196,7 @@ async function marginRows(shopId: string, runId: string): Promise<ResultRow[]> {
 export async function partialProgress(
   shopId: string,
   campaignId: string,
-): Promise<{ resumes?: "APPLY" | "REVERT"; progress?: { confirmed: number; unconfirmed: number } }> {
+): Promise<{ resumes?: "APPLY" | "REVERT"; progress?: { confirmed: number; unconfirmed: number }; kept?: number }> {
   const run = await runToResume(campaignId);
   if (!run) return {};
   const byStatus = await prisma.variantChange.groupBy({
@@ -208,5 +208,8 @@ export async function partialProgress(
   return {
     resumes: run.kind,
     progress: { confirmed: counts.verified + counts.clamped, unconfirmed: counts.unverified + counts.sent },
+    // The edits a resumed revert will leave alone (#1157), from the rows Resume reads them
+    // from. Only read when the revert skipped anything at all.
+    ...(run.kind === "REVERT" && counts.skipped > 0 ? { kept: (await editsKeptBy(run.id)).size } : {}),
   };
 }
