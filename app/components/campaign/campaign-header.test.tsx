@@ -655,6 +655,28 @@ describe("the confirmation says what is about to happen", () => {
     expect(queued).not.toContain("minutes left");
   });
 
+  it("says where a queued run has got, from the poll or else the row the page loaded with (#808)", () => {
+    const header = (over: Record<string, unknown>) =>
+      render(<CampaignHeader {...props({ lifecycle: describeState("APPLYING"), state: "APPLYING", timeZone: "UTC", ...over } as never)} />);
+    const queued = { id: "r1", kind: "APPLY", status: "QUEUED", planned: 60, verified: 0, failed: 0, skipped: 0, startedAt: null, finishedAt: null };
+    const writing = { ...queued, status: "EXECUTING", startedAt: "2026-09-25T10:39:00.000Z" };
+
+    expect(header({ runs: [queued], phase: null })).toContain("Queued · Waiting for the background worker · this page updates when it finishes");
+    expect(header({ runs: [{ ...queued, status: "PLANNING" }], phase: null })).toContain(
+      "Planning · The background worker is working out each price",
+    );
+    // The poll is newer than the row the page loaded with.
+    expect(header({ runs: [queued], phase: "Planning" })).toContain("Planning · The background worker is working out each price");
+    expect(header({ runs: [writing], phase: "Writing 2 of 60 prices", eta: "about 4 minutes left" })).toContain(
+      "Writing 2 of 60 prices · Started 25 Sep 2026, 10:39 · about 4 minutes left · this page updates when it finishes",
+    );
+    expect(header({ runs: [writing], phase: "Verifying", eta: null })).toContain(
+      "Verifying · Started 25 Sep 2026, 10:39 · this page updates when it finishes",
+    );
+    // Before the first poll, the row's own status: a count comes with the poll.
+    expect(header({ runs: [writing], phase: null })).toContain("Writing prices · Started 25 Sep 2026, 10:39");
+  });
+
   it("says nothing about time left on a campaign that is not writing", () => {
     expect(render(<CampaignHeader {...props({ eta: "about 4 minutes left" } as never)} />)).not.toContain("minutes left");
   });

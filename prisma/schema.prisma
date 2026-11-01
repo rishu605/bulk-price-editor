@@ -586,6 +586,12 @@ model CampaignRun {
   writtenRows  Int?
   writableRows Int?
 
+  /// What a run handed to the worker was asked to do (#808, D29): who asked, the state its
+  /// campaign was claimed from, whether it resumes, the variants to leave as they are. Written
+  /// with the QUEUED row the web process creates before it enqueues, so the worker's tick can
+  /// ring a run whose job Redis never took. Null for a run written where it was asked.
+  request Json?
+
   shop             Shop                  @relation(fields: [shopId], references: [id], onDelete: Cascade)
   campaign         Campaign              @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   changes          VariantChange[]

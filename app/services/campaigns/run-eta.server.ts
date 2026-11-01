@@ -16,20 +16,35 @@
 
 import prisma from "../../db.server";
 import { runEta } from "../../lib/campaigns/run-eta";
+import { runPhase } from "../../lib/campaigns/run-phase";
 
 /** Run states with a process still behind them. */
 const LIVE_RUN = ["PLANNING", "QUEUED", "EXECUTING", "VERIFYING"] as const;
 
 export async function runEtaOf(shopId: string, campaignId: string, now = new Date()): Promise<string | null> {
+  return (await runProgressOf(shopId, campaignId, now)).eta;
+}
+
+/**
+ * Where the campaign's run in flight has got (#808) and how long it has left (#820), from the
+ * one read of its row: Queued, Planning, Writing N of M, Verifying (`runPhase`). Nulls for a
+ * campaign with no run in flight -- a run claimed by the scheduler and still being planned has
+ * no row yet.
+ */
+export async function runProgressOf(
+  shopId: string,
+  campaignId: string,
+  now = new Date(),
+): Promise<{ phase: string | null; eta: string | null }> {
   const run = await prisma.campaignRun.findFirst({
     where: { shopId, campaignId, status: { in: [...LIVE_RUN] } },
     orderBy: { createdAt: "desc" },
-    select: { writePath: true, startedAt: true, heartbeatAt: true, writtenRows: true, writableRows: true },
+    select: { status: true, writePath: true, startedAt: true, heartbeatAt: true, writtenRows: true, writableRows: true },
   });
-  if (!run) return null;
+  if (!run) return { phase: null, eta: null };
 
   // A run that has not written a price yet, or one from before the count was kept, has none.
-  return runEta(
+  const eta = run.status !== "EXECUTING" ? null : runEta(
     {
       path: run.writePath,
       rows: run.writableRows ?? 0,
@@ -39,4 +54,5 @@ export async function runEtaOf(shopId: string, campaignId: string, now = new Dat
     },
     now,
   );
+  return { phase: runPhase(run), eta };
 }

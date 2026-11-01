@@ -17,6 +17,11 @@
  * One sync per shop: claiming is a conditional update, so two presses cannot both start
  * one. A sync whose heartbeat has gone quiet for `SYNC_STALE_AFTER_MS` is treated as
  * stopped, so a worker that died mid-sync never leaves the button gone for good.
+ *
+ * Never in the request (D29, #808). The claim is the truth and the job the doorbell: with no
+ * worker queue, or Redis away, the button still claims and answers, and the worker's tick
+ * rings a claim left waiting (`ringQueuedSyncs`). It used to run the whole sync inside the
+ * request when there was no queue, and refuse it when Redis was down.
  */
 
 import { Prisma } from "@prisma/client";
@@ -29,6 +34,7 @@ import type { AdminClient } from "../lib/execution/sync-executor";
 import { formatCount } from "../lib/format/display";
 import { logger } from "../lib/logging/logger";
 import { isKnownCurrency } from "../lib/money/currency";
+import { enqueueOrRun, type Handler, type QueueRuntime } from "../worker/queue-runtime.server";
 import { enqueueWithin, webQueue } from "../worker/web-queue.server";
 import { captureBaselines } from "./baselines.server";
 import { syncCatalogViaBulk } from "./catalog-bulk-sync.server";
@@ -376,14 +382,20 @@ export async function runFullSync(shopId: string, client: AdminClient, actor: st
   }
 }
 
+/** How long the button waits for Redis to take the sync's job: the claim is kept either way. */
+const SYNC_ENQUEUE_TIMEOUT_MS = 1_000;
+
+/** How long a claimed sync may wait in `queued` before the tick rings it (#808). */
+export const STRANDED_SYNC_AFTER_MS = 15_000;
+
 /**
  * What the Sync button does: claim the sync and hand it to the worker, or say one is
- * already running. With no worker queue at all -- development without Redis -- it runs
- * here, as it always did.
+ * already running. Answered "syncing in the background" once it is claimed, whether or not
+ * Redis took the job: see the note at the top.
  */
 export async function startSync(
   shopId: string,
-  client: AdminClient,
+  _client: AdminClient,
   actor: string,
 ): Promise<{ ok: boolean; message: string; errors: string[]; queued: boolean }> {
   if (!(await claimSync(shopId))) {
@@ -396,23 +408,14 @@ export async function startSync(
   }
 
   const queue = webQueue();
-  if (!queue) {
-    const summary = await runFullSync(shopId, client, actor);
-    return { ok: summary.errors.length === 0, queued: false, message: summary.message, errors: summary.errors.slice(0, 5) };
-  }
-
   try {
-    await enqueueWithin(queue, "sync", { shopId, fullSync: true, actor });
+    if (queue) await enqueueWithin(queue, "sync", { shopId, fullSync: true, actor }, SYNC_ENQUEUE_TIMEOUT_MS);
+    else logger.warn("no worker queue: a sync waits for the worker's tick", { shopId });
   } catch (error) {
-    await releaseSync(shopId, null);
-    return {
-      ok: false,
-      queued: false,
-      message:
-        "The background worker could not be reached, so the sync did not start and nothing changed. Try again in a minute; " +
-        "if it keeps happening, contact support from this page.",
-      errors: [error instanceof Error ? error.message : String(error)],
-    };
+    logger.warn("a sync was not handed to the worker; its tick will ring it", {
+      shopId,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 
   return {
@@ -423,4 +426,39 @@ export async function startSync(
       "the sync carries on without it.",
     errors: [],
   };
+}
+
+/**
+ * Rings every shop whose claimed sync has waited in `queued` past `STRANDED_SYNC_AFTER_MS`
+ * (#808): a job still waiting absorbs it, by its deduplication key, and one that never reached
+ * Redis is queued now -- or run here, in the tick, by `inline`, when the queue cannot take it.
+ * Who pressed the button is not on the claim, so a sync rung this way is Shopify's, as one
+ * started by anything other than a person is.
+ */
+export async function ringQueuedSyncs(
+  queue: QueueRuntime,
+  inline: Handler,
+  { now = new Date(), shopId }: { now?: Date; shopId?: string } = {},
+): Promise<number> {
+  const before = new Date(now.getTime() - STRANDED_SYNC_AFTER_MS);
+  const shops = await prisma.shop.findMany({
+    where: {
+      syncPhase: "queued",
+      syncStartedAt: { not: null, lt: before },
+      uninstalledAt: null,
+      ...(shopId ? { id: shopId } : {}),
+    },
+    select: { id: true },
+  });
+  for (const shop of shops) {
+    try {
+      await enqueueOrRun(queue, "sync", { shopId: shop.id, fullSync: true }, inline, SYNC_ENQUEUE_TIMEOUT_MS);
+    } catch (error) {
+      logger.error("a queued sync rung by the tick failed", {
+        shopId: shop.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return shops.length;
 }

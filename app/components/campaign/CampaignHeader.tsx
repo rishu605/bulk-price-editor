@@ -42,6 +42,7 @@ import { archivedTone } from "../../lib/campaigns/archive-warning";
 import { SPACE } from "../../lib/ui/spacing";
 import { formatScheduleInstant } from "../../lib/scheduling/window";
 import { IN_FLIGHT } from "./useRunPolling";
+import { runPhase, WAITING_TEXT } from "../../lib/campaigns/run-phase";
 import type { CampaignDetailProps } from "./props";
 
 /** Links the "More actions" button to the menu it opens. */
@@ -75,6 +76,7 @@ export function CampaignHeader({
   startConfirmation,
   breachPolicy,
   eta,
+  phase,
 }: CampaignDetailProps) {
   // Archiving a campaign that is still running asks first (#748); Restore never does.
   const archiveModal = useRef<ArchiveModal | null>(null);
@@ -138,7 +140,7 @@ export function CampaignHeader({
             </s-button>
           </fetcher.Form>
         ) : IN_FLIGHT.has(state) ? (
-          <s-text color="subdued">{writing(runs, timeZone, eta)}</s-text>
+          <s-text color="subdued">{writing(runs, timeZone, eta, phase)}</s-text>
         ) : (
           <>
             {/* Opens the confirmation rather than submitting.
@@ -391,8 +393,11 @@ function supportHref(campaignId: string): string {
 const LIVE_RUN = new Set(["PLANNING", "QUEUED", "EXECUTING", "VERIFYING"]);
 
 /**
- * What the header says while a run writes: when it started, or that the worker has yet to
- * pick it up -- a run handed over by #790 has no row until it does.
+ * What the header says while a run is in flight: where it has got -- Queued, Planning, Writing
+ * N of M, Verifying (#808) -- and when it started writing, or what the worker is doing before it
+ * does. The phase is the poll's when it has answered, and otherwise read off the run row the
+ * page loaded with. No row at all is a run the worker has yet to take (a scheduled one being
+ * planned, or one handed over by the release before #808): waiting.
  *
  * And how long it has left, once it has written enough to say (#820). Only beside a run this
  * page saw start: "Waiting for the background worker" with a time left contradicts itself.
@@ -401,10 +406,13 @@ function writing(
   runs: ReadonlyArray<{ status: string; startedAt: string | null }>,
   timeZone: string,
   eta: string | null,
+  polled: string | null,
 ): string {
   const live = runs.find((run) => LIVE_RUN.has(run.status));
-  const when = live?.startedAt
-    ? `Started ${formatScheduleInstant(live.startedAt, timeZone)}${eta ? ` · ${eta}` : ""}`
-    : "Waiting for the background worker";
-  return `${when} · this page updates when it finishes`;
+  const phase = polled ?? (live ? runPhase(live) : null) ?? "Queued";
+  const waiting = phase === "Queued" || phase === "Planning" || !live?.startedAt;
+  const when = waiting
+    ? WAITING_TEXT[phase === "Planning" ? "Planning" : "Queued"]
+    : `Started ${formatScheduleInstant(live!.startedAt!, timeZone)}${eta ? ` · ${eta}` : ""}`;
+  return `${waiting && phase !== "Planning" ? "Queued" : phase} · ${when} · this page updates when it finishes`;
 }

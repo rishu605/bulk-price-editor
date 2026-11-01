@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /**
- * The worker process: the only thing that writes prices on a schedule.
+ * The worker process: what writes prices, on a schedule and on request.
  *
  * Deliberately separate from the web process. Web serves the admin UI and computes
- * previews; it never writes. Giving the worker its own process means it can be
- * restarted, scaled and rate-limited on its own, and a slow campaign cannot tie up
- * a request thread.
+ * previews, and writes only a run of at most fifty variants pressed on the campaign page
+ * (D29, #808); every other run, sync and capture is handed here. Giving the worker its own
+ * process means it can be restarted, scaled and rate-limited on its own, and a slow
+ * campaign cannot tie up a request thread -- or another shop's pages (#803).
  *
  *   npm run worker
  */
@@ -25,6 +26,9 @@ import { handleJob } from "../app/worker/handlers.server";
 import { LeaderLock } from "../app/worker/leader-lock";
 import { pruneWriteIntents } from "../app/services/drift.server";
 import { ringStrandedWebhooks } from "../app/services/webhook-queue.server";
+import { ringQueuedRuns } from "../app/services/campaigns/queued-run.server";
+import { ringQueuedSyncs } from "../app/services/sync-job.server";
+import { ringQueuedRecaptures } from "../app/services/recapture-job.server";
 import prisma, { databasePool } from "../app/db.server";
 import { reportPoolBudget } from "../app/lib/db/budget.server";
 import { startPoolWaitSampler } from "../app/lib/db/pool-wait.server";
@@ -93,20 +97,57 @@ let running = true;
 let isLeader = false;
 let ticks = 0;
 
+/**
+ * What the web process handed over and Redis never delivered, rung again from its row (#808):
+ * a queued run, a claimed sync, a queued recapture. Each is queued now, or -- when the queue
+ * cannot take it either -- run here, in this tick: Redis down degrades to the worker doing the
+ * work itself, never to a request doing it. Each kind has its own failure, so none costs the
+ * others their turn.
+ */
+async function ringWaiting(): Promise<void> {
+  const rings = [
+    ["queued run", ringQueuedRuns],
+    ["queued sync", ringQueuedSyncs],
+    ["queued recapture", ringQueuedRecaptures],
+  ] as const;
+  for (const [what, ring] of rings) {
+    try {
+      const rung = await ring(queues, handleJob);
+      if (rung > 0) console.log(`[worker] rang ${rung} ${what}(s) left waiting`);
+    } catch (error) {
+      console.error(`[worker] could not ring a ${what}:`, error instanceof Error ? error.message : error);
+    }
+  }
+}
+
 async function runOnce(): Promise<void> {
   // Renew if we already lead, otherwise try to take over. A failed renewal means we
   // lost the lock -- fall back to acquiring rather than assuming we still lead.
-  isLeader = isLeader ? await lock.renew() : await lock.acquire();
+  try {
+    isLeader = isLeader ? await lock.renew() : await lock.acquire();
+  } catch (error) {
+    // Redis is down, so nobody leads and nothing is scheduled: two workers each deciding a
+    // campaign is due would start it twice. What a merchant or Flow already asked for still
+    // runs (#808). Each is claimed by a conditional update when it starts, so every worker
+    // ringing at once runs each one once.
+    isLeader = false;
+    await ringWaiting();
+    throw error;
+  }
   if (!isLeader) return;
 
   const started = Date.now();
-  const result = await tick();
+  // With the queues, so what the tick hands over -- a campaign's enrolled variants -- runs in
+  // the worker's slots rather than inside the tick (#808).
+  const result = await tick(new Date(), queues);
   ticks++;
 
   // Reported from the leader only, so N replicas do not publish N copies of the same
   // number. A rising floor here is the earliest signal that the worker is losing
   // ground, and the one that predicts a missed scheduled revert before it is missed.
   await reportDepths(queues);
+
+  await ringWaiting();
 
   // Products deliveries persisted and never drained: their job was not taken or was lost
   // (#811). A shop whose drain is merely busy absorbs the ring; the rest get one.

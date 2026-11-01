@@ -194,7 +194,8 @@ export async function refreshPlanSummary(
 /** Whether the page shows this campaign a rollback report: it can be reverted, and has applied. */
 async function hasRollback(campaignId: string, status: string): Promise<boolean> {
   if (!REVERTABLE.has(status)) return false;
-  return (await prisma.campaignRun.findFirst({ where: { campaignId, kind: "APPLY" }, select: { id: true } })) !== null;
+  // An apply queued and refused before it wrote applied nothing (#808).
+  return (await prisma.campaignRun.findFirst({ where: { campaignId, kind: "APPLY", status: { not: "CANCELLED" } }, select: { id: true } })) !== null;
 }
 
 /**
@@ -211,7 +212,7 @@ async function whereToPlan(shopId: string, campaignId: string, status: string): 
   const written = REVERTABLE.has(status)
     ? ((
         await prisma.campaignRun.findFirst({
-          where: { campaignId, kind: "APPLY" },
+          where: { campaignId, kind: "APPLY", status: { not: "CANCELLED" } },
           orderBy: { createdAt: "desc" },
           select: { plannedRows: true },
         })

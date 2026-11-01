@@ -6,9 +6,8 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { ensureShop } from "../services/shop.server";
 import { toAdminClient } from "../services/admin-client.server";
-import { campaignRuns, runCampaign, runToResume } from "../services/campaigns/index.server";
+import { campaignRuns, runToResume, startRun } from "../services/campaigns/index.server";
 import { campaignPagePlan } from "../services/campaigns/plan-summary.server";
-import { PAGE_INLINE_BUDGET_MS } from "../lib/execution/inline-budget";
 import { runResponse } from "../lib/campaigns/run-response";
 import { ResultBanner } from "../components/ResultBanner";
 import { describeSchedule, formatScheduleInstant, parseSchedule, scheduleWarnings } from "../lib/scheduling/window";
@@ -43,7 +42,7 @@ import { approvalFor, approvalSummary, decideApproval, requestApproval, SelfAppr
 import { PageShell } from "../components/PageShell";
 import { CampaignTabs, currentTab, tabsFor } from "../components/campaign/CampaignTabs";
 import { useKeepers } from "../components/campaign/useKeepers";
-import { IN_FLIGHT, useRunPolling } from "../components/campaign/useRunPolling";
+import { IN_FLIGHT, RUN_DONE, useRunPolling } from "../components/campaign/useRunPolling";
 import { usePlanPolling } from "../components/campaign/usePlanPolling";
 import { CampaignHeader } from "../components/campaign/CampaignHeader";
 import { CampaignOverviewTab } from "../components/campaign/CampaignOverviewTab";
@@ -232,14 +231,14 @@ export const action = withGuard("/app/campaigns/$id", async ({ request, params }
     // campaign price are planned as "already correct" and cost nothing — only the ones
     // that failed last time are written again. A separate retry path would be a second
     // implementation of the same thing, free to disagree with the first.
-    const result = await runCampaign(shop.id, String(params.id), toAdminClient(admin), {
+    // Up to fifty variants here, as always; larger, a queued row the worker writes (D29, #808).
+    const result = await startRun(shop.id, String(params.id), toAdminClient(admin), "page", {
       revert: reverting,
       resume: intent === "resume",
       actor,
       // Rows the merchant ticked "leave as it is" in the rollback report. Only
       // meaningful on a revert; an apply has no drifted-row conversation to honour.
       skipVariantGids: reverting ? form.getAll("keep").map(String) : undefined,
-      inlineBudgetMs: PAGE_INLINE_BUDGET_MS, // this request's deadline: longer goes to the worker (#790)
       untypedPress: press.untyped && !reverting,
     });
 
@@ -309,7 +308,8 @@ export default function CampaignDetail() {
 
   const tabs = tabsFor({ runs, rollback, ledger, ledgerTotal: data.ledgerTotal });
   const { keepers, pending: keepersPending } = useKeepers(rollback);
-  const eta = useRunPolling(data.campaignId, state); // a run in the worker, followed to its end (#790), and its time left (#820)
+  // A run in the worker, followed to its end (#790): where it has got (#808), and its time left (#820).
+  const { eta, phase, done } = useRunPolling(data.campaignId, state);
   usePlanPolling(data.campaignId, preview); // a plan in the worker, followed until it is stored (#812)
   const [params] = useSearchParams();
   const tab = currentTab(tabs, params.get("tab"));
@@ -330,11 +330,12 @@ export default function CampaignDetail() {
     keepers,
     keepersPending,
     eta,
+    phase,
   };
 
   return (
     <PageShell heading={preview.name} backTo={{ href: "/app/campaigns", label: "Campaigns" }}>
-      <ResultBanner result={fetcher.data} />
+      <ResultBanner result={done ? RUN_DONE : fetcher.data} />
 
       {attention ? (
         <s-banner tone={lifecycle.tone === "critical" ? "critical" : "warning"}>

@@ -35,6 +35,12 @@ import {
 
 export interface QueueRuntime {
   enqueue(name: QueueName, ref: JobRef): Promise<void>;
+  /**
+   * True for `inlineRuntime`, whose enqueue is the work itself (#808). A caller bounding how
+   * long it waits for the queue to take a job must not bound that: the job would carry on
+   * past the deadline with nobody waiting on it, and the fallback would run it a second time.
+   */
+  readonly inline?: boolean;
   depths(): Promise<Record<QueueName, number>>;
   /**
    * Each queue's counts and the enqueue time of its longest-waiting job (#813). Optional:
@@ -56,6 +62,7 @@ export type Handler = (name: QueueName, ref: JobRef) => Promise<JobResult>;
  */
 export function inlineRuntime(handler: Handler): QueueRuntime {
   return {
+    inline: true,
     async enqueue(name, ref) {
       // A turn that asks for another gets it here and now: inline, there is nobody else's
       // turn to go behind, and the caller is promised the work is done when this returns.
@@ -69,6 +76,51 @@ export function inlineRuntime(handler: Handler): QueueRuntime {
     },
     async close() {},
   };
+}
+
+/**
+ * Hands a job to the queue, or does it here when the queue cannot take it within `ms` (#808).
+ *
+ * The worker's own way of degrading. Its tick hands over what it finds waiting -- a queued run
+ * whose job never reached Redis, a campaign's enrolled variants -- and with Redis down the
+ * hand-over would hang on a connection that retries for ever. So past `ms` the job is run by
+ * `handler`, in the tick, as the worker did everything before the queue existed. An inline
+ * runtime is not timed: its enqueue is the work. A job the late enqueue delivers after all is
+ * harmless -- each such job claims its work with a conditional update, and runs once.
+ */
+export async function enqueueOrRun(
+  queue: QueueRuntime,
+  name: QueueName,
+  ref: JobRef,
+  handler: Handler,
+  ms: number,
+): Promise<"queued" | "ran"> {
+  if (queue.inline) {
+    await queue.enqueue(name, ref);
+    return "ran";
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      queue.enqueue(name, ref),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`no answer from the queue in ${ms}ms`)), ms);
+      }),
+    ]);
+    return "queued";
+  } catch (error) {
+    logger.warn("the queue did not take a job; running it in the tick", {
+      queue: name,
+      shopId: ref.shopId,
+      campaignId: ref.campaignId,
+      runId: ref.runId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  while ((await traced(name, ref, () => handler(name, ref))) === "again");
+  return "ran";
 }
 
 export interface RedisConnection {

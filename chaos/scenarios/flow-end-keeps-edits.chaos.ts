@@ -18,6 +18,8 @@ import prisma from "../../app/db.server";
 import { KEPT_EDIT_REASON } from "../../app/lib/campaigns/kept-edits";
 import { rollbackReport } from "../../app/services/campaigns/rollback-report.server";
 import { resolveDrift } from "../../app/services/drift.server";
+import { ringQueuedRuns, STRANDED_RUN_AFTER_MS } from "../../app/services/campaigns/queued-run.server";
+import { inlineRuntime } from "../../app/worker/queue-runtime.server";
 import type { JobRef, QueueName } from "../../app/worker/queues";
 import { chaosAdminClient } from "../harness/http-client";
 import { type ChaosContext, fixtureAdminClient, withChaos } from "../harness/scenario";
@@ -113,6 +115,16 @@ async function flowEnds(chaos: ChaosContext, { queue }: { queue: boolean }) {
   return { status: response.status, message: ((await response.json()) as { message: string }).message };
 }
 
+/**
+ * The worker's tick, with no Redis of its own, running what Flow queued: every end Flow asks
+ * for is the worker's since D29 (#808), however small.
+ */
+async function worker(chaos: ChaosContext) {
+  const handle = async (name: QueueName, ref: JobRef) => (await import("../../app/worker/handlers.server")).handleJob(name, ref);
+  const now = new Date(Date.now() + STRANDED_RUN_AFTER_MS + 1_000);
+  expect(await ringQueuedRuns(inlineRuntime(handle), handle, { now, shopId: chaos.fixture.shopId })).toBe(1);
+}
+
 const statusOf = async (id: string) => (await prisma.campaign.findUniqueOrThrow({ where: { id } })).status;
 const cents = (chaos: ChaosContext, gid: string) => Number(chaos.fake.priceOf(gid)!.replace(".", ""));
 
@@ -164,13 +176,12 @@ describe("chaos: Flow's End campaign over a price edited by hand", () => {
 
       const answer = await flowEnds(chaos, { queue: false });
 
+      // Queued, two products or twenty thousand (D29), and told what happens to the edits.
       expect(answer.status).toBe(200);
+      expect(answer.message).toMatch(/^"chaos\/flow-end-keeps-held-edit": Runs started from Shopify Flow are always written by the background worker\./);
+      expect(answer.message).toMatch(/Any price edited outside Anchor since the campaign set it is left as edited, not reverted\.$/);
+      await worker(chaos);
       expect(chaos.fake.priceOf(edited), "Flow's end wrote over the merchant's edit").toBe("1.23");
-      expect(answer.message).toBe(
-        `"chaos/flow-end-keeps-held-edit" ended: 1 variant reverted and verified. 1 price edited outside Anchor was left as ` +
-          "edited, not reverted. The campaign's Ledger tab lists it.",
-      );
-      expect(enqueued, "a two-product end was handed to the worker").toEqual([]);
       await expectEditKept(chaos, edited, "1.23");
       expect(cents(chaos, other)).toBe(chaos.fixture.baseline.get(other));
 
@@ -182,7 +193,7 @@ describe("chaos: Flow's End campaign over a price edited by hand", () => {
       expect(Number(mirror.livePrice)).toBe(123);
 
       const [request] = await prisma.auditLogEntry.findMany({ where: { shopId, actor: "shopify-flow", action: "flow.end-campaign" } });
-      expect(request.after).toMatchObject({ outcome: "done", status: 200, message: answer.message });
+      expect(request.after).toMatchObject({ outcome: "queued", status: 200, message: answer.message });
     });
   });
 
@@ -204,8 +215,9 @@ describe("chaos: Flow's End campaign over a price edited by hand", () => {
       const answer = await flowEnds(chaos, { queue: false });
 
       expect(answer.status).toBe(200);
+      expect(answer.message).toContain("is left as edited, not reverted.");
+      await worker(chaos);
       expect(chaos.fake.priceOf(edited), "Flow's end wrote over an edit the merchant left for now").toBe("1.23");
-      expect(answer.message).toContain("1 price edited outside Anchor was left as edited, not reverted.");
       await expectEditKept(chaos, edited, "1.23");
     });
   });
@@ -229,7 +241,16 @@ describe("chaos: Flow's End campaign over a price edited by hand", () => {
       expect(enqueued).toEqual([
         {
           name: "execution",
-          ref: { shopId, campaignId, revert: true, claimedFrom: "HELD", actor: "shopify-flow", keepEdited: true, skipReason: KEPT_EDIT_REASON },
+          ref: {
+            shopId,
+            campaignId,
+            runId: expect.any(String),
+            revert: true,
+            claimedFrom: "HELD",
+            actor: "shopify-flow",
+            keepEdited: true,
+            skipReason: KEPT_EDIT_REASON,
+          },
         },
       ]);
       expect(await statusOf(campaignId)).toBe("REVERTING");

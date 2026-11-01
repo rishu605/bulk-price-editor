@@ -88,7 +88,8 @@ export async function recapturedBaselines(
   // Since it last ended (#1166): a sale after a completed revert starts its stints afresh.
   const runs = sinceItEnded(
     await prisma.campaignRun.findMany({
-      where: { shopId, campaignId, kind: { in: ["APPLY", "REASSERT", "ENROLL", "REVERT"] } },
+      // Not a run that wrote nothing: a scoped one that stood down, or one queued and refused (#808).
+      where: { shopId, campaignId, kind: { in: ["APPLY", "REASSERT", "ENROLL", "REVERT"] }, status: { not: "CANCELLED" } },
       orderBy: { createdAt: "desc" },
       select: { id: true, kind: true, status: true, occurrenceKey: true, createdAt: true },
       take: 20,

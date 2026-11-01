@@ -177,6 +177,90 @@ export async function claimForSchedule(
   return { from, to, reason, recorded: true };
 }
 
+/** What `claimForQueue` writes on the run row it creates. */
+export interface QueuedRunRow {
+  kind: "APPLY" | "REVERT";
+  /** The scope's size, counted before anything is planned: the worker's plan replaces it. */
+  plannedRows: number;
+  /** Everything the job says, so the worker's tick can ring it again from the row (#808). */
+  request: Record<string, unknown>;
+}
+
+export type QueueClaim =
+  | { claimed: true; runId: string; from: CampaignState }
+  /** The campaign is already claimed, or a live run already holds it: nothing was written. */
+  | { claimed: false };
+
+/**
+ * Claims a campaign for a run handed to the worker, and writes the run's QUEUED row, in one
+ * transaction (#808, D29).
+ *
+ * One transaction because each half is the other's guard. The campaign's conditional update is
+ * the claim two presses race for; the row is what `campaign_runs_one_live_run` refuses a second
+ * of, whatever claimed the campaign, and what a second press names. Apart, a row written and
+ * then given back when the claim was lost could be the live run a scheduled run stood down to
+ * in that moment, leaving the campaign claimed with nothing behind it. Together, the loser of
+ * either race changes nothing: a P2002 rolls the claim back with it.
+ *
+ * Refused, as `transitionCampaign` refuses, when the move is not legal from where the campaign
+ * is. Recorded once the transaction commits, with the run's id, so the history reads the claim
+ * against the run that holds it.
+ */
+export async function claimForQueue(
+  shopId: string,
+  campaignId: string,
+  to: "APPLYING" | "REVERTING",
+  row: QueuedRunRow,
+  options: TransitionOptions,
+): Promise<QueueClaim> {
+  const campaign = await prisma.campaign.findFirstOrThrow({ where: { id: campaignId, shopId }, select: { status: true } });
+  const from = campaign.status as CampaignState;
+  if (CLAIM_STATES.has(from)) return { claimed: false };
+  if (!canTransition(from, to)) {
+    throw new AppError({
+      code: "VALIDATION",
+      userMessage: `This campaign is ${describeState(from).label.toLowerCase()}, so that action does not apply to it. Reload the page to see its current state.`,
+      context: { campaignId, from, to, reason: options.reason },
+    });
+  }
+  const policy = await keptPolicy(shopId, from, to);
+  const now = new Date();
+
+  let runId: string | null;
+  try {
+    runId = await prisma.$transaction(async (tx) => {
+      const claimed = await tx.campaign.updateMany({ where: { id: campaignId, shopId, status: from }, data: { status: to, ...policy } });
+      if (claimed.count === 0) return null;
+      const run = await tx.campaignRun.create({
+        data: {
+          shopId,
+          campaignId,
+          kind: row.kind,
+          status: "QUEUED",
+          occurrenceKey: `${row.kind}-${now.getTime()}`,
+          plannedRows: row.plannedRows,
+          // Not a start: `startedAt` is when it begins writing, as it always was, and what the
+          // time left is measured from (#820). The heartbeat is the release before this one's
+          // way to reclaim a row it cannot pick up (see the migration); this one's reaper
+          // leaves a queued row alone.
+          heartbeatAt: now,
+          // With the state it was claimed from, which only this read knows.
+          request: { ...row.request, claimedFrom: from } as never,
+        },
+        select: { id: true },
+      });
+      return run.id;
+    });
+  } catch (error) {
+    if ((error as { code?: string })?.code === "P2002") return { claimed: false };
+    throw error;
+  }
+  if (!runId) return { claimed: false };
+
+  await recordTransition(shopId, campaignId, from, to, { ...options, runId });
+  return { claimed: true, runId, from };
+}
+
 /** Records a scheduler's claim that `claimForSchedule` left for its run to record. */
 export async function recordClaim(
   shopId: string,

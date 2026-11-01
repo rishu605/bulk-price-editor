@@ -584,7 +584,8 @@ export async function competingCampaigns(shopId: string, besides?: string): Prom
 export async function endingAmong(campaignIds: readonly string[]): Promise<Set<string>> {
   if (campaignIds.length === 0) return new Set();
   const latest = await prisma.campaignRun.findMany({
-    where: { campaignId: { in: [...campaignIds] }, NOT: { occurrenceKey: { startsWith: "VARIANT-" } } },
+    // A revert queued and refused before it wrote is not one ending the sale (#808): CANCELLED.
+    where: { campaignId: { in: [...campaignIds] }, NOT: { occurrenceKey: { startsWith: "VARIANT-" } }, status: { not: "CANCELLED" } },
     orderBy: { createdAt: "desc" },
     distinct: ["campaignId"],
     select: { campaignId: true, kind: true },

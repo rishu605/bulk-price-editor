@@ -14,6 +14,11 @@
  * Both halves are checked — the sentence in `CLAUDE.md` and the mechanism in the source —
  * because the failure to guard against is not one of them changing. It is them drifting
  * apart again, quietly, in either direction.
+ *
+ * D29 (#808) moved the rule back toward the RFC's "the worker writes prices", without the
+ * absolute that was false before: the web process still writes a run of at most
+ * `MAX_INLINE_ROWS` variants pressed on the campaign page, and everything else is queued.
+ * So the rule names that bound, and this checks the bound is the one the routes are held to.
  */
 
 import { describe, expect, it } from "vitest";
@@ -82,14 +87,19 @@ describe("the rule in CLAUDE.md says this and not the old thing", () => {
 
   it("states the invariant that is actually enforced", () => {
     expect(rules).toContain("One writer per occurrence");
-    expect(rules).toContain("PAGE_INLINE_BUDGET_MS");
+    expect(rules).toContain("MAX_INLINE_ROWS");
+    // And what is never written in a request, whatever its size (D29).
+    for (const queued of ["Flow action", "auto-enrol drain", "catalogue sync", "baseline capture"]) {
+      expect(rules, queued).toContain(queued);
+    }
   });
 
-  it("names a bound that exists", () => {
+  it("names a bound that exists, and is the one the page's runs are held to", () => {
     // The rule points at the thing that makes web writing safe. If that constant is
     // renamed or deleted, the rule is describing a guard the app no longer has.
-    expect(sourceOf("app/lib/execution/inline-budget.ts")).toContain(
-      "export const PAGE_INLINE_BUDGET_MS",
-    );
+    const budget = sourceOf("app/lib/execution/inline-budget.ts");
+    expect(budget).toContain("export const MAX_INLINE_ROWS = 50");
+    expect(budget).toMatch(/PAGE_INLINE: InlineLimit = \{ rows: MAX_INLINE_ROWS,/);
+    expect(sourceOf("app/services/campaigns/start-run.server.ts")).toContain('caller === "page" ? PAGE_INLINE');
   });
 });

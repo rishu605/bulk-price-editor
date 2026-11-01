@@ -1,10 +1,15 @@
 /**
- * A revert too large for one request goes to the worker (#772).
+ * A revert too large for one request goes to the worker (#772), as a row first (#808).
  *
  * Apply has always been bounded by the inline budget; revert was not, because the check
  * sat inside `if (!options.revert)`. A revert from the campaign page or Flow ran inline
  * however large it was, and past Railway's five-minute proxy limit the request is cut off
  * while the writes carry on with nobody reading the result.
+ *
+ * Since D29 the limit is rows as well as time, and a run handed over is a QUEUED run row
+ * before it is a job: with Redis away, or no Redis at all, the request still answers
+ * "queued", writes nothing, and the worker's tick runs it. The limit here is ten rows over a
+ * twenty-variant fixture, so the scenario stays small; what is under test is the hand-over.
  *
  * The web queue is replaced by a recorder, and the recorded job is then run through the
  * worker's own handler -- the same code the worker process runs. `adminClientForShop` is
@@ -14,6 +19,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import prisma from "../../app/db.server";
+import { PAGE_INLINE } from "../../app/lib/execution/inline-budget";
+import { ringQueuedRuns, STRANDED_RUN_AFTER_MS } from "../../app/services/campaigns/queued-run.server";
+import { inlineRuntime } from "../../app/worker/queue-runtime.server";
 import type { JobRef, QueueName } from "../../app/worker/queues";
 import { type ChaosContext, fixtureAdminClient, withChaos } from "../harness/scenario";
 
@@ -59,71 +67,119 @@ async function onSale(chaos: ChaosContext) {
 const statusOf = async (id: string) =>
   (await prisma.campaign.findUniqueOrThrow({ where: { id }, select: { status: true } })).status;
 
+/** Ten rows, so the twenty-variant fixture is the worker's. */
+const SMALL = { ...PAGE_INLINE, rows: 10 };
+
+/** The worker's tick, past the moment a queued row counts as waiting. */
+async function workerTick(chaos: ChaosContext, queue = inlineRuntime(handler)) {
+  const now = new Date(Date.now() + STRANDED_RUN_AFTER_MS + 1_000);
+  return ringQueuedRuns(queue, handler, { now, shopId: chaos.fixture.shopId });
+}
+async function handler(name: QueueName, ref: JobRef) {
+  const { handleJob } = await import("../../app/worker/handlers.server");
+  return handleJob(name, ref);
+}
+
 describe("chaos: a revert too large for one request", () => {
   it("is handed to the worker, not written inline, and the worker finishes it", async () => {
     await withChaos("queued-revert", CATALOG, async (chaos) => {
       const { campaignId, variantGids, baseline } = chaos.fixture;
       const sale = await onSale(chaos);
 
-      const outcome = await chaos.revert({ inlineBudgetMs: 10_000, actor: "staff@example.com" });
+      const outcome = await chaos.revert({ inline: SMALL, actor: "staff@example.com" });
 
-      expect(outcome.queued, "a 20-product revert ran inline past a 10-second budget").toBe(true);
-      expect(outcome.messages[0]).toMatch(/covers 20 variants.*background worker is reverting it/);
+      expect(outcome.queued, "a 20-variant revert ran inline past a 10-row limit").toBe(true);
+      expect(outcome.messages[0]).toMatch(/covers 20 variants, more than the 10.*background worker is reverting it/);
       for (const gid of variantGids) expect(chaos.fake.priceOf(gid), "written inline anyway").toBe(sale.get(gid));
       expect(await statusOf(campaignId), "not claimed, so a second press could queue a second revert").toBe("REVERTING");
+      // The row first: the run the page follows, and the one the job names (#808).
+      const queued = await prisma.campaignRun.findFirstOrThrow({ where: { campaignId, status: "QUEUED" } });
+      expect(queued).toMatchObject({ kind: "REVERT", plannedRows: 20, startedAt: null });
+      expect(outcome.runId).toBe(queued.id);
       expect(enqueued).toEqual([
-        { name: "execution", ref: { shopId: chaos.fixture.shopId, campaignId, revert: true, claimedFrom: "ACTIVE", actor: "staff@example.com" } },
+        {
+          name: "execution",
+          ref: { shopId: chaos.fixture.shopId, campaignId, runId: queued.id, revert: true, claimedFrom: "ACTIVE", actor: "staff@example.com" },
+        },
       ]);
 
-      // A second press finds it claimed, and queues nothing more.
-      const again = await chaos.revert({ actor: "chaos", inlineBudgetMs: 10_000 });
-      expect(again.deferredTo).toBeTruthy();
-      expect(again.messages[0]).toMatch(/already being reverted/);
+      // A second press is refused by the row, names it, and queues nothing more.
+      const again = await chaos.revert({ actor: "chaos", inline: SMALL });
+      expect(again.deferredTo).toBe(queued.id);
+      expect(again.messages[0]).toMatch(/already queued to be reverted over 20 variants, waiting for the background worker/);
       expect(enqueued).toHaveLength(1);
 
-      // The worker runs the job.
-      const { handleJob } = await import("../../app/worker/handlers.server");
-      await handleJob(enqueued[0].name, enqueued[0].ref);
+      // The worker runs the job, as the row it was handed.
+      await handler(enqueued[0].name, enqueued[0].ref);
       expect(await statusOf(campaignId)).toBe("COMPLETED");
+      expect(await prisma.campaignRun.findUniqueOrThrow({ where: { id: queued.id } })).toMatchObject({ status: "COMPLETED", verifiedRows: 20 });
+      // A job rung twice runs once: the second finds the row taken and touches nothing.
+      await handler(enqueued[0].name, enqueued[0].ref);
+      expect(await prisma.campaignRun.count({ where: { campaignId, kind: "REVERT" } })).toBe(1);
       for (const gid of variantGids) {
         expect(Number(chaos.fake.priceOf(gid)!.replace(".", "")), `${gid} not reverted`).toBe(baseline.get(gid));
       }
     });
   });
 
-  it("writes nothing and puts the campaign back when the worker cannot be reached", async () => {
+  it("is still queued when Redis does not take the job, and the worker's tick runs it, not the request (#808)", async () => {
     await withChaos("queued-revert-down", CATALOG, async (chaos) => {
-      const { campaignId, variantGids } = chaos.fixture;
+      const { campaignId, variantGids, baseline } = chaos.fixture;
       const sale = await onSale(chaos);
       queueMode = "down";
 
-      const outcome = await chaos.revert({ actor: "chaos", inlineBudgetMs: 10_000 });
+      const outcome = await chaos.revert({ actor: "chaos", inline: SMALL });
 
-      expect(outcome.refused).toMatch(/could not be reached, so nothing was written/);
-      expect(await statusOf(campaignId), "the claim was kept with no job behind it").toBe("ACTIVE");
-      for (const gid of variantGids) expect(chaos.fake.priceOf(gid)).toBe(sale.get(gid));
+      // It used to refuse: "the background worker could not be reached". The row is the truth.
+      expect(outcome.queued).toBe(true);
+      expect(outcome.refused).toBeUndefined();
+      expect(await statusOf(campaignId)).toBe("REVERTING");
+      for (const gid of variantGids) expect(chaos.fake.priceOf(gid), "written in the request").toBe(sale.get(gid));
+
+      // The worker's tick, with its own queue down too: it rings the row, the queue does not
+      // take it, and the tick runs it there and then.
+      const down = {
+        async enqueue() {
+          throw new Error("ECONNREFUSED");
+        },
+        async depths() {
+          return {} as never;
+        },
+        async close() {},
+      };
+      expect(await workerTick(chaos, down)).toBe(1);
+      expect(await statusOf(campaignId)).toBe("COMPLETED");
+      for (const gid of variantGids) expect(Number(chaos.fake.priceOf(gid)!.replace(".", ""))).toBe(baseline.get(gid));
+      // And never twice: the next tick finds nothing waiting.
+      expect(await workerTick(chaos, down)).toBe(0);
     });
   });
 
-  it("still runs inline when there is no worker queue at all", async () => {
+  it("with no worker queue at all, is queued rather than run in the request, and the worker's tick runs it (#808)", async () => {
     await withChaos("queued-revert-fits", CATALOG, async (chaos) => {
-      const { campaignId } = chaos.fixture;
-      await onSale(chaos);
+      const { campaignId, variantGids } = chaos.fixture;
+      const sale = await onSale(chaos);
 
-      // No queue to hand it to: a revert is never refused, so it runs here.
+      // No queue to hand it to. Before D29 a revert ran here, in the request.
       queueMode = "none";
-      const inline = await chaos.revert({ actor: "chaos", inlineBudgetMs: 10_000 });
-      expect(inline.queued).toBeUndefined();
-      expect(inline.verified).toBe(20);
-      expect(await statusOf(campaignId)).toBe("COMPLETED");
+      const outcome = await chaos.revert({ actor: "chaos", inline: SMALL });
+      expect(outcome.queued).toBe(true);
+      expect(outcome.verified).toBe(0);
+      for (const gid of variantGids) expect(chaos.fake.priceOf(gid)).toBe(sale.get(gid));
       expect(enqueued).toHaveLength(0);
+
+      // Not rung before it has had its moment to reach a queue.
+      expect(await ringQueuedRuns(inlineRuntime(handler), handler, { shopId: chaos.fixture.shopId })).toBe(0);
+      // The worker with no Redis runs everything inline: in its tick.
+      expect(await workerTick(chaos)).toBe(1);
+      expect(await statusOf(campaignId)).toBe("COMPLETED");
     });
   });
 
   it("does not queue a revert that fits in the request", async () => {
     await withChaos("queued-revert-small", CATALOG, async (chaos) => {
       await onSale(chaos);
-      const outcome = await chaos.revert({ actor: "chaos", inlineBudgetMs: 60_000 });
+      const outcome = await chaos.revert({ actor: "chaos", inline: PAGE_INLINE });
       expect(outcome.queued).toBeUndefined();
       expect(outcome.verified).toBe(20);
       expect(enqueued).toHaveLength(0);

@@ -24,6 +24,9 @@ import { refusedForGood, startRefusal } from "../lib/scheduling/start-refusal";
 import { isEndingLate, toldEndingLate } from "../lib/scheduling/ending-late";
 import { adminClientForShop } from "./admin-client.server";
 import { claimEnrollment, endingSinceLastApply, pendingEnrollments } from "./auto-enroll.server";
+import { enqueueOrRun, inlineRuntime, type QueueRuntime } from "../worker/queue-runtime.server";
+import { handleJob } from "../worker/handlers.server";
+import { RUN_ENQUEUE_TIMEOUT_MS } from "./campaigns/queued-run.server";
 import { reclaimStaleRuns } from "./campaigns/reaper.server";
 import { claimForSchedule, noteCampaign } from "./campaigns/lifecycle.server";
 import { recordEndingLate } from "./campaigns/ending-late.server";
@@ -63,7 +66,15 @@ export interface TickResult {
  * Statuses are filtered in the query, but the decision itself is left to
  * `dueTransition` so there is one place that knows the rules.
  */
-export async function tick(now: Date = new Date()): Promise<TickResult> {
+export async function tick(
+  now: Date = new Date(),
+  /**
+   * Where the tick hands the work it finds and does not do itself (#808): the worker's
+   * queues. Inline when not given -- the chaos suite, a script -- so the work has happened by
+   * the time the tick returns, as it always had.
+   */
+  queue: QueueRuntime = inlineRuntime(handleJob),
+): Promise<TickResult> {
   // The real clock, so `now` can be moved on by the time a run inside this tick took.
   const tickStartedAt = Date.now();
   const result: TickResult = {
@@ -162,7 +173,7 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
     }
   }
 
-  await drainEnrollments(result, transitioned);
+  await drainEnrollments(result, transitioned, queue);
 
   // Last, and never able to hold up the work above it. A digest is a courtesy; a sale
   // starting on time is not.
@@ -384,16 +395,20 @@ function isOffPeak(now: Date, timeZone: string): boolean {
 }
 
 /**
- * Prices the products campaigns gained while running.
+ * Hands the products campaigns gained while running to the worker's queue (#808).
  *
- * An apply over the enrolled variants and nothing else, resolved against every campaign
- * like any run. It used to be a whole-campaign apply, idempotent in theory: after a revert
- * stopped part-way it re-discounted everything the revert had restored, for one enrolled
- * variant (#805). A campaign being reverted is not priced into at all; its mark is cleared.
+ * Each is an apply over the enrolled variants and nothing else, resolved against every
+ * campaign like any run (#805), and it is the worker's to run (`runEnrollment`): the tick
+ * used to run every one itself, in turn, and a campaign that gained a few thousand products
+ * held every other shop's scheduled start and end behind it. The job carries the campaign,
+ * not the variants: they stay its pending mark until the job claims them, so a job lost
+ * before then loses nothing, and the next tick hands it over again -- absorbed, while one
+ * waits, by its deduplication key. With Redis down it runs here, as it always did.
  */
 async function drainEnrollments(
   result: TickResult,
   alreadyRun: ReadonlySet<string>,
+  queue: QueueRuntime,
 ): Promise<void> {
   const pending = await pendingEnrollments();
 
@@ -408,38 +423,15 @@ async function drainEnrollments(
 
     // Marked before a revert was asked for. The merchant is ending this sale; pricing its
     // new products into it now would be a second writer against the revert, or a sale
-    // put back on products the revert has just restored.
+    // put back on products the revert has just restored. Asked here so a campaign being
+    // ended is never handed over, and again by the job, for a revert pressed while it waits.
     if (await endingSinceLastApply(entry.id)) {
       await claimEnrollment(entry.id);
       continue;
     }
 
-    // The client before the claim. Claiming clears the mark, and clearing it for a run
-    // that then could not start -- no session -- dropped the newly enrolled variants for
-    // good (#707). Without a client the mark stays, and the next tick asks again.
-    const client = await adminClientForShop(entry.shopDomain);
-    if (!client) {
-      result.failures.push({ campaignId: entry.id, error: `No usable session for ${entry.shopDomain}` });
-      continue;
-    }
-
-    // Another worker that got there first returns false, which is the whole point --
-    // two workers must not re-apply the same campaign.
-    const variantGids = await claimEnrollment(entry.id);
-    if (!variantGids) continue;
-    // A mark from before the variants were recorded with it names none. Nothing is lost
-    // that the variant's next edit does not enrol again.
-    if (variantGids.length === 0) continue;
-
     try {
-      // Named variants, so the run never holds the campaign: a revert pressed meanwhile
-      // finds it and asks the merchant to try again in a minute, and this run, finding the
-      // campaign claimed first, writes nothing (#763).
-      await runCampaign(entry.shopId, entry.id, client, {
-        actor: SCHEDULER_ACTOR,
-        variantGids,
-        occurrenceKey: `VARIANT-ENROLL-${Date.now()}`,
-      });
+      await enqueueOrRun(queue, "execution", { shopId: entry.shopId, campaignId: entry.id, enroll: true }, handleJob, RUN_ENQUEUE_TIMEOUT_MS);
       result.enrolled++;
     } catch (error) {
       result.failures.push({

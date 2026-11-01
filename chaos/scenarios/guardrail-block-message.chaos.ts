@@ -13,13 +13,19 @@
  *
  * Through the campaign's real preview, the real run, and Flow's Start and End campaign through
  * their routes, with only `authenticate` replaced (no signed request) and Flow's admin the chaos
- * client.
+ * client. Every run Flow starts is the worker's since D29 (#808), and a block is found by
+ * planning, so Flow hears it queued; the worker's refusal is what the campaign then says
+ * (#1046), in the same sentence. There is no worker queue here: the worker's tick runs it.
  */
 
 import { describe, expect, it, vi } from "vitest";
 
 import prisma from "../../app/db.server";
 import { AppError } from "../../app/lib/errors/app-error";
+import { queuedRefusal } from "../../app/lib/campaigns/queued-refusal";
+import { ringQueuedRuns, STRANDED_RUN_AFTER_MS } from "../../app/services/campaigns/queued-run.server";
+import { inlineRuntime } from "../../app/worker/queue-runtime.server";
+import type { JobRef, QueueName } from "../../app/worker/queues";
 import { breachPolicyOf, createCampaign } from "../../app/services/campaigns/model.server";
 import { previewCampaign } from "../../app/services/campaigns/preview.server";
 import { runCampaign } from "../../app/services/campaigns/run.server";
@@ -46,6 +52,24 @@ vi.mock("../../app/services/admin-client.server", async (importOriginal) => {
       (admin as { __chaos?: unknown })?.__chaos ?? actual.toAdminClient(admin as never),
   };
 });
+
+vi.mock("../../app/worker/web-queue.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../app/worker/web-queue.server")>()),
+  webQueue: () => null,
+}));
+
+async function worker(name: QueueName, ref: JobRef) {
+  const { handleJob } = await import("../../app/worker/handlers.server");
+  return handleJob(name, ref);
+}
+
+/** The worker's tick runs what Flow queued; what the campaign then says of its refusal (#1046). */
+async function refusedInTheWorker(chaos: ChaosContext): Promise<string> {
+  const now = new Date(Date.now() + STRANDED_RUN_AFTER_MS + 1_000);
+  expect(await ringQueuedRuns(inlineRuntime(worker), worker, { now, shopId: chaos.fixture.shopId })).toBe(1);
+  const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: chaos.fixture.campaignId } });
+  return queuedRefusal(campaign.schedule)?.reason ?? "";
+}
 
 /** Flow's Start campaign for the fixture campaign, through the route, and what Flow is told. */
 async function flowStart(chaos: ChaosContext) {
@@ -130,8 +154,8 @@ describe("chaos: a campaign a blocking guardrail stops", () => {
       expect(await previewSays()).toContain(SETTING);
       expect(await refusal()).toContain(SETTING);
       const draftFlow = await flowStart(chaos);
-      expect(draftFlow.status).toBe(422);
-      expect(draftFlow.message).toContain(SETTING);
+      expect(draftFlow.status, "Flow's start is queued, and its plan is the worker's").toBe(200);
+      expect(await refusedInTheWorker(chaos)).toContain(SETTING);
       expect((await campaign()).status, "a blocked apply kept the draft's claim").toBe("DRAFT");
       expect(chaos.fake.writeLog, "a blocked draft wrote").toHaveLength(0);
 
@@ -147,8 +171,10 @@ describe("chaos: a campaign a blocking guardrail stops", () => {
       // Its preview, a re-apply from its page and Flow's Start campaign all say so, and what
       // reaches it instead -- never the setting it no longer follows.
       const flow = await flowStart(chaos);
-      expect(flow.status).toBe(422);
-      const kept = { preview: await previewSays(), run: await refusal(), flow: flow.message };
+      expect(flow.status).toBe(200);
+      const queued = await refusedInTheWorker(chaos);
+      expect((await campaign()).status, "a blocked re-apply did not give the campaign back").toBe("ACTIVE");
+      const kept = { preview: await previewSays(), run: await refusal(), flow: queued };
       for (const [where, said] of Object.entries(kept)) {
         expect(said, where).toContain('This campaign started under "Block the whole campaign" and keeps that until it ends');
         expect(said, where).toContain(
@@ -157,7 +183,7 @@ describe("chaos: a campaign a blocking guardrail stops", () => {
         );
         expect(said, `${where} told a running campaign to change a setting that does not reach it`).not.toContain(SETTING);
       }
-      expect(kept.flow).toBe(`"${(await campaign()).name}" was not applied: ${kept.run}`);
+      expect(kept.flow, "the worker's refusal is not the run's sentence").toBe(kept.run);
       expect((await campaign()).status, "a blocked re-apply did not give the campaign back").toBe("ACTIVE");
 
       // A resume says the same: stopped part-way is started.
@@ -238,14 +264,15 @@ describe("chaos: a campaign a blocking guardrail stops", () => {
       // follows Clamp, so the setting is not what stops it either.
       await prisma.campaign.update({ where: { id: campaignId }, data: { priority: 100 } });
       const draftFlow = await flowStart(chaos);
-      expect(draftFlow.status).toBe(422);
+      expect(draftFlow.status).toBe(200);
+      const queuedDraft = await refusedInTheWorker(chaos);
       const draft = {
         preview: (await previewCampaign(shopId, campaignId, { limit: 100 })).blocked?.message ?? "",
         run: await refusal(),
-        flow: draftFlow.message,
+        flow: queuedDraft,
       };
       namesWinter(draft);
-      expect(draft.flow).toBe(`"${(await campaign()).name}" was not applied: ${draft.run}`);
+      expect(draft.flow).toBe(draft.run);
       expect((await campaign()).status, "a blocked apply kept the draft's claim").toBe("DRAFT");
       expect(chaos.fake.writeLog, "a blocked draft wrote").toHaveLength(before);
 
@@ -259,14 +286,15 @@ describe("chaos: a campaign a blocking guardrail stops", () => {
       // Its revert hands every variant to Winter Sale, under the floor: the revert's preview, its run
       // and Flow's End campaign name Winter Sale, and what reaches it.
       const endFlow = await flowEnd(chaos);
-      expect(endFlow.status).toBe(422);
+      expect(endFlow.status).toBe(200);
+      const queuedEnd = await refusedInTheWorker(chaos);
       const revert = {
         preview: (await previewCampaign(shopId, campaignId, { limit: 100, revert: true })).blocked?.message ?? "",
         run: await refusal({ revert: true }),
-        flow: endFlow.message,
+        flow: queuedEnd,
       };
       namesWinter(revert);
-      expect(revert.flow).toBe(`"${(await campaign()).name}" was not ended: ${revert.run}`);
+      expect(revert.flow).toBe(revert.run);
       expect((await campaign()).status, "a blocked revert did not give the campaign back").toBe("ACTIVE");
 
       // With Block saved too, starting Winter Sale again would block again: the setting comes first.

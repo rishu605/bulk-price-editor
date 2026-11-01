@@ -21,8 +21,9 @@ export async function handleJob(name: QueueName, ref: JobRef): Promise<JobResult
   switch (name) {
     case "execution":
       // A drift decision over many prices is execution too: a put-back is a run, and
-      // keeping or leaving thousands is the same queue's kind of work (#822).
-      return ref.drift ? driftDecisionJob(ref) : runCampaignJob(ref);
+      // keeping or leaving thousands is the same queue's kind of work (#822). So is pricing
+      // the products a running campaign gained, which the tick used to do itself (#808).
+      return ref.drift ? driftDecisionJob(ref) : ref.enroll ? enrollmentJob(ref) : runCampaignJob(ref);
     case "audit":
       return auditJob(ref);
     case "sync":
@@ -65,11 +66,27 @@ async function runCampaignJob(ref: JobRef): Promise<void> {
   // Thrown, not logged and returned: a job that returns has succeeded as far as the queue
   // is concerned, so a queued apply or revert with no client used to vanish with its
   // job marked done (#707). Now it fails where the queue's own failure handling sees it.
+  // A queued run's row is given back first and the merchant told (#808): left QUEUED, the
+  // tick would ring it into the same wall every thirty seconds, and the campaign would read
+  // Queued for good.
   const client = await adminClientForShop(shop.domain);
-  if (!client) throw new Error(`No usable session for ${shop.domain}; the run did not start.`);
+  if (!client) {
+    if (ref.runId) {
+      const { refuseQueuedRun } = await import("../services/campaigns/queued-run.server");
+      await refuseQueuedRun(
+        ref,
+        "The app has no working session for this store, so the background worker could not start this run and nothing " +
+          "was written. Open the app again from Shopify admin, then try again.",
+      );
+    }
+    throw new Error(`No usable session for ${shop.domain}; the run did not start.`);
+  }
 
   const { runCampaign } = await import("../services/campaigns/run.server");
   await runCampaign(ref.shopId, ref.campaignId, client, {
+    // The QUEUED row the web process wrote, which this run takes over rather than creating
+    // one of its own (#808). None on a job from before rows were queued.
+    ...(ref.runId ? { runId: ref.runId } : {}),
     revert: ref.revert === true,
     resume: ref.resume === true,
     // Claimed and answered "under way" before it was queued: one that cannot run says so (#1046).
@@ -85,6 +102,17 @@ async function runCampaignJob(ref: JobRef): Promise<void> {
     ...(ref.untypedPress ? { untypedPress: true } : {}),
     ...(ref.claimedFrom ? { claimedFrom: ref.claimedFrom as CampaignState } : {}),
   });
+}
+
+/**
+ * The products a running campaign gained while it ran, priced over those variants alone
+ * (#805), handed here by the scheduler's tick (#808). The job names the campaign; the
+ * variants are its pending mark, claimed when it runs.
+ */
+async function enrollmentJob(ref: JobRef): Promise<void> {
+  if (!ref.campaignId) return;
+  const { runEnrollment } = await import("../services/auto-enroll.server");
+  await runEnrollment(ref.shopId, ref.campaignId);
 }
 
 /**

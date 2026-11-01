@@ -9,30 +9,27 @@
  * cannot type, so this refuses outright when a campaign is live rather than asking. A
  * scheduled automation that silently reset a merchant's reference prices mid-sale would be
  * the most expensive thing in this codebase.
+ *
+ * Every capture it asks for is the worker's (D29, #808): checked here, so a refusal is Flow's
+ * 4xx at once, then queued and answered 200. A capture has no row of its own to wait on, so
+ * when the queue cannot take it Flow hears a 503, and its resend is the retry it needs.
  */
 
 import type { ActionFunctionArgs } from "react-router";
 
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
-import { toAdminClient } from "../services/admin-client.server";
 import { planRecapture } from "../services/recapture.server";
-import { captureForFlow, captureRefusal, ladderReadsToCapture } from "../services/flow/flow-capture.server";
-import {
-  answerForError,
-  FLOW_INLINE_LADDER_READS,
-  FLOW_INLINE_ROWS,
-  recordFlowRequest,
-  respond,
-  type FlowAnswer,
-} from "../services/flow/flow-answer.server";
+import { captureRefusal } from "../services/flow/flow-capture.server";
+import { answerForError, recordFlowRequest, respond, type FlowAnswer } from "../services/flow/flow-answer.server";
 import { enqueueWithin, webQueue } from "../worker/web-queue.server";
-import { recapturedMessage } from "../lib/baselines/recapture";
-import type { AdminClient } from "../lib/execution/sync-executor";
 import { formatCount } from "../lib/format/display";
 
+/** How long Flow's request waits for Redis to take the capture: well inside Flow's ten seconds. */
+const CAPTURE_ENQUEUE_TIMEOUT_MS = 2_000;
+
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { session, payload, admin } = await authenticate.flow(request);
+  const { session, payload } = await authenticate.flow(request);
 
   const shop = await prisma.shop.findUnique({
     where: { domain: session.shop },
@@ -43,13 +40,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const segmentId = String(
     (payload as { properties?: Record<string, unknown> }).properties?.["segment-id"] ?? "",
   );
-  // For the wholesale prices' quantity ladders, read as the recapture page reads them (#1092).
-  const answer = await capture(shop.id, segmentId, admin ? toAdminClient(admin) : undefined);
+  // The worker reads the wholesale prices' quantity ladders with the shop's session (#1092).
+  const answer = await capture(shop.id, segmentId);
   await recordFlowRequest(shop.id, "capture-baselines", { kind: "Segment", id: segmentId }, answer);
   return respond(answer);
 };
 
-async function capture(shopId: string, segmentId: string, client: AdminClient | undefined): Promise<FlowAnswer> {
+async function capture(shopId: string, segmentId: string): Promise<FlowAnswer> {
   // A 409, not the 200 it was: Flow showed a capture that never happened as a success.
   const refusal = await captureRefusal(shopId);
   if (refusal) return { status: 409, outcome: "refused", message: refusal };
@@ -67,44 +64,28 @@ async function capture(shopId: string, segmentId: string, client: AdminClient | 
   }
 
   try {
+    // Planned here for its refusals -- a segment that is gone, an empty scope -- which Flow
+    // hears now, as a 4xx, rather than never.
     const plan = await planRecapture(shopId, { segmentId });
 
-    // Ten seconds is Flow's whole wait (#773). A capture larger than a run Flow may make
-    // goes to the worker and is answered at once; with no worker queue it runs here. So does
-    // one whose wholesale prices need more ladder reads from Shopify than the wait has room
-    // for (#1092): each is baselined with its ladder or not at all.
-    const large =
-      plan.variantGids.length > FLOW_INLINE_ROWS ||
-      (await ladderReadsToCapture(shopId, plan.variantGids)) > FLOW_INLINE_LADDER_READS;
-    const queue = large ? webQueue() : null;
-    if (queue) {
-      try {
-        await enqueueWithin(queue, "sync", { shopId, recaptureSegmentId: segmentId });
-      } catch {
-        // The queue will come back; Flow resends a 5xx, which is the retry this needs.
-        return {
-          status: 503,
-          outcome: "retry",
-          message: "This capture is too large to run inside Flow's wait, and the background worker could not be reached. Nothing was captured; Flow will try again.",
-        };
-      }
+    // Every capture is the worker's (D29): a baseline capture never runs in a web request. The
+    // worker checks again before it writes (`captureForFlow`): a campaign may go live first.
+    const queue = webQueue();
+    try {
+      if (!queue) throw new Error("no worker queue");
+      await enqueueWithin(queue, "sync", { shopId, recaptureSegmentId: segmentId }, CAPTURE_ENQUEUE_TIMEOUT_MS);
+    } catch {
+      // The queue will come back; Flow resends a 5xx, which is the retry this needs.
       return {
-        status: 200,
-        outcome: "queued",
-        message: `Capturing baselines for ${formatCount(plan.variantGids.length)} variants in the background.`,
+        status: 503,
+        outcome: "retry",
+        message: "Baselines are captured by the background worker, and it could not be reached. Nothing was captured; Flow will try again.",
       };
     }
-
-    const captured = await captureForFlow(shopId, segmentId, client);
-    // A campaign went live between the check above and the capture.
-    if (!captured) return { status: 409, outcome: "refused", message: (await captureRefusal(shopId)) ?? "Nothing was captured." };
-    // The page's sentence, wholesale prices counted (#1092). Wholesale prices whose ladders
-    // could not be read are left as they were, and said so: the capture happened, so not a
-    // 5xx Flow would resend, and running it again is the merchant's to decide.
     return {
       status: 200,
-      outcome: captured.wholesaleLeft > 0 ? "partial" : "done",
-      message: recapturedMessage(captured),
+      outcome: "queued",
+      message: `Capturing baselines for ${formatCount(plan.variantGids.length)} variants in the background.`,
     };
   } catch (error) {
     return answerForError(error, "Baselines were not captured");

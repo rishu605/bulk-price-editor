@@ -1,20 +1,28 @@
 /**
- * How much writing one HTTP request can do before its connection is closed.
+ * How much writing one HTTP request can do before its connection is closed -- and, since
+ * D29 (#808), how little a run may cover and still be written there at all.
  *
- * `runCampaign` executes inline, so a campaign applied from the campaign page is written
- * by the web process during a single request. Railway's proxy closes a request after
- * five minutes with no data transferred, and a React Router action sends nothing until
- * it returns — so five minutes is the real ceiling, not the fifteen that applies to a
- * streaming response.
+ * `runCampaign` used to run every Apply, Revert and Resume inside the request that asked
+ * for it, bounded only by the time it would take. One 102,132-variant apply on anchor-perf
+ * then held the web process's whole connection pool for minutes, and every other shop's
+ * pages went blank (#803). So a run is the worker's unless it is tiny: at most
+ * `MAX_INLINE_ROWS` variants, pressed on the campaign page, still runs where it was asked,
+ * so a merchant's one-variant revert and App Review's few-variant apply and revert behave as
+ * they always did. Everything else -- and everything Flow starts -- is handed to the worker
+ * (`queueRun`), and the page follows it there.
  *
- * **The failure it prevents is the bad kind.** Exceeding the ceiling does not cancel the
+ * Railway's proxy closes a request after five minutes with no data transferred, and a React
+ * Router action sends nothing until it returns -- so five minutes is the real ceiling, not
+ * the fifteen that applies to a streaming response.
+ *
+ * **The failure that ceiling causes is the bad kind.** Exceeding it does not cancel the
  * work. The proxy closes the connection while `runCampaign` carries on writing, so the
- * merchant sees a bare "502" and their storefront changes anyway — the one outcome this
+ * merchant sees a bare "502" and their storefront changes anyway -- the one outcome this
  * product exists to prevent, arriving through a timeout nobody documented.
  *
- * **The budget is time, not rows (#790).** It used to be 120,000 variants, from 1.75 ms a
- * variant measured on `anchor-perf` — on the bulk path, where 62,535 variants are one
- * mutation and the wait is the whole cost. Two things were never in that figure:
+ * **The time budget stays, beside the rows (#790).** It used to be 120,000 variants, from
+ * 1.75 ms a variant measured on `anchor-perf` -- on the bulk path, where 62,535 variants are
+ * one mutation and the wait is the whole cost. Two things were never in that figure:
  *
  * - **Shopify's bulk queue.** A run over `DEFAULT_THRESHOLD` variants is submitted as one
  *   bulk operation and polled until Shopify finishes it. The queue is shared with every
@@ -22,16 +30,18 @@
  *   all, and never runs inside a request.
  * - **Per-product calls.** The sync path writes one product per call, and a campaign's
  *   tag kit is one `tagsAdd` per product after that. Both are network round trips,
- *   measured below — about four hundred times the bulk figure per product.
+ *   measured below -- about four hundred times the bulk figure per product.
  *
  * A 3,666-variant campaign passed the old check at 3% of the limit, ran for 7½ minutes,
  * and showed the merchant a bare "502" at five while it kept writing prices and tags. A
  * 522-variant one on 318 products -- under the bulk threshold, so all of it sync -- takes
- * 7 minutes 9 seconds with its tag kit, and this budget estimates it at 7 minutes 1.
+ * 7 minutes 9 seconds with its tag kit, and this budget estimates it at 7 minutes 1. Under
+ * `MAX_INLINE_ROWS` the budget never binds on the page (a test holds that); it is what still
+ * bounds a drift put-back's estimate, and it says so if the figures ever move.
  *
- * Above the budget the answer is not "no" — it is "not in this request". The worker has
- * no request attached and no deadline, so the run is handed to it and the page follows
- * the campaign's state until it finishes.
+ * Above either, the answer is not "no" -- it is "not in this request". The worker has no
+ * request attached and no deadline, so the run is handed to it and the page follows the
+ * run row until it finishes.
  */
 
 import { formatCount } from "../format/display";
@@ -69,28 +79,19 @@ export const MS_PER_TAGGED_PRODUCT = 600;
 export const PAGE_INLINE_BUDGET_MS = 2 * 60 * 1000;
 
 /**
- * How many Shopify reads the recapture page makes for wholesale quantity ladders while the
- * merchant waits (#1105). A recapture needing more is handed to the worker, and the page
- * follows it there step by step, as Home follows a sync.
+ * The most variants a run pressed on the campaign page may cover and still be written inside
+ * the request (D29, #808). Larger, and the run is the worker's: a queued run row first, a job
+ * second, and the page shows it Queued, then Planning, then Writing N of M, then Verifying.
  *
- * A wholesale price is recaptured with its quantity ladder or not at all, and the ladder is
- * read from Shopify, 25 prices a read (`LADDER_READ_VARIANTS`), one read after another --
- * before a single baseline is written. Flow's four reads take a second or two
- * (`FLOW_INLINE_LADDER_READS`): about half a second a read on a Plus store, whose bucket and
- * restore rate leave a read of this cost unthrottled, and B2B catalogues are a Plus feature.
- * Forty reads, a thousand wholesale prices, is then about twenty seconds. Even at three times
- * that pace it is half of `PAGE_INLINE_BUDGET_MS`, which leaves the other half for what the
- * same request does around the reads: counting the scope against every running campaign, and
- * writing a baseline for every surface in it. Not measured on a store with a large wholesale
- * catalogue; inferred from Flow's figure, and set low because the cost of being wrong is
- * lopsided -- a recapture sent to the worker that could have run here costs a few seconds of
- * polling, and one kept here that could not is a "502" over a recapture still writing.
- *
- * Reads rather than prices, because reads are what take the time: a list of three prices
- * costs a read as one of twenty-five does. Counted as Flow counts them, by
- * `ladderReadsToCapture`.
+ * Fifty, because the runs that must keep behaving as they always did are tiny: a merchant's
+ * one-variant revert or reinstate, and App Review's apply and revert on a development store's
+ * handful of variants. At the measured cost of a product on the sync path, with its tag kit,
+ * fifty is about a minute -- inside `PAGE_INLINE_BUDGET_MS`, so the time budget never binds
+ * below it -- and fifty rows cannot hold a web connection long enough to starve another shop's
+ * pages, which a run of thousands did (#803). Counted as `inlineWork` counts the scope: one
+ * indexed count of the campaign's variants, before anything is planned.
  */
-export const PAGE_INLINE_LADDER_READS = 40;
+export const MAX_INLINE_ROWS = 50;
 
 /**
  * The largest scope the campaign page plans while it loads, when it has no current stored
@@ -134,8 +135,8 @@ export function estimateMs(work: InlineWork): number | null {
  * Why this run cannot finish inside `budgetMs`, in a sentence a merchant can read, or
  * null when it can.
  *
- * It names the size and the reason; the caller adds what happens next, which differs
- * between handing the run to the worker and refusing it.
+ * It names the size and the reason; the caller adds what happens next. Since D29 that is
+ * always the worker: a run is never refused for its size.
  */
 export function overBudget(work: InlineWork, budgetMs: number): string | null {
   const ms = estimateMs(work);
@@ -164,16 +165,40 @@ function roughly(ms: number): string {
 }
 
 /**
- * The refusal, for a run over budget with no background worker to hand it to.
- *
- * Names the size, the reason and the way forward — the error taxonomy requires all
- * three, and "too large" on its own leaves a merchant with a campaign they cannot run
- * and no idea what to do about it.
+ * What a caller lets a run do before answering: how many variants it may cover, and how long
+ * it may take (D29). Set only by `startRun`, which is the one place a route starts a run.
  */
-export function refuseInline(reason: string): string {
-  return (
-    `${reason} Started from here, it would be cut off partway through while still writing ` +
-    "prices, which is worse than not starting. Schedule it instead: a scheduled campaign " +
-    "runs in the background with no time limit, and reports the same result when it finishes."
-  );
+export interface InlineLimit {
+  /** `MAX_INLINE_ROWS` for the campaign page; 0 for a caller that never writes inline. */
+  rows: number;
+  /** The caller's deadline, in milliseconds. */
+  budgetMs: number;
+}
+
+/** The campaign page's: fifty variants, and two of Railway's five minutes. */
+export const PAGE_INLINE: InlineLimit = { rows: MAX_INLINE_ROWS, budgetMs: PAGE_INLINE_BUDGET_MS };
+
+/** A caller none of whose runs is written inline: Shopify Flow, which waits ten seconds (D29). */
+export const NEVER_INLINE: InlineLimit = { rows: 0, budgetMs: 0 };
+
+/**
+ * Why this run is handed to the worker rather than written in the request that asked, in a
+ * sentence a merchant (or Flow's run log) can read, or null when it runs here (D29).
+ *
+ * It names the size and the reason; `queueRun` adds what happens next. A caller that never
+ * writes inline hands over every run, an empty one included: there is no size at which Flow's
+ * ten seconds are the right place to write prices.
+ */
+export function handedOver(work: InlineWork, limit: InlineLimit): string | null {
+  if (limit.rows <= 0) return "Runs started from Shopify Flow are always written by the background worker.";
+  // The bulk path and the time first: either says more about the run than its count does.
+  const tooLong = overBudget(work, limit.budgetMs);
+  if (tooLong) return tooLong;
+  if (work.variants > limit.rows) {
+    return (
+      `This campaign covers ${formatCount(work.variants)} variants, more than the ${formatCount(limit.rows)} ` +
+      "Anchor writes while the page waits."
+    );
+  }
+  return null;
 }

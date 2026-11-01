@@ -9,17 +9,23 @@
  * shop basics and the market read are replaced -- the fake store models neither the bulk
  * query nor the shop object, and each step is tested on its own elsewhere -- so each can
  * look at what the shop row says while it runs. Baseline capture is the real one.
+ *
+ * And it never runs in Home's request, with Redis or without (D29, #808): the claim is the
+ * truth, and the worker's tick rings one left waiting.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import prisma from "../../app/db.server";
-import { syncStateOf } from "../../app/services/sync-job.server";
+import { ringQueuedSyncs, STRANDED_SYNC_AFTER_MS, syncStateOf } from "../../app/services/sync-job.server";
+import { inlineRuntime } from "../../app/worker/queue-runtime.server";
 import type { JobRef, QueueName } from "../../app/worker/queues";
 import { type ChaosContext, fixtureAdminClient, withChaos } from "../harness/scenario";
 
 let pending = { shop: "", endpoint: "" };
 const enqueued: Array<{ name: QueueName; ref: JobRef }> = [];
+/** Redis taking nothing: every enqueue refused. */
+let redisDown = false;
 /** What the shop row said each step was, read from inside that step. */
 const seen: Record<string, unknown> = {};
 let marketsFail = false;
@@ -50,6 +56,7 @@ vi.mock("../../app/worker/web-queue.server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../app/worker/web-queue.server")>()),
   webQueue: () => ({
     async enqueue(name: QueueName, ref: JobRef) {
+      if (redisDown) throw new Error("ECONNREFUSED");
       enqueued.push({ name, ref });
     },
     async depths() {
@@ -102,6 +109,7 @@ vi.mock("../../app/services/markets-sync.server", async (importOriginal) => ({
 
 beforeEach(() => {
   enqueued.length = 0;
+  redisDown = false;
   marketsFail = false;
   marketsProblem = null;
   marketsMs = 0;
@@ -166,6 +174,32 @@ describe("chaos: Sync catalogue on Home", () => {
       expect(shop.timezone).toBe("Europe/London");
       expect(await prisma.baseline.count({ where: { shopId, supersededAt: null } })).toBe(3);
       expect(await prisma.auditLogEntry.findFirst({ where: { shopId, action: "catalogue.synced" } })).toMatchObject({ actor: "staff:42" });
+    });
+  });
+
+  it("with Redis down, still claims and answers, never syncs in the request, and the worker's tick runs it (#808)", async () => {
+    await withChaos("background-sync-redis-down", { catalog: { products: 3, variantsPerProduct: 1 } }, async (chaos) => {
+      const { shopId, domain } = chaos.fixture;
+      pending = { shop: domain, endpoint: chaos.server.endpoint() };
+      redisDown = true;
+
+      // It used to refuse: "the background worker could not be reached, so the sync did not start".
+      const answer = await press("sync");
+      expect(answer.ok).toBe(true);
+      expect(answer.message).toMatch(/Syncing your catalogue in the background/);
+      expect(seen.catalogue, "the request synced the catalogue itself").toBeUndefined();
+      expect(syncStateOf(await shopOf(chaos))).toMatchObject({ running: true, phase: "queued" });
+
+      // The worker's tick: not before the claim has had its moment to reach a queue, then run there.
+      const { handleJob } = await import("../../app/worker/handlers.server");
+      expect(await ringQueuedSyncs(inlineRuntime(handleJob), handleJob, { shopId })).toBe(0);
+      const now = new Date(Date.now() + STRANDED_SYNC_AFTER_MS + 1_000);
+      expect(await ringQueuedSyncs(inlineRuntime(handleJob), handleJob, { now, shopId })).toBe(1);
+      expect(seen.catalogue).toEqual({ phase: "catalogue", progress: { done: 3 } });
+      const shop = await shopOf(chaos);
+      expect(syncStateOf(shop)).toMatchObject({ running: false, failure: null });
+      expect(shop.initialSyncCompletedAt).not.toBeNull();
+      expect(await ringQueuedSyncs(inlineRuntime(handleJob), handleJob, { now, shopId }), "rung again once finished").toBe(0);
     });
   });
 

@@ -1,0 +1,22 @@
+-- What a run handed to the worker was asked to do, kept on its row (#808, D29).
+--
+-- A run larger than the campaign page writes while it waits, and every run Flow starts, is
+-- now a `campaign_runs` row in QUEUED before it is a job. The row is the truth and the job is
+-- only the doorbell: a job Redis never took (Redis away, or no Redis at all) or lost (restarted
+-- without its data) is rung again by the worker's tick from this row, which is why the row
+-- has to say everything the job said -- who asked, the state the campaign was claimed from,
+-- whether it resumes, and the variants the merchant asked to leave as they are.
+--
+-- No new index. `campaign_runs_one_live_run` (#793) already counts QUEUED, so a queued run
+-- holds its campaign the moment it is written, and a second press or a Flow resend is refused
+-- by the database and named the run that holds it. Nothing to check in existing data: the
+-- index is unchanged.
+--
+-- Not a plan input of its own. It is written with the row, whose insert is already logged,
+-- and never updated after.
+--
+-- Expand only: a nullable column the previous release neither reads nor writes. Rolled back one
+-- version, a queued row's job still carries every field it did before (`JobRef`), and a row
+-- that release cannot pick up goes quiet and is reclaimed as Partial, which Resume continues.
+
+ALTER TABLE "campaign_runs" ADD COLUMN "request" JSONB;

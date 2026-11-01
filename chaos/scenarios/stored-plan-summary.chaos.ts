@@ -139,6 +139,10 @@ vi.mock("../../app/lib/execution/inline-budget", async (importOriginal) => {
     get PAGE_INLINE_BUDGET_MS() {
       return inlineBudgetMs ?? actual.PAGE_INLINE_BUDGET_MS;
     },
+    // The page's limit as `startRun` passes it (D29): the same budget, under its fifty rows.
+    get PAGE_INLINE() {
+      return inlineBudgetMs === null ? actual.PAGE_INLINE : { ...actual.PAGE_INLINE, budgetMs: inlineBudgetMs };
+    },
   };
 });
 

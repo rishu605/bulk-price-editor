@@ -17,9 +17,9 @@
  * cross-references every running campaign. Paying for that on every visit to a page a
  * merchant opens to look something up is not a trade worth making for one fewer URL.
  *
- * A recapture whose wholesale prices need more quantity-ladder reads from Shopify than this
- * request can wait on is handed to the worker once its checks pass, and the page follows it
- * step by step, as Home follows a sync (#1105): `recaptureFromPage`, `useRecapturePolling`.
+ * A recapture is handed to the worker once its checks pass, whatever its size -- a baseline
+ * capture never runs in a web request (D29, #808) -- and the page follows it step by step, as
+ * Home follows a sync (#1105): `recaptureFromPage`, `useRecapturePolling`.
  */
 
 import { useEffect, useRef, useState, type ElementRef } from "react";
@@ -30,7 +30,6 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { ensureShop } from "../services/shop.server";
-import { toAdminClient } from "../services/admin-client.server";
 import { planRecapture } from "../services/recapture.server";
 import { recaptureFromPage, recaptureOnPage } from "../services/recapture-job.server";
 import { recaptureScopeFrom, STALE_SCOPE } from "../lib/baselines/recapture-scope";
@@ -81,7 +80,7 @@ export const loader = withGuard("/app/prices/baselines/recapture", async ({ requ
 type ActionData = { ok: boolean; message: string; errorId?: string; recapture?: string };
 
 export const action = withGuard("/app/prices/baselines/recapture", async ({ request }: ActionFunctionArgs) => {
-  const { admin, session, sessionToken } = await authenticate.admin(request);
+  const { session, sessionToken } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
   const form = await request.formData();
 
@@ -105,9 +104,6 @@ export const action = withGuard("/app/prices/baselines/recapture", async ({ requ
         actor: actorFor(sessionToken, session.shop),
         expectedScope: Number(shown),
       },
-      // For a wholesale price's quantity ladder, which is recaptured with it (#1071): read
-      // here, or by the worker when there are more than this request can wait on (#1105).
-      toAdminClient(admin),
     );
   } catch (error) {
     const reported = await reportError(error, {

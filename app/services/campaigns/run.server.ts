@@ -35,7 +35,7 @@ import { guardrailsFor } from "../settings.server";
 import type { RunOutcome } from "./types";
 import { chunk } from "../../lib/db/chunk";
 import { inRunChunks, retryTransient, RUN_CHUNK } from "../../lib/db/run-writes.server";
-import { overBudget, refuseInline, type InlineWork } from "../../lib/execution/inline-budget";
+import { handedOver, type InlineLimit, type InlineWork } from "../../lib/execution/inline-budget";
 import { recordClaim, releaseClaim, transitionCampaign } from "./lifecycle.server";
 import { endingLateWatch } from "./ending-late.server";
 import { clearQueuedRefused, recordEndMissed, recordQueuedRefused, recordStartRefused } from "./start-refusal.server";
@@ -98,16 +98,24 @@ export interface RunOptions {
    */
   claimUnrecorded?: string;
   /**
-   * How long this caller can wait for the writing, in milliseconds. A run estimated to
-   * take longer -- or one that goes to Shopify's bulk queue, which has no estimate -- is
-   * handed to the background worker instead of starting here (#790).
+   * What the caller lets a run do before answering (D29, #808): how many variants it may
+   * cover and how long it may take. A larger run -- or one that goes to Shopify's bulk queue,
+   * which has no estimate -- is handed to the background worker instead of starting here,
+   * as a QUEUED run row the worker picks up (`queueRun`).
    *
-   * Set by the web routes, which run inside an HTTP request that gets closed after five
-   * minutes, and by Flow, which waits ten seconds. Left unset by the worker and the
-   * scheduler, which have no request attached -- the ceiling is a property of the
-   * caller, not of the campaign. See `inline-budget.ts`.
+   * Set only by `startRun`, the one way a route starts a run: the campaign page's
+   * `PAGE_INLINE`, Flow's `NEVER_INLINE`. Left unset by the worker and the scheduler, which
+   * have no request attached -- the ceiling is a property of the caller, not of the
+   * campaign. See `inline-budget.ts`.
    */
-  inlineBudgetMs?: number;
+  inline?: InlineLimit;
+  /**
+   * The QUEUED run row this run is, when the web process handed it over (#808). The worker's
+   * run takes it out of QUEUED (`adoptQueuedRun`) rather than creating a row of its own, so the
+   * row the page has followed since the press is the one that writes, and a job rung twice
+   * runs once. One that ends before it writes is closed as CANCELLED (`cancelUnstartedRun`).
+   */
+  runId?: string;
   /**
    * Fraction of applied rows to read back. Defaults to full verification, which
    * suits the catalogue sizes the sync path handles; the bulk path compares every row
@@ -219,6 +227,33 @@ export async function runCampaign(
   // first -- a scheduled campaign whose window had ended is a draft by its claim (#1146).
   const releaseTarget = () => started.releaseTo ?? stateBefore;
 
+  // A run the web process queued is its row (#808). Only the worker that takes it out of
+  // QUEUED runs it: a job rung twice -- the tick's ring and Redis's late delivery -- stands down
+  // to the one that did, having touched nothing.
+  // Imported where it is used, as `queueRun` always was: the queue's module brings BullMQ.
+  const queued = options.runId ? await import("./queued-run.server") : null;
+  if (options.runId && !(await queued!.adoptQueuedRun(options.runId))) {
+    return {
+      runId: options.runId,
+      planned: 0,
+      verified: 0,
+      failed: 0,
+      unverified: 0,
+      clean: true,
+      deferredTo: options.runId,
+      messages: ["This queued run was already picked up by the background worker. Nothing was written twice."],
+    };
+  }
+  // Planned before a price is written, and at 102,132 variants planning is minutes (#803):
+  // stamped while it lasts, so the reaper never takes a run being planned for one that died.
+  // Conditional on PLANNING, so once the run writes its own heartbeat takes over.
+  const planning = options.runId ? planningBeat(options.runId) : null;
+  // A queued run that ends before it writes is closed as never started -- and before the
+  // claim is given back, which a live row would block.
+  const dropIfUnstarted = async () => {
+    if (options.runId && !started.runId) await queued!.cancelUnstartedRun(options.runId);
+  };
+
   try {
     // Every line this run produces carries the shop and the campaign, and the run id
     // from the moment there is one. Bound here rather than in the worker because this is
@@ -228,9 +263,11 @@ export async function runCampaign(
     // half a merchant is watching — with no ids at all.
     //
     // Merges with the job's context when there is one, so a queued run keeps its job id.
+    // A queued run's job binds its run id from the ref before it gets here (`traced`).
     const outcome = await withLogContext({ shopId, campaignId }, () =>
       executeCampaignRun(shopId, campaignId, client, options, started, stateBefore),
-    );
+    ).finally(() => planning && clearInterval(planning));
+    await dropIfUnstarted();
 
     // A refusal -- waiting for approval, over the inline limit, refused by the plan -- is
     // a return, not a throw, so the catch below never saw it. When the scheduler had
@@ -261,6 +298,8 @@ export async function runCampaign(
 
     return outcome;
   } catch (error) {
+    if (planning) clearInterval(planning);
+    await dropIfUnstarted().catch(() => {});
     // The run row reaches a terminal state before anything else happens. Without this a
     // throw between creating the row and the update at the end of `executeCampaignRun`
     // left it EXECUTING for ever: `releaseClaim` below frees the *campaign*, so nothing
@@ -323,8 +362,9 @@ export async function runCampaign(
         await recordQueuedRefused(shopId, campaignId, refusal, { tell: !failed?.ended });
       }
       // A scheduled end that could not run is retried, but said once, on the page and by
-      // email (#1005): the sale's prices are still live past its window.
-      if (options.claimedFrom && options.revert) {
+      // email (#1005): the sale's prices are still live past its window. The scheduler's only:
+      // a revert handed to the worker carries its claim too, and is said above (#808).
+      if (options.claimedFrom && options.revert && !options.queued) {
         await recordEndMissed(shopId, campaignId, toAppError(error).userMessage, { tell: !failed?.ended });
       }
       await releaseClaim(shopId, campaignId, releaseTo, {
@@ -593,7 +633,8 @@ async function executeCampaignRun(
   // Apply or a Revert waits for it. Transient: it clears on its own, and Flow's resend is
   // the retry it needs.
   if (!options.variantGids) {
-    const live = await liveFullRun(campaignId);
+    // Not this run's own row, when it is one the web process queued (#808).
+    const live = await liveFullRun(campaignId, options.runId);
     if (live) return standDown(campaignId, live, options, 0);
   }
 
@@ -630,12 +671,11 @@ async function executeCampaignRun(
     }
   }
 
-  // What this run will write, for the inline budget (#790). Counted only for a caller
-  // that declared a deadline, and only for a whole-campaign run: a scoped run is a
-  // handful of variants by construction, and handing one to the worker would take the
-  // whole campaign's claim for it.
-  const work =
-    options.inlineBudgetMs !== undefined && !options.variantGids ? await inlineWork(shopId, campaignId) : undefined;
+  // What this run will write, for the inline limit (#790, D29). Counted only for a caller
+  // that declared one, and only for a whole-campaign run: a scoped run is a handful of
+  // variants by construction, and handing one to the worker would take the whole campaign's
+  // claim for it.
+  const work = options.inline && !options.variantGids ? await inlineWork(shopId, campaignId) : undefined;
 
   // ---------------------------------------------------------- the plan gate (E8)
   //
@@ -686,10 +726,10 @@ async function executeCampaignRun(
     }
   }
 
-  // A run too long for the caller's deadline goes to the worker instead of running here
-  // (#772, #790), after the approval and plan gates have had their say, and before the
-  // claim below, because handing it over takes the claim itself.
-  const tooLongHere = work ? overBudget(work, options.inlineBudgetMs!) : null;
+  // A run larger than the caller writes while it waits goes to the worker instead of running
+  // here (#772, #790, D29), after the approval and plan gates have had their say, and before
+  // the claim below, because handing it over takes the claim itself.
+  const tooLongHere = work && options.inline ? handedOver(work, options.inline) : null;
   // Whether nobody is there to type the typed confirmation (#1009): checked below on the
   // run's own plan, and here first for a Flow start handed to the worker, which would
   // otherwise answer Flow "queued" and be refused where Flow never hears it.
@@ -709,7 +749,9 @@ async function executeCampaignRun(
   if (!options.revert && !options.resume && !options.variantGids && !options.claimedFrom) {
     started.releaseTo = (await clearEndedWindow(shopId, campaignId, options.actor)) ?? undefined;
   }
-  if (tooLongHere) {
+  if (tooLongHere && work) {
+    // Always queued from here, Redis or not (D29): the row is written, and the worker's tick
+    // runs it if no job reaches the worker. Never refused for its size, and never run here.
     const { queueRun } = await import("./queued-run.server");
     const queued = await queueRun(shopId, campaignId, tooLongHere, {
       revert: options.revert === true,
@@ -719,15 +761,14 @@ async function executeCampaignRun(
       skipReason: options.skipReason,
       keepEdited: options.keepEdited,
       untypedPress: options.untypedPress,
+      scope: work.variants,
     });
     if (queued) return queued;
-    // No worker queue. A revert runs here as it always did -- ending a sale must always be
-    // possible. An apply is refused: writing past the deadline is the one outcome this
-    // exists to prevent. Clean, because nothing is half-done.
-    if (!options.revert) {
-      const message = refuseInline(tooLongHere);
-      return { runId: "", planned: 0, verified: 0, failed: 0, unverified: 0, clean: true, messages: [message], refused: message };
-    }
+    // Already claimed, or a live run holds it: that run, by name, when there is one (#793).
+    const live = await liveFullRun(campaignId);
+    if (live) return standDown(campaignId, live, options, 0);
+    const message = `This campaign is already being ${options.revert ? "reverted" : "applied"}. Nothing more was queued; this page shows that run as it goes.`;
+    return { runId: "", planned: 0, verified: 0, failed: 0, unverified: 0, clean: true, messages: [message], deferredTo: "in-progress" };
   }
 
   if (!options.variantGids) {
@@ -930,19 +971,21 @@ async function executeCampaignRun(
 
   let run: { id: string };
   try {
-    run = await prisma.campaignRun.create({
-      data: {
-        shopId,
-        campaignId,
-        kind,
-        status: "EXECUTING",
-        occurrenceKey,
-        plannedRows: outcome.counts.planned,
-        startedAt: new Date(),
-        heartbeatAt: new Date(),
-      },
-      select: { id: true },
-    });
+    run = options.runId
+      ? await startQueuedRun(options.runId, outcome.counts.planned)
+      : await prisma.campaignRun.create({
+          data: {
+            shopId,
+            campaignId,
+            kind,
+            status: "EXECUTING",
+            occurrenceKey,
+            plannedRows: outcome.counts.planned,
+            startedAt: new Date(),
+            heartbeatAt: new Date(),
+          },
+          select: { id: true },
+        });
 
     // The one id that cannot be bound at the boundary: it does not exist until this row
     // does. Everything after this point — planning results, execution, verification,
@@ -1178,6 +1221,11 @@ async function executeCampaignRun(
     // 2), and says behind whom in the campaign's history and on its Status card.
     onBulkWait: () => noteBulkWait(shopId, campaignId, { id: run.id, actor: options.actor, prices: writable.length }),
   });
+
+  // Every price has been sent and answered. What is left is reading them back, and the tags
+  // and market prices that follow them: the page says Verifying from here (#808), where the
+  // count it showed as Writing N of M has nothing more to say.
+  await prisma.campaignRun.updateMany({ where: { id: run.id, status: "EXECUTING" }, data: { status: "VERIFYING" } }).catch(() => {});
 
   const messages = await recordResults(run.id, shopId, result.rows);
   messages.unshift(...messagesBeforeExecution);
@@ -1831,6 +1879,10 @@ export async function runToResume(
       campaignId,
       kind: { in: ["APPLY", "REVERT"] },
       NOT: { occurrenceKey: { startsWith: "VARIANT-" } },
+      // Not one handed to the worker and refused before it wrote anything (#808), CANCELLED; and
+      // not one queued or being planned, which is the resume itself before it writes: a queued
+      // run's row exists from the press, and found here, it resumed nothing and rewrote it all.
+      status: { notIn: ["CANCELLED", "QUEUED", "PLANNING"] },
     },
     orderBy: { createdAt: "desc" },
     select: { id: true, kind: true },
@@ -2005,6 +2057,7 @@ const CLAIMED: ReadonlySet<string> = new Set(["APPLYING", "REVERTING"]);
 interface LiveRun {
   id: string;
   kind: string;
+  status: string;
   startedAt: Date | null;
   plannedRows: number;
 }
@@ -2015,15 +2068,47 @@ interface LiveRun {
  * There can be at most one: `campaign_runs_one_live_run` is a unique index over exactly
  * these rows (#793).
  */
-async function liveFullRun(campaignId: string): Promise<LiveRun | null> {
+async function liveFullRun(campaignId: string, except?: string): Promise<LiveRun | null> {
   return prisma.campaignRun.findFirst({
     where: {
       campaignId,
       NOT: { occurrenceKey: { startsWith: "VARIANT-" } },
       status: { in: ["PLANNING", "QUEUED", "EXECUTING", "VERIFYING"] },
+      ...(except ? { id: { not: except } } : {}),
     },
-    select: { id: true, kind: true, startedAt: true, plannedRows: true },
+    select: { id: true, kind: true, status: true, startedAt: true, plannedRows: true },
   });
+}
+
+/**
+ * A queued run's row, from planning to writing (#808): EXECUTING, with the plan's count and
+ * the moment it starts writing, as the row a run writes where it was asked has always been
+ * created. Conditional on PLANNING, so a row the reaper reclaimed meanwhile is never written
+ * under: that would be two writers believing they own one ledger.
+ */
+async function startQueuedRun(runId: string, planned: number): Promise<{ id: string }> {
+  const now = new Date();
+  const moved = await prisma.campaignRun.updateMany({
+    where: { id: runId, status: "PLANNING" },
+    data: { status: "EXECUTING", plannedRows: planned, startedAt: now, heartbeatAt: now },
+  });
+  if (moved.count === 0) {
+    throw new AppError({
+      code: "UNKNOWN",
+      userMessage: "This run stopped being the campaign's writer while it was being planned, so nothing was written. Reload the page to see where the campaign stands.",
+      context: { runId },
+    });
+  }
+  return { id: runId };
+}
+
+/** Stamps a queued run's heartbeat while it plans: see `runCampaign`. */
+function planningBeat(runId: string): ReturnType<typeof setInterval> {
+  return setInterval(() => {
+    void prisma.campaignRun
+      .updateMany({ where: { id: runId, status: "PLANNING" }, data: { heartbeatAt: new Date() } })
+      .catch(() => {});
+  }, HEARTBEAT_EVERY_MS);
 }
 
 /**
@@ -2060,8 +2145,16 @@ async function stillRunning(campaignId: string, live: LiveRun): Promise<string> 
     ? ` that started ${formatAgo(live.startedAt, new Date(), campaign?.shop.timezone ?? "UTC")}`
     : "";
   const size = live.plannedRows > 0 ? ` over ${formatCount(live.plannedRows)} variants` : "";
+  // A run handed to the worker has not started until the worker plans it (#808): it is named
+  // as what it is, waiting or being planned, rather than as a run that started.
+  const where =
+    live.status === "QUEUED"
+      ? `is already queued to be ${verb}${size}, waiting for the background worker`
+      : live.status === "PLANNING"
+        ? `is already being ${verb}${size}: the background worker is planning it`
+        : `is still being ${verb} by a run${started}${size}`;
   return (
-    `"${campaign?.name ?? "This campaign"}" is still being ${verb} by a run${started}${size}, so nothing new was ` +
+    `"${campaign?.name ?? "This campaign"}" ${where}, so nothing new was ` +
     "started and nothing is written twice. That run finishes on its own, and this page updates when it does; " +
     "watch it on the Runs tab."
   );

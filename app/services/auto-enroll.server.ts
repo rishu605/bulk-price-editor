@@ -18,7 +18,8 @@
  *
  * Nothing here writes a price. The webhook must return quickly or Shopify retries it,
  * and a price write is far too slow; enrollment only marks the campaign with the
- * variants it gained, and the scheduler prices those variants on its next tick.
+ * variants it gained, and the scheduler's tick hands those to the worker's queue, which
+ * prices them (`runEnrollment`, #808).
  *
  * And nothing here touches a campaign that is being ended (#805). A revert that died
  * part-way left its campaign Active, the webhooks of the revert's own writes enrolled a
@@ -27,6 +28,8 @@
  */
 
 import prisma from "../db.server";
+import { SCHEDULER_ACTOR } from "../lib/audit/actor";
+import { adminClientForShop } from "./admin-client.server";
 import { captureBaselines } from "./baselines.server";
 import { astToWhere } from "./segments.server";
 import { inheritedBy } from "./campaigns/handover.server";
@@ -226,10 +229,53 @@ async function wholeRunHistory(campaignId: string): Promise<{ ending: boolean; l
   const [ending, lastRevert] = await Promise.all([
     endingSinceLastApply(campaignId),
     prisma.campaignRun.findFirst({
-      where: { campaignId, kind: "REVERT", NOT: { occurrenceKey: { startsWith: "VARIANT-" } } },
+      // Not one queued and refused before it wrote (#808), which reverted nothing.
+      where: { campaignId, kind: "REVERT", NOT: { occurrenceKey: { startsWith: "VARIANT-" } }, status: { not: "CANCELLED" } },
       orderBy: { createdAt: "desc" },
       select: { createdAt: true },
     }),
   ]);
   return { ending, lastRevertAt: lastRevert?.createdAt ?? null };
+}
+
+/**
+ * Prices the variants a running campaign gained, as an `execution` job (#808): what the
+ * scheduler's tick did for every campaign in turn, which held the tick -- and every other
+ * shop's scheduled start and end -- for as long as each took.
+ *
+ * An apply over the enrolled variants and nothing else, resolved against every campaign like
+ * any run (#805). A campaign being ended is not priced into; its mark is cleared. Asked again
+ * here, not only when the tick handed it over: a revert may have been pressed while the job
+ * waited.
+ *
+ * The client before the claim. Claiming clears the mark, and clearing it for a run that then
+ * could not start -- no session -- dropped the newly enrolled variants for good (#707). Thrown,
+ * so the job fails where the queue sees it, and the mark stays for the next tick to hand over.
+ */
+export async function runEnrollment(shopId: string, campaignId: string): Promise<void> {
+  if (await endingSinceLastApply(campaignId)) {
+    await claimEnrollment(campaignId);
+    return;
+  }
+
+  const shop = await prisma.shop.findUnique({ where: { id: shopId }, select: { domain: true, uninstalledAt: true } });
+  if (!shop || shop.uninstalledAt) return;
+  const client = await adminClientForShop(shop.domain);
+  if (!client) throw new Error(`No usable session for ${shop.domain}`);
+
+  // Another worker that got there first returns null, which is the whole point -- two must
+  // not re-apply the same campaign. A mark from before the variants were recorded with it
+  // names none, and nothing is lost that the variant's next edit does not enrol again.
+  const variantGids = await claimEnrollment(campaignId);
+  if (!variantGids || variantGids.length === 0) return;
+
+  // Named variants, so the run never holds the campaign: a revert pressed meanwhile finds it
+  // and asks the merchant to try again in a minute, and this run, finding the campaign claimed
+  // first, writes nothing (#763).
+  const { runCampaign } = await import("./campaigns/run.server");
+  await runCampaign(shopId, campaignId, client, {
+    actor: SCHEDULER_ACTOR,
+    variantGids,
+    occurrenceKey: `VARIANT-ENROLL-${Date.now()}`,
+  });
 }

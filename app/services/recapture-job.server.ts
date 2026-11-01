@@ -1,22 +1,23 @@
 /**
- * A recapture from the recapture page: run while the merchant waits when it fits, handed to
- * the worker when it does not, and recorded on a row of its own either way (#1105).
+ * A recapture from the recapture page: handed to the worker, and recorded on a row of its own
+ * that the page follows (#1105, #808).
  *
  * The page always ran its recapture inline, which was fine while a recapture was database
  * work. Since #1071 a wholesale price is recaptured with its quantity ladder or not at all,
  * and since #704 that ladder is read from Shopify for the scope's variants, 25 prices a read,
  * one read after another: 10,000 wholesale prices is 400 reads and minutes of a request that
  * writes nothing until they are done. Past Railway's five minutes the merchant is shown a
- * "502" for a recapture still running -- or half-finished.
+ * "502" for a recapture still running -- or half-finished. And a recapture of a whole
+ * catalogue is 102,132 baselines written in the web process's pool, where one shop's large
+ * write takes every other shop's pages down with it (#803).
  *
- * So a recapture whose wholesale prices need more reads than `PAGE_INLINE_LADDER_READS` --
- * counted as Flow counts them, by `ladderReadsToCapture` -- is handed to the worker, as Flow's
- * large capture is (#1092). Every check the merchant's confirmation stands for is made first,
- * in the request, while they are looking; the worker makes them again before it writes,
- * because minutes may pass in between, and records a refusal where the page reads it. The
- * row says which step the recapture is on and how far that step has got, as the shop row does
- * for a sync (#801), and the page follows it there. With no worker queue at all it runs in the
- * request, as it always did.
+ * So every recapture is the worker's (D29): a baseline capture never runs in a web request,
+ * whatever its size. Every check the merchant's confirmation stands for is made first, in the
+ * request, while they are looking; the worker makes them again before it writes, because
+ * minutes may pass in between, and records a refusal where the page reads it. The row says
+ * which step the recapture is on and how far that step has got, as the shop row does for a
+ * sync (#801), and the page follows it there. The row is the truth and the job the doorbell:
+ * with no worker queue, or Redis away, the worker's tick rings the row (`ringQueuedRecaptures`).
  *
  * One recapture per shop at a time, the page's inline ones included: two over the same
  * baselines collide on the one-current-baseline index part-way through, and one of them stops
@@ -28,7 +29,6 @@
 import { Prisma } from "@prisma/client";
 
 import prisma from "../db.server";
-import { recapturedMessage } from "../lib/baselines/recapture";
 import {
   quiet,
   RECAPTURE_STALE_AFTER_MS,
@@ -41,10 +41,10 @@ import {
 } from "../lib/baselines/recapture-progress";
 import type { RecaptureScope } from "../lib/baselines/recapture-scope";
 import { AppError } from "../lib/errors/app-error";
-import { PAGE_INLINE_LADDER_READS } from "../lib/execution/inline-budget";
 import type { AdminClient } from "../lib/execution/sync-executor";
 import { countOf } from "../lib/format/display";
 import { logger } from "../lib/logging/logger";
+import { enqueueOrRun, type Handler, type QueueRuntime } from "../worker/queue-runtime.server";
 import { enqueueWithin, webQueue } from "../worker/web-queue.server";
 import { reportError } from "./error-report.server";
 import { ladderReadsToCapture } from "./flow/flow-capture.server";
@@ -77,7 +77,16 @@ export const ALREADY_RECAPTURING =
   "check the scope again once it has finished, then recapture if you still need to.";
 
 /**
- * What the recapture page's Replace does: check, then recapture here or hand it to the worker.
+ * How long the page waits for Redis to take a recapture's job: short, because the row is
+ * written and the tick rings it (#808).
+ */
+const RECAPTURE_ENQUEUE_TIMEOUT_MS = 1_000;
+
+/** How long a recapture may wait in `queued` before the tick rings it (#808). */
+export const STRANDED_RECAPTURE_AFTER_MS = 15_000;
+
+/**
+ * What the recapture page's Replace does: check, then hand the recapture to the worker.
  *
  * Throws the check's `AppError` when the recapture is refused -- the phrase, the count, an
  * empty scope -- as `recapture` always has, so the page says it the way it always did.
@@ -85,16 +94,12 @@ export const ALREADY_RECAPTURING =
 export async function recaptureFromPage(
   shopId: string,
   request: PageRecapture,
-  client: AdminClient,
 ): Promise<PageRecaptureAnswer> {
   // Every check first, while the merchant is looking: a phrase mistyped or a count nobody was
   // shown is refused now, not minutes later in a worker they cannot see.
   const plan = await checkRecapture(shopId, request);
-
-  // The same count Flow's capture decides on (#1092). Over it, and with a worker to take it,
-  // the reads run there; otherwise here, as they always did.
+  // Counted for the log, as Flow counts them (#1092): what the worker will read from Shopify.
   const reads = await ladderReadsToCapture(shopId, plan.variantGids);
-  const queue = reads > PAGE_INLINE_LADDER_READS ? webQueue() : null;
 
   const id = await claimRecapture(shopId, {
     segmentId: request.segmentId ?? null,
@@ -104,32 +109,21 @@ export async function recaptureFromPage(
     // The campaigns the merchant was warned about, by the plan they confirmed (#1105).
     confirmedOver: plan.overlaps.map((overlap) => overlap.campaignId),
     actor: request.actor,
-    phase: queue ? "queued" : "checking",
+    phase: "queued",
   });
   if (!id) return { ok: false, message: ALREADY_RECAPTURING };
 
-  if (!queue) {
-    const result = await runClaimed(id, shopId, request, client, plan);
-    return { ok: true, message: recapturedMessage(result) };
-  }
-
+  // The row is written, so nothing is lost if Redis does not take the job: the tick rings it.
+  const queue = webQueue();
   try {
-    await enqueueWithin(queue, "sync", { shopId, recaptureId: id });
+    if (queue) await enqueueWithin(queue, "sync", { shopId, recaptureId: id }, RECAPTURE_ENQUEUE_TIMEOUT_MS);
+    else logger.warn("no worker queue: a recapture waits for the worker's tick", { shopId, recaptureId: id });
   } catch (error) {
-    // Nothing happened, so nothing is kept: the claim goes, and the page says why.
-    await prisma.baselineRecapture.deleteMany({ where: { id } });
-    logger.warn("a recapture could not be handed to the worker", {
+    logger.warn("a recapture was not handed to the worker; its tick will ring it", {
       shopId,
-      scope: plan.scope,
+      recaptureId: id,
       error: error instanceof Error ? error.message : String(error),
     });
-    return {
-      ok: false,
-      message:
-        "Reading the quantity breaks of this scope's wholesale prices from Shopify takes longer than this page can wait, " +
-        "and the background worker could not be reached, so nothing was recaptured. Try again in a minute. If it keeps " +
-        "happening, contact support from the Help page.",
-    };
   }
 
   logger.info("a recapture was handed to the worker", { shopId, scope: plan.scope, ladderReads: reads });
@@ -137,10 +131,43 @@ export async function recaptureFromPage(
     ok: true,
     recapture: id,
     message:
-      `Recapturing ${countOf(plan.scope, "variant")} in the background: reading their wholesale prices' quantity breaks ` +
-      "from Shopify takes longer than this page can wait. This page shows each step as it goes, and you can leave it: " +
-      "the recapture carries on without it.",
+      `Recapturing ${countOf(plan.scope, "variant")} in the background. This page shows each step as it goes, and you can ` +
+      "leave it: the recapture carries on without it.",
   };
+}
+
+/**
+ * Rings every recapture left in `queued` past `STRANDED_RECAPTURE_AFTER_MS` (#808): one whose
+ * job is still waiting is absorbed by its deduplication key, and one whose job never reached
+ * Redis is queued now -- or run here, in the tick, by `inline` when the queue cannot take it.
+ */
+export async function ringQueuedRecaptures(
+  queue: QueueRuntime,
+  inline: Handler,
+  { now = new Date(), shopId }: { now?: Date; shopId?: string } = {},
+): Promise<number> {
+  const rows = await prisma.baselineRecapture.findMany({
+    where: {
+      phase: "queued",
+      finishedAt: null,
+      startedAt: { lt: new Date(now.getTime() - STRANDED_RECAPTURE_AFTER_MS) },
+      shop: { uninstalledAt: null },
+      ...(shopId ? { shopId } : {}),
+    },
+    orderBy: { startedAt: "asc" },
+    select: { id: true, shopId: true },
+  });
+  for (const row of rows) {
+    try {
+      await enqueueOrRun(queue, "sync", { shopId: row.shopId, recaptureId: row.id }, inline, RECAPTURE_ENQUEUE_TIMEOUT_MS);
+    } catch (error) {
+      logger.error("a queued recapture rung by the tick failed", {
+        recaptureId: row.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return rows.length;
 }
 
 /**

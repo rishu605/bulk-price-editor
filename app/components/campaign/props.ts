@@ -34,4 +34,10 @@ export type CampaignDetailProps = Awaited<ReturnType<typeof loader>> & {
    * written enough to say, and wherever it cannot: see `runEta`.
    */
   eta: string | null;
+  /**
+   * Where the run writing has got, from the same poll (#808): "Queued", "Planning", "Writing
+   * 1,200 of 4,000 prices", "Verifying". Null before the first answer; the header then reads
+   * the phase off the run row the page loaded with.
+   */
+  phase: string | null;
 };

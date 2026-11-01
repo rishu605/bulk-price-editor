@@ -408,7 +408,8 @@ async function appliedValues(
   // before reverting" in place of Resume. Nobody edited them: the revert did, and its
   // landed row is the newest thing this campaign wrote there.
   const runs = await prisma.campaignRun.findMany({
-    where: { campaignId, kind: { in: ["APPLY", "REVERT"] } },
+    // Not a run that wrote nothing: a scoped one that stood down, or one queued and refused (#808).
+    where: { campaignId, kind: { in: ["APPLY", "REVERT"] }, status: { not: "CANCELLED" } },
     orderBy: { createdAt: "desc" },
     select: { id: true, kind: true, status: true, occurrenceKey: true },
     take: 20,

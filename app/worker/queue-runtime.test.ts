@@ -14,7 +14,9 @@ import { logger } from "../lib/logging/logger";
 
 import {
   connectionFor,
+  enqueueOrRun,
   inlineRuntime,
+  type QueueRuntime,
   reportDepths,
   runnableAt,
   runtimeFor,
@@ -75,6 +77,66 @@ describe("running without Redis", () => {
     });
 
     await expect(runtime.enqueue("audit", { shopId: "s1" })).rejects.toThrow("handler blew up");
+  });
+});
+
+/**
+ * The worker's own way of degrading (#808): its tick hands over what it finds waiting, and
+ * with Redis down the hand-over would hang on a connection that retries for ever.
+ */
+describe("handing a job over from the tick, or doing it there", () => {
+  const ref: JobRef = { shopId: "s1", campaignId: "c1", runId: "r1" };
+  const queueThat = (enqueue: QueueRuntime["enqueue"]): QueueRuntime => ({
+    enqueue,
+    async depths() {
+      return {} as never;
+    },
+    async close() {},
+  });
+
+  it("queues it when the queue takes it, and does not run it here", async () => {
+    const taken: JobRef[] = [];
+    const ran = vi.fn(async () => {});
+    expect(await enqueueOrRun(queueThat(async (_name, job) => void taken.push(job)), "execution", ref, ran, 1_000)).toBe("queued");
+    expect(taken).toEqual([ref]);
+    expect(ran).not.toHaveBeenCalled();
+  });
+
+  it("runs it here when the queue refuses it", async () => {
+    const ran = vi.fn(async () => {});
+    const refusing = queueThat(async () => {
+      throw new Error("ECONNREFUSED");
+    });
+    expect(await enqueueOrRun(refusing, "execution", ref, ran, 1_000)).toBe("ran");
+    expect(ran).toHaveBeenCalledWith("execution", ref);
+  });
+
+  it("runs it here when the queue never answers, once it has waited its bound", async () => {
+    const ran = vi.fn(async () => {});
+    const hung = queueThat(() => new Promise<void>(() => {}));
+    const started = Date.now();
+    expect(await enqueueOrRun(hung, "execution", ref, ran, 20)).toBe("ran");
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(ran).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not time an inline runtime, whose enqueue is the work itself: it would run twice", async () => {
+    let runs = 0;
+    const slow = inlineRuntime(async () => {
+      runs += 1;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    const fallback = vi.fn(async () => {});
+    expect(await enqueueOrRun(slow, "execution", ref, fallback, 1)).toBe("ran");
+    expect(runs).toBe(1);
+    expect(fallback).not.toHaveBeenCalled();
+  });
+
+  it("propagates the work's own failure, which the tick counts", async () => {
+    const failing = inlineRuntime(async () => {
+      throw new Error("no session");
+    });
+    await expect(enqueueOrRun(failing, "execution", ref, async () => {}, 1_000)).rejects.toThrow("no session");
   });
 });
 
