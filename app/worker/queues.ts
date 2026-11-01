@@ -99,11 +99,16 @@ export interface JobRef {
   /** An execution job that continues a partial run rather than starting fresh (#790). */
   resume?: boolean;
   /**
-   * The products a running campaign gained, priced by the worker rather than inside the
-   * scheduler's tick (#808). The variants are not carried: they are the campaign's pending
-   * mark, which the job claims when it runs, so a job lost before then loses nothing.
+   * The campaign whose newly enrolled products the worker prices, rather than the scheduler's
+   * tick (#808). The variants are not carried: they are the campaign's pending mark, which the
+   * job claims when it runs, so a job lost before then loses nothing.
+   *
+   * Its own field, not `campaignId`: the release before this one knows no enrolment job, and
+   * read as an ordinary execution job it would re-apply the whole campaign -- after a revert
+   * that stopped part-way, the sale put back on everything the revert had restored (#805).
+   * Without a `campaignId` that release's handler does nothing, and its own tick drains the mark.
    */
-  enroll?: boolean;
+  enroll?: string;
   /** Who asked, so what the run resolves on their behalf is attributed to them. */
   actor?: string;
   /**
@@ -165,7 +170,7 @@ export function webhookDrainKey(shopId: string): string {
  */
 export function jobDedupKey(name: QueueName, ref: JobRef): string | null {
   if (name === "execution" && ref.runId) return `run:${ref.runId}`;
-  if (name === "execution" && ref.enroll && ref.campaignId) return `enroll:${ref.campaignId}`;
+  if (name === "execution" && ref.enroll) return `enroll:${ref.enroll}`;
   if (name === "sync" && ref.fullSync) return `sync:${ref.shopId}`;
   if (name === "sync" && ref.recaptureId) return `recapture:${ref.recaptureId}`;
   return null;

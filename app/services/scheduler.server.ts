@@ -403,7 +403,8 @@ function isOffPeak(now: Date, timeZone: string): boolean {
  * held every other shop's scheduled start and end behind it. The job carries the campaign,
  * not the variants: they stay its pending mark until the job claims them, so a job lost
  * before then loses nothing, and the next tick hands it over again -- absorbed, while one
- * waits, by its deduplication key. With Redis down it runs here, as it always did.
+ * waits, by its deduplication key. When the queue does not take it within a second, it runs
+ * here, as it always did.
  */
 async function drainEnrollments(
   result: TickResult,
@@ -431,7 +432,7 @@ async function drainEnrollments(
     }
 
     try {
-      await enqueueOrRun(queue, "execution", { shopId: entry.shopId, campaignId: entry.id, enroll: true }, handleJob, RUN_ENQUEUE_TIMEOUT_MS);
+      await enqueueOrRun(queue, "execution", { shopId: entry.shopId, enroll: entry.id }, handleJob, RUN_ENQUEUE_TIMEOUT_MS);
       result.enrolled++;
     } catch (error) {
       result.failures.push({

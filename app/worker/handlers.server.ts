@@ -110,9 +110,9 @@ async function runCampaignJob(ref: JobRef): Promise<void> {
  * variants are its pending mark, claimed when it runs.
  */
 async function enrollmentJob(ref: JobRef): Promise<void> {
-  if (!ref.campaignId) return;
+  if (!ref.enroll) return;
   const { runEnrollment } = await import("../services/auto-enroll.server");
-  await runEnrollment(ref.shopId, ref.campaignId);
+  await runEnrollment(ref.shopId, ref.enroll);
 }
 
 /**

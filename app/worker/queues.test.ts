@@ -117,7 +117,7 @@ describe("a job whose work is a row the tick rings again is never two jobs at on
   it("shares a key with its own duplicates, and with nothing else's", () => {
     expect(jobDedupKey("execution", { shopId: "s1", campaignId: "c1", runId: "r1" })).toBe("run:r1");
     expect(jobDedupKey("execution", { shopId: "s1", campaignId: "c1", runId: "r2" })).toBe("run:r2");
-    expect(jobDedupKey("execution", { shopId: "s1", campaignId: "c1", enroll: true })).toBe("enroll:c1");
+    expect(jobDedupKey("execution", { shopId: "s1", enroll: "c1" })).toBe("enroll:c1");
     expect(jobDedupKey("sync", { shopId: "s1", fullSync: true })).toBe("sync:s1");
     expect(jobDedupKey("sync", { shopId: "s1", recaptureId: "x1" })).toBe("recapture:x1");
   });
@@ -139,6 +139,15 @@ describe("a job whose work is a row the tick rings again is never two jobs at on
     ] as const) {
       expect(jobDedupKey(name, ref as never), JSON.stringify(ref)).toBeNull();
     }
+  });
+});
+
+describe("an enrolment job the release before this one cannot mistake for an apply (#808, #805)", () => {
+  it("names its campaign in a field of its own, so that release's handler finds no campaign and does nothing", () => {
+    // That release runs any execution job with a `campaignId` as a whole-campaign apply.
+    const ref = { shopId: "s1", enroll: "c1" };
+    expect(ref).not.toHaveProperty("campaignId");
+    expect(jobDedupKey("execution", ref)).toBe("enroll:c1");
   });
 });
 
