@@ -7,15 +7,38 @@
  * every variant in the store. The picker now navigates, and the page posts the count it
  * showed, which the service checks against the scope it is about to rewrite.
  *
- * Driven through the page's own loader and action; only `authenticate.admin` is replaced.
+ * Driven through the page's own loader and action; only `authenticate.admin` is replaced, and
+ * the web queue, with a recorder whose jobs the worker's own handler runs: every recapture is
+ * the worker's since D29 (#808), checked in the request and checked again before it writes.
  */
 
 import { describe, expect, it, vi } from "vitest";
 
 import prisma from "../../app/db.server";
+import type { JobRef, QueueName } from "../../app/worker/queues";
 import { withChaos } from "../harness/scenario";
 
 let pending = { shop: "" };
+
+const enqueued: Array<{ name: QueueName; ref: JobRef }> = [];
+vi.mock("../../app/worker/web-queue.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../app/worker/web-queue.server")>()),
+  webQueue: () => ({
+    async enqueue(name: QueueName, ref: JobRef) {
+      enqueued.push({ name, ref });
+    },
+    async depths() {
+      return {};
+    },
+    async close() {},
+  }),
+}));
+
+// The worker reads wholesale ladders with the shop's session; this scope has none to read.
+vi.mock("../../app/services/admin-client.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../app/services/admin-client.server")>();
+  return { ...actual, adminClientForShop: async () => ({ request: async () => ({ data: {} }) }) };
+});
 
 vi.mock("../../app/shopify.server", () => ({
   authenticate: {
@@ -75,10 +98,14 @@ describe("chaos: recapturing a chosen scope", () => {
       expect(stale.message).toMatch(/1 variant now, not the 4 you were shown/);
       expect((await post({ segment: chosen.id })).ok).toBe(false);
       expect(await prisma.baseline.count({ where: { shopId, source: "RECAPTURE" } })).toBe(0);
+      expect(enqueued, "a refused recapture was handed to the worker").toEqual([]);
 
       // What the page posts after that navigation: the chosen segment and its count.
       const done = await post({ segment: page.segmentId, scope: String(page.assessment.scope) });
       expect(done.ok, done.message).toBe(true);
+      expect(enqueued).toHaveLength(1);
+      const { handleJob } = await import("../../app/worker/handlers.server");
+      await handleJob(enqueued[0]!.name, enqueued[0]!.ref);
 
       const current = async (gid: string) =>
         Number(
