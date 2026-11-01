@@ -17,6 +17,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import prisma from "../../app/db.server";
+import { queuedRefusal } from "../../app/lib/campaigns/queued-refusal";
 import type { AdminClient } from "../../app/lib/execution/sync-executor";
 import { MAX_INLINE_ROWS } from "../../app/lib/execution/inline-budget";
 import { HEARTBEAT_EVERY_MS, reclaimStaleRuns, STALE_AFTER_MS } from "../../app/services/campaigns/reaper.server";
@@ -236,6 +237,34 @@ describe("chaos: a large apply pressed on the campaign page", () => {
       for (const gid of variantGids) {
         expect(Number(chaos.fake.priceOf(gid)!.replace(".", ""))).toBe(Math.round(baseline.get(gid)! * 0.9));
       }
+    });
+  });
+});
+
+describe("chaos: a queued run the worker cannot start", () => {
+  it("is given back and said once when the store has no session, rather than rung every tick into the same wall", async () => {
+    await withChaos("queued-run-no-session", LARGE, async (chaos) => {
+      useShop(chaos);
+      const { campaignId, shopId } = chaos.fixture;
+      expect((await press(campaignId)).ok).toBe(true);
+
+      workerClient = null;
+      await expect(handler(enqueued[0].name, enqueued[0].ref)).rejects.toThrow(/No usable session/);
+
+      expect(await statusOf(campaignId), "the claim was kept with nobody able to run it").toBe("DRAFT");
+      expect((await prisma.campaignRun.findFirstOrThrow({ where: { campaignId } })).status).toBe("CANCELLED");
+      const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
+      expect(queuedRefusal(campaign.schedule)?.reason).toMatch(/no working session for this store.*nothing was written/);
+      const later = new Date(Date.now() + STRANDED_RUN_AFTER_MS + 1_000);
+      expect(await ringQueuedRuns(recorder, handler, { now: later, shopId }), "rung again after it was given back").toBe(0);
+
+      // With the session back, the next press runs afresh: the cancelled row is not a run to resume.
+      useShop(chaos);
+      enqueued.length = 0;
+      expect((await press(campaignId)).message).toMatch(/The background worker is applying it/);
+      await handler(enqueued[0].name, enqueued[0].ref);
+      expect(await statusOf(campaignId)).toBe("ACTIVE");
+      expect(await prisma.campaignRun.count({ where: { campaignId, status: "COMPLETED" } })).toBe(1);
     });
   });
 });

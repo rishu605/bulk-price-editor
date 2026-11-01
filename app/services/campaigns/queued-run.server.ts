@@ -23,6 +23,7 @@
  */
 
 import prisma from "../../db.server";
+import { SCHEDULER_ACTOR } from "../../lib/audit/actor";
 import type { CampaignState } from "../../lib/lifecycle/transitions";
 import { logger } from "../../lib/logging/logger";
 import { enqueueOrRun, type Handler, type QueueRuntime } from "../../worker/queue-runtime.server";
@@ -250,10 +251,15 @@ export async function cancelUnstartedRun(runId: string): Promise<void> {
  */
 export async function refuseQueuedRun(ref: JobRef, reason: string): Promise<void> {
   if (!ref.runId || !ref.campaignId) return;
-  await cancelUnstartedRun(ref.runId);
+  // Only a row still waiting: one another worker has taken is that worker's to finish.
+  const closed = await prisma.campaignRun.updateMany({
+    where: { id: ref.runId, status: "QUEUED" },
+    data: { status: "CANCELLED", finishedAt: new Date() },
+  });
+  if (closed.count === 0) return;
   await recordQueuedRefused(ref.shopId, ref.campaignId, { verb: queuedVerb(ref), reason }, { tell: true });
   const to = ref.claimedFrom as CampaignState | undefined;
   if (to && to !== "APPLYING" && to !== "REVERTING") {
-    await releaseClaim(ref.shopId, ref.campaignId, to, { reason, actor: ref.actor ?? "system" });
+    await releaseClaim(ref.shopId, ref.campaignId, to, { reason, actor: ref.actor ?? SCHEDULER_ACTOR });
   }
 }
