@@ -128,18 +128,7 @@ export async function loadCandidates(
 
   const imported = await importedPricesByVariant(importIds, gids);
 
-  const [baselines, entries] = await Promise.all([
-    inChunks(gids, (batch) =>
-      prisma.baseline.findMany({
-        where: { shopId, supersededAt: null, surfaceKind: "BASE", variantGid: { in: batch } },
-      }),
-    ),
-    inChunks(gids, (batch) =>
-      prisma.priceSurfaceEntry.findMany({
-        where: { shopId, surfaceKind: "BASE", variantGid: { in: batch } },
-      }),
-    ),
-  ]);
+  const { baselines, entries } = await baseRowsOf(shopId, gids);
 
   const baselineBy = new Map(baselines.map((b) => [b.variantGid, b]));
   const entryBy = new Map(entries.map((e) => [e.variantGid, e]));
@@ -184,6 +173,71 @@ export async function loadCandidates(
   return candidates;
 }
 
+/** What a candidate reads from a variant's current base baseline. */
+interface BaselineRow {
+  variantGid: string;
+  currency: string;
+  basePrice: bigint;
+  baseCompareAt: bigint | null;
+  cost: bigint | null;
+}
+
+/** What a candidate reads from a variant's base surface entry. */
+interface EntryRow {
+  variantGid: string;
+  livePrice: bigint | null;
+  liveCompareAt: bigint | null;
+}
+
+/**
+ * The current base baselines and base live prices of these variants, in two reads however
+ * many there are (#524).
+ *
+ * They were read 5,000 ids at a time, and Postgres answered each batch by reading every row
+ * the shop has: one pass over its `baselines` and one over its `price_surface_entries` per
+ * 5,000 variants in scope, so the work grew with the scope times the shop. A 102,132-variant
+ * plan was 42 full scans. Here the ids go as one array, which is one bind variable at any
+ * length, so the ceiling `chunk.ts` guards cannot be reached and each table is read once.
+ *
+ * The scope's ids rather than its filter, which is what a join to `variant_index` would need.
+ * Putting the filter in this SQL means a second translation of it beside `astToWhere`, and two
+ * translations of one scope are how a preview comes to disagree with its run (rule 4). A
+ * relation Prisma could filter through needs a foreign key, which fails on a baseline for a
+ * variant the mirror does not have (#252). These ids are the rows the scope query returned, so
+ * they cannot name any other variants.
+ *
+ * `force_custom_plan`, because Prisma keeps each statement prepared on its connection, and
+ * from a prepared statement's sixth execution Postgres may plan it once without its values.
+ * Blind to the array's length, that plan probes the index once per id. On 102,273 ids the two
+ * reads took 280ms for five plans and 3,400ms from the sixth, more than three times as long
+ * as the chunks they replace. Planned with the values every time, a wide scope is one hashed
+ * pass over each table and a narrow one a probe per id. `SET LOCAL` ends with this
+ * transaction, so nothing else on the pooled connection is planned differently, and behind
+ * PgBouncer, where Prisma prepares nothing, it changes nothing.
+ *
+ * The same conditions the chunked reads had, so the same rows: `loadCandidates` walks the
+ * scope's variants and only looks these up. `candidate-reads.chaos.ts` holds them to the
+ * chunked reads over random catalogues and scopes.
+ */
+async function baseRowsOf(
+  shopId: string,
+  gids: string[],
+): Promise<{ baselines: BaselineRow[]; entries: EntryRow[] }> {
+  const [, baselines, entries] = await prisma.$transaction([
+    prisma.$executeRaw`SET LOCAL plan_cache_mode = force_custom_plan`,
+    prisma.$queryRaw<BaselineRow[]>`
+      SELECT b."variantGid", b."currency", b."basePrice", b."baseCompareAt", b."cost"
+      FROM "baselines" b
+      WHERE b."shopId" = ${shopId} AND b."supersededAt" IS NULL AND b."surfaceKind" = 'BASE'
+        AND b."variantGid" = ANY(${gids}::text[])`,
+    prisma.$queryRaw<EntryRow[]>`
+      SELECT e."variantGid", e."livePrice", e."liveCompareAt"
+      FROM "price_surface_entries" e
+      WHERE e."shopId" = ${shopId} AND e."surfaceKind" = 'BASE'
+        AND e."variantGid" = ANY(${gids}::text[])`,
+  ]);
+  return { baselines, entries };
+}
 
 /**
  * The variants whose base price this campaign has written since it last finished
