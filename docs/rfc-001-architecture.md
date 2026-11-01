@@ -50,9 +50,13 @@ flowchart TB
 ```
 
 - **Web process** — admin UI, auth, preview computation (read-only resolver), settings,
-  billing. **Never writes prices.**
-- **Worker process** — the only price writer. Scheduler tick (30s, leader-elected), run
-  planner, chunk executor, verifier, webhook consumers, nightly audits.
+  billing. **Never writes prices, but one run of at most `MAX_INLINE_ROWS` (50) variants
+  pressed on the campaign page** (D29). Every other run, every Flow action, the catalogue
+  sync and every baseline capture is a row it writes before it enqueues: a QUEUED
+  `campaign_runs` row, the shop's sync claim, a recapture's row. The page follows the row.
+- **Worker process** — the price writer. Scheduler tick (30s, leader-elected), run
+  planner, chunk executor, verifier, webhook consumers, nightly audits. The tick rings any
+  row the web process left waiting, and runs it there when Redis cannot take the job.
 - **Ingress** — raw-body HMAC verify → insert `webhook_events` (unique on webhook id =
   dedup) → enqueue → return 200 immediately. Processing is always async.
 
@@ -68,7 +72,7 @@ flowchart TB
 | `baselines` | shop_id, variant_gid, surface_type, price_list_gid?, currency, base_price, base_compare_at, cost, source, captured_at, superseded_at | Append-only versions. Current = `superseded_at IS NULL` (unique partial index). |
 | `segments` | shop_id, name, kind (dynamic\|frozen), filter_ast JSONB, frozen_variant_ids?, created_by | AST = OR of (AND of conditions). Versioned on edit. |
 | `campaigns` | shop_id, name, status, priority, rule_rows JSONB, rounding_profile_id, compare_at_policy, surfaces JSONB, filter JSONB, segment_id, rounding JSONB, practice, schedule JSONB, segment_ids, excludes, tag_kit, flags | Index (shop_id, status). What it prices (filter, segment, rounding, practice) has columns of its own and `schedule` says when it runs (#884). Since the contract (#1141) the columns are read and written alone: its migration re-ran the backfill and stripped the copy from every `schedule`, which keeps only the window and the campaign's own record (`startConfirmed`, `queuedRefused`). |
-| `campaign_runs` | campaign_id, kind (apply\|revert\|reassert\|enroll), occurrence_key, status, planned/verified/failed_rows, started_at, finished_at | `occurrence_key` makes recurring runs idempotent. |
+| `campaign_runs` | campaign_id, kind (apply\|revert\|reassert\|enroll), occurrence_key, status (queued\|planning\|executing\|verifying\|…), planned/verified/failed_rows, written/writable_rows, request JSONB, started_at, finished_at | `occurrence_key` makes recurring runs idempotent; at most one live whole-campaign run per campaign. A run handed to the worker is a `queued` row first, carrying its `request` (D29). |
 | `variant_changes` | run_id, shop_id, variant_gid, surface_type, price_list_gid?, before_*, intended_*, applied_at, verified_at, status, failure_reason, attempt | **The ledger.** Unique (run_id, variant_gid, surface_type, price_list_gid). Partitioned by shop_id. |
 | `write_intents` | shop_id, variant_gid, surface, value_hash, written_at | Self-echo suppression window (§7). TTL-pruned. |
 | `drift_events` | shop_id, variant_gid, surface, campaign_id?, observed_price, expected_price, detected_at, resolution, resolved_by | Feeds the drift queue UI. |
