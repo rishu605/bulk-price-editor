@@ -70,6 +70,7 @@ npm run dev
 | Command | Does |
 |---|---|
 | `npm run dev` | Shopify CLI dev server with tunnel + hot reload |
+| `npm run worker` | The worker: queued runs, syncs and recaptures, and the scheduler tick. Run it beside `dev`, or a run of more than 50 variants, anything Flow starts and a catalogue sync stay Queued (D29) |
 | `npm run setup` | `prisma generate && prisma migrate deploy` |
 | `npm run typecheck` | React Router typegen + `tsc --noEmit` |
 | `npm run lint` | ESLint |
@@ -79,8 +80,10 @@ npm run dev
 ## Architecture in one paragraph
 
 A **web process** (React Router 7, Polaris web components, embedded via App Bridge) serves
-the admin UI and computes previews — it never writes prices. A **worker process** is the
-only writer: a leader-elected scheduler tick finds due campaign transitions, a planner
+the admin UI and computes previews. It writes only a run of at most fifty variants pressed on
+the campaign page; every other run, sync and capture it queues as a row the page follows (D29).
+A **worker process** writes the rest: a leader-elected scheduler tick finds due campaign
+transitions and rings anything left waiting, a planner
 materialises ledger rows by diffing the resolver's output against the mirrored catalog, and
 an executor writes them via `productVariantsBulkUpdate` (small runs) or
 `bulkOperationRunMutation` with staged JSONL (everything else, since bulk operations carry
