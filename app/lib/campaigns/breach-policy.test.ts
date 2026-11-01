@@ -6,6 +6,7 @@ import {
   breachPolicyAtApply,
   breachPolicyDetail,
   breachPolicyFor,
+  breachPolicyOfDraft,
   startsKeepingPolicy,
 } from "./breach-policy";
 
@@ -72,5 +73,36 @@ describe("how it is said", () => {
     expect(breachPolicyAtApply({ policy: "clamp", kept: true, store: "skip" })).toBe(
       "Clamp it to the floor and carry on: the one it started with. Settings now says “Skip that variant, price the rest”, which it does not follow",
     );
+  });
+});
+
+describe("a policy the campaign chose itself (#816, D30)", () => {
+  it("is the campaign's in every state, whatever Settings says", () => {
+    for (const state of ALL_STATES) {
+      expect(breachPolicyFor(state, "clamp", "clamp", "block"), state).toEqual({
+        policy: "block",
+        kept: pricesMayBeLive(state),
+        store: "clamp",
+        own: true,
+      });
+    }
+  });
+
+  it("leaves a campaign that chose none following the store until it starts, as D21 says", () => {
+    expect(breachPolicyFor("DRAFT", "clamp", "block", undefined)).toEqual({ policy: "block", kept: false, store: "block" });
+    expect(breachPolicyFor("ACTIVE", "clamp", "block", undefined)).toEqual({ policy: "clamp", kept: true, store: "block" });
+  });
+
+  it("is said as its own choice on the page, in the Apply dialog and in the editor's preview", () => {
+    const own = breachPolicyFor("DRAFT", "block", "clamp", "block");
+    expect(breachPolicyDetail(own)).toBe(
+      "This campaign's own choice, which it keeps whatever Settings says. Settings now says “Clamp it to the floor and carry on”.",
+    );
+    expect(breachPolicyAtApply(own)).toBe(
+      "Block the whole campaign: this campaign's own choice. Settings says “Clamp it to the floor and carry on”, which it does not follow",
+    );
+    expect(breachPolicyAtApply(breachPolicyFor("ACTIVE", "skip", "skip", "skip"))).toBe("Skip that variant, price the rest: this campaign's own choice");
+    expect(breachPolicyOfDraft(undefined, "skip")).toBe("Skip that variant, price the rest: the store's setting, which it follows until it starts");
+    expect(breachPolicyOfDraft("clamp", "clamp")).toBe("Clamp it to the floor and carry on: this campaign's own choice");
   });
 });

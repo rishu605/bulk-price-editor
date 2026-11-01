@@ -38,6 +38,15 @@ const overview = (over: Partial<CampaignDetailProps> = {}) =>
     // Nothing on record and nothing asked (#1009).
     startConfirmation: { confirmed: null, unconfirmed: null },
     breachPolicy: { policy: "clamp", kept: true, store: "clamp" },
+    // Which floors it is planned with: the store's, as every campaign that sets none (#816).
+    floors: {
+      applied: "At least $5.00",
+      whose: "The store's floors, from Settings.",
+      unconfirmed: null,
+      fields: { neverBelowCost: false, minMarginPercent: "", minPrice: "5.00", policy: "" },
+      store: "At least $5.00",
+      currency: "USD",
+    },
     ...over,
   }) as unknown as CampaignDetailProps;
 
