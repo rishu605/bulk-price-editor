@@ -289,7 +289,7 @@ export default function Settings() {
             tight against the lede, which is the point: the two are one thought. */}
         <Card
           heading="Guardrails"
-          lede="Floors that no campaign may price below. They are checked after rounding, so a rounding rule cannot push a price under them."
+          lede="Floors that no campaign may price below. They are checked after rounding, so a rounding rule cannot push a price under them. A campaign can set tighter floors and its own policy under Advanced; going below these asks for a typed confirmation, recorded in the activity log."
           secondary={
             <>
               {formatCount(withCost)} of {formatCount(variants)} variants have a cost
@@ -364,17 +364,20 @@ export default function Settings() {
               </s-select>
             </FieldGrid>
 
-            {/* The running campaigns the saved policy does not reach, by name (#789). */}
+            {/* The campaigns the saved policy does not reach, by name (#789): running ones, and
+                any that chose a policy of their own (#816). */}
             {keepingOther.total > 0 ? (
               <s-stack gap={SPACE.tight}>
                 <s-text>
-                  These are running, so they keep the policy they started with until they end, not the one saved above:
+                  These keep a policy other than the one saved above. A running campaign keeps the one it started with until
+                  it ends, and a campaign that chose its own keeps that:
                 </s-text>
                 <s-unordered-list>
                   {keepingOther.campaigns.map((campaign) => (
                     <s-list-item key={campaign.id}>
                       <s-link href={`/app/campaigns/${campaign.id}`}>{campaign.name}</s-link>:{" "}
                       {BREACH_POLICY_LABELS[campaign.policy].toLowerCase()}
+                      {campaign.own ? ", its own choice" : ""}
                     </s-list-item>
                   ))}
                 </s-unordered-list>

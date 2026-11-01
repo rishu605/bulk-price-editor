@@ -24,6 +24,7 @@ import { describe, expect, it } from "vitest";
 import { money, type Money } from "../money/money";
 import {
   computeFloor,
+  inCurrency,
   MissingCostError,
   mergeGuardrails,
   needsCostButMissing,
@@ -93,6 +94,38 @@ describe("a campaign may tighten a store guardrail, never loosen it", () => {
     expect(mergeGuardrails(undefined, { minMarginPercent: 20 })).toEqual({ minMarginPercent: 20 });
     expect(mergeGuardrails({ minMarginPercent: 20 }, undefined)).toEqual({ minMarginPercent: 20 });
     expect(mergeGuardrails(undefined, undefined)).toEqual({});
+  });
+});
+
+describe("a floor a campaign set below the store's, with the word typed (#816)", () => {
+  // The one way below the store's: named in `loosens`, which only a typed, logged confirmation
+  // writes. Every floor not named still only tightens.
+  it("is the campaign's own, and none where it set none", () => {
+    const merged = mergeGuardrails(
+      { neverBelowCost: true, minMarginPercent: 25, minPrice: usd(500) },
+      { neverBelowCost: false, minPrice: usd(100), loosens: ["neverBelowCost", "minMarginPercent", "minPrice"] },
+    );
+    expect(merged.neverBelowCost).toBe(false);
+    expect(merged.minMarginPercent).toBeUndefined();
+    expect(merged.minPrice).toEqual(usd(100));
+  });
+
+  it("leaves every floor it does not name tighter-only", () => {
+    const merged = mergeGuardrails(
+      { neverBelowCost: true, minMarginPercent: 25, minPrice: usd(500) },
+      { neverBelowCost: false, minMarginPercent: 10, minPrice: usd(100), loosens: ["minMarginPercent"] },
+    );
+    expect(merged.minMarginPercent).toBe(10);
+    expect(merged.neverBelowCost).toBe(true);
+    expect(merged.minPrice).toEqual(usd(500));
+  });
+});
+
+describe("a campaign's minimum price on a market in another currency (#816)", () => {
+  it("is left out, as the store's is (#691), and kept in its own currency", () => {
+    expect(inCurrency({ minPrice: usd(500), minMarginPercent: 10 }, "EUR")).toEqual({ minMarginPercent: 10 });
+    expect(inCurrency({ minPrice: usd(500) }, "USD")).toEqual({ minPrice: usd(500) });
+    expect(inCurrency(undefined, "EUR")).toBeUndefined();
   });
 });
 

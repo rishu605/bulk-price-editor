@@ -3,6 +3,7 @@ import { useRef, type ElementRef } from "react";
 
 import { confirmationReasons } from "../../lib/campaigns/blast-radius";
 import { breachPolicyAtApply, type BreachPolicy } from "../../lib/campaigns/breach-policy";
+import type { FloorsView } from "../../lib/campaigns/campaign-floors";
 import { describeRunDuration } from "../../lib/planning/duration";
 import { describeTagKit } from "../../lib/tags/plan";
 import { formatCount } from "../../lib/format/display";
@@ -49,6 +50,7 @@ export function ApplyConfirmation({
   busy,
   heldEdits = 0,
   breachPolicy,
+  floors,
   onConfirm,
 }: {
   preview: CampaignPreview;
@@ -71,6 +73,8 @@ export function ApplyConfirmation({
   heldEdits?: number;
   /** What it does when a price would breach a floor, as its plan does (#789). */
   breachPolicy: BreachPolicy;
+  /** Which floors its plan uses, and whose: the store's, or its own (#816). */
+  floors: Pick<FloorsView, "applied" | "whose">;
   /**
    * Commit, carrying whatever was typed into the confirmation box.
    *
@@ -153,6 +157,12 @@ export function ApplyConfirmation({
               written at the smallest price instead
             </Fact>
           ) : null}
+
+          {/* Which floors, and whose (#816): a campaign can tighten the store's, or go below them
+              with the word typed, and this is the last screen before they are written to. */}
+          <Fact label="Floors">
+            {floors.applied}. {floors.whose}
+          </Fact>
 
           {/* Always said (#789): nothing told a merchant which policy a campaign would use, and
               one created before they chose Block went on clamping, which can raise a price. */}

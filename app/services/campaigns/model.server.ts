@@ -24,11 +24,11 @@ import {
 import type { AdjustmentRule,
   CompareAtPolicy,
   GuardrailViolationPolicy,
-  Guardrails,
   ResolvableCampaign,
 } from "../../lib/pricing/types";
 import { PRICES_MAY_BE_LIVE, PRICING_STATES, type CampaignState } from "../../lib/lifecycle/transitions";
 import { breachPolicyFor, type BreachPolicy } from "../../lib/campaigns/breach-policy";
+import { campaignGuardrailsOf, floorsAudit, resolverGuardrails, setsAnything } from "../../lib/campaigns/campaign-floors";
 import { productStatusesOf, type ProductStatus } from "../../lib/campaigns/product-status";
 import { START_CONFIRMED_KEY } from "../../lib/campaigns/start-confirmation";
 import { parseSurfaces } from "../../lib/campaigns/surfaces";
@@ -59,43 +59,67 @@ async function violationPolicyFor(shopId: string): Promise<GuardrailViolationPol
 /**
  * The floor-breach policy this campaign is planned and run with (#789): the store's setting as
  * it is now until the campaign starts, and the one it started with while its prices may be up.
+ * Or, where the merchant chose one for this campaign, that one in every state (#816, D30).
  * `campaignContext` plans with it and the campaign page names it, so the two cannot disagree.
  */
 export async function breachPolicyOf(
   shopId: string,
-  campaign: Pick<Campaign, "status" | "guardrailViolationPolicy">,
+  campaign: Pick<Campaign, "status" | "guardrailViolationPolicy" | "guardrails">,
 ): Promise<BreachPolicy> {
   return breachPolicyFor(
     campaign.status as CampaignState,
     asViolationPolicy(campaign.guardrailViolationPolicy),
     await violationPolicyFor(shopId),
+    campaignGuardrailsOf(campaign.guardrails).violationPolicy,
   );
 }
 
 /**
- * Running campaigns keeping a policy other than the store's, for Settings to name beside the
- * field (#789): changing it does not reach them, and nothing said so. The first page of them
- * by name, and how many there are.
+ * Campaigns keeping a policy other than the store's, for Settings to name beside the field
+ * (#789): changing it does not reach them, and nothing said so. Running ones keep the one they
+ * started with; any other that chose its own keeps that (#816). The first page of them by name,
+ * and how many there are.
  */
 export async function keepingOtherPolicies(shopId: string, store: GuardrailViolationPolicy) {
+  const others = (["clamp", "skip", "block"] as const).filter((policy) => policy !== store);
   const where: Prisma.CampaignWhereInput = {
     shopId,
-    status: { in: [...PRICES_MAY_BE_LIVE] },
-    // A value `asViolationPolicy` does not know reads as clamp, so it differs from skip and
-    // block and not from clamp.
-    guardrailViolationPolicy: store === "clamp" ? { in: ["skip", "block"] } : { not: store },
+    OR: [
+      {
+        status: { in: [...PRICES_MAY_BE_LIVE] },
+        // A value `asViolationPolicy` does not know reads as clamp, so it differs from skip and
+        // block and not from clamp.
+        guardrailViolationPolicy: store === "clamp" ? { in: ["skip", "block"] } : { not: store },
+      },
+      // Not started, with a choice of its own: one that will start with it. Not a cancelled
+      // one, which never starts.
+      ...others.map((policy) => ({
+        status: { notIn: [...PRICES_MAY_BE_LIVE, "CANCELLED" as const] },
+        guardrails: { path: ["violationPolicy"], equals: policy },
+      })),
+    ],
   };
   const [rows, total] = await Promise.all([
     prisma.campaign.findMany({
       where,
-      select: { id: true, name: true, guardrailViolationPolicy: true },
+      select: { id: true, name: true, status: true, guardrailViolationPolicy: true, guardrails: true },
       orderBy: { name: "asc" },
       take: ROWS_PER_VIEW,
     }),
     prisma.campaign.count({ where }),
   ]);
   return {
-    campaigns: rows.map((row) => ({ id: row.id, name: row.name, policy: asViolationPolicy(row.guardrailViolationPolicy) })),
+    campaigns: rows.map((row) => {
+      const own = campaignGuardrailsOf(row.guardrails).violationPolicy;
+      const running = PRICES_MAY_BE_LIVE.has(row.status as CampaignState);
+      return {
+        id: row.id,
+        name: row.name,
+        policy: running ? asViolationPolicy(row.guardrailViolationPolicy) : (own ?? asViolationPolicy(row.guardrailViolationPolicy)),
+        // Said beside it, where it is the campaign's own choice rather than one it started with.
+        ...(own ? { own: true as const } : {}),
+      };
+    }),
     total,
   };
 }
@@ -147,6 +171,8 @@ export async function createCampaign(
         name: campaign.name,
         status: campaign.status,
         practice: input.practice ?? false,
+        // Its own floors and policy, where it sets any (#816): who set a floor is in the log.
+        ...(input.guardrails && setsAnything(input.guardrails) ? floorsAudit(input.guardrails) : {}),
         // Who typed the word for its start, and what it covered (#1009).
         ...(input.startConfirmed ? { startConfirmed: input.startConfirmed } : {}),
       } as never,
@@ -201,6 +227,8 @@ async function campaignRow(shopId: string, input: CampaignInput) {
       surfaces: { base: true, priceLists: input.priceLists ?? [] } as never,
       compareAtPolicy: input.compareAtPolicy as never,
       compareAtViolationPolicy: "clear",
+      // Its own floors and policy, as the editor read them (#816); nothing, for a campaign that
+      // sets none, which follows the store's floors as every campaign always has.
       guardrails: (input.guardrails ?? {}) as never,
       // The shop's answer to "when a price would breach a floor", not a literal.
       // It was hardcoded here and again in `toResolvable`, so the setting the merchant
@@ -210,8 +238,8 @@ async function campaignRow(shopId: string, input: CampaignInput) {
       // Only a record until the campaign starts: until then it is planned with the store's
       // setting as it is (`breachPolicyOf`), and this is written again as it starts, so
       // changing the store's setting does not change what a running campaign does to prices
-      // already on a storefront (#789).
-      guardrailViolationPolicy: await violationPolicyFor(shopId),
+      // already on a storefront (#789). The campaign's own choice, where it made one (#816).
+      guardrailViolationPolicy: input.guardrails?.violationPolicy ?? (await violationPolicyFor(shopId)),
       // What it prices, in its columns alone (#1141); the blob is when it runs and the
       // campaign's own record, here the typed confirmation of its start (#1009).
       ...definitionData(definition),
@@ -503,7 +531,9 @@ export function toResolvable(campaign: PlannableCampaign): ResolvableCampaign {
     compareAtPolicy: campaign.compareAtPolicy as unknown as CompareAtPolicy,
     compareAtViolationPolicy: "clear",
     roundingPolicy: roundingFor(campaign.rounding),
-    guardrails: (campaign.guardrails ?? undefined) as unknown as Guardrails | undefined,
+    // Its own floors over the store's (#816): tighter only, but for each one somebody typed the
+    // word to take below the store's. Every campaign before #816 stored `{}`, which is nothing.
+    guardrails: resolverGuardrails(campaignGuardrailsOf(campaign.guardrails)),
     // Read from the campaign, not hardcoded. See #338: every layer below this
     // implemented `skip` and `block` correctly and none of them could ever be reached,
     // because this line threw the answer away. As handed over: `campaignContext` hands

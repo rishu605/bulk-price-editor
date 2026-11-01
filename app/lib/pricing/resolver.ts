@@ -22,6 +22,7 @@ import { applyRounding } from "../money/rounding";
 import { compare, isPositive, lessThanOrEqual, max, type Money } from "../money/money";
 import {
   computeFloor,
+  inCurrency,
   MissingCostError,
   mergeGuardrails,
   needsCostButMissing,
@@ -83,7 +84,8 @@ export function resolve(input: ResolveInput): Resolution {
     };
   }
 
-  const guardrails = mergeGuardrails(storeGuardrails, winner.guardrails);
+  // The campaign's own floors over the store's (#816), its minimum price only in its currency.
+  const guardrails = mergeGuardrails(storeGuardrails, inCurrency(winner.guardrails, currency));
 
   // A cost-dependent guardrail with no cost cannot be evaluated. Pricing anyway
   // would mean writing a price the merchant explicitly asked us to guard.

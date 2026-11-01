@@ -6,7 +6,8 @@
  */
 
 import type { AlreadyCorrect, Overlap } from "../../lib/planning/overlaps";
-import type { AdjustmentRule, CompareAtPolicy, Guardrails } from "../../lib/pricing/types";
+import type { AdjustmentRule, CompareAtPolicy } from "../../lib/pricing/types";
+import type { CampaignGuardrails } from "../../lib/campaigns/campaign-floors";
 import type { PlannedRow } from "../../lib/planning/types";
 import type { MarginRow } from "../../lib/pricing/margin";
 import type { StoredRoundingPolicy } from "../../lib/money/rounding-policy";
@@ -29,7 +30,11 @@ export interface CampaignInput {
    * another (E9).
    */
   rounding: StoredRoundingPolicy;
-  guardrails?: Guardrails;
+  /**
+   * Its own floors and floor-breach policy (#816), as `floorsToSave` read them: below the
+   * store's only with the word typed. Absent sets nothing, and it follows the store's.
+   */
+  guardrails?: CampaignGuardrails;
   priority?: number;
   /**
    * Price products that enter scope while the campaign runs. Defaults on: a merchant

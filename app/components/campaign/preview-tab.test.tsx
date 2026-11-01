@@ -35,6 +35,9 @@ const props = (preview: Record<string, unknown>) =>
     approval: { required: false, state: "none" },
     fetcher: { Form: "form", state: "idle" },
     busy: false,
+    // The store's floors and policy, as every campaign that sets none (#816).
+    floors: { applied: "At least $5.00", whose: "The store's floors, from Settings.", unconfirmed: null },
+    breachPolicy: { policy: "clamp", kept: false, store: "clamp" },
   }) as unknown as CampaignDetailProps;
 
 const render = (preview: Record<string, unknown>) =>
