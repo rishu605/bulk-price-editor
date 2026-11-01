@@ -116,6 +116,9 @@ Verified byte-identical to the old output on all four shops in the local databas
 
 ### Finding 3 — planning issues one full scan of `baselines` per chunk, and that is currently correct
 
+**Replaced in #524**, once measured past one store's size: see "After #524" below. Correct
+as a choice between chunk sizes, which is all this section compared.
+
 `loadCandidates` over the whole catalogue emits 43 statements: 21 chunks × `baselines`,
 21 × `price_surface_entries`, plus the scope query. Every one is a sequential scan, each
 discarding ~100,869 rows.
@@ -266,11 +269,125 @@ over 200 ms. Worth checking before attributing a spike to the change under test.
 `offBaselineCells` is left alone at 185 ms. It is already a merge join over two index
 scans; comparing every surface entry to its baseline *is* the work.
 
+## After #524 — a plan's baselines and live prices in one read each
+
+`loadCandidates` now sends the scope's variant ids as one array, `"variantGid" = ANY($2)`, in
+one read of `baselines` and one of `price_surface_entries`, inside a transaction that sets
+`plan_cache_mode = force_custom_plan`. The conditions are the chunked reads' own, and the
+scope is still the one Prisma query `astToWhere` compiles, so nothing about which variants
+are in scope or what is read for them moved. `candidate-reads.chaos.ts` holds the new reads to
+the old loader, kept there as the reference, over random catalogues and every condition field.
+
+### Measured
+
+Not on anchor-perf. The catalogue `app/lib/seed/catalogue.ts` builds was written straight
+into a local database in the shape a sync and an install capture leave: 102,273 live
+variants, 3,688 tombstoned, 110,758 baselines, 119,829 surface entries, which is
+anchor-perf's shape. The old code's 1,384–1,411 ms is in line with anchor-perf's 1,288 ms.
+`measure:queries`, old and new alternated three times:
+
+| Path | Before | After |
+|---|---|---|
+| plan: candidates for the whole catalogue | 1,384–1,411 ms, 43 statements, 43 scans | **712–730 ms, 6 statements, 3 scans** |
+| plan: candidates for a tag (19,292) | 288–297 ms, 9 statements, 8 scans | **163–164 ms, 6 statements, 2 scans** |
+| statements reading a whole table, all paths | 69 of 97 | 23 of 51 |
+
+Six statements, half of them the transaction's: `BEGIN`, the setting, `COMMIT`. The scans
+left are one pass over each table, which is what a scope this wide costs.
+
+What Postgres did for the whole-catalogue plan, every statement EXPLAINed and summed:
+
+| | Before | After |
+|---|---|---|
+| rows read and discarded | 4,641,954 | **30,214** |
+| buffer blocks | 103,761 | 9,456 |
+| execution, summed | 491 ms | 83 ms |
+
+Old and new alternating in one process, twelve runs each, so both saw the same load:
+
+| Scope | Chunked (median) | One array (median) |
+|---|---|---|
+| whole catalogue, 101,788 candidates | 1,392 ms | **679 ms** |
+| tag, 19,292 | 297 ms | **149 ms** |
+| sku contains, 52 | 2 ms | 2 ms |
+
+What is left of the 679 ms is mostly Prisma's, not Postgres's: about 216 ms to bring the
+scope's rows back, 79 ms to sort them (#769), and about 100 ms of each read's 130 ms
+sending 102,273 ids and receiving the rows. A narrow scope makes three more round trips for
+the transaction than it did, about a millisecond.
+
+### The exponent, measured
+
+Finding 3 left open whether the chunks still won at ten times the size. There are two ways
+to be ten times bigger, and they behave differently.
+
+**Ten times the rows, from other shops**, as a production table is: 1,107,580 baselines and
+1,198,290 surface entries, nine shops besides this one. The old reads did not get worse.
+Postgres stopped scanning the table and read the shop's rows through its index instead, so
+each chunk still read every row of *this shop*: 4,078,544 rows discarded, 1,355 ms. New:
+13,346 discarded, 693 ms. The cost was the shop's size times the scope, never the table's.
+
+**One shop three times the size**, which is the case that matters: 303,054 live variants and
+301,617 candidates, seeded beside the first shop, so the tables held four times the rows.
+
+| | Chunked | One array |
+|---|---|---|
+| statements | 123 | 6 |
+| rows read and discarded | 55,327,251 | 427,431 |
+| execution, summed | 4,730 ms | 231 ms |
+| wall (median of six) | 6,711 ms | **2,150 ms** |
+
+Three times the scope cost the chunks 9.6 times the Postgres time and 4.8 times the wall:
+three times the chunks, each reading a table four times the size. The array cost 2.8 times
+and 3.2 times, which is the rows themselves.
+
+### The trap the first version fell into
+
+`"variantGid" = ANY($2)` alone was faster in every one-off measurement, and would have shipped
+a regression no measurement here could see:
+
+| Both reads, 102,273 ids, one connection | Runs 1–5 | Runs 6–12 |
+|---|---|---|
+| `= ANY($2)` | 269–294 ms | **3,311–3,427 ms** |
+| `= ANY($2)` with `force_custom_plan` | 251–260 ms | 245–263 ms |
+
+Prisma keeps each statement prepared on its connection. From a prepared statement's sixth
+execution, Postgres may plan it once without its values (`plan_cache_mode = auto`), and a
+plan that cannot see the array's length guesses a dozen rows and probes the index once per
+id: 270 ms where a scan took 9 ms, on 19,383 ids in `psql`. At 102,273 ids that is three and
+a half times *slower* than the chunks. In production it would have been every plan after the
+fifth on each pooled connection.
+
+**Neither tool here saw it.** `EXPLAIN` plans with the values, so `measure:queries` reports
+the first-five plan. A single wall-clock reading is a first-five reading too. Only twelve in
+a row on one connection showed it. `SET LOCAL` keeps the setting to the transaction, so
+nothing else on the connection is planned differently. Behind PgBouncer Prisma prepares
+nothing and it changes nothing. `candidate-reads.chaos.ts` fails if a plan stops asking for
+it.
+
+### Not taken
+
+- **A join to `variant_index` on the scope's filter**, the one-statement version #524
+  measured at 62 ms for the baselines half. It needs the filter in SQL: a second translation of the AST beside
+  `astToWhere`, and two translations of one scope are how a preview comes to disagree with
+  its run (rule 4).
+- **A relation Prisma could filter through.** It needs a foreign key from `baselines` to
+  `variant_index`, which a baseline for a variant the mirror does not have fails (#252).
+- **One statement joining both tables.** About 45 ms faster at 102K. Two reads keep each
+  table's conditions exactly as they were, and that was worth more than 45 ms here.
+
+Imported prices (`price_import_rows`) are still read 5,000 ids at a time, and only for a
+campaign with a `from-import` rule. Not measured: the seeded catalogue has no imports.
+
 ## What this does not cover
 
 Concurrency, same as `measure-admin`. Every number here is one statement at a time against
 an otherwise idle database, so they are a floor. A merchant paging the catalogue while a
 100K campaign plans is a different question.
+
+Nor a prepared statement past its fifth execution. `EXPLAIN` plans with the values bound, and
+each path here runs once, so a statement Postgres would later plan without them reads as
+fast as its first plan. See "The trap the first version fell into" above.
 
 Nor is any of it from a real beta merchant. `anchor-perf` is synthetic — uniform variant
 counts, 16 vendors, tags applied evenly. Real catalogues are lumpy, and lumpy is what
