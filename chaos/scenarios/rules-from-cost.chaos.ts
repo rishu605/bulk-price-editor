@@ -54,8 +54,12 @@ vi.mock("../../app/services/notifications.server", async (importOriginal) => ({
 
 vi.mock("../../app/worker/web-queue.server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../app/worker/web-queue.server")>()),
+  // Nothing here is large enough to plan in the background, so nothing is enqueued.
   webQueue: () => ({
-    async enqueue(_name: QueueName, _ref: JobRef) {},
+    async enqueue(name: QueueName, ref: JobRef) {
+      void name;
+      void ref;
+    },
     async depths() {
       return {};
     },

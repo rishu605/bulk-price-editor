@@ -58,9 +58,10 @@ describe("chaos: editing a segment", () => {
         request: new Request(`https://example.invalid/app/settings/segments?edit=${segment.id}`),
         params: {},
         context: {},
-      } as never)) as { editing: { id: string; conditions: Record<string, string> } | null };
+      } as never)) as { editing: { id: string; scope: { groups: Array<{ conditions: unknown[] }> } } | null };
       expect(page.editing?.id).toBe(segment.id);
-      expect(page.editing?.conditions.tag).toBe("nothing-has-this");
+      // In the filter builder's rows since #817, every condition of every group.
+      expect(page.editing?.scope.groups).toEqual([{ conditions: [{ field: "tag", values: ["nothing-has-this"] }] }]);
 
       // Renamed and refiltered, with nobody using it: saved at once.
       const saved = await post({ intent: "update", segmentId: segment.id, name: "Chaos tagged", tag: "chaos" });
