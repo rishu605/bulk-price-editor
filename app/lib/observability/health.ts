@@ -46,7 +46,7 @@ export interface QueueLimit {
 }
 
 /**
- * The defaults, per queue, because one number cannot serve all six.
+ * The defaults, per queue, because one number cannot serve all seven.
  *
  * Depth is a throughput signal and means something different on every queue: fifty jobs on
  * `execution` is fifty merchants' campaigns, while `webhooks` holds one drain per shop
@@ -57,6 +57,11 @@ export interface QueueLimit {
  *   `execution` -- a merchant's apply or revert, and the queue the epic is about. A minute
  *   behind another shop's run is the #807 failure, and the gate's 1-variant apply has 30 s
  *   end to end. Depth 50 is `EXECUTION_BACKLOG`, the alert's own number.
+ *
+ *   `execution-small` -- the small-run lane (#809), whose slots no large run takes. Thirty
+ *   seconds, the gate's own budget for a 1-variant apply: a run here waiting that long is a
+ *   lane that is full or stopped, never one shop's sale in the way. A job put back because its
+ *   own shop is busy is delayed, not waiting, and counts in neither.
  *
  *   `webhooks` -- well under the five minutes `webhook-lag` pages at, because a stalled
  *   queue produces no processed deliveries and that alert goes quiet rather than firing.
@@ -74,6 +79,7 @@ export const QUEUE_LIMITS: Record<QueueName, QueueLimit> = {
   webhooks: { depth: 200, waitMs: 2 * 60_000 },
   planning: { depth: 200, waitMs: 2 * 60_000 },
   execution: { depth: 50, waitMs: 60_000 },
+  "execution-small": { depth: 50, waitMs: 30_000 },
   verification: { depth: 200, waitMs: 5 * 60_000 },
   audit: { depth: null, waitMs: null },
 };
@@ -143,9 +149,9 @@ export interface QueueSnapshot {
   /** When the job that has waited longest to start was enqueued (epoch ms); null if none waits. */
   oldestWaitingAt: number | null;
   /**
-   * The same per shop, for `execution` only: that queue's jobs are shops' runs, and "one
-   * shop waiting behind another" is the incident #807 is about. Never sent out of
-   * `/healthz`, which is unauthenticated and returns no shop data.
+   * The same per shop, for the run lanes only (`execution`, `execution-small`, #809): their
+   * jobs are shops' runs, and "one shop waiting behind another" is the incident #807 is about.
+   * Never sent out of `/healthz`, which is unauthenticated and returns no shop data.
    */
   oldestWaitingAtByShop?: Record<string, number>;
 }

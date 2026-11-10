@@ -12,7 +12,14 @@
  *
  *   `execution` and `verification` spend a shop's Admin API budget, so they are narrow.
  *   Two concurrent executions on the same shop would each see the other's throttle and
- *   back off, turning one slow run into two slower ones.
+ *   back off, turning one slow run into two slower ones -- so a shop runs one at a time,
+ *   held by its lease in Postgres rather than by the queue (#809, `shop-lease.server.ts`).
+ *
+ *   `execution-small` is the small-run lane (#809): a run the inline budget's own figures put
+ *   at two minutes of writing or less. Slots of its own, so a merchant's one-variant revert
+ *   never waits behind another shop's catalogue-wide sale, which can hold an `execution` slot
+ *   for an hour. Both lanes are capped across every worker process, not per process: their
+ *   numbers come from the worker's database pool (#810), which a second replica does not grow.
  *
  *   `webhooks` and `planning` are database-bound and cheap, so they are wide. A webhook
  *   backlog after a large catalogue edit should drain, not trickle. Wide across shops, not
@@ -32,6 +39,7 @@ export const QUEUE_NAMES = [
   "webhooks",
   "planning",
   "execution",
+  "execution-small",
   "verification",
   "audit",
 ] as const;
@@ -40,7 +48,14 @@ export type QueueName = (typeof QUEUE_NAMES)[number];
 
 export interface QueuePolicy {
   name: QueueName;
+  /** Jobs one worker process runs at once. */
   concurrency: number;
+  /**
+   * Jobs every worker process together runs at once: BullMQ's global concurrency, set on the
+   * queue when a worker starts (#809). For the classes whose cap is the database's budget
+   * rather than the process's CPU, which a second replica would otherwise double (#810).
+   */
+  globalConcurrency?: number;
   attempts: number;
   /** Milliseconds before the first retry; doubled each attempt. */
   backoffMs: number;
@@ -59,7 +74,15 @@ export const QUEUE_POLICIES: Record<QueueName, QueuePolicy> = {
   sync: { name: "sync", concurrency: 1, attempts: 3, backoffMs: 30_000, retryable: true },
   webhooks: { name: "webhooks", concurrency: 10, attempts: 5, backoffMs: 1_000, retryable: true },
   planning: { name: "planning", concurrency: 5, attempts: 3, backoffMs: 5_000, retryable: true },
-  execution: { name: "execution", concurrency: 2, attempts: 1, backoffMs: 0, retryable: false },
+  execution: { name: "execution", concurrency: 2, globalConcurrency: 2, attempts: 1, backoffMs: 0, retryable: false },
+  "execution-small": {
+    name: "execution-small",
+    concurrency: 2,
+    globalConcurrency: 2,
+    attempts: 1,
+    backoffMs: 0,
+    retryable: false,
+  },
   verification: {
     name: "verification",
     concurrency: 2,
@@ -109,6 +132,16 @@ export interface JobRef {
    * Without a `campaignId` that release's handler does nothing, and its own tick drains the mark.
    */
   enroll?: string;
+  /**
+   * The campaign whose due scheduled transition this job runs (#809): the tick hands its starts
+   * and ends to the worker rather than running each inside itself. The transition is `revert`'s,
+   * and the job asks the schedule again when it runs, so one that waited is never stale.
+   *
+   * Its own field, not `campaignId`, as `enroll` is: read as an ordinary execution job by the
+   * release before this one, it would be an unclaimed apply of the whole campaign. Without a
+   * `campaignId` that release's handler does nothing, and its own tick runs the transition.
+   */
+  scheduled?: string;
   /** Who asked, so what the run resolves on their behalf is attributed to them. */
   actor?: string;
   /**
@@ -145,8 +178,35 @@ export interface JobRef {
  * job, behind whatever else is waiting (#811). A shop's webhook drain says it when it
  * stopped with deliveries still waiting, so one shop's echo storm is drained a turn at a
  * time between other shops' turns rather than holding a slot until it is done.
+ *
+ * `"later"` is a job that did nothing because its shop is busy: another of the shop's runs, or
+ * syncs, holds its lease (#809). It goes back to wait `SHOP_BUSY_RETRY_MS` with its slot given to
+ * another shop, and keeps its place as the one job for its work, so a ring meanwhile is
+ * absorbed. Inline there is no queue to go back to, and the work waits where it is recorded --
+ * a QUEUED row, a claim, a campaign's schedule -- for the tick that rings it next.
  */
-export type JobResult = void | "again";
+export type JobResult = void | "again" | "later";
+
+/**
+ * How long a job whose shop is busy waits before it asks again (#809). Short, because it is how
+ * late a shop's second run starts after its first finishes; a turn that finds the shop still
+ * busy costs one indexed upsert and gives its slot straight back.
+ */
+export const SHOP_BUSY_RETRY_MS = 5_000;
+
+/** The two lanes a run can go on: the small-run lane and everything else (#809). */
+export const RUN_LANES = ["execution", "execution-small"] as const satisfies readonly QueueName[];
+export type RunLane = (typeof RUN_LANES)[number];
+
+/** Whether a queue is one of the run lanes, whose jobs are a shop's price writes. */
+export function isRunLane(name: QueueName): name is RunLane {
+  return (RUN_LANES as readonly QueueName[]).includes(name);
+}
+
+/** The lane for a run: the small-run lane when `smallRun` says so (`lib/execution/run-lane.ts`). */
+export function laneFor(small: boolean): RunLane {
+  return small ? "execution-small" : "execution";
+}
 
 /**
  * How long a shop's first waiting delivery waits for others before the worker drains them
@@ -165,12 +225,16 @@ export function webhookDrainKey(shopId: string): string {
 /**
  * The key a job's duplicates share, for the jobs whose work is a row the worker's tick rings
  * again when it waits too long (#808): a queued run, a catalogue sync, a campaign's
- * enrolments. A ring of a job still waiting or running is absorbed by it; once it has finished,
- * the key is free for the next. Null for every other job, which is never rung twice.
+ * enrolments, a campaign's due scheduled transition (#809). A ring of a job still waiting or
+ * running -- or put back because its shop was busy -- is absorbed by it; once it has finished,
+ * the key is free for the next. Null for every other job, which is never rung twice. The same
+ * key on either lane: a run is rung on the lane its row names, so it is only ever on one.
  */
 export function jobDedupKey(name: QueueName, ref: JobRef): string | null {
-  if (name === "execution" && ref.runId) return `run:${ref.runId}`;
-  if (name === "execution" && ref.enroll) return `enroll:${ref.enroll}`;
+  if (isRunLane(name) && ref.runId) return `run:${ref.runId}`;
+  if (isRunLane(name) && ref.enroll) return `enroll:${ref.enroll}`;
+  // A campaign's due transition, rung by every tick until it has run (#809).
+  if (isRunLane(name) && ref.scheduled) return `scheduled:${ref.scheduled}:${ref.revert ? "revert" : "apply"}`;
   if (name === "sync" && ref.fullSync) return `sync:${ref.shopId}`;
   if (name === "sync" && ref.recaptureId) return `recapture:${ref.recaptureId}`;
   return null;

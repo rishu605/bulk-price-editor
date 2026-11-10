@@ -52,6 +52,9 @@ export const INSTRUMENTS: Record<Metric, "counter" | "histogram" | "gauge"> = {
   "queue.oldest_wait_ms": "gauge",
   // A distribution of individual waits, so a p95 per shop can be read off it (#813).
   "queue.wait_ms": "histogram",
+  "queue.deferred": "counter",
+  // A distribution, for the same reason: a p95 of a lane's run waits, per shop (#809).
+  "run.wait_ms": "histogram",
   "queue.enqueued": "counter",
   "queue.failed": "counter",
   "plan.summary_ms": "histogram",

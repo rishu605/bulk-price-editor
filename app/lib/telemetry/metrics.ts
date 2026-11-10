@@ -73,6 +73,18 @@ export type Metric =
    * another's, which is the question Epic 19 (#807) exists to answer.
    */
   | "queue.wait_ms"
+  /**
+   * Jobs put back to wait because their shop was busy, by queue (#809): another of the shop's
+   * runs, or syncs, held its lease. A shop's own work queuing behind itself, which is by
+   * design; a rising count is shops pressing more than their runs can keep up with.
+   */
+  | "queue.deferred"
+  /**
+   * How long a queued run waited, from the press or the due moment to the worker taking it, by
+   * lane and shop (#809). Whatever it waited for: a slot, or the shop's own run before it. The
+   * merchant's wait, where `queue.wait_ms` is a job's wait for a worker.
+   */
+  | "run.wait_ms"
   /** Jobs accepted onto a queue, by class. */
   | "queue.enqueued"
   /** Jobs that exhausted their attempts. A class failing every attempt is the thing an

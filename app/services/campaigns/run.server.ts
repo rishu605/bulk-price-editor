@@ -36,6 +36,8 @@ import type { RunOutcome } from "./types";
 import { chunk } from "../../lib/db/chunk";
 import { inRunChunks, retryTransient, RUN_CHUNK } from "../../lib/db/run-writes.server";
 import { handedOver, type InlineLimit, type InlineWork } from "../../lib/execution/inline-budget";
+import { smallRun } from "../../lib/execution/run-lane";
+import { leaseHolder, runLeaseHolder, takeShopLease, type ShopLease } from "../shop-lease.server";
 import { recordClaim, releaseClaim, transitionCampaign } from "./lifecycle.server";
 import { endingLateWatch } from "./ending-late.server";
 import { clearQueuedRefused, recordEndMissed, recordQueuedRefused, recordStartRefused } from "./start-refusal.server";
@@ -378,6 +380,9 @@ export async function runCampaign(
       });
     }
     throw error;
+  } finally {
+    // The shop's run lease a page-written run took (#809), however it ended.
+    await started.lease?.release();
   }
 }
 
@@ -405,6 +410,8 @@ interface Started {
   writing?: boolean;
   /** Where a claim given back goes, when the run moved the campaign before claiming it (#1146). */
   releaseTo?: CampaignState;
+  /** The shop's run lease, held by a run the campaign page writes itself (#809). */
+  lease?: ShopLease;
 }
 
 interface FailedRun {
@@ -730,6 +737,15 @@ async function executeCampaignRun(
   // here (#772, #790, D29), after the approval and plan gates have had their say, and before
   // the claim below, because handing it over takes the claim itself.
   const tooLongHere = work && options.inline ? handedOver(work, options.inline) : null;
+  // One run per shop at a time, the page's own included (#809): a run small enough to write
+  // here takes the shop's lease first, and one that finds another of the shop's runs writing is
+  // the worker's, which starts it the moment that one finishes. Released by `runCampaign`.
+  let handOver = tooLongHere;
+  if (!handOver && work && options.inline) {
+    const lease = await takeShopLease(shopId, "run", { holder: leaseHolder("page"), campaignId });
+    if (lease) started.lease = lease;
+    else handOver = await shopBusyReason(shopId);
+  }
   // Whether nobody is there to type the typed confirmation (#1009): checked below on the
   // run's own plan, and here first for a Flow start handed to the worker, which would
   // otherwise answer Flow "queued" and be refused where Flow never hears it.
@@ -749,11 +765,11 @@ async function executeCampaignRun(
   if (!options.revert && !options.resume && !options.variantGids && !options.claimedFrom) {
     started.releaseTo = (await clearEndedWindow(shopId, campaignId, options.actor)) ?? undefined;
   }
-  if (tooLongHere && work) {
+  if (handOver && work) {
     // Always queued from here, Redis or not (D29): the row is written, and the worker's tick
     // runs it if no job reaches the worker. Never refused for its size, and never run here.
     const { queueRun } = await import("./queued-run.server");
-    const queued = await queueRun(shopId, campaignId, tooLongHere, {
+    const queued = await queueRun(shopId, campaignId, handOver, {
       revert: options.revert === true,
       resume: options.resume,
       actor: options.actor,
@@ -762,6 +778,8 @@ async function executeCampaignRun(
       keepEdited: options.keepEdited,
       untypedPress: options.untypedPress,
       scope: work.variants,
+      // The lane, from the same count (#809): a run the page could have waited for is small.
+      small: smallRun(work),
     });
     if (queued) return queued;
     // Already claimed, or a live run holds it: that run, by name, when there is one (#793).
@@ -2038,8 +2056,10 @@ async function recordResults(
  * Products only below the bulk threshold: above it the run goes to Shopify's queue and has
  * no estimate to make. Tags are counted as every product in scope when the campaign has a
  * tag kit -- an apply adds them, a revert takes them off, one call a product either way.
+ *
+ * Also which lane a run the scheduler hands to the worker goes on (#809, `smallRun`).
  */
-async function inlineWork(shopId: string, campaignId: string): Promise<InlineWork> {
+export async function inlineWork(shopId: string, campaignId: string): Promise<InlineWork> {
   const campaign = await prisma.campaign.findFirstOrThrow({
     where: { id: campaignId, shopId },
     select: { ...DEFINITION, tagKit: true },
@@ -2049,6 +2069,21 @@ async function inlineWork(shopId: string, campaignId: string): Promise<InlineWor
   const products =
     variants > DEFAULT_THRESHOLD ? 0 : (await prisma.variantIndex.groupBy({ by: ["productGid"], where })).length;
   return { variants, products, taggedProducts: campaign.tagKit.length > 0 ? products : 0 };
+}
+
+/**
+ * Why a run the page could write is the worker's instead: another of the shop's runs holds the
+ * shop's lease (#809). Names that run's campaign when the lease says which.
+ */
+async function shopBusyReason(shopId: string): Promise<string> {
+  const holder = await runLeaseHolder(shopId);
+  const campaign = holder?.campaignId
+    ? await prisma.campaign.findFirst({ where: { id: holder.campaignId, shopId }, select: { name: true } })
+    : null;
+  return (
+    `Another run is writing this store's prices right now${campaign ? ` ("${campaign.name}")` : ""}, and a store's runs are ` +
+    "written one at a time, so this one waits for it."
+  );
 }
 
 /** The states in which a full run holds the campaign's claim. */
