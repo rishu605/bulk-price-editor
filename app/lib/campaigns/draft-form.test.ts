@@ -15,6 +15,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  compareAtViolationFrom,
   astFrom,
   compareAtFrom,
   readerFor,
@@ -260,5 +261,42 @@ describe("priority and revert buffer (#727)", () => {
     expect(priorityFrom(read({ priority: "40.7" }))).toBe(40);
     expect(priorityFrom(read({ priority: "-5" }))).toBe(-5);
     expect(revertBufferFrom(read({ revertBuffer: "-3" }))).toBe(0);
+  });
+});
+
+describe("rules from cost and off the compare-at (#817)", () => {
+  it("reads a markup, a margin and a percentage off the compare-at", () => {
+    expect(ruleFrom(read({ ruleKind: "from-cost-multiplier", ruleValue: "2.5" }), "USD")).toEqual({ kind: "from-cost-multiplier", factor: 2.5 });
+    expect(ruleFrom(read({ ruleKind: "from-cost-margin", ruleValue: "30" }), "USD")).toEqual({ kind: "from-cost-margin", marginPercent: 30 });
+    // Off, whichever way it was typed: the field asks how much to take off.
+    expect(ruleFrom(read({ ruleKind: "percent-of-compare-at", ruleValue: "20" }), "USD")).toEqual({ kind: "percent-of-compare-at", percent: -20 });
+    expect(ruleFrom(read({ ruleKind: "percent-of-compare-at", ruleValue: "-20" }), "USD")).toEqual({ kind: "percent-of-compare-at", percent: -20 });
+  });
+
+  it.each([
+    ["from-cost-multiplier", "0", /The markup has to be more than 0/],
+    ["from-cost-multiplier", "150", /not a price\. Enter less than 100/],
+    ["from-cost-margin", "100", /would need an infinite price/],
+    ["from-cost-margin", "-5", /The margin has to be more than 0%/],
+    ["percent-of-compare-at", "0", /would price every variant at its compare-at/],
+    ["percent-of-compare-at", "100", /would make every price free or negative/],
+    ["from-cost-margin", "", /The margin is empty/],
+  ])("refuses %s %s by name", (kind, value, sentence) => {
+    expect(ruleInputProblem(read({ ruleKind: kind, ruleValue: value }), "USD")).toMatch(sentence);
+  });
+
+  it("takes an ordinary markup, margin and percentage", () => {
+    expect(ruleInputProblem(read({ ruleKind: "from-cost-multiplier", ruleValue: "2" }), "USD")).toBeNull();
+    expect(ruleInputProblem(read({ ruleKind: "from-cost-margin", ruleValue: "35.5" }), "USD")).toBeNull();
+    expect(ruleInputProblem(read({ ruleKind: "percent-of-compare-at", ruleValue: "25" }), "USD")).toBeNull();
+  });
+});
+
+describe("the compare-at violation policy (#817)", () => {
+  it("is what the form chose, and clear when it chose nothing, as every campaign was", () => {
+    expect(compareAtViolationFrom(read({ compareAtViolation: "skip" }))).toBe("skip");
+    expect(compareAtViolationFrom(read({ compareAtViolation: "block" }))).toBe("block");
+    expect(compareAtViolationFrom(read({}))).toBe("clear");
+    expect(compareAtViolationFrom(read({ compareAtViolation: "nonsense" }))).toBe("clear");
   });
 });

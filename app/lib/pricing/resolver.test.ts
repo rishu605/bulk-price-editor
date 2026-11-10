@@ -541,7 +541,9 @@ describe("rule engine", () => {
     }, 30_000);
   });
 
-  it("last matching rule row wins (edge case E16)", () => {
+  // Dormant (D32, #817): no screen or import makes a row with segments, and no planner says which
+  // segments a variant is in, so this is the engine's rule and not something a campaign does yet.
+  it("last matching rule row wins (edge case E16) — dormant, D32", () => {
     const rows = [
       { segmentIds: [], rule: { kind: "percent-change", percent: -10 } as AdjustmentRule },
       { segmentIds: ["seg-a"], rule: { kind: "percent-change", percent: -20 } as AdjustmentRule },
@@ -610,6 +612,22 @@ describe("compare-at policy", () => {
       ],
     });
     expect(result.meta.outcome).toBe("skipped");
+    expect(result.meta.reason).toBe("invalid-compare-at");
+  });
+
+  it("can stop the campaign instead, as the campaign chose (#817)", () => {
+    const result = resolve({
+      baseline: { price: usd(10_000) },
+      surface: USD,
+      campaigns: [
+        campaign({
+          ruleRows: [{ segmentIds: [], rule: { kind: "set-exact", amount: usd(15_000) } }],
+          compareAtPolicy: { kind: "set-to-baseline" },
+          compareAtViolationPolicy: "block",
+        }),
+      ],
+    });
+    expect(result.meta.outcome).toBe("blocked");
     expect(result.meta.reason).toBe("invalid-compare-at");
   });
 

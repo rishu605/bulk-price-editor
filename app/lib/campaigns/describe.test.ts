@@ -215,3 +215,37 @@ describe("draft and archived products in the sentence (#751)", () => {
     );
   });
 });
+
+describe("the rules and conditions the filter builder and the rule select added (#817)", () => {
+  it("says a rule from cost or off the compare-at as a merchant would", () => {
+    expect(describeRule({ kind: "from-cost-multiplier", factor: 2.5 })).toBe("Cost × 2.5");
+    expect(describeRule({ kind: "from-cost-margin", marginPercent: 30 })).toBe("30% margin on cost");
+    expect(describeRule({ kind: "percent-of-compare-at", percent: -20 })).toBe("20% off compare-at");
+  });
+
+  it("lists several values of one condition as any of them", () => {
+    expect(describeScope({ groups: [{ conditions: [{ field: "tag", value: ["sale", "clearance"] }] }] })).toBe("Tagged sale or clearance");
+    expect(
+      describeScope({ groups: [{ conditions: [{ field: "collection", value: "Outerwear" }, { field: "excludeTag", value: ["no-sale", "gift"] }] }] }),
+    ).toBe("In Outerwear · except tagged no-sale or gift");
+  });
+
+  it("says stock and cost in words", () => {
+    expect(
+      describeScope({ groups: [{ conditions: [{ field: "inventoryMin", value: 50 }, { field: "hasCost", value: true }] }] }),
+    ).toBe("Stock at least 50 · Cost recorded");
+    expect(describeScope({ groups: [{ conditions: [{ field: "inventoryMax", value: 3 }, { field: "hasCost", value: false }] }] })).toBe(
+      "Stock at most 3 · No cost recorded",
+    );
+  });
+
+  it("counts products picked beside conditions as one more group, and those left out", () => {
+    expect(
+      describeScope({
+        groups: [{ conditions: [{ field: "tag", value: "sale" }] }, { conditions: [{ field: "variantGid", value: ["gid://1", "gid://2"] }] }],
+        excludeVariantGids: ["gid://3"],
+      }),
+    ).toBe("Tagged sale or 2 chosen variants · except 1 chosen variant");
+    expect(describeScope({ groups: [], excludeVariantGids: ["gid://3", "gid://4"] })).toBe("All variants · except 2 chosen variants");
+  });
+});
