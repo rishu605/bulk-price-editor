@@ -1848,10 +1848,19 @@ const LIVE_RUN_STATES: ReadonlySet<string> = new Set(["PLANNING", "QUEUED", "EXE
  * Resume to finish it.
  */
 export async function continueChunkedRun(shopId: string, runId: string, client: AdminClient | null): Promise<ChunkTurn> {
-  const taken = await prisma.runChunk.updateMany({
-    where: { runId, waitingSince: { not: null }, run: { is: { shopId, status: "EXECUTING" } } },
-    data: { waitingSince: null, turns: { increment: 1 } },
-  });
+  // The turn and its first sign of life in one step. The run's heartbeat is as old as its wait in
+  // the queue, and a reaper reading between the two would find a turn nobody had stamped, and give
+  // it back to the queue while it wrote.
+  const [, taken] = await prisma.$transaction([
+    prisma.campaignRun.updateMany({
+      where: { id: runId, shopId, status: "EXECUTING", chunk: { is: { waitingSince: { not: null } } } },
+      data: { heartbeatAt: new Date() },
+    }),
+    prisma.runChunk.updateMany({
+      where: { runId, waitingSince: { not: null }, run: { is: { shopId, status: "EXECUTING" } } },
+      data: { waitingSince: null, turns: { increment: 1 } },
+    }),
+  ]);
   if (taken.count !== 1) {
     const live = await prisma.campaignRun.findFirst({
       where: { id: runId, shopId, chunk: { isNot: null } },
@@ -1877,9 +1886,8 @@ export async function continueChunkedRun(shopId: string, runId: string, client: 
   };
 
   return withLogContext({ shopId, campaignId, runId }, async () => {
-    // Alive from the moment the turn is taken: the reaper judges a turn by this, as it does a run.
+    // Stamped as the turn works, as a run in one call is: the reaper judges a turn by this.
     const pulse = heartbeat(runId);
-    await pulse();
     const campaign = await prisma.campaign.findUnique({ where: { id: campaignId }, select: { schedule: true } });
     const lateWatch = carry.revert ? null : endingLateWatch(shopId, campaignId, campaign?.schedule);
     const beat = lateWatch
