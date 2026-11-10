@@ -1957,7 +1957,7 @@ export async function continueChunkedRun(shopId: string, runId: string, client: 
         await endTurn(runId, failures, total - left);
         return { kind: "continues", runId, campaignId };
       }
-      const outcome = await finishChunks(shopId, campaignId, runId, run.kind, client, options, carry, beat);
+      const outcome = await finishChunks(shopId, campaignId, runId, run.kind, client, options, carry, beat, total);
       return { kind: "finished", runId, campaignId, revert: carry.revert, outcome };
     } catch (error) {
       // As a run written in one call ends when it throws. Prices may have changed once any turn
@@ -2083,9 +2083,14 @@ async function finishChunks(
   options: RunOptions,
   carry: ChunkCarry,
   beat: () => Promise<void>,
+  /** The prices the run writes, every one of them now sent and answered. */
+  total: number,
 ): Promise<RunOutcome> {
-  // Every price sent and answered: Verifying, as a run written in one call says from here (#808).
-  await prisma.campaignRun.updateMany({ where: { id: runId, status: "EXECUTING" }, data: { status: "VERIFYING" } }).catch(() => {});
+  // Every price sent and answered: Verifying, as a run written in one call says from here (#808),
+  // with the run's count where its last chunk left it.
+  await prisma.campaignRun
+    .updateMany({ where: { id: runId, status: "EXECUTING" }, data: { status: "VERIFYING", writtenRows: total } })
+    .catch(() => {});
   const { campaign, resolvable, breach } = await loadCampaignContext(shopId, campaignId);
   const products = await productMapFor(shopId, [...new Set([...carry.marketVariants, ...carry.winners.map(([gid]) => gid)])]);
   const tail: RunTail = {
