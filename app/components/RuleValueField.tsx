@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { DRAFT_DEFAULTS } from "../lib/campaigns/draft-defaults";
+import { FROM_COST_MARGIN, FROM_COST_MULTIPLIER, MAX_MARKUP, OFF_COMPARE_AT } from "../lib/campaigns/draft-form";
 import { MAX_REDUCTION_PERCENT } from "../lib/campaigns/rule-limits";
 
 /** The largest "Reduce by" the field steps to: just under the whole price (#818). */
@@ -91,6 +92,18 @@ export function RuleValueField({
         <s-option value="set-exact" defaultSelected={kind === "set-exact"}>
           Set an exact price
         </s-option>
+        {/* From cost and from the compare-at (#817, PRD A-3.1): the engine priced them all along
+            and nothing offered them. Cost-plus is the wholesale merchant's rule; a percentage off
+            the compare-at is a sale computed from the price a product is shown "was". */}
+        <s-option value={FROM_COST_MULTIPLIER} defaultSelected={kind === FROM_COST_MULTIPLIER}>
+          From cost, times a markup
+        </s-option>
+        <s-option value={FROM_COST_MARGIN} defaultSelected={kind === FROM_COST_MARGIN}>
+          From cost, at a margin
+        </s-option>
+        <s-option value={OFF_COMPARE_AT} defaultSelected={kind === OFF_COMPARE_AT}>
+          Percent off the compare-at price
+        </s-option>
         {/* A file is a way prices change, not a different door.
             
             #416 dissolved the Imports nav item on the rule that a nav item is a noun; the
@@ -130,7 +143,35 @@ export function RuleValueField({
         </s-select>
       ) : null}
 
-      {kind === FROM_FILE ? null : money ? (
+      {kind === FROM_FILE ? null : kind === FROM_COST_MULTIPLIER ? (
+        /* No direction: a markup is a multiple, not a change. A variant with no cost is left at
+           its price and said so in the preview, never priced as though its cost were zero. */
+        <s-number-field
+          name={name}
+          label="Times cost"
+          value={initial?.magnitude ?? DRAFT_DEFAULTS.markup}
+          min={0.01}
+          max={MAX_MARKUP - 0.01}
+          details="2 sells each variant at twice its cost per item. A variant with no cost recorded keeps its price."
+        />
+      ) : kind === FROM_COST_MARGIN ? (
+        <s-number-field
+          name={name}
+          label="Margin (%)"
+          value={initial?.magnitude ?? DRAFT_DEFAULTS.margin}
+          min={0.01}
+          max={99.99}
+          details="Of the selling price, so a 30% margin on a 70.00 cost is 100.00. A variant with no cost recorded keeps its price."
+        />
+      ) : kind === OFF_COMPARE_AT ? (
+        <s-number-field
+          name={name}
+          label="Percent off"
+          value={initial?.magnitude ?? DRAFT_DEFAULTS.offCompareAt}
+          max={LARGEST_REDUCTION}
+          details="Off each variant's compare-at price as its baseline records it. A variant with none keeps its price. Leave the compare-at unchanged below to keep showing it struck through."
+        />
+      ) : money ? (
         <s-money-field
           name={name}
           label={kind === "set-exact" ? `Price (${currency})` : `Amount (${currency})`}

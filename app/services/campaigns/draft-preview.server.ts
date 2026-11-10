@@ -44,6 +44,7 @@ import { EVERY_STATUS } from "../../lib/campaigns/product-status";
 import type {
   AdjustmentRule,
   CompareAtPolicy,
+  CompareAtViolationPolicy,
   GuardrailFloor,
   GuardrailViolationPolicy,
   ResolvableCampaign,
@@ -57,10 +58,14 @@ export interface DraftCampaign {
   ast: FilterAst;
   rule: AdjustmentRule;
   compareAtPolicy: CompareAtPolicy;
+  /** What a compare-at not above the new price does (#817). Absent is "clear". */
+  compareAtViolationPolicy?: CompareAtViolationPolicy;
   rounding: StoredRoundingPolicy;
   priority: number;
   /** Why the rule's amount cannot be used, if it cannot (#696). Nothing is priced then. */
   ruleProblem?: string;
+  /** Why the filter builder's scope cannot be used (#817). Nothing is priced then. */
+  scopeProblem?: string;
   /** Its own floors and policy, as the fields say (#816). None follows the store's. */
   floors?: CampaignGuardrails;
   /** Of those floors, the ones below the store's, which Create asks to be confirmed. */
@@ -151,6 +156,15 @@ export interface DraftPreview {
   ruleProblem?: string;
   /** Why the floor fields cannot be used (#816), said instead of a preview, as `ruleProblem` is. */
   floorsProblem?: string;
+  /** Why the scope cannot be used (#817): a stock that is not a whole number, too many picked. */
+  scopeProblem?: string;
+  /**
+   * Of the rows left alone, those the rule had nothing to price from (#817): no cost for a
+   * markup or a margin, no compare-at for a percentage off it. Said beside the counts as the
+   * rule's consequence, so a merchant choosing cost-plus pricing sees how much of the scope it
+   * reaches before creating it. Absent when none.
+   */
+  ruleNeeds?: { cost: number; compareAt: number };
   /**
    * Which floors and policy the draft is previewed with, and whose (#816): the store's, or its
    * own, with any below the store's that Create will ask to be confirmed.
@@ -206,7 +220,8 @@ function draftAsResolvable(
     startAt: Number.MAX_SAFE_INTEGER,
     ruleRows: [{ segmentIds: [], rule: draft.rule }],
     compareAtPolicy: draft.compareAtPolicy,
-    compareAtViolationPolicy: "clear",
+    // As the form says it (#817), so a preview of "Stop the campaign" stops as the run will.
+    compareAtViolationPolicy: draft.compareAtViolationPolicy ?? "clear",
     roundingPolicy: resolvePolicy(draft.rounding),
     guardrails: draftGuardrails(own, draft.below ?? []),
     // Its own choice where it made one (#816); otherwise the store's, as a campaign created a
@@ -225,6 +240,7 @@ export async function previewDraft(
   limit = 25,
 ): Promise<DraftPreview> {
   if (draft.ruleProblem) return { ...EMPTY, ruleProblem: draft.ruleProblem };
+  if (draft.scopeProblem) return { ...EMPTY, scopeProblem: draft.scopeProblem };
   if (draft.floorsProblem) return { ...EMPTY, floorsProblem: draft.floorsProblem };
 
   const [others, settings, currency] = await Promise.all([
@@ -327,11 +343,16 @@ export async function previewDraft(
   );
 
   const fmt = (value?: Money | null) => (value ? format(value) : null);
+  const needs = {
+    cost: skipped.filter((row) => row.reason === "needs-cost").length,
+    compareAt: skipped.filter((row) => row.reason === "needs-compare-at").length,
+  };
 
   return {
     matched,
     leftOutByStatus,
     overlaps,
+    ...(needs.cost + needs.compareAt > 0 ? { ruleNeeds: needs } : {}),
     changing: changing.length,
     alreadyCorrect: alreadyCorrect.length,
     skipped: skipped.length,

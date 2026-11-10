@@ -71,7 +71,12 @@ export type AdjustmentRule =
  * A campaign may carry several ("-20% on Collection A, -30% on Collection B").
  * Where a variant matches more than one, the *last* matching row wins — a total,
  * deterministic order rather than an error, so the outcome is always predictable
- * (edge case E16). The UI surfaces overlaps in the preview.
+ * (edge case E16).
+ *
+ * Dormant (D32, #817): every campaign stores one row for its whole scope. A row naming
+ * segments matches a variant only through `variantSegmentIds`, which no planner supplies
+ * (`PlanCandidate.segmentIds` is never set), so it would price nothing; and every page reads
+ * a campaign's one rule (`ruleOf`). Per-segment rows are later in the PRD until both change.
  */
 export interface RuleRow {
   /** Segment ids this row applies to. Empty means the whole campaign scope. */
@@ -84,7 +89,13 @@ export interface RuleRow {
 export type CompareAtPolicy =
   /** Copy the baseline price into compare-at, producing a strike-through sale. */
   | { kind: "set-to-baseline" }
-  /** Derive compare-at from the baseline compare-at by rule. */
+  /**
+   * Derive compare-at from the baseline compare-at by rule.
+   *
+   * Dormant (D32, #817): no screen or import makes one. This says the baseline compare-at,
+   * and `resolveCompareAt` applies the rule to the baseline price, so what it would write is
+   * not settled. PRD A-3.3's "set/adjust by rule" is later until it is.
+   */
   | { kind: "adjust"; rule: AdjustmentRule }
   /** Remove any compare-at. */
   | { kind: "clear" }
@@ -241,7 +252,19 @@ export interface ResolutionMeta {
 
 export type ResolutionReason =
   | "below-floor"
+  /** A cost-based guardrail applies and the variant has no cost, so it cannot be checked. */
   | "missing-cost"
+  /**
+   * The rule prices from cost -- a markup or a margin -- and the variant has no cost (#817).
+   * Its own reason rather than "missing-cost", which is about a guardrail: the way out is to
+   * record the cost, or to narrow the scope to products that have one.
+   */
+  | "needs-cost"
+  /**
+   * The rule takes a percentage off the compare-at, and the variant's baseline has none
+   * (#817). It was reported as a missing cost, which sent the merchant to the wrong page.
+   */
+  | "needs-compare-at"
   | "invalid-compare-at"
   | "invalid-margin"
   | "non-positive-price"

@@ -10,6 +10,7 @@
  */
 
 import { BREACH_POLICY_LABELS, type BreachPolicy } from "../campaigns/breach-policy";
+import { COMPARE_AT_VIOLATION_LABELS } from "../campaigns/compare-at-violation";
 import { formatPrice } from "../money/format";
 import type { Money } from "../money/money";
 import { SKIP_REASON_ROW } from "./reasons";
@@ -57,14 +58,46 @@ export function blockedMessage(
   breach?: BreachPolicy,
   ownFloors = false,
 ): string {
+  // A compare-at the campaign was told to stop over is not a floor (#817), and lowering one
+  // changes nothing about it: those variants are said on their own, after any a floor stopped.
+  const compareAt = lines.filter((entry) => entry.reason === "invalid-compare-at");
+  const floors = lines.filter((entry) => entry.reason !== "invalid-compare-at");
+  const sentences = [
+    ...(floors.length > 0 ? [floorSentence(floors, when, breach, ownFloors)] : []),
+    ...(compareAt.length > 0 ? [compareAtSentence(compareAt, when, floors.length > 0)] : []),
+  ];
+  return sentences.join(" ");
+}
+
+function listOf(lines: readonly BlockedLine[]): string {
   const named = lines.slice(0, BLOCKED_NAMED).map(line);
   const rest = lines.length - named.length;
-  const list = named.join("; ") + (rest > 0 ? `; and ${rest} more` : "");
+  return named.join("; ") + (rest > 0 ? `; and ${rest} more` : "");
+}
+
+function floorSentence(lines: readonly BlockedLine[], when: "preview" | "run", breach: BreachPolicy | undefined, ownFloors: boolean): string {
   const opening =
     when === "run"
       ? "A guardrail stopped this run before anything was written"
       : "A guardrail set to block the whole campaign would stop it before anything is written";
-  return `${opening}: ${list}. ${nextSteps(lines, breach, ownFloors ? "in Settings or in this campaign's own floors" : "in Settings")}`;
+  return `${opening}: ${listOf(lines)}. ${nextSteps(lines, breach, ownFloors ? "in Settings or in this campaign's own floors" : "in Settings")}`;
+}
+
+/**
+ * The compare-at check, set to stop the campaign (#817, PRD A-3.3): the strike-through it would
+ * write is at or under the new price, which shows no saving. What reaches it is the campaign's
+ * own compare-at choices, not a floor.
+ */
+function compareAtSentence(lines: readonly BlockedLine[], when: "preview" | "run", afterFloors: boolean): string {
+  const opening =
+    when === "run"
+      ? `${afterFloors ? "The compare-at check also stopped it" : "The compare-at check stopped this run before anything was written"}`
+      : `${afterFloors ? "The compare-at check would also stop it" : "This campaign stops when a compare-at would not be above the new price, so it would stop before anything is written"}`;
+  const which = lines.length === 1 ? "that variant" : "those variants";
+  return (
+    `${opening}: ${listOf(lines)}. Choose "${COMPARE_AT_VIOLATION_LABELS.clear}" or "${COMPARE_AT_VIOLATION_LABELS.skip}" ` +
+    `for a compare-at that would not be above the price, set the compare-at to leave unchanged, or take ${which} out of the campaign's products.`
+  );
 }
 
 /** Whether a campaign keeps Block from its start, which the store's setting does not reach (D21). */
@@ -154,9 +187,12 @@ function startAgain(which: string, store: BreachPolicy["store"]): string {
     : `, or revert ${which} and apply it again, so it starts under the store's policy now, "${BREACH_POLICY_LABELS[store]}"`;
 }
 
-/** "Record the missing costs" removes the cause whatever the policy. */
+/**
+ * "Record the missing costs" removes the cause whatever the policy: a guardrail's, or a rule
+ * that prices from cost (#817).
+ */
 function costsOf(lines: readonly BlockedLine[]): string {
-  return lines.some((entry) => entry.reason === "missing-cost") ? ", record the missing costs" : "";
+  return lines.some((entry) => entry.reason === "missing-cost" || entry.reason === "needs-cost") ? ", record the missing costs" : "";
 }
 
 /** `"A"`, `"A" and "B"`, `"A", "B" and "C"`; past five, "and N more". */

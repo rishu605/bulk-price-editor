@@ -432,8 +432,36 @@ describe("rule engine", () => {
       ],
     });
     expect(result.meta.outcome).toBe("skipped");
-    expect(result.meta.reason).toBe("missing-cost");
+    // The rule's own reason (#817): "missing-cost" is a guardrail's, and sends the merchant
+    // to their floors rather than to the cost the rule prices from.
+    expect(result.meta.reason).toBe("needs-cost");
     expect(result.price).toBeUndefined();
+  });
+
+  it("says a missing compare-at is a missing compare-at, not a missing cost (#817)", () => {
+    const result = resolve({
+      baseline: { price: usd(10_000), cost: usd(4_000) },
+      surface: USD,
+      campaigns: [campaign({ ruleRows: [{ segmentIds: [], rule: { kind: "percent-of-compare-at", percent: -20 } }] })],
+    });
+    expect(result.meta.outcome).toBe("skipped");
+    expect(result.meta.reason).toBe("needs-compare-at");
+    expect(result.price).toBeUndefined();
+  });
+
+  it("stops the campaign instead under block, as a missing cost always has", () => {
+    const result = resolve({
+      baseline: { price: usd(10_000) },
+      surface: USD,
+      campaigns: [
+        campaign({
+          ruleRows: [{ segmentIds: [], rule: { kind: "from-cost-multiplier", factor: 2 } }],
+          guardrailViolationPolicy: "block",
+        }),
+      ],
+    });
+    expect(result.meta.outcome).toBe("blocked");
+    expect(result.meta.reason).toBe("needs-cost");
   });
 
   it("rejects an unreachable margin target", () => {
