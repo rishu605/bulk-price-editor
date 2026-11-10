@@ -116,6 +116,13 @@ export function describeMarketSkips(
           `cannot be checked in ${currency}.`
         );
       }
+      // The same for a rule that prices from cost (#817): the cost is there, in another currency.
+      if (reason === "needs-cost" && !inStoreCurrency) {
+        return (
+          `${market}: ${variants} left at full price. Costs are recorded in your store's ` +
+          `currency only, so a price from cost cannot be worked out in ${currency}.`
+        );
+      }
       const why = SKIP_REASON_GROUP[reason as ResolutionReason];
       return why
         ? `${market}: ${variants} left at full price: they ${why}.`

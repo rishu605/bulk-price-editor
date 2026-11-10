@@ -91,6 +91,7 @@ const SAMPLE: Record<ConditionField, Condition["value"]> = {
   title: "Alpine",
   sku: "APF-927",
   barcode: "0123456789012",
+  // Dormant (D32, #817), and still compiled: classified here so the day they ship they are covered.
   priceMin: 1000,
   priceMax: 9000,
   inventoryMin: 1,

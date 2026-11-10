@@ -78,10 +78,11 @@ describe("the rule is what a merchant meets first", () => {
     // grew a counter, and the spreadsheet path has a `name="name"` of its own further
     // down the file — so matching the attribute now finds the wrong one and would pass
     // or fail for reasons unrelated to the order these sections are in.
+    // The scope is the filter builder since #817.
     expect(at("<CampaignNameField"), "the campaign's name is below the scope again").toBeLessThan(
-      at('name="collection"'),
+      at("<ScopeBuilder"),
     );
-    expect(at("<RuleValueField")).toBeLessThan(at('name="collection"'));
+    expect(at("<RuleValueField")).toBeLessThan(at("<ScopeBuilder"));
   });
 
   it("numbers the headings from what it renders, rather than writing them out", () => {
@@ -164,9 +165,10 @@ describe("the rule is what a merchant meets first", () => {
     expect(
       EDITOR,
       "a hidden mirror of a scope field means there are two forms again",
-    ).not.toMatch(/<input type="hidden" name="(collection|tag|vendor|title|segment)"/);
+    ).not.toMatch(/<input type="hidden" name="(collection|tag|vendor|title|segment|scope)"/);
 
-    for (const field of ['name="segment"', 'name="collection"', 'name="tag"', 'name="vendor"', 'name="title"']) {
+    // The segment select and the filter builder, which posts the scope as one field (#817).
+    for (const field of ['name="segment"', "<ScopeBuilder"]) {
       expect(at(field), `${field} is outside the form that prices it`).toBeGreaterThan(at("<Form "));
       expect(at(field), `${field} is outside the form that submits it`).toBeLessThan(at("</Form>"));
     }

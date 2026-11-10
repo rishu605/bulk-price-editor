@@ -156,3 +156,26 @@ describe("what a campaign that chose Block itself is told to do (#816)", () => {
     expect(text).toContain('or revert "Clearance", choose clamp or skip for it, and apply it again.');
   });
 });
+
+describe("a campaign its compare-at policy stops (#817, PRD A-3.3)", () => {
+  const compareAt: BlockedLine = { title: "Wool scarf", reason: "invalid-compare-at" };
+  const floor: BlockedLine = { title: "Boot", reason: "below-floor", wouldBe: money(500, "USD"), floor: money(900, "USD") };
+
+  it("says it is the compare-at, and what reaches it, not a floor", () => {
+    const message = blockedMessage([compareAt], "preview");
+    expect(message).toMatch(/^This campaign stops when a compare-at would not be above the new price/);
+    expect(message).toContain('"Wool scarf": compare-at would be below the price');
+    expect(message).toContain('Choose "Drop the strike-through" or "Leave the variant at its price"');
+    expect(message).not.toMatch(/floor|guardrail/i);
+  });
+
+  it("says a floor's variants and the compare-at's apart, when both stop it", () => {
+    const message = blockedMessage([floor, compareAt], "run");
+    expect(message).toMatch(/^A guardrail stopped this run before anything was written: "Boot" would be \$5\.00, under its \$9\.00 floor\./);
+    expect(message).toMatch(/The compare-at check also stopped it: "Wool scarf"/);
+  });
+
+  it("names a cost a rule needs as a cost to record (#817)", () => {
+    expect(blockedMessage([{ title: "Gloves", reason: "needs-cost" }], "preview")).toContain(", record the missing costs");
+  });
+});

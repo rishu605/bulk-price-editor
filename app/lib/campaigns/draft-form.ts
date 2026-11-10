@@ -14,7 +14,7 @@
 
 import { abs, negate, type Money } from "../money/money";
 import { typedAmount } from "../money/typed-amount";
-import type { AdjustmentRule, CompareAtPolicy } from "../pricing/types";
+import type { AdjustmentRule, CompareAtPolicy, CompareAtViolationPolicy } from "../pricing/types";
 import type { FilterAst } from "../../services/segments.server";
 import { PRODUCT_STATUS_FIELDS, productStatusesOf, type ProductStatus } from "./product-status";
 import { reductionProblem } from "./rule-limits";
@@ -79,7 +79,42 @@ function signedAmount(read: FieldReader): number {
 
 /** The field a rule's amount is typed into, as the refusals name it. */
 function fieldOf(kind: string): string {
-  return kind === "set-exact" ? "The exact price" : kind === "fixed-change" ? "The amount to change by" : "The percentage";
+  if (kind === "set-exact") return "The exact price";
+  if (kind === "fixed-change") return "The amount to change by";
+  if (kind === "from-cost-multiplier") return "The markup";
+  if (kind === "from-cost-margin") return "The margin";
+  return "The percentage";
+}
+
+/**
+ * The rules that price from something other than the baseline price (#817, PRD A-3.1): cost
+ * and a markup, cost at a margin, and a percentage off the compare-at. The engine has priced
+ * them since P2, and no screen offered them. A variant without the cost or compare-at they
+ * read keeps its price, said on its row (`needs-cost`, `needs-compare-at`), never priced as
+ * though the missing amount were zero.
+ */
+export const FROM_COST_MULTIPLIER = "from-cost-multiplier";
+export const FROM_COST_MARGIN = "from-cost-margin";
+export const OFF_COMPARE_AT = "percent-of-compare-at";
+
+/**
+ * The largest markup the form takes. A hundred times cost is not a price anybody means: it
+ * is a cost typed where the markup goes, and the preview would show every price at it.
+ */
+export const MAX_MARKUP = 100;
+
+/** Why a rule that is not a change from the baseline cannot be used, or null (#817). */
+function fromOtherProblem(kind: string, amount: number, field: string): string | null {
+  if (kind === FROM_COST_MULTIPLIER) {
+    if (amount <= 0) return `${field} has to be more than 0. Enter how many times cost to charge, such as 2.`;
+    return amount >= MAX_MARKUP ? `${field} of ${amount} times cost is not a price. Enter less than ${MAX_MARKUP}.` : null;
+  }
+  if (kind === FROM_COST_MARGIN) {
+    if (amount <= 0) return `${field} has to be more than 0%: at 0% or less every price is at or below cost.`;
+    return amount >= 100 ? `A margin of ${amount}% would need an infinite price, since margin is a share of the selling price. Enter less than 100.` : null;
+  }
+  // Off the compare-at: a reduction, as "Reduce by" is, and held to the same limit (#818).
+  return amount === 0 ? `${field} is 0, which would price every variant at its compare-at. Enter the percentage off.` : reductionProblem(-Math.abs(amount));
 }
 
 /**
@@ -133,6 +168,10 @@ export function ruleInputProblem(read: FieldReader, currency: string): string | 
     }
   }
 
+  if (kind === FROM_COST_MULTIPLIER || kind === FROM_COST_MARGIN || kind === OFF_COMPARE_AT) {
+    return fromOtherProblem(kind, Number(raw), field);
+  }
+
   const signed = signedAmount(read);
   if (signed === 0) return `${field} is 0, which would leave every price where it is. Enter the change to make.`;
   // The same limit the run holds a stored campaign to (#818), so the form cannot save a
@@ -161,6 +200,12 @@ export function ruleFrom(read: FieldReader, currency: string): AdjustmentRule {
       ? { kind: "set-exact", amount: typed.amount }
       : { kind: "fixed-change", amount: directed(typed.amount, read("ruleDirection")) };
   }
+  // From cost, or off the compare-at (#817). The amount as typed: a markup and a margin have
+  // no direction, and a percentage off the compare-at only ever takes off.
+  const amount = Number(read("ruleValue") ?? 0);
+  if (kind === FROM_COST_MULTIPLIER) return { kind: FROM_COST_MULTIPLIER, factor: amount };
+  if (kind === FROM_COST_MARGIN) return { kind: FROM_COST_MARGIN, marginPercent: amount };
+  if (kind === OFF_COMPARE_AT) return { kind: OFF_COMPARE_AT, percent: -Math.abs(amount) || 0 };
   return { kind: "percent-change", percent: signedAmount(read) };
 }
 
@@ -169,6 +214,17 @@ export function compareAtFrom(read: FieldReader): CompareAtPolicy {
   if (value === "set-to-baseline") return { kind: "set-to-baseline" };
   if (value === "clear") return { kind: "clear" };
   return { kind: "leave" };
+}
+
+/**
+ * What a campaign does when the compare-at it would write is not above the new price (#817,
+ * PRD A-3.3): drop the strike-through, leave the variant at its price, or stop the campaign.
+ * Dropping it is what every campaign did before the choice existed (`createCampaign` wrote
+ * "clear"), so a form that does not say is read as that.
+ */
+export function compareAtViolationFrom(read: FieldReader): CompareAtViolationPolicy {
+  const value = read("compareAtViolation");
+  return value === "skip" || value === "block" ? value : "clear";
 }
 
 /** The inline filter, as an AST. An empty filter is every variant, not none. */

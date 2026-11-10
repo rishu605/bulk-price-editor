@@ -15,9 +15,9 @@ off a sale price, permanently.
 
 **Campaigns → New campaign.**
 
-- **Scope** — leave everything blank to target every active product, or narrow by collection, vendor, tag or title. Draft and archived products are left out unless you tick **Include draft products** or **Include archived products**: a draft you publish mid-sale would otherwise go live at the sale price, and an archived product would come back already discounted.
-- **Rule** — "percent change from baseline", `-20` for 20% off.
-- **Compare-at** — "set to baseline" gives the strike-through shoppers expect.
+- **Scope** — with no conditions it covers every active product. **Add a condition** to narrow it by collection, tag, vendor, product type, status, title, SKU or barcode, stock, or whether a cost is recorded; pick several values to mean any of them. Every condition in a group must hold, and **Or another group** adds a second set any product may match instead. **Add products** puts products you pick into the sale whatever the conditions say, and **Leave products out** keeps them out of it. The count under the conditions is what the preview prices. Draft and archived products are left out unless you tick **Include draft products** or **Include archived products**: a draft you publish mid-sale would otherwise go live at the sale price, and an archived product would come back already discounted.
+- **Rule** — "percent change from baseline", **Reduce by** `20` for 20% off. A rule can also price from each variant's cost (**From cost, times a markup** or **at a margin**) or take a percentage off its compare-at price. A variant without the cost or compare-at a rule needs keeps its price, and the preview says how many.
+- **Compare-at** — "set to baseline" gives the strike-through shoppers expect. If a new price would reach the strike-through, the campaign drops it by default; you can choose to leave those variants at their price, or to stop the campaign instead.
 - **Rounding** — `.99` endings if you want them.
 
 ## 3. Read the preview

@@ -278,3 +278,36 @@ describe("counts agree with one, shown and said (#1097)", () => {
     }
   });
 });
+
+describe("a rule from cost or off the compare-at says what it cannot reach (#817)", () => {
+  const needing = preview({
+    matched: 3,
+    changing: 1,
+    skipped: 2,
+    ruleNeeds: { cost: 1, compareAt: 1 },
+    rows: [
+      row(),
+      row({ variantGid: "gid://shopify/ProductVariant/2", title: "Scarf", after: null, skippedReason: "Needs a cost: none recorded" }),
+      row({ variantGid: "gid://shopify/ProductVariant/3", title: "Hat", after: null, skippedReason: "Needs a compare-at: none in its baseline" }),
+    ],
+  });
+
+  it("says how many keep their price, and why, beside the counts and on each row", () => {
+    const html = render(needing);
+    expect(html).toContain("1 variant has no cost recorded, so this rule cannot price it and it keeps its price.");
+    expect(html).toContain("Cost per item is recorded");
+    expect(html).toContain("1 variant has no compare-at price in its baseline");
+    expect(html).toContain("Needs a cost: none recorded");
+    expect(html).toContain("Needs a compare-at: none in its baseline");
+  });
+
+  it("says it aloud as well", () => {
+    expect(previewAnnouncement(needing, false)).toContain("has no cost recorded");
+  });
+
+  it("says a scope it cannot use instead of a preview", () => {
+    const html = render(preview({ scopeProblem: 'Stock at least "5.5" is not a whole number. Enter one, such as 50.' }));
+    expect(html).toContain("is not a whole number");
+    expect(html).not.toContain("would change price");
+  });
+});
