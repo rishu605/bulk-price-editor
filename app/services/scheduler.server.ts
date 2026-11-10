@@ -2,33 +2,30 @@
  * The scheduler: finding campaigns that owe a transition, and running it.
  *
  * All the timing rules live in lib/scheduling/window.ts, which is pure and tested.
- * This module only fetches candidates, asks that function what is due, and calls
- * the existing run path — so scheduled and manual runs go through exactly the same
- * code, ledger and verification.
+ * This module only fetches candidates, asks that function what is due, and hands each
+ * due transition to the worker's queue (#809), whose job runs it through the existing run
+ * path — so scheduled and manual runs go through exactly the same code, ledger and
+ * verification. Given no queue, it runs each itself (`runScheduledTransition`).
  */
 
 import { SCHEDULER_ACTOR } from "../lib/audit/actor";
 import prisma from "../db.server";
-import {
-  dueTransition,
-  occurrenceKeyFor,
-  parseSchedule,
-  type Transition,
-} from "../lib/scheduling/window";
+import { dueTransition, parseSchedule, type Transition } from "../lib/scheduling/window";
 import { IS_PRACTICE, isPractice } from "./campaigns/model.server";
 import { unschedule } from "./campaigns/schedule-control.server";
-import { runCampaign } from "./campaigns/run.server";
-import type { RunOutcome } from "./campaigns/types";
-import { nextAttemptKey } from "../lib/scheduling/attempts";
-import { refusedForGood, startRefusal } from "../lib/scheduling/start-refusal";
+import { inlineWork } from "./campaigns/run.server";
+import { startRefusal } from "../lib/scheduling/start-refusal";
 import { isEndingLate, toldEndingLate } from "../lib/scheduling/ending-late";
 import { adminClientForShop } from "./admin-client.server";
 import { claimEnrollment, endingSinceLastApply, pendingEnrollments } from "./auto-enroll.server";
 import { enqueueOrRun, inlineRuntime, type QueueRuntime } from "../worker/queue-runtime.server";
 import { handleJob } from "../worker/handlers.server";
+import { laneFor, type JobRef } from "../worker/queues";
+import { smallRun, smallVariantRun } from "../lib/execution/run-lane";
 import { RUN_ENQUEUE_TIMEOUT_MS } from "./campaigns/queued-run.server";
 import { reclaimStaleRuns } from "./campaigns/reaper.server";
-import { claimForSchedule, noteCampaign } from "./campaigns/lifecycle.server";
+import { runScheduledTransition } from "./scheduled-run.server";
+import { leaseHolder, withShopLease } from "./shop-lease.server";
 import { recordEndingLate } from "./campaigns/ending-late.server";
 import { countUncounted } from "./campaigns/recaptured.server";
 import { beat } from "./scheduler-heartbeat.server";
@@ -57,6 +54,13 @@ export interface TickResult {
   alerts: number;
   /** Due transitions refused before they started: awaiting approval, over a limit, refused for good (#975). */
   refused: number;
+  /** Due transitions handed to the worker's queue, which runs and counts them (#809). */
+  queued: number;
+  /**
+   * Due transitions this tick ran nothing for because another of the shop's runs holds its
+   * lease (#809). Still due, so the next tick asks again; only a tick given no queue has these.
+   */
+  waiting: number;
   failures: Array<{ campaignId: string; error: string }>;
 }
 
@@ -69,14 +73,12 @@ export interface TickResult {
 export async function tick(
   now: Date = new Date(),
   /**
-   * Where the tick hands the work it finds and does not do itself (#808): the worker's
-   * queues. Inline when not given -- the chaos suite, a script -- so the work has happened by
-   * the time the tick returns, as it always had.
+   * Where the tick hands the work it finds (#808): the worker's queues, which since #809 take
+   * its scheduled starts and ends too. Inline when not given -- the chaos suite, a script -- so
+   * the work has happened by the time the tick returns, as it always had.
    */
   queue: QueueRuntime = inlineRuntime(handleJob),
 ): Promise<TickResult> {
-  // The real clock, so `now` can be moved on by the time a run inside this tick took.
-  const tickStartedAt = Date.now();
   const result: TickResult = {
     examined: 0,
     applied: 0,
@@ -87,6 +89,8 @@ export async function tick(
     audited: 0,
     alerts: 0,
     refused: 0,
+    queued: 0,
+    waiting: 0,
     failures: [],
   };
 
@@ -107,7 +111,8 @@ export async function tick(
   const alerts = await checkAlerts(now);
   result.alerts = alerts.sent;
 
-  // Before the work below, which can hold this tick for as long as one apply takes.
+  // Before the work below, which can hold this tick for as long as one apply takes when the
+  // tick was given no queue and runs it itself.
   await noteEndingLate(now);
 
   // HELD too: a held campaign's prices are still live, and its window still ends. Leaving
@@ -125,6 +130,9 @@ export async function tick(
   // Campaigns this tick has already run, so the enrollment drain does not run them
   // a second time for no reason.
   const transitioned = new Set<string>();
+  // And those it handed to the queue (#809), whose enrolments wait for the transition to run:
+  // its apply prices them anyway, and its end must never have them priced in beside it.
+  const handedOver = new Set<string>();
 
   for (const campaign of candidates) {
     // An uninstalled shop has no usable token, and writing to it is impossible
@@ -158,22 +166,32 @@ export async function tick(
     // to its history again, every thirty seconds.
     if (transition === "apply" && startRefusal(campaign.schedule)) continue;
 
-    await runDue(campaign, transition, now, result, transitioned);
-    if (transition !== "apply") continue;
-
-    // An apply that outlasted its window ends now, not a tick later (#829). This tick has
-    // been inside the apply all along -- at 102,132 variants, past the end of a 30-minute
-    // sale -- and the rest of its list could hold it longer still. The clock is the tick's,
-    // moved on by the time spent, and the revert takes its own claim and occurrence like any
-    // other: the apply's run has finished, so it is the only writer (rule 2).
-    const later = new Date(now.getTime() + (Date.now() - tickStartedAt));
-    const after = await prisma.campaign.findUnique({ where: { id: campaign.id }, select: { status: true, schedule: true } });
-    if (after && dueTransition({ schedule: parseSchedule(after.schedule), status: after.status }, later) === "revert") {
-      await runDue({ ...campaign, ...after }, "revert", later, result, transitioned);
+    // To the worker's queue, on the lane its size calls for (#809): one 100k-variant apply run
+    // here held every other shop's scheduled starts and ends behind it, and the leader lock
+    // lapsed meanwhile. The job asks the schedule again when it runs, and an end that came
+    // while its start applied follows in the same job (#1053).
+    if (!queue.inline) {
+      await handOver(campaign.shop.id, campaign.id, transition, queue, result);
+      handedOver.add(campaign.id);
+      continue;
     }
+
+    // Given no queue, run here, as the tick always did -- holding the shop's run lease as the
+    // worker's job would, so another of the shop's runs never writes beside it. Beaten again
+    // per campaign: the run can spend minutes on a large catalogue, and a heartbeat that only
+    // fired between ticks would go stale during the work that proves the scheduler alive.
+    await beat(new Date());
+    const ran = await withShopLease(
+      campaign.shop.id,
+      "run",
+      () => runScheduledTransition(campaign.id, result, { now }),
+      { holder: leaseHolder("tick"), campaignId: campaign.id },
+    );
+    if (ran.busy) result.waiting++;
+    else for (const id of ran.value) transitioned.add(id);
   }
 
-  await drainEnrollments(result, transitioned, queue);
+  await drainEnrollments(result, transitioned, handedOver, queue);
 
   // Last, and never able to hold up the work above it. A digest is a courtesy; a sale
   // starting on time is not.
@@ -235,81 +253,40 @@ export async function tick(
   return result;
 }
 
-/** A campaign the tick acts on, as its candidates query reads it. */
-interface Candidate {
-  id: string;
-  schedule: unknown;
-  shop: { id: string; domain: string };
-}
-
 /**
- * Runs one due transition for one campaign: picks the attempt, claims, runs, and counts the
- * outcome on `result`. Never throws; a failure is counted, and the tick goes on.
+ * Hands one due transition to the worker's queue (#809), on the small-run lane when its scope
+ * is (`smallRun`), counted from one indexed count before anything is planned. Rung again by
+ * every tick while it is still due: a job still waiting -- or put back because its shop is busy
+ * -- absorbs the ring by its deduplication key. When the queue does not take it within a second
+ * it runs here after all, in the tick, as the worker did everything before the queue existed.
  */
-async function runDue(
-  campaign: Candidate,
+async function handOver(
+  shopId: string,
+  campaignId: string,
   transition: Transition,
-  now: Date,
+  queue: QueueRuntime,
   result: TickResult,
-  transitioned: Set<string>,
 ): Promise<void> {
-  // Which attempt at this occurrence, if any. Null when one is still running or every
-  // attempt has been used; a finished attempt never blocks the next one (#700).
-  const base = occurrenceKeyFor(parseSchedule(campaign.schedule), transition, now);
-  const attempts = await prisma.campaignRun.findMany({
-    where: {
-      campaignId: campaign.id,
-      kind: transition === "apply" ? "APPLY" : "REVERT",
-      occurrenceKey: { startsWith: base },
-    },
-    select: { occurrenceKey: true, status: true },
-  });
-  const occurrenceKey = nextAttemptKey(base, attempts);
-  if (!occurrenceKey) return;
-
-  // Beaten again per campaign, not only at the top of the tick. `runTransition` below
-  // can spend minutes on a large catalogue, and a heartbeat that only fires between
-  // ticks would go stale during precisely the work that proves the scheduler is
-  // alive — turning a busy scheduler into a stopped one. One upsert per due campaign
-  // is nothing next to the run it precedes.
-  await beat(new Date());
-
   try {
-    const outcome = await runTransition(
-      campaign.shop.id,
-      campaign.shop.domain,
-      campaign.id,
-      transition,
-      // The occurrence this tick is acting on, not the instant it happened to run.
-      // Two ticks that both find this window due produce the same key, and the unique
-      // index turns the second into a no-op rather than a second apply.
-      occurrenceKey,
+    const lane = laneFor(smallRun(await inlineWork(shopId, campaignId)));
+    const ref: JobRef = { shopId, scheduled: campaignId, revert: transition === "revert" };
+    const how = await enqueueOrRun(
+      queue,
+      lane,
+      ref,
+      // Run here when the queue cannot take it: the same transition, the same lease, counted.
+      async () => {
+        const ran = await withShopLease(shopId, "run", () => runScheduledTransition(campaignId, result), {
+          holder: leaseHolder("tick"),
+          campaignId,
+        });
+        if (ran.busy) result.waiting++;
+      },
+      RUN_ENQUEUE_TIMEOUT_MS,
     );
-    // Refused before it started, and released back to SCHEDULED: nothing was applied,
-    // and counting it as applied made a stuck campaign look like a working tick.
-    if (outcome?.refused) {
-      result.refused++;
-    } else if (transition === "apply") {
-      result.applied++;
-      transitioned.add(campaign.id);
-    } else {
-      result.reverted++;
-      transitioned.add(campaign.id);
-    }
+    if (how === "queued") result.queued++;
   } catch (error) {
-    // Refused for good (#975): `runCampaign` has recorded it on the campaign, and the
-    // merchant has been told. A refusal like the ones returned early, not a failure of
-    // ours, and not one the worker log should repeat.
-    if (transition === "apply" && refusedForGood(error)) {
-      result.refused++;
-      return;
-    }
-    // One campaign failing must not stop the tick: the others are still due, and
-    // a scheduler that gives up on the first error leaves sales unstarted.
-    result.failures.push({
-      campaignId: campaign.id,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    result.failures.push({ campaignId, error: error instanceof Error ? error.message : String(error) });
   }
 }
 
@@ -409,6 +386,7 @@ function isOffPeak(now: Date, timeZone: string): boolean {
 async function drainEnrollments(
   result: TickResult,
   alreadyRun: ReadonlySet<string>,
+  waitingToRun: ReadonlySet<string>,
   queue: QueueRuntime,
 ): Promise<void> {
   const pending = await pendingEnrollments();
@@ -422,6 +400,11 @@ async function drainEnrollments(
       continue;
     }
 
+    // One whose transition is in the queue (#809): its mark waits for a tick after it has run.
+    // Its end must not have them priced in beside it, and if its start is refused the mark is
+    // still there.
+    if (waitingToRun.has(entry.id)) continue;
+
     // Marked before a revert was asked for. The merchant is ending this sale; pricing its
     // new products into it now would be a second writer against the revert, or a sale
     // put back on products the revert has just restored. Asked here so a campaign being
@@ -432,7 +415,9 @@ async function drainEnrollments(
     }
 
     try {
-      await enqueueOrRun(queue, "execution", { shopId: entry.shopId, enroll: entry.id }, handleJob, RUN_ENQUEUE_TIMEOUT_MS);
+      // On the small-run lane when the variants waiting are few enough (#809).
+      const lane = laneFor(smallVariantRun(entry.pending, entry.tagged));
+      await enqueueOrRun(queue, lane, { shopId: entry.shopId, enroll: entry.id }, handleJob, RUN_ENQUEUE_TIMEOUT_MS);
       result.enrolled++;
     } catch (error) {
       result.failures.push({
@@ -441,69 +426,6 @@ async function drainEnrollments(
       });
     }
   }
-}
-
-async function runTransition(
-  shopId: string,
-  shopDomain: string,
-  campaignId: string,
-  transition: Transition,
-  occurrenceKey: string,
-): Promise<RunOutcome | null> {
-  const client = await adminClientForShop(shopDomain);
-  if (!client) {
-    // Before any claim, so the campaign keeps its state and the next tick tries again --
-    // but said on the campaign, once, rather than only in a tick log.
-    await noteCampaign(
-      shopId,
-      campaignId,
-      `Couldn't ${transition === "apply" ? "start" : "end"} on schedule: Anchor lost access to ` +
-        `your store. Open Anchor in your Shopify admin to reconnect; the schedule resumes on its own.`,
-    );
-    throw new Error(`No usable session for ${shopDomain}`);
-  }
-
-  // Claim the campaign before running. Two ticks overlapping — a slow run, a second
-  // worker that briefly held the lock — would otherwise both start the same
-  // transition. The status change is the claim, taken from the exact state that was read,
-  // so a run that fails before it starts can be put back there, and recorded as the
-  // scheduler's (#829).
-  const claim = await claimForSchedule(shopId, campaignId, transition, SCHEDULER_ACTOR);
-  if (!claim) return null; // someone else took it
-
-  // A held campaign's end still comes (#756), but the prices that held it were edited by
-  // somebody on purpose and are waiting for a decision in the drift queue. Ending the sale
-  // reverts everything else on time and leaves those as edited (#784): overwriting them
-  // unasked is the one thing the hold exists to prevent.
-  const edited =
-    transition === "revert" && claim.from === "HELD"
-      ? (
-          await prisma.driftEvent.findMany({
-            where: { shopId, campaignId, resolution: "PENDING", surfaceKind: "BASE" },
-            select: { variantGid: true },
-          })
-        ).map((event) => event.variantGid)
-      : [];
-
-  return runCampaign(shopId, campaignId, client, {
-    actor: SCHEDULER_ACTOR,
-    revert: transition === "revert",
-    occurrenceKey,
-    claimedFrom: claim.from,
-    ...(claim.recorded ? {} : { claimUnrecorded: claim.reason }),
-    // An end tried again after one stopped part-way finishes that revert, as Resume does, so
-    // it keeps what that revert kept as edited (#1157). Run as a fresh revert, the next tick
-    // wrote over every one, before the merchant could press anything.
-    ...(transition === "revert" && claim.from === "PARTIAL" ? { resume: true } : {}),
-    ...(edited.length > 0
-      ? {
-          skipVariantGids: edited,
-          skipReason:
-            "Left as it is: this price was edited outside the app while the campaign was held, and the edit is still " +
-            "waiting for your decision in the drift queue. The rest of the sale ended on schedule.",
-        }
-      : {}),
-  });
 }
 
 /** Campaigns with a schedule that has not yet fired, for the UI. */

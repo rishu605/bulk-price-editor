@@ -64,8 +64,8 @@ void initOtel({ process: "worker" });
 
 // The connection budget against `max_connections`, logged once, and this pool's wait sampled
 // from then on (#810): the worker's pool is the one a run lives in. It is also every queue's:
-// told how many jobs can run at once -- the products-webhook drains (#811) included, and the
-// scheduler's tick, which runs due campaigns itself -- so it can say when the pool is smaller.
+// told how many jobs can run at once -- the products-webhook drains (#811) and both run lanes
+// (#809) included, and the scheduler's tick -- so it can say when the pool is smaller.
 const queueSlots = Object.values(QUEUE_POLICIES);
 void reportPoolBudget(prisma, databasePool, {
   concurrentJobs: {
@@ -137,8 +137,8 @@ async function runOnce(): Promise<void> {
   if (!isLeader) return;
 
   const started = Date.now();
-  // With the queues, so what the tick hands over -- a campaign's enrolled variants -- runs in
-  // the worker's slots rather than inside the tick (#808).
+  // With the queues, so what the tick hands over -- a campaign's enrolled variants (#808), its
+  // scheduled starts and ends (#809) -- runs in the worker's slots rather than inside the tick.
   const result = await tick(new Date(), queues);
   ticks++;
 
@@ -162,11 +162,14 @@ async function runOnce(): Promise<void> {
   if (
     result.applied > 0 ||
     result.reverted > 0 ||
+    result.queued > 0 ||
     result.enrolled > 0 ||
     result.failures.length > 0
   ) {
+    // Scheduled starts and ends are handed to the run lanes (#809): `queued` here, and their
+    // own job's log line says how each went.
     console.log(
-      `[worker] tick ${ticks}: examined ${result.examined}, applied ${result.applied}, ` +
+      `[worker] tick ${ticks}: examined ${result.examined}, queued ${result.queued}, applied ${result.applied}, ` +
         `reverted ${result.reverted}, enrolled ${result.enrolled}, ` +
         `failed ${result.failures.length} (${Date.now() - started}ms)`,
     );

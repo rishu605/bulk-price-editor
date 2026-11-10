@@ -29,6 +29,7 @@ import {
 } from "../lib/observability/alerts";
 import { readingOf, waitedMs, type QueueSnapshot } from "../lib/observability/health";
 import { probeRedis } from "../worker/queue-stats.server";
+import { isRunLane, type QueueName } from "../worker/queues";
 import { secondsSinceBeat } from "./scheduler-heartbeat.server";
 
 /** How far back a window looks. Long enough to be meaningful, short enough to be current. */
@@ -138,7 +139,10 @@ export async function gather(now: Date = new Date()): Promise<SignalWindow> {
     unpriceableVariants: typeof audit?.unpriceable === "number" ? audit.unpriceable : null,
     // It was always null here, so the backlog alert could only fire for a caller that
     // passed a depth -- and the tick never did (#813).
-    executionQueueDepth: queues?.signals.find((queue) => queue.queue === "execution")?.depth ?? null,
+    // Both run lanes (#809): a merchant's campaign is late on either.
+    executionQueueDepth: queues
+      ? queues.signals.filter((queue) => isRunLane(queue.queue as QueueName)).reduce((sum, queue) => sum + queue.depth, 0)
+      : null,
     queues: queues?.signals ?? null,
     shopRunWaits: queues?.shopRunWaits ?? null,
     pagesDatabaseWaitMs: await pagesDatabaseWait(),
@@ -167,11 +171,16 @@ function queueSignals(
   if (!snapshots) return null;
   const now = Date.now();
   const signals = snapshots.map((snapshot) => ({ queue: snapshot.queue, ...readingOf(snapshot, now) }));
-  const execution = snapshots.find((snapshot) => snapshot.queue === "execution");
-  const shopRunWaits = Object.entries(execution?.oldestWaitingAtByShop ?? {}).map(([shopId, at]) => ({
-    shopId,
-    waitMs: waitedMs(at, now) ?? 0,
-  }));
+  // Each run lane's, marked small on the small-run lane, which pages sooner (#809).
+  const shopRunWaits = snapshots
+    .filter((snapshot) => isRunLane(snapshot.queue))
+    .flatMap((snapshot) =>
+      Object.entries(snapshot.oldestWaitingAtByShop ?? {}).map(([shopId, at]) => ({
+        shopId,
+        waitMs: waitedMs(at, now) ?? 0,
+        ...(snapshot.queue === "execution-small" ? { small: true } : {}),
+      })),
+    );
   return { signals, shopRunWaits };
 }
 

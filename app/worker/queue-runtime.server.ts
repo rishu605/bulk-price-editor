@@ -17,7 +17,7 @@
  * revert before it is missed.
  */
 
-import { Queue, Worker, type Job } from "bullmq";
+import { DelayedError, Queue, Worker, type Job } from "bullmq";
 
 import { readingOf, type QueueSnapshot } from "../lib/observability/health";
 import { logger } from "../lib/logging/logger";
@@ -25,9 +25,11 @@ import { metric } from "../lib/telemetry/metrics";
 import { span } from "../lib/observability/otel.server";
 import { withLogContext } from "../lib/logging/context.server";
 import {
+  isRunLane,
   jobOptionsFor,
   QUEUE_NAMES,
   QUEUE_POLICIES,
+  SHOP_BUSY_RETRY_MS,
   type JobRef,
   type JobResult,
   type QueueName,
@@ -59,6 +61,10 @@ export type Handler = (name: QueueName, ref: JobRef) => Promise<JobResult>;
  * Used when there is no Redis, and by the chaos suite, which needs the work to have
  * happened by the time the call returns so it can assert on the result rather than on
  * a promise that something will happen eventually.
+ *
+ * Except when the job's shop is busy (#809): another of its runs holds the shop's lease, and
+ * waiting for it here would hold the caller -- the tick -- for as long as that run lasts. The job
+ * answers `later`, and its work stays where it is recorded for the next tick to ring.
  */
 export function inlineRuntime(handler: Handler): QueueRuntime {
   return {
@@ -66,7 +72,7 @@ export function inlineRuntime(handler: Handler): QueueRuntime {
     async enqueue(name, ref) {
       // A turn that asks for another gets it here and now: inline, there is nobody else's
       // turn to go behind, and the caller is promised the work is done when this returns.
-      while ((await traced(name, ref, () => handler(name, ref))) === "again");
+      await runInline(name, ref, handler);
     },
     async depths() {
       return Object.fromEntries(QUEUE_NAMES.map((name) => [name, 0])) as Record<
@@ -119,8 +125,21 @@ export async function enqueueOrRun(
   } finally {
     clearTimeout(timer);
   }
-  while ((await traced(name, ref, () => handler(name, ref))) === "again");
+  await runInline(name, ref, handler);
   return "ran";
+}
+
+/**
+ * A job run where it was asked for, with every turn it asks for. One whose shop is busy
+ * (`later`) is left for the next ring rather than waited on: see `inlineRuntime`.
+ */
+async function runInline(name: QueueName, ref: JobRef, handler: Handler): Promise<void> {
+  for (;;) {
+    const result = await traced(name, ref, () => handler(name, ref));
+    if (result === "again") continue;
+    if (result === "later") logger.info("a job's shop is busy; its work waits for the next ring", { queue: name, shopId: ref.shopId });
+    return;
+  }
 }
 
 export interface RedisConnection {
@@ -135,6 +154,11 @@ export interface RedisRuntimeOptions {
   connection: RedisConnection;
   /** Set false in a process that only enqueues, so the web process never executes. */
   consume?: boolean;
+  /**
+   * How long a job whose shop is busy goes back to wait (#809). `SHOP_BUSY_RETRY_MS` unless a
+   * scenario needs its turn sooner.
+   */
+  shopBusyRetryMs?: number;
 }
 
 export function redisRuntime(handler: Handler, options: RedisRuntimeOptions): QueueRuntime {
@@ -153,12 +177,21 @@ export function redisRuntime(handler: Handler, options: RedisRuntimeOptions): Qu
 
       const worker = new Worker(
         name,
-        async (job: Job<JobRef>) => {
+        async (job: Job<JobRef>, token?: string) => {
           reportWait(name, job);
           const result = await traced(name, job.data, () => handler(name, job.data), job.id);
           // Another turn, asked for while this one still holds its key (#811): stored as its
           // successor and created behind everything already waiting when this one finishes.
           if (result === "again") await add(name, job.data, { again: true });
+          // Its shop is busy (#809): the same job back to wait, so it keeps its deduplication
+          // key and a ring meanwhile is absorbed, and its slot goes to another shop now.
+          // BullMQ's own way to delay a job from inside it: moved, then `DelayedError`, which
+          // the worker reads as neither a success nor a failure.
+          if (result === "later") {
+            metric("queue.deferred", 1, { queue: name });
+            await job.moveToDelayed(Date.now() + (options.shopBusyRetryMs ?? SHOP_BUSY_RETRY_MS), token);
+            throw new DelayedError();
+          }
         },
         { connection, concurrency: policy.concurrency },
       );
@@ -178,6 +211,24 @@ export function redisRuntime(handler: Handler, options: RedisRuntimeOptions): Qu
       });
 
       workers.push(worker);
+    }
+
+    // The cap across every worker process, where a class's numbers are the database's rather
+    // than one process's (#809, #810). Set by every worker as it starts, to the same policy, so
+    // a deploy that changes it takes effect with the first new worker. Logged, never thrown:
+    // without it each process still runs no more than its own concurrency.
+    for (const name of QUEUE_NAMES) {
+      const cap = QUEUE_POLICIES[name].globalConcurrency;
+      if (cap === undefined) continue;
+      queues
+        .get(name)!
+        .setGlobalConcurrency(cap)
+        .catch((error: unknown) =>
+          logger.warn("a queue's cap across workers was not set", {
+            queue: name,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
     }
   }
 
@@ -286,7 +337,7 @@ export function connectionFor(url: string): RedisConnection {
 }
 
 /**
- * How many of `execution`'s longest-waiting jobs are read to find each shop's wait.
+ * How many of each run lane's longest-waiting jobs are read to find each shop's wait.
  *
  * The queue's backlog alert is at fifty, so a sample this size sees every shop in any
  * backlog short of an incident -- and past it, the shops at the back are not the news.
@@ -302,6 +353,19 @@ const RUN_WAIT_SAMPLE = 50;
  */
 export function runnableAt(job: { timestamp: number; delay?: number }): number {
   return job.timestamp + Math.max(0, job.delay ?? 0);
+}
+
+/**
+ * When a waiting job could last have started: `runnableAt`, from its last turn rather than
+ * from when it was added, for a job that has had one (#809).
+ *
+ * A job put back because its shop was busy keeps the timestamp it was added with, and BullMQ
+ * records its delay from the turn that put it back. So a run that waited ten minutes behind its
+ * own shop's sale, and is now next for a slot, has waited five seconds for one -- not ten
+ * minutes, which would page `shop-run-waiting` for a wait that is by design.
+ */
+export function turnRunnableAt(job: { timestamp: number; delay?: number; processedOn?: number }): number {
+  return runnableAt({ timestamp: Math.max(job.timestamp, job.processedOn ?? 0), delay: job.delay });
 }
 
 /**
@@ -322,7 +386,7 @@ export async function snapshotQueues(queueFor: (name: QueueName) => Queue): Prom
       const queue = queueFor(name);
       const [counts, front] = await Promise.all([
         queue.getJobCounts("waiting", "active", "delayed"),
-        queue.getWaiting(0, name === "execution" ? RUN_WAIT_SAMPLE - 1 : 0),
+        queue.getWaiting(0, isRunLane(name) ? RUN_WAIT_SAMPLE - 1 : 0),
       ]);
 
       const stamps = front.filter((job) => Number.isFinite(job?.timestamp));
@@ -331,15 +395,17 @@ export async function snapshotQueues(queueFor: (name: QueueName) => Queue): Prom
         waiting: counts.waiting ?? 0,
         active: counts.active ?? 0,
         delayed: counts.delayed ?? 0,
-        oldestWaitingAt: stamps.length ? Math.min(...stamps.map(runnableAt)) : null,
+        oldestWaitingAt: stamps.length ? Math.min(...stamps.map(turnRunnableAt)) : null,
       };
 
-      if (name === "execution") {
+      // Both run lanes (#809): the small-run lane's wait is the one a merchant pressing a
+      // one-variant revert feels, and it pages sooner.
+      if (isRunLane(name)) {
         const byShop: Record<string, number> = {};
         for (const job of stamps) {
           const shopId = (job.data as Partial<JobRef> | undefined)?.shopId;
           if (typeof shopId !== "string") continue;
-          byShop[shopId] = Math.min(byShop[shopId] ?? Infinity, runnableAt(job));
+          byShop[shopId] = Math.min(byShop[shopId] ?? Infinity, turnRunnableAt(job));
         }
         snapshot.oldestWaitingAtByShop = byShop;
       }
@@ -387,9 +453,12 @@ export async function reportDepths(runtime: QueueRuntime): Promise<void> {
  * worker took it, less any delay the job asked for (`runnableAt`). Floored at zero, because
  * the two come from different processes' clocks. A drain's next turn (#811) is a new job, so
  * it is timed from when it was put behind the other shops, which is the wait that matters.
+ *
+ * First starts only, too (#809): a job put back because its shop was busy starts again, and
+ * that is not another wait for a worker -- the wait for the shop is the run's, `run.wait_ms`.
  */
 function reportWait(name: QueueName, job: Job<JobRef>): void {
-  if (job.attemptsMade > 0 || !job.processedOn || !job.timestamp) return;
+  if (job.attemptsMade > 0 || (job.attemptsStarted ?? 1) > 1 || !job.processedOn || !job.timestamp) return;
   metric("queue.wait_ms", Math.max(0, job.processedOn - runnableAt(job)), {
     queue: name,
     ...(job.data?.shopId ? { shopId: job.data.shopId } : {}),

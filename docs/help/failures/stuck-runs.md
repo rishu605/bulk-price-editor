@@ -16,6 +16,12 @@ price, **Writing 1,200 of 4,000 prices** as it writes them, then **Verifying** w
 them back and adds tags and market prices. When it finishes the page says **Done** and shows
 the result, without a reload.
 
+Anchor writes one campaign at a time for each store, so two campaigns never write over each
+other's prices or share your store's Shopify rate limit. If another of your campaigns is
+already writing, the second one waits **Queued** and starts by itself when the first finishes,
+even if it is a small change you pressed on the campaign page. A small campaign of yours never
+waits behind another store's large one: small runs have room of their own in the worker.
+
 While it writes prices, it also says when it started and how long it has left, for example
 "Writing 1,200 of 4,000 prices · Started 14:02 · about 4 minutes left". The time left appears
 once a twentieth of the prices are written, and keeps itself up to date. It goes away while
