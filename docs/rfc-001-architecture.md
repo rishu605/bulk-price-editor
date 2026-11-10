@@ -131,8 +131,16 @@ resolve(variant, surface) -> {price, compareAt, meta}:
   minutes' writing or less, whose slots no large run takes; each capped across every worker
   at what the worker's database pool allows. A shop writes one run at a time, held by its
   `shop_leases` row wherever the run is written; a job whose shop is busy goes back to wait
-  its turn and gives its slot to another shop. Splitting a large run into chunk jobs, so two
-  shops' large runs interleave, is not built yet (#809).
+  its turn and gives its slot to another shop.
+- **Chunked runs** (D34) — a whole-campaign run the worker writes, of more than
+  `RUN_CHUNK_ROWS` (5,000) prices on the bulk path, plans and ledgers every price in its first
+  turn, then writes them a chunk a turn: the next 5,000 PENDING rows of its ledger as one bulk
+  operation, read back and recorded, before its job goes to the back of the lane. Two shops'
+  large runs interleave by chunk, and a third shop's run takes a slot between them. The run holds
+  its shop's lease from its first turn to its last (renewed by the tick between turns); a turn
+  whose worker died is given back to the queue by the reaper, and the next asks Shopify how that
+  turn's operation ended and carries on at the next unwritten row, planning nothing again. The
+  last turn writes tags and market prices and ends the run, as a run written in one job does.
 - **Planner** — streams enrolled variants × surfaces, diffs `resolve()` against the mirror,
   skips no-ops, applies guardrail policy, materialises ledger rows 1K per insert. Chooses
   the write path: **sync** under `BULK_PATH_ROW_THRESHOLD` rows, **bulk** above.
@@ -142,6 +150,7 @@ resolve(variant, surface) -> {price, compareAt, meta}:
 - **Bulk executor** — streams rows → JSONL → `stagedUploadsCreate` → upload →
   `bulkOperationRunMutation`; rows go to `writing`; on `bulk_operations/finish` (or the
   poll fallback) the result JSONL is streamed and each row marked `verified` or `failed`.
+  A run of more than 5,000 is one operation a chunk, sent one after another (D34).
 - **Retries** — exponential backoff with jitter, 5 attempts, then the row is quarantined as
   poison with a reason. A poison row never blocks the run; the run ends `partial`, and
   resume re-plans only non-verified rows (E2).

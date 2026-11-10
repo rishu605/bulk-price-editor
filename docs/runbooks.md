@@ -286,6 +286,11 @@ now is `SELECT "shopId", kind, "campaignId", "expiresAt" FROM shop_leases;` — 
 the moment of the press: `SELECT id, "campaignId", "createdAt" FROM campaign_runs WHERE status = 'QUEUED' ORDER BY "createdAt";`
 lists them, oldest first. The tick rings any older than fifteen seconds, so a job Redis never
 took, or lost, is queued again without anyone doing anything; the reaper leaves them alone.
+Since D34 a run of more than 5,000 prices is written a chunk a turn, and between turns its job
+waits on `execution` behind other shops' work, holding its shop as the run (`holder` is
+`run:<id>`). The runs waiting for their next turn are
+`SELECT "runId", turns, restarts, "waitingSince" FROM run_chunks WHERE "waitingSince" IS NOT NULL ORDER BY "waitingSince";`
+— the tick renews each one's lease and rings it once it has waited fifteen seconds.
 
 **Remediate.** Let the long runs finish rather than restarting the worker: a restart
 mid-write leaves a Partial campaign to resume, and the waiting job stays queued and starts
@@ -367,7 +372,9 @@ that makes it worse, because two workers on one shop each back off from the othe
 
 A run that will not finish is almost always one whose process died. The reaper handles
 this automatically after `RUN_STALE_AFTER_MS` (default five minutes), so **the first
-action is to wait one tick and look again.**
+action is to wait one tick and look again.** A run written in chunks (D34) is not reclaimed
+then but given back to the queue, and its next turn carries on from the next unwritten row;
+only after three such restarts (`restarts` in `run_chunks`) is it reclaimed as Partial.
 
 If it is genuinely stuck:
 

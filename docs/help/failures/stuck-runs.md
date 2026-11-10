@@ -28,9 +28,12 @@ once a twentieth of the prices are written, and keeps itself up to date. It goes
 the run adds tags and market prices, which come after the prices and are not in that count.
 It also goes away if the run has not been heard from for a minute.
 
-A large campaign is handed to Shopify to write in the background, as one operation, and its
-prices are confirmed together when Shopify finishes. There is no time left to show for one.
-The Runs tab says how many prices were sent to Shopify, when, and how far Shopify has got.
+A large campaign is handed to Shopify to write in the background, and its prices are
+confirmed together when Shopify finishes. Over 5,000 prices, it is sent in parts of 5,000, one
+after another, so a store's large sale never holds up every other store's campaigns: the count
+goes up as each part is confirmed, for example "Writing 15,000 of 62,535 prices". There is no
+time left to show for one. The Runs tab says how many prices were sent to Shopify, when, and
+how far Shopify has got.
 
 The ledger fills in once the prices are written and read back, all at once rather than row
 by row. A ledger that has not moved yet does not mean anything is wrong.
@@ -45,7 +48,8 @@ half-written. There is nothing to do.
 Rare, but it happens — a deploy, a restart, an out-of-memory. The app detects this: a run
 that stops reporting for five minutes is reclaimed automatically, marked **partial**, and
 becomes resumable. A run still **Queued** is not one of these: nothing has started, and it
-starts on its own once the worker is back.
+starts on its own once the worker is back. Nor is a large campaign being sent in parts: it
+picks up on its own at the next part that has not been confirmed, without starting again.
 
 You do not need to do anything to trigger that, and you should not try to force it. A run
 that is merely slow, reclaimed early, would be two processes believing they own the same
