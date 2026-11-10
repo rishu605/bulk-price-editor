@@ -309,18 +309,25 @@ const LIVE_RUN: readonly string[] = ["PLANNING", "QUEUED", "EXECUTING", "VERIFYI
  * have, and the run carries on with what is left. Returns the run whose rows it settled, so the
  * caller can bring that run's mirror and counts up to date, and the variants whose prices
  * landed: the run died before its tags and market prices, so the resume owes them both.
+ *
+ * `own` is a chunked run's turn asking about the run's own operation (#809, D34): one an earlier
+ * turn sent and died before reading. The run is live -- this turn is it -- so it is not stood down
+ * to, and its rows are settled here as that turn would have settled them.
  */
 export async function settleSubmittedBulk(
   shopId: string,
   campaignId: string,
   client: AdminClient,
+  { runId: own }: { runId?: string } = {},
 ): Promise<
-  | { stillRunning: string }
+  | { stillRunning: string; operation: string; submittedAt: Date }
   | { settledRunId: string; operation: string; landed: string[]; failed: number; unreported: number }
   | null
 > {
   const record = await prisma.bulkOperationRecord.findFirst({
-    where: { shopId, kind: "MUTATION", run: { campaignId, changes: { some: { status: "WRITING" } } } },
+    where: own
+      ? { shopId, kind: "MUTATION", runId: own, run: { changes: { some: { status: "WRITING" } } } }
+      : { shopId, kind: "MUTATION", run: { campaignId, changes: { some: { status: "WRITING" } } } },
     orderBy: { submittedAt: "desc" },
     include: { run: { select: { status: true } } },
   });
@@ -330,11 +337,13 @@ export async function settleSubmittedBulk(
     stillRunning:
       `Shopify is still applying this campaign's prices in bulk (operation ${record.shopifyGid}` +
       `${done === null ? "" : `, ${done} done so far`}). Nothing was sent. Try again once it has finished.`,
+    operation: record.shopifyGid,
+    submittedAt: record.submittedAt,
   });
 
   // The run that sent it is alive and polling: its rows are its own to settle, one writer
   // per occurrence, and it will.
-  if (record.run && LIVE_RUN.includes(record.run.status)) {
+  if (!own && record.run && LIVE_RUN.includes(record.run.status)) {
     return stillRunning(record.objectCount === null ? null : Number(record.objectCount));
   }
 

@@ -24,7 +24,10 @@ import type { RunOutcome } from "./types";
 export type RunCaller = "page" | "flow";
 
 /** What a route may ask a run for: everything but the limit, which is the caller's. */
-export type StartOptions = Omit<RunOptions, "inline" | "runId" | "queued" | "claimedFrom" | "claimUnrecorded" | "occurrenceKey">;
+export type StartOptions = Omit<
+  RunOptions,
+  "inline" | "runId" | "queued" | "claimedFrom" | "claimUnrecorded" | "occurrenceKey" | "turns"
+>;
 
 export async function startRun(
   shopId: string,

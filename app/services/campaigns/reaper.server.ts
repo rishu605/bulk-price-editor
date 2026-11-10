@@ -19,6 +19,12 @@
  * really are live on the storefront, and its unfinished rows are still sitting in the
  * ledger as PENDING. PARTIAL is the honest description of that, and it is the state a
  * resume knows how to continue from.
+ *
+ * A run written in chunks is given back to the queue instead (#809, D34). Its plan is its
+ * ledger, so a turn whose process died has lost nothing a later turn needs: the run waits for
+ * its next turn, which settles whatever the dead one sent and carries on at the next unwritten
+ * row, with nothing replanned and nobody asked to press Resume. A run waiting between turns
+ * has no process behind it to die, and is left alone, as a QUEUED one is.
  */
 
 import { SCHEDULER_ACTOR } from "../../lib/audit/actor";
@@ -28,6 +34,7 @@ import { countOf } from "../../lib/format/display";
 import { transitionCampaign } from "./lifecycle.server";
 import { settleMirror } from "./mirror.server";
 import { LANDED } from "../../lib/execution/landed";
+import { MAX_TURN_RESTARTS } from "../../lib/execution/run-chunks";
 
 /**
  * How quiet a run must go before it is presumed dead.
@@ -118,6 +125,8 @@ async function lastLedgerActivity(runId: string): Promise<Date | null> {
 export interface ReapResult {
   reclaimed: number;
   runIds: string[];
+  /** Chunked runs whose turn died, given back to the queue to carry on (#809, D34). */
+  restarted: string[];
 }
 
 export async function reclaimStaleRuns(
@@ -135,7 +144,13 @@ export async function reclaimStaleRuns(
   // construction -- and if it ever is not, that unbounded growth is exactly the
   // condition this function exists to clear.
   const candidates = await prisma.campaignRun.findMany({
-    where: { status: { in: [...RECLAIMABLE] }, ...(scope.shopId ? { shopId: scope.shopId } : {}) },
+    where: {
+      status: { in: [...RECLAIMABLE] },
+      ...(scope.shopId ? { shopId: scope.shopId } : {}),
+      // A chunked run between turns is a row waiting for the worker, as a QUEUED one is, and the
+      // tick rings it (`ringChunkedRuns`): quiet for as long as the lane keeps it waiting (D34).
+      NOT: { chunk: { is: { waitingSince: { not: null } } } },
+    },
     select: {
       id: true,
       shopId: true,
@@ -143,12 +158,14 @@ export async function reclaimStaleRuns(
       kind: true,
       heartbeatAt: true,
       startedAt: true,
+      chunk: { select: { restarts: true } },
     },
   });
 
   const quiet = candidates.filter((run) => isStale(run, now, staleAfterMs));
 
   const runIds: string[] = [];
+  const restarted: string[] = [];
 
   for (const run of quiet) {
     try {
@@ -159,6 +176,27 @@ export async function reclaimStaleRuns(
       const activity = await lastLedgerActivity(run.id);
       if (!isStale({ ...run, heartbeatAt: latest(run.heartbeatAt, activity) }, now, staleAfterMs)) {
         logger.info("quiet run left alone: its ledger is still changing", { runId: run.id, campaignId: run.campaignId });
+        continue;
+      }
+
+      // A chunked run's turn that died (#809, D34): the run waits for its next turn, which picks
+      // up at the next unwritten row. Its rows stay as they are -- PENDING, or WRITING inside an
+      // operation Shopify accepted, which the next turn asks Shopify about first -- and so does
+      // its campaign, still the run's. Only so many times: a chunk that kills its worker every
+      // time is reclaimed below as Partial, as any dead run is.
+      if (run.chunk && run.chunk.restarts < MAX_TURN_RESTARTS) {
+        const given = await prisma.runChunk.updateMany({
+          where: { runId: run.id, waitingSince: null },
+          data: { waitingSince: now, restarts: { increment: 1 } },
+        });
+        if (given.count === 1) {
+          logger.warn("a chunked run's turn stopped responding; its next turn carries on", {
+            runId: run.id,
+            campaignId: run.campaignId,
+            restarts: run.chunk.restarts + 1,
+          });
+          restarted.push(run.id);
+        }
         continue;
       }
 
@@ -270,5 +308,5 @@ export async function reclaimStaleRuns(
     }
   }
 
-  return { reclaimed: runIds.length, runIds };
+  return { reclaimed: runIds.length, runIds, restarted };
 }

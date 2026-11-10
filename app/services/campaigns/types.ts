@@ -328,6 +328,12 @@ export interface RunOutcome {
    * outside Anchor rather than revert them, so Flow's answer can say so.
    */
   keptEdits?: number;
+  /**
+   * Set when the run is written in chunks and this call was its first turn (#809, D34): every
+   * price planned and ledgered, none written yet. The worker's job that asked hands the run its
+   * next turn (`continueChunkedRun`); only a caller that passed `turns` ever sees it.
+   */
+  continues?: boolean;
 }
 
 export interface RunSummary {

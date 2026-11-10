@@ -9,7 +9,14 @@
  * themselves.
  */
 
-import { BulkSubmissionError, type BulkOperationState } from "../../lib/execution/bulk-executor";
+import type { Prisma } from "@prisma/client";
+
+import {
+  BULK_POLL_INTERVAL_MS,
+  BULK_WAIT_MS,
+  BulkSubmissionError,
+  type BulkOperationState,
+} from "../../lib/execution/bulk-executor";
 
 import prisma from "../../db.server";
 import { countOf, formatAgo, formatCount } from "../../lib/format/display";
@@ -27,7 +34,15 @@ import { editedVariants } from "./rollback-report.server";
 import { refreshBasePrices } from "../live-prices.server";
 import { DEFINITION, isPractice, loadCampaignContext, scopeOf, importIdsOf, segmentGone } from "./model.server";
 import { astToWhere } from "../segments.server";
-import { DEFAULT_THRESHOLD } from "../../lib/planning/write-path";
+import { DEFAULT_THRESHOLD, selectWritePath } from "../../lib/planning/write-path";
+import {
+  CARRY_FAILURES,
+  chunkRowsFor,
+  plannedRowOf,
+  RUN_CHUNK_ROWS,
+  type ChunkCarry,
+} from "../../lib/execution/run-chunks";
+import type { ResolvableCampaign } from "../../lib/pricing/types";
 import { AppError, toAppError } from "../../lib/errors/app-error";
 import { classifyFailure } from "../../lib/execution/classify";
 import { LANDED } from "../../lib/execution/landed";
@@ -196,6 +211,14 @@ export interface RunOptions {
    * worker for a run handed there.
    */
   untypedPress?: boolean;
+  /**
+   * The caller can give the run back to its lane between chunks (#809, D34): set by the worker's
+   * run-lane jobs, and only there. A whole-campaign run of more than `RUN_CHUNK_ROWS` prices on
+   * Shopify's bulk path then plans and ledgers every price in this call and answers `continues`,
+   * and its prices are written a chunk a turn by `continueChunkedRun`. Unset -- the campaign page,
+   * the tick given no queue, a script -- and every run is written here, whole, as it always was.
+   */
+  turns?: boolean;
 }
 
 export async function runCampaign(
@@ -302,88 +325,111 @@ export async function runCampaign(
   } catch (error) {
     if (planning) clearInterval(planning);
     await dropIfUnstarted().catch(() => {});
-    // The run row reaches a terminal state before anything else happens. Without this a
-    // throw between creating the row and the update at the end of `executeCampaignRun`
-    // left it EXECUTING for ever: `releaseClaim` below frees the *campaign*, so nothing
-    // looked stuck, and the run sat in the ledger claiming to be in progress with no
-    // process behind it. #649 found it on the bulk path, where a refused submission
-    // throws straight past the terminal update, but the gap was never specific to that
-    // path — every `await` after the row is created had it.
-    //
-    // A bulk submission Shopify refused sent nothing, however far the run had got (#1054):
-    // a run that waited its whole wait for a turn, or any other refusal. Nothing went before
-    // it -- on the bulk path it is the first write -- so the run did not stop part-way, and
-    // "This apply stopped part-way. Some prices may have changed" over it was untrue.
+    // A bulk submission Shopify refused sent nothing, however far the run had got (#1054): a run
+    // that waited its whole wait for a turn, or any other refusal. Nothing went before it -- on
+    // the bulk path it is the first write -- so the run did not stop part-way, and "This apply
+    // stopped part-way. Some prices may have changed" over it was untrue.
     const writing = started.writing === true && !(error instanceof BulkSubmissionError);
-    const failed = await failRun(started.runId, error, writing);
-    if (failed?.ended) await notifyRunFailed(shopId, campaignId, options, failed, error, writing, started.runId);
-
-    // It wrote, then threw (#802). Handing the campaign back to where it started -- Draft,
-    // for a manual apply -- told the merchant "nothing has been written to your storefront"
-    // over 54,168 prices at 10% off, nothing owned them, and Revert does not work on a
-    // draft. The honest state is Partial, with what the ledger says landed, and the message
-    // says prices changed. Only when this throw ended the run: one after it completed --
-    // the mirror refresh, a notification -- leaves the finished run's state alone. A run
-    // over named variants never held the campaign, so it has no state to move.
-    if (failed?.ended && writing && !options.variantGids) {
-      try {
-        await transitionCampaign(shopId, campaignId, "PARTIAL", {
-          reason:
-            `${options.revert ? "revert" : "apply"} stopped part-way, after ${failed.verified} of ${failed.planned} ` +
-            `prices were changed and read back: ${toAppError(error).userMessage}`,
-          runId: started.runId,
-          actor: options.actor,
-        });
-      } catch (transitionError) {
-        const { logger } = await import("../../lib/logging/logger");
-        logger.error("a run stopped part-way and its campaign could not be marked partial", {
-          campaignId,
-          runId: started.runId,
-          error: transitionError instanceof Error ? transitionError.message : String(transitionError),
-        });
-      }
-      throw stoppedPartWay(error, failed, options);
-    }
-
-    // Only release to a state that is not itself a claim. A campaign that was already
-    // APPLYING when this was called -- a resume, a second worker -- has nowhere to be
-    // put back to, and `releaseClaim` additionally refuses while any run is still live.
-    const releaseTo = releaseTarget();
-    if (releaseTo && releaseTo !== "APPLYING" && releaseTo !== "REVERTING") {
-      // A scheduled start refused for a reason no retry changes -- its segment deleted, a
-      // blocking guardrail (#975). Put back to SCHEDULED as before, the claim being the
-      // scheduler's to give back, but marked first: the next tick claimed it again, was
-      // refused again, and wrote both to its history every thirty seconds while its window
-      // stayed open. Marked before the release, so no tick sees it SCHEDULED and unmarked.
-      const forGood = options.claimedFrom === "SCHEDULED" ? refusedForGood(error) : null;
-      if (forGood) await recordStartRefused(shopId, campaignId, forGood.userMessage, { tell: !failed?.ended });
-      // A queued run that never got to write, whatever stopped it (#1046): the job is not
-      // tried again, so a blip is as final for it as a refusal.
-      if (options.queued) {
-        const refusal = { verb: queuedVerb(options), reason: toAppError(error).userMessage };
-        await recordQueuedRefused(shopId, campaignId, refusal, { tell: !failed?.ended });
-      }
-      // A scheduled end that could not run is retried, but said once, on the page and by
-      // email (#1005): the sale's prices are still live past its window. The scheduler's only:
-      // a revert handed to the worker carries its claim too, and is said above (#808).
-      if (options.claimedFrom && options.revert && !options.queued) {
-        await recordEndMissed(shopId, campaignId, toAppError(error).userMessage, { tell: !failed?.ended });
-      }
-      await releaseClaim(shopId, campaignId, releaseTo, {
-        // The merchant's sentence from the error taxonomy, never the raw message (#1005):
-        // "fetch failed" in a campaign's history tells its reader nothing they can act on.
-        reason: forGood ? startRefusedEntry(forGood.userMessage) : toAppError(error).userMessage,
-        actor: options.actor,
-        // A blip is retried every tick while it lasts, as an early refusal is: one entry says
-        // why, and a new one every thirty seconds would bury it.
-        quietIfRepeated: options.claimedFrom !== undefined,
-      });
-    }
-    throw error;
+    return endFailedRun(shopId, campaignId, options, { runId: started.runId, writing, releaseTo: releaseTarget() }, error);
   } finally {
     // The shop's run lease a page-written run took (#809), however it ended.
     await started.lease?.release();
   }
+}
+
+/**
+ * Ends a run that threw, and says so: its row terminal, the merchant told, and the campaign
+ * Partial when prices may have changed or its claim given back when none did. Then throws, the
+ * merchant's sentence when it stopped part-way and the original otherwise. Shared by a run
+ * written in one call (`runCampaign`) and a chunked run's turn (`continueChunkedRun`, D34), so a
+ * run that stops in its fifth chunk ends exactly as one that stops five thousand rows in.
+ */
+async function endFailedRun(
+  shopId: string,
+  campaignId: string,
+  options: RunOptions,
+  ended: {
+    /** The run row, once there is one. */
+    runId: string | undefined;
+    /** Whether prices may have changed: from here a failure leaves the campaign Partial (#802). */
+    writing: boolean;
+    /** Where a claim given back goes. */
+    releaseTo: CampaignState | undefined;
+  },
+  error: unknown,
+): Promise<never> {
+  const { writing, releaseTo } = ended;
+  // The run row reaches a terminal state before anything else happens. Without this a
+  // throw between creating the row and the update at the end of `executeCampaignRun`
+  // left it EXECUTING for ever: `releaseClaim` below frees the *campaign*, so nothing
+  // looked stuck, and the run sat in the ledger claiming to be in progress with no
+  // process behind it. #649 found it on the bulk path, where a refused submission
+  // throws straight past the terminal update, but the gap was never specific to that
+  // path — every `await` after the row is created had it.
+  const failed = await failRun(ended.runId, error, writing);
+  if (failed?.ended) await notifyRunFailed(shopId, campaignId, options, failed, error, writing, ended.runId);
+
+  // It wrote, then threw (#802). Handing the campaign back to where it started -- Draft,
+  // for a manual apply -- told the merchant "nothing has been written to your storefront"
+  // over 54,168 prices at 10% off, nothing owned them, and Revert does not work on a
+  // draft. The honest state is Partial, with what the ledger says landed, and the message
+  // says prices changed. Only when this throw ended the run: one after it completed --
+  // the mirror refresh, a notification -- leaves the finished run's state alone. A run
+  // over named variants never held the campaign, so it has no state to move.
+  if (failed?.ended && writing && !options.variantGids) {
+    try {
+      await transitionCampaign(shopId, campaignId, "PARTIAL", {
+        reason:
+          `${options.revert ? "revert" : "apply"} stopped part-way, after ${failed.verified} of ${failed.planned} ` +
+          `prices were changed and read back: ${toAppError(error).userMessage}`,
+        runId: ended.runId,
+        actor: options.actor,
+      });
+    } catch (transitionError) {
+      const { logger } = await import("../../lib/logging/logger");
+      logger.error("a run stopped part-way and its campaign could not be marked partial", {
+        campaignId,
+        runId: ended.runId,
+        error: transitionError instanceof Error ? transitionError.message : String(transitionError),
+      });
+    }
+    throw stoppedPartWay(error, failed, options);
+  }
+
+  // Only release to a state that is not itself a claim. A campaign that was already
+  // APPLYING when this was called -- a resume, a second worker -- has nowhere to be
+  // put back to, and `releaseClaim` additionally refuses while any run is still live.
+  if (releaseTo && releaseTo !== "APPLYING" && releaseTo !== "REVERTING") {
+    // A scheduled start refused for a reason no retry changes -- its segment deleted, a
+    // blocking guardrail (#975). Put back to SCHEDULED as before, the claim being the
+    // scheduler's to give back, but marked first: the next tick claimed it again, was
+    // refused again, and wrote both to its history every thirty seconds while its window
+    // stayed open. Marked before the release, so no tick sees it SCHEDULED and unmarked.
+    const forGood = options.claimedFrom === "SCHEDULED" ? refusedForGood(error) : null;
+    if (forGood) await recordStartRefused(shopId, campaignId, forGood.userMessage, { tell: !failed?.ended });
+    // A queued run that never got to write, whatever stopped it (#1046): the job is not
+    // tried again, so a blip is as final for it as a refusal.
+    if (options.queued) {
+      const refusal = { verb: queuedVerb(options), reason: toAppError(error).userMessage };
+      await recordQueuedRefused(shopId, campaignId, refusal, { tell: !failed?.ended });
+    }
+    // A scheduled end that could not run is retried, but said once, on the page and by
+    // email (#1005): the sale's prices are still live past its window. The scheduler's only:
+    // a revert handed to the worker carries its claim too, and is said above (#808).
+    if (options.claimedFrom && options.revert && !options.queued) {
+      await recordEndMissed(shopId, campaignId, toAppError(error).userMessage, { tell: !failed?.ended });
+    }
+    await releaseClaim(shopId, campaignId, releaseTo, {
+      // The merchant's sentence from the error taxonomy, never the raw message (#1005):
+      // "fetch failed" in a campaign's history tells its reader nothing they can act on.
+      reason: forGood ? startRefusedEntry(forGood.userMessage) : toAppError(error).userMessage,
+      actor: options.actor,
+      // A blip is retried every tick while it lasts, as an early refusal is: one entry says
+      // why, and a new one every thirty seconds would bury it.
+      quietIfRepeated: options.claimedFrom !== undefined,
+    });
+  }
+  throw error;
 }
 
 /** A bulk operation's state as its record keeps it: status, how far it has got, and when it ended. */
@@ -978,6 +1024,16 @@ async function executeCampaignRun(
     ]),
   ];
 
+  // Written in chunks, a turn on the large lane each, when the caller can give the run back to
+  // its lane between them and it is large enough to want it (#809, D34): this call plans and
+  // ledgers, and `continueChunkedRun` writes. The path is the one the executor would choose for
+  // the whole run, chosen once, so every chunk is a bulk operation however few rows it has.
+  const writeCount = writable.filter((row) => row.intendedPrice).length;
+  const chunkRows =
+    options.turns && !options.variantGids
+      ? chunkRowsFor(writeCount, options.forcePath ?? selectWritePath(writeCount).path, RUN_CHUNK_ROWS)
+      : null;
+
   // One run per (campaign, occurrence, kind), enforced by a unique index. Two workers
   // ticking the same campaign at once -- which is exactly what happens in the window
   // after a Redis restart drops the leader lock -- have one of them lose this race,
@@ -1089,25 +1145,16 @@ async function executeCampaignRun(
   }
 
   await writeLedgerRows(run.id, shopId, writable);
+  // A chunked run's turns rebuild each row from its ledger alone (`plannedRowOf`), so a clamped
+  // row says why now, as a bulk run's rows say it when Shopify accepts them (#792).
+  if (chunkRows) await ledgerClampReasons(run.id, shopId, writable);
   await writeSparedRows(run.id, shopId, spared, options.skipReason, keptBefore);
 
   // Record intents before writing: every price we write produces a products/update
   // webhook moments later, and without this the drift detector would flag our own
-  // writes and bury the merchant in false events.
-  await recordWriteIntents(
-    shopId,
-    writable.map((row) => ({
-      variantGid: row.ref.variantGid,
-      price: row.intendedPrice ? BigInt(row.intendedPrice.amount) : null,
-      // A row that leaves compare-at alone did not decide it, so its echo is matched on
-      // price alone (#731). A row that clears it intends `null`, and says so.
-      compareAt: !row.intendedCompareAtSet
-        ? ("leave" as const)
-        : row.intendedCompareAt
-          ? BigInt(row.intendedCompareAt.amount)
-          : null,
-    })),
-  );
+  // writes and bury the merchant in false events. A chunked run records each chunk's as it
+  // writes it (#809): an intent lasts fifteen minutes, and its later chunks are written later.
+  if (!chunkRows) await recordWriteIntents(shopId, intentsOf(writable));
 
   // A revert's takeover reaches past what it writes: the variants an earlier attempt put
   // back, which plan as unchanged (#926). Their products are needed for the winner's tags.
@@ -1115,9 +1162,10 @@ async function executeCampaignRun(
     options.revert && outcome.kind === "ok"
       ? outcome.unchanged.filter((row) => !leaveAlone.has(row.ref.variantGid))
       : [];
-  const products = await productMapFor(shopId, [
-    ...new Set([...marketVariants, ...handedBack.map((row) => row.ref.variantGid)]),
-  ]);
+  // Read by the turn that needs them, for a chunked run: each its chunk's, the last its tags'.
+  const products = chunkRows
+    ? new Map<string, string>()
+    : await productMapFor(shopId, [...new Set([...marketVariants, ...handedBack.map((row) => row.ref.variantGid)])]);
 
   // Honour the planner's path choice. A 1,600-row campaign executed synchronously
   // would take roughly one variant every two seconds against a standard shop's
@@ -1171,6 +1219,51 @@ async function executeCampaignRun(
     : pulse;
   await lateWatch?.();
 
+  // What the rest of the run needs from this plan -- its tags, markets, counts and end --
+  // whether its prices are written now or a chunk a turn (#809, D34).
+  const tail: RunTail = {
+    runId: run.id,
+    kind,
+    campaignName,
+    resolvable,
+    breach,
+    wholeRevert,
+    takeover: [...writable, ...handedBack],
+    marketVariants,
+    products,
+    refusedMarkets,
+    marketsLandedIn,
+    unplanned: unplanned.length,
+    before: messagesBeforeExecution,
+    counts: {
+      planned: outcome.counts.planned,
+      skipped: outcome.counts.skipped,
+      clamped: outcome.counts.clamped,
+      noop: outcome.counts.noop,
+    },
+    skips: describeSkips(outcome.rows),
+    unchanged:
+      options.variantGids && outcome.kind === "ok"
+        ? outcome.unchanged.filter(({ ref }) => ref.priceListGid === "").map(({ ref }) => ref.variantGid)
+        : [],
+    settledNote,
+    kept: keptBefore.size,
+    spared: spared.length,
+    resumedFrom,
+    startedAt,
+  };
+
+  // Large enough to write in chunks (#809, D34): planned and ledgered, and not a price written in
+  // this turn. Its first chunk is the next turn's, behind whoever waits on the lane.
+  if (chunkRows) {
+    return beginChunks(run.id, tail, {
+      chunkRows,
+      writeCount,
+      options,
+      releaseTo: started.releaseTo ?? stateBefore,
+    });
+  }
+
   // From here a failure may have changed the storefront (#802).
   started.writing = true;
 
@@ -1198,11 +1291,7 @@ async function executeCampaignRun(
     // reasons go in `RUN_CHUNK` batches, never one list per reason.
     onSubmitted: async (operation) => {
       await retryTransient("run.bulk-submitted", () => prisma.$transaction([
-        prisma.bulkOperationRecord.upsert({
-          where: { shopifyGid: operation.id },
-          create: { shopId, runId: run.id, shopifyGid: operation.id, kind: "MUTATION", ...bulkProgress(operation) },
-          update: { shopId, runId: run.id, kind: "MUTATION", submittedAt: new Date(), finishedAt: null, ...bulkProgress(operation) },
-        }),
+        recordOperation(shopId, run.id, operation),
         prisma.variantChange.updateMany({
           where: { runId: run.id, shopId, status: "PENDING", surfaceKind: "BASE", priceListGid: "" },
           data: { status: "WRITING" },
@@ -1226,14 +1315,7 @@ async function executeCampaignRun(
         ),
       ]));
     },
-    onPoll: async (operation) => {
-      await retryTransient("run.bulk-poll", () =>
-        prisma.bulkOperationRecord.updateMany({
-          where: { shopifyGid: operation.id },
-          data: { ...bulkProgress(operation), lastPolledAt: new Date() },
-        }),
-      );
-    },
+    onPoll: recordPoll,
     // Shopify is running as many bulk mutations for this app in the shop as it allows, and
     // refused this one (#1054). The run waits for a turn still holding its occurrence (rule
     // 2), and says behind whom in the campaign's history and on its Status card.
@@ -1245,15 +1327,101 @@ async function executeCampaignRun(
   // count it showed as Writing N of M has nothing more to say.
   await prisma.campaignRun.updateMany({ where: { id: run.id, status: "EXECUTING" }, data: { status: "VERIFYING" } }).catch(() => {});
 
-  const messages = await recordResults(run.id, shopId, result.rows);
-  messages.unshift(...messagesBeforeExecution);
+  const failures = await recordResults(run.id, shopId, result.rows);
+  return finishRun(
+    shopId,
+    campaignId,
+    client,
+    options,
+    tail,
+    {
+      verified: result.verified,
+      failed: result.failed,
+      unverified: result.unverified,
+      clean: result.clean,
+      verifiedGids: verifiedVariants(result.rows),
+      failures,
+    },
+    beat,
+  );
+}
+
+/**
+ * What a run's prices left for the rest of it (#809, D34): how many were written and read back,
+ * which, and why any failed. From the executor's rows for a run written in one call, and from
+ * the ledger for a chunked run, whose rows were written over many turns.
+ */
+interface Written {
+  verified: number;
+  failed: number;
+  unverified: number;
+  clean: boolean;
+  /** Base-price variants written and read back, for the drift queue (#755). */
+  verifiedGids: string[];
+  /** Why rows failed, in Shopify's words and ours, in the order they did. */
+  failures: string[];
+}
+
+type Breach = Awaited<ReturnType<typeof loadCampaignContext>>["breach"];
+
+/**
+ * Everything the rest of a run needs from its plan: its tags, its market prices, its counts and
+ * its end. Built from the plan by a run written in one call, and from its carry by a chunked
+ * run's last turn (`ChunkCarry`), so the two end through the same lines (`finishRun`).
+ */
+interface RunTail {
+  runId: string;
+  kind: "APPLY" | "REVERT";
+  campaignName: string;
+  /** Every campaign the run resolves against, for the market step. */
+  resolvable: ResolvableCampaign[];
+  breach: Breach;
+  wholeRevert: boolean;
+  /** Whom each variant goes to after a revert, for the takeover tags (#687, #926). */
+  takeover: readonly WinnerRow[];
+  marketVariants: string[];
+  products: Map<string, string>;
+  refusedMarkets: string[];
+  marketsLandedIn?: string;
+  /** Prices a whole revert had no baseline to take back (#828). */
+  unplanned: number;
+  /** Said before any price was written. */
+  before: string[];
+  counts: ChunkCarry["counts"];
+  skips: string[];
+  /** For a run over named variants: those already at the campaign's price (#1042). */
+  unchanged: string[];
+  settledNote: string | null;
+  kept: number;
+  spared: number;
+  resumedFrom: ChunkCarry["resumedFrom"];
+  startedAt: number;
+}
+
+/**
+ * The rest of a run once its prices are written and recorded: tags, then market prices, then the
+ * mirror, the run's counts and the campaign's state, the drift queue, the email and Flow. The
+ * lines a run has always ended with, shared since #809 by a run written in one call and a chunked
+ * run's last turn (D34), so a run reads the same however its prices were written.
+ */
+async function finishRun(
+  shopId: string,
+  campaignId: string,
+  client: AdminClient,
+  options: RunOptions,
+  tail: RunTail,
+  written: Written,
+  beat: () => Promise<void>,
+): Promise<RunOutcome> {
+  const messages = [...tail.before, ...written.failures];
+  let clean = written.clean;
 
   // Prices this campaign wrote that the revert had no baseline to take them back to. The
   // revert is not over while they stand, so it does not say it is (#828).
-  if (unplanned.length > 0) {
-    result.clean = false;
+  if (tail.unplanned > 0) {
+    clean = false;
     messages.push(
-      `${unplanned.length} variant${unplanned.length === 1 ? "" : "s"} this campaign priced ${unplanned.length === 1 ? "has" : "have"} no ` +
+      `${tail.unplanned} variant${tail.unplanned === 1 ? "" : "s"} this campaign priced ${tail.unplanned === 1 ? "has" : "have"} no ` +
         "baseline to go back to, so they still show the campaign's price. Capture their baselines on Prices → Baselines, " +
         "then Resume to finish the revert.",
     );
@@ -1265,8 +1433,7 @@ async function executeCampaignRun(
   // A revert hands its variants to whoever prices them next, those an earlier attempt
   // already put back included: they plan as unchanged, and their new winner's tags were
   // never applied if that attempt died before its tag step (#926).
-  const takeover = [...writable, ...handedBack];
-  const tagOutcome = await syncTags(shopId, campaignId, run.id, takeover, marketVariants, products, client, options, beat);
+  const tagOutcome = await syncTags(shopId, campaignId, tail.runId, tail.takeover, tail.marketVariants, tail.products, client, options, beat);
   if (tagOutcome) messages.push(...tagOutcome.messages);
 
   // Markets, after the base surface. A campaign that only ever touched the base price
@@ -1287,11 +1454,11 @@ async function executeCampaignRun(
         await applyMarketSurfaces(
           shopId,
           campaignId,
-          run.id,
-          options.revert ? resolvable.filter((campaign) => campaign.id !== campaignId) : resolvable,
+          tail.runId,
+          options.revert ? tail.resolvable.filter((campaign) => campaign.id !== campaignId) : tail.resolvable,
           options.variantGids,
           client,
-          refusedMarkets,
+          tail.refusedMarkets,
           // A variant taken out of a sale follows a percentage list again, rather than being
           // pinned at the price the list derives today (#1002). A market it stops says what to
           // do by the campaign's policy (#1161), except on a revert, which plans without it.
@@ -1299,25 +1466,25 @@ async function executeCampaignRun(
             perProductOnly: true,
             onProgress: beat,
             letFollow: options.revert === true,
-            ...(options.revert ? {} : { breach }),
+            ...(options.revert ? {} : { breach: tail.breach }),
           },
         )
       : options.revert
         ? await revertMarketSurfaces(shopId, campaignId, client, beat, {
-            runId: run.id,
-            campaigns: resolvable.filter((campaign) => campaign.id !== campaignId),
+            runId: tail.runId,
+            campaigns: tail.resolvable.filter((campaign) => campaign.id !== campaignId),
           })
         : await applyMarketSurfaces(
             shopId,
             campaignId,
-            run.id,
-            resolvable,
-            marketVariants,
+            tail.runId,
+            tail.resolvable,
+            tail.marketVariants,
             client,
-            refusedMarkets,
+            tail.refusedMarkets,
             // As this run keeps it, not as it was before the claim (#1161): a market is planned
             // once the base prices are up, so whatever stops one, the campaign has started.
-            { onProgress: beat, alreadyLandedIn: marketsLandedIn, breach },
+            { onProgress: beat, alreadyLandedIn: tail.marketsLandedIn, breach: tail.breach },
           );
 
     for (const market of markets) {
@@ -1356,22 +1523,22 @@ async function executeCampaignRun(
   // Europe still on sale and nothing offering to finish it. A delete Shopify refuses is now a
   // FAILED row of the revert's, and a market-wide percentage it could not put back is counted
   // beside them, so the revert is Partial and Resume sends what is outstanding again.
-  const markets = await outstandingMarketRows(run.id);
-  if (marketsStopped) result.clean = false;
-  if (markets.failed + markets.unverified + percentagesLeft > 0) result.clean = false;
+  const markets = await outstandingMarketRows(tail.runId);
+  if (marketsStopped) clean = false;
+  if (markets.failed + markets.unverified + percentagesLeft > 0) clean = false;
   // Every surface, for what the merchant reads: "Partial · 0 failed" over three euro prices
   // that failed reads as nothing being wrong. The metrics below stay the base surface's;
   // the market writer reports its own.
-  const failedRows = result.failed + markets.failed + percentagesLeft;
-  const unverifiedRows = result.unverified + markets.unverified;
+  const failedRows = written.failed + markets.failed + percentagesLeft;
+  const unverifiedRows = written.unverified + markets.unverified;
   // And its verified prices, where the market prices are all it writes (#1111). A campaign
   // for Europe alone that verified every euro price said "apply finished: 0 verified" -- in
   // its history, its run row, its outcome and its email. A campaign that also prices the base
   // price still counts that one: its "N verified" has always been the store prices. Not a
   // whole revert's, whose market rows are only the few it wrote back: what it deleted settles
   // the apply's rows, and its count stays the store prices it put back.
-  const marketsOnly = resolvable.some((campaign) => campaign.id === campaignId && campaign.marketsOnly);
-  const verifiedRows = result.verified + (marketsOnly && !wholeRevert ? markets.verified : 0);
+  const marketsOnly = tail.resolvable.some((campaign) => campaign.id === campaignId && campaign.marketsOnly);
+  const verifiedRows = written.verified + (marketsOnly && !tail.wholeRevert ? markets.verified : 0);
 
   // The mirror, before anything says this run is over (#906). It was refreshed row by row
   // -- two queries a variant, 204,000 for a 102,132-variant apply -- *after* the campaign
@@ -1380,18 +1547,18 @@ async function executeCampaignRun(
   // baseline, skipped them, and reported clean with the sale live; the late refresh then
   // overwrote 2,514 rows the revert had just restored. Now it is a handful of statements
   // from the ledger, done before the run row or the campaign says "finished".
-  await settleMirror(run.id);
+  await settleMirror(tail.runId);
 
   // Retried like the ledger (#810): every price has landed and been recorded by now, and a
   // pool timeout on the one statement saying so must not turn a clean run into a Partial.
   await retryTransient("run.finish", () =>
     prisma.campaignRun.update({
-      where: { id: run.id },
+      where: { id: tail.runId },
       data: {
-        status: result.clean ? "COMPLETED" : "PARTIAL",
+        status: clean ? "COMPLETED" : "PARTIAL",
         verifiedRows,
         failedRows,
-        skippedRows: outcome.counts.skipped,
+        skippedRows: tail.counts.skipped,
         finishedAt: new Date(),
       },
     }),
@@ -1402,20 +1569,20 @@ async function executeCampaignRun(
   // the sale COMPLETED -- it is still running, for everything else. The ledger records
   // what happened to those rows; the campaign's own state is left alone.
   if (options.variantGids) {
-    await resolveOverwrittenDrift(shopId, run.id, verifiedVariants(result.rows), kind, options.actor);
+    await resolveOverwrittenDrift(shopId, tail.runId, written.verifiedGids, tail.kind, options.actor);
 
   // The headline panels, from the one place that knows the answer. Counts and durations
   // only — the ledger holds what actually changed.
-  metric("run.duration_ms", Date.now() - startedAt, { shopId, campaignId, kind });
-  metric("run.verified_clean_rate", result.clean ? 1 : 0, { shopId, campaignId, kind });
-  metric("run.rows", result.verified, { shopId, campaignId, outcome: "verified" });
-  if (result.failed > 0) metric("run.rows", result.failed, { shopId, campaignId, outcome: "failed" });
-  if (result.unverified > 0) {
-    metric("run.rows", result.unverified, { shopId, campaignId, outcome: "unverified" });
+  metric("run.duration_ms", Date.now() - tail.startedAt, { shopId, campaignId, kind: tail.kind });
+  metric("run.verified_clean_rate", clean ? 1 : 0, { shopId, campaignId, kind: tail.kind });
+  metric("run.rows", written.verified, { shopId, campaignId, outcome: "verified" });
+  if (written.failed > 0) metric("run.rows", written.failed, { shopId, campaignId, outcome: "failed" });
+  if (written.unverified > 0) {
+    metric("run.rows", written.unverified, { shopId, campaignId, outcome: "unverified" });
   }
-    const unchanged = outcome.kind === "ok" ? outcome.unchanged.filter(({ ref }) => ref.priceListGid === "").map(({ ref }) => ref.variantGid) : [];
+    const unchanged = tail.unchanged;
     return {
-      ...scopedOutcome(run.id, outcome.counts.planned, { ...result, verified: verifiedRows, failed: failedRows, unverified: unverifiedRows }, messages),
+      ...scopedOutcome(tail.runId, tail.counts.planned, { verified: verifiedRows, failed: failedRows, unverified: unverifiedRows, clean }, messages),
       unchanged,
     };
   }
@@ -1424,36 +1591,36 @@ async function executeCampaignRun(
   // and records how the campaign got here. A run that finishes late must not clobber a
   // newer state, which a bare update would happily do.
   const finalState = options.revert
-    ? result.clean
+    ? clean
       ? "COMPLETED"
       : "PARTIAL"
-    : result.clean
+    : clean
       ? "ACTIVE"
       : "PARTIAL";
 
   await transitionCampaign(shopId, campaignId, finalState, {
     reason:
       `${options.revert ? "revert" : "apply"} finished: ${verifiedRows} verified, ${failedRows} failed` +
-      (settledNote ? `. ${settledNote}` : "") +
+      (tail.settledNote ? `. ${tail.settledNote}` : "") +
       // Nobody ticked these (#794), nor on a resume (#1157), so the history is where the
       // merchant reads that they stayed.
-      ((options.keepEdited || keptBefore.size > 0) && spared.length > 0 ? `. ${editsLeft(spared.length)}` : ""),
-    runId: run.id,
+      ((options.keepEdited || tail.kept > 0) && tail.spared > 0 ? `. ${editsLeft(tail.spared)}` : ""),
+    runId: tail.runId,
     actor: options.actor,
   });
 
   // A held campaign can still be applied; whatever this run wrote over an edit made
   // outside Anchor now stands, and the drift queue must stop asking about it (#755).
-  await resolveOverwrittenDrift(shopId, run.id, verifiedVariants(result.rows), kind, options.actor);
+  await resolveOverwrittenDrift(shopId, tail.runId, written.verifiedGids, tail.kind, options.actor);
 
   // The headline panels, from the one place that knows the answer. Counts and durations
   // only — the ledger holds what actually changed.
-  metric("run.duration_ms", Date.now() - startedAt, { shopId, campaignId, kind });
-  metric("run.verified_clean_rate", result.clean ? 1 : 0, { shopId, campaignId, kind });
-  metric("run.rows", result.verified, { shopId, campaignId, outcome: "verified" });
-  if (result.failed > 0) metric("run.rows", result.failed, { shopId, campaignId, outcome: "failed" });
-  if (result.unverified > 0) {
-    metric("run.rows", result.unverified, { shopId, campaignId, outcome: "unverified" });
+  metric("run.duration_ms", Date.now() - tail.startedAt, { shopId, campaignId, kind: tail.kind });
+  metric("run.verified_clean_rate", clean ? 1 : 0, { shopId, campaignId, kind: tail.kind });
+  metric("run.rows", written.verified, { shopId, campaignId, outcome: "verified" });
+  if (written.failed > 0) metric("run.rows", written.failed, { shopId, campaignId, outcome: "failed" });
+  if (written.unverified > 0) {
+    metric("run.rows", written.unverified, { shopId, campaignId, outcome: "unverified" });
   }
 
   // Best-effort, and deliberately last. A campaign runs for hours; the merchant has to
@@ -1463,36 +1630,36 @@ async function executeCampaignRun(
   void notify(shopId, {
     campaignId,
     // A revert that left prices on sale is a partial run, not "has been reverted" (#710).
-    kind: result.clean ? (options.revert ? "revert-completed" : "run-completed") : "run-partial",
+    kind: clean ? (options.revert ? "revert-completed" : "run-completed") : "run-partial",
     revert: options.revert === true,
-    campaignName: campaignName ?? "Your campaign",
+    campaignName: tail.campaignName ?? "Your campaign",
     counts: {
       verified: verifiedRows,
       failed: failedRows,
       unverified: unverifiedRows,
-      skipped: outcome.counts.skipped,
-      clamped: outcome.counts.clamped,
+      skipped: tail.counts.skipped,
+      clamped: tail.counts.clamped,
     },
     reasons: messages.slice(0, 5),
-  }, { runId: run.id });
+  }, { runId: tail.runId });
 
   // Told after the fact, never awaited for correctness. A campaign must not fail because
   // an automation could not be notified about it.
-  await fireCampaignTrigger(shopId, campaignId, campaignRecord.name, options, outcome, result);
+  await fireCampaignTrigger(shopId, campaignId, tail.campaignName, options, tail.counts.planned, { verified: written.verified, clean });
 
   return {
-    runId: run.id,
-    planned: outcome.counts.planned,
+    runId: tail.runId,
+    planned: tail.counts.planned,
     verified: verifiedRows,
     failed: failedRows,
     unverified: unverifiedRows,
-    clean: result.clean,
-    ...(options.keepEdited ? { keptEdits: spared.length } : {}),
+    clean,
+    ...(options.keepEdited ? { keptEdits: tail.spared } : {}),
     messages: [
-      ...(settledNote ? [settledNote] : []),
+      ...(tail.settledNote ? [tail.settledNote] : []),
       // What the resume left alone, under "Resumed" (#1157): the banner it was pressed under
       // said it would.
-      ...(keptBefore.size > 0 && spared.length > 0 ? [editsLeft(spared.length)] : []),
+      ...(tail.kept > 0 && tail.spared > 0 ? [editsLeft(tail.spared)] : []),
       // Lead with what was skipped. "Applied 3 variants" after a 1,500-row campaign
       // looks like a catastrophe until you know the other 1,497 were already correct
       // and deliberately left alone.
@@ -1501,11 +1668,11 @@ async function executeCampaignRun(
       // planner drops rows already showing the target price, and the resume drops rows
       // the ledger says were verified. Reporting only the latter said "0 rows were
       // already verified" straight after a run that had verified two of them.
-      ...(resumedFrom && resumedFrom.verified + outcome.counts.noop > 0
+      ...(tail.resumedFrom && tail.resumedFrom.verified + tail.counts.noop > 0
         ? [
-            `Resumed: ${resumedFrom.verified + outcome.counts.noop} rows were already correct and left untouched` +
-              (resumedFrom.quarantined > 0
-                ? `, ${resumedFrom.quarantined} quarantined after repeated failures`
+            `Resumed: ${tail.resumedFrom.verified + tail.counts.noop} rows were already correct and left untouched` +
+              (tail.resumedFrom.quarantined > 0
+                ? `, ${tail.resumedFrom.quarantined} quarantined after repeated failures`
                 : "") +
               ".",
           ]
@@ -1515,9 +1682,453 @@ async function executeCampaignRun(
       // nameable reason — no cost, below a floor, not in the imported file — handed the
       // merchant a smaller number than they expected and no explanation for it. The
       // count was in the database; it was just never said out loud.
-      ...describeSkips(outcome.rows),
+      ...tail.skips,
       ...messages.slice(0, 5),
     ],
+  };
+}
+
+
+/** The write intents for rows about to be written: their price, and their compare-at when they decide it. */
+function intentsOf(rows: readonly PlannedRow[]) {
+  return rows.map((row) => ({
+    variantGid: row.ref.variantGid,
+    price: row.intendedPrice ? BigInt(row.intendedPrice.amount) : null,
+    // A row that leaves compare-at alone did not decide it, so its echo is matched on
+    // price alone (#731). A row that clears it intends `null`, and says so.
+    compareAt: !row.intendedCompareAtSet
+      ? ("leave" as const)
+      : row.intendedCompareAt
+        ? BigInt(row.intendedCompareAt.amount)
+        : null,
+  }));
+}
+
+/** The record of a bulk operation Shopify accepted for a run (#832), as a statement for its transaction. */
+function recordOperation(shopId: string, runId: string, operation: BulkOperationState) {
+  return prisma.bulkOperationRecord.upsert({
+    where: { shopifyGid: operation.id },
+    create: { shopId, runId, shopifyGid: operation.id, kind: "MUTATION", ...bulkProgress(operation) },
+    update: { shopId, runId, kind: "MUTATION", submittedAt: new Date(), finishedAt: null, ...bulkProgress(operation) },
+  });
+}
+
+/** Each poll of a bulk operation, and its final state, on its record. */
+async function recordPoll(operation: BulkOperationState): Promise<void> {
+  await retryTransient("run.bulk-poll", () =>
+    prisma.bulkOperationRecord.updateMany({
+      where: { shopifyGid: operation.id },
+      data: { ...bulkProgress(operation), lastPolledAt: new Date() },
+    }),
+  );
+}
+
+/**
+ * A chunked run's clamped rows say why with its ledger (#792, D34): its turns rebuild each row
+ * from the ledger alone, and this is how one tells a clamped row from one priced by the rule.
+ * In `RUN_CHUNK` batches, each retried (#810).
+ */
+async function ledgerClampReasons(runId: string, shopId: string, rows: readonly PlannedRow[]): Promise<void> {
+  for (const [reason, text] of CLAMP_REASONS) {
+    const gids = rows
+      .filter((row) => row.status === "clamped" && (row.reason ?? "below-floor") === reason)
+      .map((row) => row.ref.variantGid);
+    if (gids.length === 0) continue;
+    await inRunChunks("ledger.base.clamp", gids, (batch) =>
+      prisma.variantChange.updateMany({
+        where: { runId, shopId, surfaceKind: "BASE", priceListGid: "", variantGid: { in: batch } },
+        data: { failureReason: text },
+      }),
+    );
+  }
+}
+
+/**
+ * Ends a chunked run's first turn (#809, D34): every price planned and ledgered, none written.
+ * Keeps what its last turn needs beside the run (`ChunkCarry`), stamps how many prices it writes
+ * so the page counts the run's and not a chunk's, and marks it waiting for its next turn, which
+ * writes its first chunk. The run stays EXECUTING, the campaign's writer, until its last turn.
+ */
+async function beginChunks(
+  runId: string,
+  tail: RunTail,
+  how: { chunkRows: number; writeCount: number; options: RunOptions; releaseTo: CampaignState | undefined },
+): Promise<RunOutcome> {
+  const { options } = how;
+  const carry: ChunkCarry = {
+    actor: options.actor,
+    revert: options.revert === true,
+    resume: options.resume === true,
+    keepEdited: options.keepEdited === true,
+    queued: options.queued === true,
+    ...(options.claimedFrom ? { claimedFrom: options.claimedFrom } : {}),
+    ...(how.releaseTo ? { releaseTo: how.releaseTo } : {}),
+    wholeRevert: tail.wholeRevert,
+    startedAt: tail.startedAt,
+    counts: tail.counts,
+    skips: tail.skips,
+    resumedFrom: tail.resumedFrom,
+    settledNote: tail.settledNote,
+    kept: tail.kept,
+    spared: tail.spared,
+    unplanned: tail.unplanned,
+    before: tail.before,
+    refusedMarkets: tail.refusedMarkets,
+    ...(tail.marketsLandedIn ? { marketsLandedIn: tail.marketsLandedIn } : {}),
+    marketVariants: tail.marketVariants,
+    // Only a revert's tags read whom each variant goes to: an apply tags its own scope.
+    winners: options.revert
+      ? tail.takeover.flatMap((row): Array<[string, string]> => (row.campaignId ? [[row.ref.variantGid, row.campaignId]] : []))
+      : [],
+    failures: [],
+  };
+  const now = new Date();
+  await retryTransient("run.chunks", () =>
+    prisma.$transaction([
+      prisma.runChunk.create({
+        data: { runId, size: how.chunkRows, turns: 1, waitingSince: now, carry: carry as unknown as Prisma.InputJsonObject },
+      }),
+      // The run's count from here, for "Writing N of M" (#820): every chunk's prices, not one's.
+      prisma.campaignRun.update({
+        where: { id: runId },
+        data: { writePath: "BULK", writtenRows: 0, writableRows: how.writeCount, heartbeatAt: now },
+      }),
+    ]),
+  );
+  const parts = Math.ceil(how.writeCount / how.chunkRows);
+  return {
+    runId,
+    planned: tail.counts.planned,
+    verified: 0,
+    failed: 0,
+    unverified: 0,
+    clean: false,
+    continues: true,
+    messages: [
+      `Planned ${countOf(how.writeCount, "price")}: the background worker writes them in ${formatCount(parts)} parts of ` +
+        `${formatCount(how.chunkRows)}, between other stores' runs.`,
+    ],
+  };
+}
+
+/** How a chunked run's turn ended (#809, D34), for the job that took it. */
+export type ChunkTurn =
+  /** It wrote a chunk, or found Shopify still on the last one, and the run goes on. */
+  | { kind: "continues"; runId: string; campaignId: string; delayMs?: number }
+  /** Its last turn: the run is over, and `outcome` is what its one job would have answered. */
+  | { kind: "finished"; runId: string; campaignId: string; revert: boolean; outcome: RunOutcome }
+  /** Another process is in the run's turn: a job delivered twice, or rung beside the turn's own. */
+  | { kind: "elsewhere" }
+  /** The run is not one this can write: finished, reclaimed, or never chunked. */
+  | { kind: "over" };
+
+/** A run in one of these is still its campaign's writer. */
+const LIVE_RUN_STATES: ReadonlySet<string> = new Set(["PLANNING", "QUEUED", "EXECUTING", "VERIFYING"]);
+
+/**
+ * One turn of a chunked run (#809, D34): takes the run's turn, writes its next chunk, and ends
+ * the turn -- or, when nothing is left, ends the run.
+ *
+ * The turn is taken by one conditional update on the run's chunk row, so a job delivered twice,
+ * or rung beside its own, writes nothing. Then:
+ *
+ * - **A bulk operation a turn before this one sent and died waiting on** is asked of Shopify
+ *   first, and its rows settled from its result file (#832). Still running, the turn ends and the
+ *   next asks again; nothing is sent beside it.
+ * - **The next chunk** is the next `size` PENDING rows of the run's ledger, written exactly as the
+ *   plan wrote them (`plannedRowOf`): their write intents, one bulk operation, its read-back and
+ *   its results recorded, the run's heartbeat and count stamped as it goes. Nothing is planned
+ *   again, and a row a turn has written is never in a chunk again.
+ * - **Rows left**, the turn ends: the run waits for its next turn, holding its shop.
+ * - **None left**, the run ends as its one job did (`finishRun`): tags, markets, the mirror, its
+ *   counts from the ledger, the campaign's state, the drift queue, the email and Flow.
+ *
+ * A turn that throws ends the run as a run written in one call ends when it throws
+ * (`endFailedRun`): Partial when prices may have changed, its rows where the ledger has them, and
+ * Resume to finish it.
+ */
+export async function continueChunkedRun(shopId: string, runId: string, client: AdminClient | null): Promise<ChunkTurn> {
+  const taken = await prisma.runChunk.updateMany({
+    where: { runId, waitingSince: { not: null }, run: { is: { shopId, status: "EXECUTING" } } },
+    data: { waitingSince: null, turns: { increment: 1 } },
+  });
+  if (taken.count !== 1) {
+    const live = await prisma.campaignRun.findFirst({
+      where: { id: runId, shopId, chunk: { isNot: null } },
+      select: { status: true },
+    });
+    return live && LIVE_RUN_STATES.has(live.status) ? { kind: "elsewhere" } : { kind: "over" };
+  }
+
+  const [run, held] = await Promise.all([
+    prisma.campaignRun.findUniqueOrThrow({ where: { id: runId }, select: { campaignId: true, kind: true, writableRows: true } }),
+    prisma.runChunk.findUniqueOrThrow({ where: { runId }, select: { size: true, carry: true } }),
+  ]);
+  const { campaignId } = run;
+  const carry = held.carry as unknown as ChunkCarry;
+  // The options the run was planned with, as far as the rest of it reads them.
+  const options: RunOptions = {
+    actor: carry.actor,
+    revert: carry.revert,
+    resume: carry.resume,
+    queued: carry.queued,
+    ...(carry.keepEdited ? { keepEdited: true } : {}),
+    ...(carry.claimedFrom ? { claimedFrom: carry.claimedFrom as CampaignState } : {}),
+  };
+
+  return withLogContext({ shopId, campaignId, runId }, async () => {
+    // Alive from the moment the turn is taken: the reaper judges a turn by this, as it does a run.
+    const pulse = heartbeat(runId);
+    await pulse();
+    const campaign = await prisma.campaign.findUnique({ where: { id: campaignId }, select: { schedule: true } });
+    const lateWatch = carry.revert ? null : endingLateWatch(shopId, campaignId, campaign?.schedule);
+    const beat = lateWatch
+      ? async (written?: number, writable?: number) => {
+          await pulse(written, writable);
+          await lateWatch();
+        }
+      : pulse;
+
+    // Whether a price may have changed: an operation an earlier turn sent, or this one's.
+    let sentBefore = false;
+    let sending = false;
+    try {
+      await lateWatch?.();
+      sentBefore = (await prisma.bulkOperationRecord.count({ where: { runId, kind: "MUTATION" } })) > 0;
+      if (!client) {
+        throw new AppError({
+          code: "NO_SESSION",
+          userMessage:
+            "The app has no working session for this store, so the background worker could not go on writing this run. " +
+            "Open the app again from Shopify admin, then Resume.",
+          context: { runId },
+        });
+      }
+      const total = run.writableRows ?? 0;
+
+      // An operation a turn before this one sent, and died before reading (#832). Asked of Shopify
+      // by its id, as a Resume would, before anything else is sent.
+      const { settleSubmittedBulk } = await import("./execute.server");
+      const settled = await settleSubmittedBulk(shopId, campaignId, client, { runId });
+      if (settled && "stillRunning" in settled) {
+        // As long as a turn would have waited for it, and no longer (#832): then the run stops,
+        // its rows sent, and the campaign's next run asks Shopify how it ended.
+        if (settled.submittedAt && Date.now() - settled.submittedAt.getTime() > BULK_WAIT_MS) {
+          throw new AppError({
+            code: "UNKNOWN",
+            retryable: false,
+            context: { runId, operation: settled.operation },
+            userMessage:
+              `Shopify is still applying this campaign's prices in bulk (operation ${settled.operation}), and the app has ` +
+              "stopped waiting for it. They may already be live. The campaign's next run asks Shopify how it ended before " +
+              "writing anything.",
+          });
+        }
+        await endTurn(runId, null, total - (await outstandingRows(runId)));
+        return { kind: "continues", runId, campaignId, delayMs: BULK_POLL_INTERVAL_MS };
+      }
+
+      const rows = await nextChunk(runId, shopId, held.size);
+      let failures: string[] | null = null;
+      if (rows.length > 0) {
+        sending = true;
+        const failed = await writeChunk(shopId, campaignId, runId, client, rows, {
+          written: total - (await outstandingRows(runId)),
+          total,
+          beat,
+          actor: options.actor,
+        });
+        if (failed.length > 0 && carry.failures.length < CARRY_FAILURES) {
+          failures = [...carry.failures, ...failed].slice(0, CARRY_FAILURES);
+          carry.failures = failures;
+        }
+      }
+
+      const left = await outstandingRows(runId);
+      if (left > 0) {
+        await endTurn(runId, failures, total - left);
+        return { kind: "continues", runId, campaignId };
+      }
+      const outcome = await finishChunks(shopId, campaignId, runId, run.kind, client, options, carry, beat);
+      return { kind: "finished", runId, campaignId, revert: carry.revert, outcome };
+    } catch (error) {
+      // As a run written in one call ends when it throws. Prices may have changed once any turn
+      // has sent an operation, whatever stopped this one; before that, a submission Shopify
+      // refused sent nothing (#1054), and the campaign's claim is given back.
+      const writing = sentBefore || (sending && !(error instanceof BulkSubmissionError));
+      return endFailedRun(shopId, campaignId, options, { runId, writing, releaseTo: carry.releaseTo as CampaignState | undefined }, error);
+    }
+  });
+}
+
+/** The base-price rows a chunked run has still to send or hear back from. */
+function outstandingRows(runId: string): Promise<number> {
+  return prisma.variantChange.count({
+    where: { runId, surfaceKind: "BASE", priceListGid: "", status: { in: ["PENDING", "WRITING"] } },
+  });
+}
+
+/**
+ * The next chunk of a run's ledger, as the plan wrote it: its oldest PENDING base-price rows.
+ * Oldest first so the chunks go through the plan in its order; any order would do, since a row
+ * a turn has sent is never PENDING again.
+ */
+async function nextChunk(runId: string, shopId: string, size: number): Promise<PlannedRow[]> {
+  const rows = await prisma.variantChange.findMany({
+    where: { runId, shopId, status: "PENDING", surfaceKind: "BASE", priceListGid: "" },
+    orderBy: { id: "asc" },
+    take: size,
+    select: {
+      variantGid: true,
+      currency: true,
+      beforePrice: true,
+      beforeCompareAt: true,
+      intendedPrice: true,
+      intendedCompareAt: true,
+      intendedCompareAtSet: true,
+      failureReason: true,
+    },
+  });
+  return rows.map(plannedRowOf);
+}
+
+/**
+ * One chunk, written as a run written in one call writes its prices (#809, D34): its write
+ * intents first, then one bulk operation whose rows say "sent" in the step that records it, its
+ * result file read back, and every row recorded. The run's count is stamped as it goes, so the
+ * page reads "Writing N of M" for the whole run. Answers why any row failed.
+ */
+async function writeChunk(
+  shopId: string,
+  campaignId: string,
+  runId: string,
+  client: AdminClient,
+  rows: PlannedRow[],
+  how: { written: number; total: number; beat: (written?: number, writable?: number) => Promise<void>; actor: string },
+): Promise<string[]> {
+  await recordWriteIntents(shopId, intentsOf(rows));
+  const gids = rows.map((row) => row.ref.variantGid);
+  const products = await productMapFor(shopId, gids);
+  const result = await executeRows(rows, {
+    client,
+    shopId,
+    productOf: (gid) => products.get(gid) ?? gid,
+    verifySampleRate: 1,
+    // The path the run chose for all its prices: a last chunk of a few hundred is not one to
+    // write a product at a time.
+    forcePath: "bulk",
+    onProgress: (done) => how.beat(how.written + done, how.total),
+    // This chunk's rows only, with the record of the operation that holds them (#832). Their
+    // clamp reasons went in with the ledger.
+    onSubmitted: async (operation) => {
+      await retryTransient("run.bulk-submitted", () =>
+        prisma.$transaction([
+          recordOperation(shopId, runId, operation),
+          ...chunk(gids, RUN_CHUNK).map((batch) =>
+            prisma.variantChange.updateMany({
+              where: { runId, shopId, status: "PENDING", surfaceKind: "BASE", priceListGid: "", variantGid: { in: batch } },
+              data: { status: "WRITING" },
+            }),
+          ),
+        ]),
+      );
+    },
+    onPoll: recordPoll,
+    onBulkWait: () => noteBulkWait(shopId, campaignId, { id: runId, actor: how.actor, prices: rows.length }),
+  });
+  return recordResults(runId, shopId, result.rows);
+}
+
+/**
+ * Ends a turn with the run going on: waiting for its next, holding its shop, its count where the
+ * turn left it. The carry's failures are written only when the turn added to them -- the rest of
+ * the carry is the plan's, and a 100k run's is megabytes.
+ */
+async function endTurn(runId: string, failures: string[] | null, written: number): Promise<void> {
+  const now = new Date();
+  await retryTransient("run.turn-end", () =>
+    prisma.$transaction([
+      prisma.campaignRun.update({ where: { id: runId }, data: { heartbeatAt: now, writtenRows: written } }),
+      ...(failures
+        ? [
+            prisma.$executeRaw`UPDATE "run_chunks" SET "carry" = jsonb_set("carry", '{failures}', ${JSON.stringify(failures)}::jsonb)
+                                WHERE "runId" = ${runId}`,
+          ]
+        : []),
+      prisma.runChunk.update({ where: { runId }, data: { waitingSince: now } }),
+    ]),
+  );
+}
+
+/**
+ * A chunked run's last turn, once every chunk is written (#809, D34): the rest of the run, as a
+ * run written in one call has it (`finishRun`), from what its plan kept and what its ledger says.
+ * The campaigns are read again for the market step, as a market's own plan reads them when it
+ * runs; the prices, the tags' and markets' variants and the counts are the plan's.
+ */
+async function finishChunks(
+  shopId: string,
+  campaignId: string,
+  runId: string,
+  kind: string,
+  client: AdminClient,
+  options: RunOptions,
+  carry: ChunkCarry,
+  beat: () => Promise<void>,
+): Promise<RunOutcome> {
+  // Every price sent and answered: Verifying, as a run written in one call says from here (#808).
+  await prisma.campaignRun.updateMany({ where: { id: runId, status: "EXECUTING" }, data: { status: "VERIFYING" } }).catch(() => {});
+  const { campaign, resolvable, breach } = await loadCampaignContext(shopId, campaignId);
+  const products = await productMapFor(shopId, [...new Set([...carry.marketVariants, ...carry.winners.map(([gid]) => gid)])]);
+  const tail: RunTail = {
+    runId,
+    kind: kind === "REVERT" ? "REVERT" : "APPLY",
+    campaignName: campaign.name,
+    resolvable,
+    breach,
+    wholeRevert: carry.wholeRevert,
+    takeover: carry.winners.map(([variantGid, winner]) => ({ ref: { variantGid }, campaignId: winner })),
+    marketVariants: carry.marketVariants,
+    products,
+    refusedMarkets: carry.refusedMarkets,
+    ...(carry.marketsLandedIn ? { marketsLandedIn: carry.marketsLandedIn } : {}),
+    unplanned: carry.unplanned,
+    before: carry.before,
+    counts: carry.counts,
+    skips: carry.skips,
+    unchanged: [],
+    settledNote: carry.settledNote,
+    kept: carry.kept,
+    spared: carry.spared,
+    resumedFrom: carry.resumedFrom,
+    startedAt: carry.startedAt,
+  };
+  return finishRun(shopId, campaignId, client, options, tail, await writtenFromLedger(runId, carry.failures), beat);
+}
+
+/**
+ * What a chunked run's turns wrote, from its ledger (#809, D34): what `executeRows` answers for a
+ * run written in one call, counted over every chunk. The base price's rows only; markets count
+ * their own (`outstandingMarketRows`).
+ */
+async function writtenFromLedger(runId: string, failures: string[]): Promise<Written> {
+  const base = { runId, surfaceKind: "BASE" as const, priceListGid: "" };
+  const [byStatus, landed] = await Promise.all([
+    prisma.variantChange.groupBy({ by: ["status"], where: base, _count: { _all: true } }),
+    prisma.variantChange.findMany({ where: { ...base, status: { in: [...LANDED] } }, select: { variantGid: true } }),
+  ]);
+  const count = (...statuses: string[]) =>
+    byStatus.filter((group) => statuses.includes(group.status)).reduce((sum, group) => sum + group._count._all, 0);
+  const failed = count("FAILED");
+  // Written and not read back, or never answered: neither is verified (rule 5).
+  const unverified = count("APPLIED", "WRITING", "PENDING");
+  return {
+    verified: landed.length,
+    failed,
+    unverified,
+    clean: failed === 0 && unverified === 0,
+    verifiedGids: landed.map((row) => row.variantGid),
+    failures,
   };
 }
 
@@ -1749,7 +2360,7 @@ function heartbeat(runId: string, everyMs = HEARTBEAT_EVERY_MS) {
 function scopedOutcome(
   runId: string,
   planned: number,
-  result: Awaited<ReturnType<typeof executeRows>>,
+  result: { verified: number; failed: number; unverified: number; clean: boolean },
   messages: string[],
 ): RunOutcome {
   return {
@@ -2295,7 +2906,8 @@ async function fireCampaignTrigger(
   campaignId: string,
   campaignName: string,
   options: RunOptions,
-  outcome: Extract<ReturnType<typeof planRun>, { kind: "ok" }>,
+  /** The rows the plan writes, for "products affected". */
+  planned: number,
   result: { verified: number; clean: boolean },
 ): Promise<void> {
   try {
@@ -2314,7 +2926,7 @@ async function fireCampaignTrigger(
     await fireTriggerForShop(shopId, "campaign-started", {
       "campaign id": campaignId,
       "campaign name": campaignName,
-      "products affected": String(outcome.counts.planned),
+      "products affected": String(planned),
     });
   } catch (error) {
     const { logger } = await import("../../lib/logging/logger");
