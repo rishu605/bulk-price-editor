@@ -70,6 +70,24 @@ describe("running without Redis", () => {
     expect(turns).toBe(3);
   });
 
+  it("takes a chunked run's every turn before returning, each with the ref its last turn asked for (#809, D34)", async () => {
+    // Inline -- the tick with Redis down -- nobody else's turn comes between two of the run's, and
+    // the caller is promised the run has been written.
+    const seen: unknown[] = [];
+    const runtime = inlineRuntime(async (_name, ref) => {
+      seen.push(ref);
+      return seen.length < 3 ? { turn: { shopId: "s1", campaignId: "c1", runId: "r1", turn: true } } : undefined;
+    });
+
+    await runtime.enqueue("execution", { shopId: "s1", campaignId: "c1", runId: "r1" });
+
+    expect(seen).toEqual([
+      { shopId: "s1", campaignId: "c1", runId: "r1" },
+      { shopId: "s1", campaignId: "c1", runId: "r1", turn: true },
+      { shopId: "s1", campaignId: "c1", runId: "r1", turn: true },
+    ]);
+  });
+
   it("leaves a job whose shop is busy for the next ring, rather than waiting for the shop (#809)", async () => {
     // Waiting would hold the caller -- the tick -- for as long as the shop's other run lasts.
     // The work is a QUEUED row, a claim or a schedule, and the next tick rings it again.
@@ -262,6 +280,19 @@ describe("a job's log lines carry the ids the job was asked for", () => {
     );
     expect(source, "jobs are added without the per-job options a shop's drain needs").toMatch(
       /queue\.add\(name, ref, jobOptionsFor\(QUEUE_POLICIES\[name\], ref, \{ again \}\)\)/,
+    );
+  });
+
+  // The same for a chunked run's next turn (#809, D34): dropped, the run would wait between
+  // turns until the tick rang it; added without its options, it would not be the run's job.
+  it("queues a chunked run's next turn as the run's job when its handler asks for one (#809)", () => {
+    const source = sourceOf("app/worker/queue-runtime.server.ts");
+
+    expect(source, "the Redis worker ignores a chunked run's next turn").toMatch(
+      /if \(isJobTurn\(result\)\) await addTurn\(name, result\.turn, result\.delayMs\)/,
+    );
+    expect(source, "a turn is added without the run's key and its place behind the waiting jobs").toMatch(
+      /queue\.add\(name, ref, jobOptionsFor\(QUEUE_POLICIES\[name\], ref, \{ turn: true, delayMs \}\)\)/,
     );
   });
 

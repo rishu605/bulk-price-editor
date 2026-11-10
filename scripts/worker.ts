@@ -26,7 +26,7 @@ import { handleJob } from "../app/worker/handlers.server";
 import { LeaderLock } from "../app/worker/leader-lock";
 import { pruneWriteIntents } from "../app/services/drift.server";
 import { ringStrandedWebhooks } from "../app/services/webhook-queue.server";
-import { ringQueuedRuns } from "../app/services/campaigns/queued-run.server";
+import { ringChunkedRuns, ringQueuedRuns } from "../app/services/campaigns/queued-run.server";
 import { ringQueuedSyncs } from "../app/services/sync-job.server";
 import { ringQueuedRecaptures } from "../app/services/recapture-job.server";
 import prisma, { databasePool } from "../app/db.server";
@@ -99,14 +99,16 @@ let ticks = 0;
 
 /**
  * What the web process handed over and Redis never delivered, rung again from its row (#808):
- * a queued run, a claimed sync, a queued recapture. Each is queued now, or -- when the queue
- * cannot take it either -- run here, in this tick: Redis down degrades to the worker doing the
- * work itself, never to a request doing it. Each kind has its own failure, so none costs the
- * others their turn.
+ * a queued run, a claimed sync, a queued recapture -- and a chunked run waiting for its next
+ * turn, whose shop's lease this renews while it waits (#809, D34). Each is queued now, or --
+ * when the queue cannot take it either -- run here, in this tick: Redis down degrades to the
+ * worker doing the work itself, never to a request doing it. Each kind has its own failure, so
+ * none costs the others their turn.
  */
 async function ringWaiting(): Promise<void> {
   const rings = [
     ["queued run", ringQueuedRuns],
+    ["chunked run", ringChunkedRuns],
     ["queued sync", ringQueuedSyncs],
     ["queued recapture", ringQueuedRecaptures],
   ] as const;

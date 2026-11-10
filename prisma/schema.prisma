@@ -599,6 +599,8 @@ model CampaignRun {
   tagChanges       TagChange[]
   priceListChanges PriceListChange[]
   bulkOps          BulkOperationRecord[]
+  /// Set for a run written in chunks, a turn on the worker's large lane each (#809, D34).
+  chunk            RunChunk?
 
   @@unique([campaignId, occurrenceKey, kind])
   @@index([shopId, status])
@@ -1315,4 +1317,37 @@ model ShopLease {
 
   @@id([shopId, kind])
   @@map("shop_leases")
+}
+
+/// A run written in chunks (#809, D34): one row per such run, beside its `campaign_runs` row.
+///
+/// A run of more than `RUN_CHUNK_ROWS` prices on Shopify's bulk path, written by the worker,
+/// plans and ledgers every price in its first turn and writes them a chunk a turn: each turn
+/// takes the next PENDING rows of its ledger, sends them as one bulk operation, reads them back
+/// and records them, then gives its slot on the large lane to whoever waits behind it. So the
+/// plan is the ledger, and a turn after a worker restart starts at the next unwritten row
+/// without planning anything again. The run row stays EXECUTING from its first turn to its last;
+/// this says whether a turn holds it now.
+model RunChunk {
+  runId        String    @id
+  /// Rows a turn writes: `RUN_CHUNK_ROWS` when the run was planned.
+  size         Int
+  /// Turns taken so far, its first (the plan) included.
+  turns        Int       @default(0)
+  /// Set while the run waits for its next turn, and cleared by the turn that takes it. A run
+  /// waiting has no process behind it: the reaper leaves it alone, and the worker's tick rings
+  /// it and renews its shop's lease (`ringChunkedRuns`), as it rings a QUEUED run.
+  waitingSince DateTime?
+  /// Turns whose process stopped responding, each given back to the queue by the reaper. Past
+  /// `MAX_TURN_RESTARTS` the run is reclaimed as Partial instead, as any dead run is.
+  restarts     Int       @default(0)
+  /// What the run's last turn needs from its plan, and what its turns have said so far: the
+  /// variants its tags and markets cover, its counts and its messages (`ChunkCarry`).
+  carry        Json
+  createdAt    DateTime  @default(now())
+
+  run CampaignRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([waitingSince])
+  @@map("run_chunks")
 }
