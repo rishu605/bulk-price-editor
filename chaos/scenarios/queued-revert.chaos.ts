@@ -96,9 +96,10 @@ describe("chaos: a revert too large for one request", () => {
       const queued = await prisma.campaignRun.findFirstOrThrow({ where: { campaignId, status: "QUEUED" } });
       expect(queued).toMatchObject({ kind: "REVERT", plannedRows: 20, startedAt: null });
       expect(outcome.runId).toBe(queued.id);
+      // Over the page's limit, yet seconds of writing: the small-run lane (#809).
       expect(enqueued).toEqual([
         {
-          name: "execution",
+          name: "execution-small",
           ref: { shopId: chaos.fixture.shopId, campaignId, runId: queued.id, revert: true, claimedFrom: "ACTIVE", actor: "staff@example.com" },
         },
       ]);

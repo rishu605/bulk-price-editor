@@ -16,14 +16,16 @@
  * A run on Shopify's bulk queue has no estimate at all (`estimateMs`), and is never small.
  */
 
-import { estimateMs, PAGE_INLINE_BUDGET_MS, type InlineWork } from "./inline-budget";
+import { estimateMs, type InlineWork } from "./inline-budget";
 
 /**
- * The most writing a run may be estimated at and still go on the small-run lane: what the
- * campaign page itself can wait for. A one-variant run on a busy lane waits behind at most this
- * much of another shop's, rather than behind a sale of any size.
+ * The most writing a run may be estimated at and still go on the small-run lane: two minutes,
+ * what the campaign page itself can wait for (`PAGE_INLINE_BUDGET_MS`, which a test holds it
+ * to). A one-variant run on a busy lane waits behind at most this much of another shop's,
+ * rather than behind a sale of any size. A number of its own rather than that one read when
+ * this module loads, so nothing that stands in for the page's budget moves the lanes.
  */
-export const SMALL_RUN_MS = PAGE_INLINE_BUDGET_MS;
+export const SMALL_RUN_MS = 2 * 60 * 1000;
 
 /** Whether a run of this size goes on the small-run lane. */
 export function smallRun(work: InlineWork): boolean {
