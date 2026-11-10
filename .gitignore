@@ -45,3 +45,6 @@ perf-baseline-*.json
 # against. A record that is not in version control is not a record, and a guard that reads
 # a file CI does not have is a guard that can never fail.
 !docs/perf/perf-baseline-admin.json
+
+# ESLint's cache: local, and carries absolute paths from the machine that ran it.
+.eslintcache
