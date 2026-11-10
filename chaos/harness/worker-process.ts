@@ -31,21 +31,37 @@ export interface ChildRunOptions {
 }
 
 export function startApply(options: ChildRunOptions): ChildRun {
-  const entry = join(process.cwd(), "chaos", "harness", "apply-child.ts");
+  return spawnChild("apply-child.ts", {
+    CHAOS_ENDPOINT: options.endpoint,
+    CHAOS_SHOP_ID: options.shopId,
+    CHAOS_CAMPAIGN_ID: options.campaignId,
+    CHAOS_RESUME: options.resume ? "1" : "0",
+    ...(options.databaseUrl ? { DATABASE_URL: options.databaseUrl } : {}),
+  });
+}
+
+/**
+ * One turn of a chunked run (#809, D34), in its own process, so a scenario can kill a worker
+ * mid-chunk -- after Shopify accepted the chunk's operation, before the turn read it back --
+ * and prove the run carries on from there.
+ */
+export function startTurn(options: { endpoint: string; shopId: string; runId: string }): ChildRun {
+  return spawnChild("turn-child.ts", {
+    CHAOS_ENDPOINT: options.endpoint,
+    CHAOS_SHOP_ID: options.shopId,
+    CHAOS_RUN_ID: options.runId,
+  });
+}
+
+function spawnChild(script: string, env: Record<string, string>): ChildRun {
+  const entry = join(process.cwd(), "chaos", "harness", script);
 
   // The local binary directly, not through `npx`: npx re-resolves the package on
   // every spawn, which added tens of seconds to a suite that spawns repeatedly.
   const tsx = join(process.cwd(), "node_modules", ".bin", "tsx");
 
   const child: ChildProcess = spawn(tsx, [entry], {
-    env: {
-      ...process.env,
-      CHAOS_ENDPOINT: options.endpoint,
-      CHAOS_SHOP_ID: options.shopId,
-      CHAOS_CAMPAIGN_ID: options.campaignId,
-      CHAOS_RESUME: options.resume ? "1" : "0",
-      ...(options.databaseUrl ? { DATABASE_URL: options.databaseUrl } : {}),
-    },
+    env: { ...process.env, ...env },
     stdio: ["ignore", "pipe", "pipe"],
     // Its own process group, so the kill below reaches `tsx` and not just the
     // `npx` wrapper that spawned it.
@@ -67,7 +83,7 @@ export function startApply(options: ChildRunOptions): ChildRun {
       const line = stdout.split("\n").find((l) => l.startsWith("CHAOS_OUTCOME "));
       if (!line) {
         return reject(
-          new Error(`apply-child exited ${code} with no outcome.\nstdout:\n${stdout}\nstderr:\n${stderr}`),
+          new Error(`${script} exited ${code} with no outcome.\nstdout:\n${stdout}\nstderr:\n${stderr}`),
         );
       }
       resolve(JSON.parse(line.slice("CHAOS_OUTCOME ".length)) as RunOutcome);
