@@ -124,9 +124,15 @@ resolve(variant, surface) -> {price, compareAt, meta}:
 ## 5. Job engine
 
 - **Scheduler tick** — every 30s under a Redis leader lock. Finds due transitions (start,
-  end, occurrence, revert-buffer), creates `campaign_runs` with an idempotent
-  `occurrence_key`, enqueues planning. Due means `scheduled_at <= now`, not equality, so a
-  missed tick self-heals on the next one.
+  end, occurrence, revert-buffer) and hands each to a run lane as a job; the job claims the
+  campaign and creates `campaign_runs` with an idempotent `occurrence_key` (D33). Due means
+  `scheduled_at <= now`, not equality, so a missed tick self-heals on the next one.
+- **Run lanes and fairness** (D33) — `execution`, and `execution-small` for runs of two
+  minutes' writing or less, whose slots no large run takes; each capped across every worker
+  at what the worker's database pool allows. A shop writes one run at a time, held by its
+  `shop_leases` row wherever the run is written; a job whose shop is busy goes back to wait
+  its turn and gives its slot to another shop. Splitting a large run into chunk jobs, so two
+  shops' large runs interleave, is not built yet (#809).
 - **Planner** — streams enrolled variants × surfaces, diffs `resolve()` against the mirror,
   skips no-ops, applies guardrail policy, materialises ledger rows 1K per insert. Chooses
   the write path: **sync** under `BULK_PATH_ROW_THRESHOLD` rows, **bulk** above.

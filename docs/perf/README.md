@@ -229,7 +229,9 @@ The boot line, from every process, is the check:
 reserved for superusers = 97 (55 spare)`. The worker's 22 is its queues' concurrency summed --
 products-webhook drains 10 (#811), planning 5, execution 2, verification 2, sync 1, audit 1 --
 plus the scheduler's tick, each of which can hold a connection at the same moment as a run;
-the worker warns at boot when its pool is smaller than that count. #810's own example was
+the worker warns at boot when its pool is smaller than that count. Since #809 the small-run
+lane, `execution-small`, adds two more, so the count and the recommendation are 24 (see
+`docs/deploying-to-railway.md`). #810's own example was
 worker 20, two short of that count now that the products-webhook drains run there. Over budget it is an error line naming what to
 change. `max_connections` is the one number here that is not in this repo — it moves with
 the Railway plan — which is why it is read at boot rather than written down as a constant.

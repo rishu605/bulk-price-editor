@@ -350,14 +350,22 @@ const RUN_WAIT_SAMPLE = 50;
  * The delay is not waiting. A shop's first `webhooks` job is held five seconds so a
  * product's burst of deliveries lands before it is read (#811), and a retry waits out its
  * backoff; counting either as queue wait would report a calm queue as a slow one.
- *
- * Nor is a turn already taken (#809). A job put back because its shop was busy keeps the
- * timestamp it was added with, and BullMQ records its delay from the turn that put it back --
- * so a run that waited ten minutes behind its own shop's sale and is next for a slot has
- * waited for one five seconds, not ten minutes. Its delay counts from when it last started.
  */
-export function runnableAt(job: { timestamp: number; delay?: number; processedOn?: number }): number {
-  return Math.max(job.timestamp, job.processedOn ?? 0) + Math.max(0, job.delay ?? 0);
+export function runnableAt(job: { timestamp: number; delay?: number }): number {
+  return job.timestamp + Math.max(0, job.delay ?? 0);
+}
+
+/**
+ * When a waiting job could last have started: `runnableAt`, from its last turn rather than
+ * from when it was added, for a job that has had one (#809).
+ *
+ * A job put back because its shop was busy keeps the timestamp it was added with, and BullMQ
+ * records its delay from the turn that put it back. So a run that waited ten minutes behind its
+ * own shop's sale, and is now next for a slot, has waited five seconds for one -- not ten
+ * minutes, which would page `shop-run-waiting` for a wait that is by design.
+ */
+export function turnRunnableAt(job: { timestamp: number; delay?: number; processedOn?: number }): number {
+  return runnableAt({ timestamp: Math.max(job.timestamp, job.processedOn ?? 0), delay: job.delay });
 }
 
 /**
@@ -387,7 +395,7 @@ export async function snapshotQueues(queueFor: (name: QueueName) => Queue): Prom
         waiting: counts.waiting ?? 0,
         active: counts.active ?? 0,
         delayed: counts.delayed ?? 0,
-        oldestWaitingAt: stamps.length ? Math.min(...stamps.map(runnableAt)) : null,
+        oldestWaitingAt: stamps.length ? Math.min(...stamps.map(turnRunnableAt)) : null,
       };
 
       // Both run lanes (#809): the small-run lane's wait is the one a merchant pressing a
@@ -397,7 +405,7 @@ export async function snapshotQueues(queueFor: (name: QueueName) => Queue): Prom
         for (const job of stamps) {
           const shopId = (job.data as Partial<JobRef> | undefined)?.shopId;
           if (typeof shopId !== "string") continue;
-          byShop[shopId] = Math.min(byShop[shopId] ?? Infinity, runnableAt(job));
+          byShop[shopId] = Math.min(byShop[shopId] ?? Infinity, turnRunnableAt(job));
         }
         snapshot.oldestWaitingAtByShop = byShop;
       }
@@ -451,8 +459,7 @@ export async function reportDepths(runtime: QueueRuntime): Promise<void> {
  */
 function reportWait(name: QueueName, job: Job<JobRef>): void {
   if (job.attemptsMade > 0 || (job.attemptsStarted ?? 1) > 1 || !job.processedOn || !job.timestamp) return;
-  // From when it was added: `processedOn` is this start, and a first start has no earlier one.
-  metric("queue.wait_ms", Math.max(0, job.processedOn - runnableAt({ timestamp: job.timestamp, delay: job.delay })), {
+  metric("queue.wait_ms", Math.max(0, job.processedOn - runnableAt(job)), {
     queue: name,
     ...(job.data?.shopId ? { shopId: job.data.shopId } : {}),
   });

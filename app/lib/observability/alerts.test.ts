@@ -17,6 +17,7 @@ import {
   NOT_ALERTS,
   QUEUE_STALLED_MS,
   RUN_WAIT_MS,
+  SMALL_RUN_WAIT_MS,
   TICK_SILENCE_SECONDS,
   WEBHOOK_LAG_MS,
   type SignalWindow,
@@ -76,6 +77,14 @@ describe("work waiting to start (#813)", () => {
     expect(ids({ shopRunWaits: [{ shopId: "dartmode", waitMs: RUN_WAIT_MS }] })).not.toContain("shop-run-waiting");
     expect(ids({ shopRunWaits: [] })).not.toContain("shop-run-waiting");
     expect(ids({ shopRunWaits: null })).not.toContain("shop-run-waiting");
+  });
+
+  it("pages sooner for a run waiting on the small-run lane, which no large run holds (#809)", () => {
+    expect(ids({ shopRunWaits: [{ shopId: "dartmode", waitMs: SMALL_RUN_WAIT_MS + 1, small: true }] })).toContain("shop-run-waiting");
+    expect(ids({ shopRunWaits: [{ shopId: "dartmode", waitMs: SMALL_RUN_WAIT_MS, small: true }] })).not.toContain("shop-run-waiting");
+    // The same wait on the large lane is a run that is merely next.
+    expect(ids({ shopRunWaits: [{ shopId: "dartmode", waitMs: SMALL_RUN_WAIT_MS + 1 }] })).not.toContain("shop-run-waiting");
+    expect(SMALL_RUN_WAIT_MS).toBeLessThan(RUN_WAIT_MS);
   });
 
   it("fires once however many shops are waiting", () => {

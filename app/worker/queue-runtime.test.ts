@@ -21,8 +21,9 @@ import {
   runnableAt,
   runtimeFor,
   snapshotQueues,
+  turnRunnableAt,
 } from "./queue-runtime.server";
-import type { JobRef, QueueName } from "./queues";
+import { QUEUE_NAMES, type JobRef, type QueueName } from "./queues";
 
 describe("running without Redis", () => {
   it("does the work rather than dropping it", async () => {
@@ -67,6 +68,20 @@ describe("running without Redis", () => {
     await runtime.enqueue("webhooks", { shopId: "s1" });
 
     expect(turns).toBe(3);
+  });
+
+  it("leaves a job whose shop is busy for the next ring, rather than waiting for the shop (#809)", async () => {
+    // Waiting would hold the caller -- the tick -- for as long as the shop's other run lasts.
+    // The work is a QUEUED row, a claim or a schedule, and the next tick rings it again.
+    let turns = 0;
+    const runtime = inlineRuntime(async () => {
+      turns++;
+      return "later";
+    });
+
+    await runtime.enqueue("execution", { shopId: "s1", runId: "r1" });
+
+    expect(turns).toBe(1);
   });
 
   it("propagates a handler failure to the caller", async () => {
@@ -324,7 +339,31 @@ describe("how far behind each queue is (#813)", () => {
     expect(execution.oldestWaitingAtByShop).toEqual({ "anchor-perf": 1_000, dartmode: 2_000 });
     expect(snapshots.find((snapshot) => snapshot.queue === "sync")).toMatchObject({ oldestWaitingAt: null });
     // Every queue, so a missing one cannot read as calm.
-    expect(snapshots).toHaveLength(6);
+    expect(snapshots).toHaveLength(QUEUE_NAMES.length);
+  });
+
+  it("reports each shop's wait on the small-run lane too, which pages sooner (#809)", async () => {
+    const snapshots = await snapshotQueues((name) =>
+      name === "execution-small"
+        ? fakeQueue({ waiting: 1, active: 2, delayed: 3 }, [{ timestamp: 4_000, data: { shopId: "dartmode" } }])
+        : fakeQueue({ waiting: 0, active: 0, delayed: 0 }, []),
+    );
+    expect(snapshots.find((snapshot) => snapshot.queue === "execution-small")?.oldestWaitingAtByShop).toEqual({ dartmode: 4_000 });
+  });
+
+  it("times a job put back for its busy shop from its last turn, not from when it was added (#809)", async () => {
+    // Ten minutes behind its own shop's sale is by design; next for a slot, it has waited
+    // five seconds for one, and that is all the wait `shop-run-waiting` should read.
+    const putBack = { timestamp: 1_000, processedOn: 600_000, delay: 5_000 };
+    expect(turnRunnableAt(putBack)).toBe(605_000);
+    expect(turnRunnableAt({ timestamp: 1_000, delay: 5_000 })).toBe(runnableAt({ timestamp: 1_000, delay: 5_000 }));
+
+    const snapshots = await snapshotQueues((name) =>
+      name === "execution"
+        ? fakeQueue({ waiting: 1, active: 0, delayed: 0 }, [{ ...putBack, data: { shopId: "anchor-perf" } } as never])
+        : fakeQueue({ waiting: 0, active: 0, delayed: 0 }, []),
+    );
+    expect(snapshots.find((snapshot) => snapshot.queue === "execution")?.oldestWaitingAtByShop).toEqual({ "anchor-perf": 605_000 });
   });
 
   it("reports each queue's oldest wait as a metric beside its depth, zero when nothing waits", async () => {
@@ -344,7 +383,7 @@ describe("how far behind each queue is (#813)", () => {
       const ages = lines.filter((line) => line.metric === "queue.oldest_wait_ms");
       expect(ages.find((line) => line.queue === "execution")?.value).toBeGreaterThanOrEqual(90_000);
       expect(ages.find((line) => line.queue === "sync")?.value).toBe(0);
-      expect(lines.filter((line) => line.metric === "queue.depth")).toHaveLength(6);
+      expect(lines.filter((line) => line.metric === "queue.depth")).toHaveLength(QUEUE_NAMES.length);
     } finally {
       vi.unstubAllEnvs();
       log.mockRestore();
@@ -358,5 +397,14 @@ describe("how far behind each queue is (#813)", () => {
     expect(source).toMatch(/reportWait\(name, job\);\s*const result = await traced\(/);
     expect(source).toMatch(/metric\("queue\.wait_ms", Math\.max\(0, job\.processedOn - runnableAt\(job\)\)/);
     expect(source).toMatch(/if \(job\.attemptsMade > 0/);
+    // A job put back for its busy shop starts again; that is not a second wait for a worker (#809).
+    expect(source).toMatch(/\(job\.attemptsStarted \?\? 1\) > 1/);
+  });
+
+  it("puts a job whose shop is busy back to wait, as the same job, and gives its slot away (#809)", () => {
+    const source = sourceOf("app/worker/queue-runtime.server.ts");
+    expect(source).toMatch(/if \(result === "later"\) \{[\s\S]*?job\.moveToDelayed\(Date\.now\(\) \+[\s\S]*?throw new DelayedError\(\);/);
+    // Capped across every worker where the policy says so, not only per process.
+    expect(source).toMatch(/setGlobalConcurrency\(cap\)/);
   });
 });
