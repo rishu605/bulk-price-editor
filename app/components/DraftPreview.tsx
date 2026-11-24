@@ -55,6 +55,7 @@ export function DraftPreview(props: DraftPreviewProps) {
 export function previewAnnouncement(preview: Preview | null, pending: boolean): string {
   if (pending || !preview) return "";
   if (preview.ruleProblem) return preview.ruleProblem;
+  if (preview.floorsProblem) return preview.floorsProblem;
   // The banner's own sentence, which names each variant, its price and its floor (#1076).
   if (preview.blocked) return preview.blocked.message;
 
@@ -128,12 +129,12 @@ function PreviewBody({ preview, pending = false, surface, fullPreviewHref }: Dra
     );
   }
 
-  // The rule's amount is empty, not a number, or no price at all (#696): nothing to show
-  // but why, where the merchant is typing it.
-  if (preview.ruleProblem) {
+  // The rule's amount is empty, not a number, or no price at all (#696), or a floor of the
+  // campaign's own is not one (#816): nothing to show but why, where the merchant is typing it.
+  if (preview.ruleProblem || preview.floorsProblem) {
     return (
       <s-banner tone="critical">
-        <s-paragraph>{preview.ruleProblem}</s-paragraph>
+        <s-paragraph>{preview.ruleProblem ?? preview.floorsProblem}</s-paragraph>
       </s-banner>
     );
   }
@@ -233,6 +234,23 @@ function PreviewBody({ preview, pending = false, surface, fullPreviewHref }: Dra
           where they went (#751). */}
       {preview.leftOutByStatus > 0 ? (
         <Secondary>{leftOutSentence(preview.leftOutByStatus)}</Secondary>
+      ) : null}
+
+      {/* Which floors and policy these prices were worked out with, and whose (#816): the
+          store's, or this campaign's own from Advanced, with any below the store's that Create
+          will ask to be confirmed. */}
+      {preview.floors ? (
+        <s-stack gap={SPACE.tight}>
+          <Secondary>
+            Floors: {preview.floors.applied}. {preview.floors.whose}
+          </Secondary>
+          <Secondary>If a price breaches one: {preview.floors.policy}.</Secondary>
+          {preview.floors.below ? (
+            <s-paragraph>
+              <s-text tone="caution">{preview.floors.below}</s-text>
+            </s-paragraph>
+          ) : null}
+        </s-stack>
       ) : null}
 
       {/* Said once, above the table, rather than on every row that has one.

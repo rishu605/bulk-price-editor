@@ -12,6 +12,10 @@
  * with, until it ends. Pure, and the one place that is decided: the planner, the campaign page,
  * the Apply dialog and Settings all ask it, so the policy the page names is the one the plan used
  * (rule 4).
+ *
+ * A campaign can also choose its own, in its editor or on its page (#816, D30). Then it is the
+ * campaign's from that moment, started or not, and Settings does not reach it: the merchant
+ * chose it for this campaign, and following the store would undo that choice silently.
  */
 
 import { pricesMayBeLive, type CampaignState } from "../lifecycle/transitions";
@@ -26,7 +30,7 @@ export const BREACH_POLICY_LABELS: Readonly<Record<GuardrailViolationPolicy, str
 
 /** What Settings says the field applies to, and what it does not. */
 export const BREACH_POLICY_REACH =
-  "Applies to new campaigns and anything not yet started. A campaign that is running keeps the policy it started with until it ends.";
+  "Applies to new campaigns and anything not yet started, unless a campaign sets its own. A campaign that is running keeps the policy it started with until it ends.";
 
 export interface BreachPolicy {
   /** What the campaign does when a price would breach a floor: what it is planned, and run, with. */
@@ -39,16 +43,26 @@ export interface BreachPolicy {
   kept: boolean;
   /** The store's setting as it is now. */
   store: GuardrailViolationPolicy;
+  /**
+   * The campaign chose this one itself (#816): it is the campaign's whatever its state, and
+   * Settings does not reach it. Absent when it follows the store's, as D21 says.
+   */
+  own?: true;
 }
 
-/** The policy a campaign in `state` runs with, given its own and the store's. */
+/**
+ * The policy a campaign in `state` runs with, given the one it keeps and the store's. `chosen`
+ * is the campaign's own choice, where it made one (#816), which it runs with in every state.
+ */
 export function breachPolicyFor(
   state: CampaignState,
-  own: GuardrailViolationPolicy,
+  kept: GuardrailViolationPolicy,
   store: GuardrailViolationPolicy,
+  chosen?: GuardrailViolationPolicy,
 ): BreachPolicy {
-  const kept = pricesMayBeLive(state);
-  return { policy: kept ? own : store, kept, store };
+  const live = pricesMayBeLive(state);
+  if (chosen) return { policy: chosen, kept: live, store, own: true };
+  return { policy: live ? kept : store, kept: live, store };
 }
 
 /** Whether a move into `to` starts a campaign: it now keeps the store's policy as it is (#789). */
@@ -57,7 +71,11 @@ export function startsKeepingPolicy(from: CampaignState, to: CampaignState): boo
 }
 
 /** The line beside the policy on the campaign page. */
-export function breachPolicyDetail({ kept, policy, store }: BreachPolicy): string {
+export function breachPolicyDetail({ kept, policy, store, own }: BreachPolicy): string {
+  if (own) {
+    const now = policy === store ? "" : ` Settings now says “${BREACH_POLICY_LABELS[store]}”.`;
+    return `This campaign's own choice, which it keeps whatever Settings says.${now}`;
+  }
   if (!kept) {
     return "The store's setting, which this campaign follows until it starts. From then it keeps it until it ends.";
   }
@@ -71,10 +89,25 @@ export function breachPolicyDetail({ kept, policy, store }: BreachPolicy): strin
  * The policy as the Apply dialog restates it. Applying is the moment one that has not started
  * takes the store's for good, so it says so; one already running keeps its own.
  */
-export function breachPolicyAtApply({ kept, policy, store }: BreachPolicy): string {
+export function breachPolicyAtApply({ kept, policy, store, own }: BreachPolicy): string {
   const label = BREACH_POLICY_LABELS[policy];
+  if (own) return ownChoice(policy, store);
   if (!kept) return `${label}: the store's setting, which this campaign keeps until it ends`;
   return policy === store
     ? `${label}: the one it started with`
     : `${label}: the one it started with. Settings now says “${BREACH_POLICY_LABELS[store]}”, which it does not follow`;
+}
+
+/** A campaign's own choice, and what Settings says where that differs (#816). */
+function ownChoice(policy: GuardrailViolationPolicy, store: GuardrailViolationPolicy): string {
+  const label = `${BREACH_POLICY_LABELS[policy]}: this campaign's own choice`;
+  return policy === store ? label : `${label}. Settings says “${BREACH_POLICY_LABELS[store]}”, which it does not follow`;
+}
+
+/**
+ * The policy as a draft in the editor would run with it (#816): its own choice, or the store's,
+ * which it follows until it starts (D21).
+ */
+export function breachPolicyOfDraft(chosen: GuardrailViolationPolicy | undefined, store: GuardrailViolationPolicy): string {
+  return chosen ? ownChoice(chosen, store) : `${BREACH_POLICY_LABELS[store]}: the store's setting, which it follows until it starts`;
 }

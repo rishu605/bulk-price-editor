@@ -33,8 +33,11 @@ import { ExportButton } from "../ExportButton";
 import { ActionRow } from "../ActionRow";
 import type { CampaignDetailProps } from "./props";
 import { Card } from "../Card";
+import { BREACH_POLICY_LABELS, breachPolicyDetail } from "../../lib/campaigns/breach-policy";
+import { SPACE } from "../../lib/ui/spacing";
+import { Secondary } from "../Type";
 
-export function CampaignPreviewTab({ preview, approval, fetcher, busy }: CampaignDetailProps) {
+export function CampaignPreviewTab({ preview, approval, fetcher, busy, floors, breachPolicy }: CampaignDetailProps) {
   // A run is writing this campaign: no plan was made, and none is needed (#803). Or its
   // first plan is still being worked out in the background, and there is nothing to show
   // but why (#812): a table of zeros would read as a campaign that changes nothing.
@@ -116,6 +119,17 @@ export function CampaignPreviewTab({ preview, approval, fetcher, busy }: Campaig
             </s-text>
           </s-paragraph>
         )}
+
+        {/* Which floors and policy these rows were planned with, and whose (#816): the store's,
+            or this campaign's own, which can be tighter or, with the word typed, lower. */}
+        <s-stack gap={SPACE.tight}>
+          <Secondary>
+            Floors: {floors.applied}. {floors.whose}
+          </Secondary>
+          <Secondary>
+            If a price breaches one: {BREACH_POLICY_LABELS[breachPolicy.policy].toLowerCase()}. {breachPolicyDetail(breachPolicy)}
+          </Secondary>
+        </s-stack>
 
         {/* Before Apply: these rows are discounted from, and reverted to, a price the
             merchant has since changed outside the app (#745). */}

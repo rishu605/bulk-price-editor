@@ -75,6 +75,7 @@ export function CampaignHeader({
   zoneShift,
   startConfirmation,
   breachPolicy,
+  floors,
   eta,
   phase,
 }: CampaignDetailProps) {
@@ -368,6 +369,7 @@ export function CampaignHeader({
           busy={busy}
           heldEdits={heldEdits}
           breachPolicy={breachPolicy}
+          floors={floors}
           onConfirm={(confirmation) =>
             fetcher.submit({ intent: "apply", confirmation }, { method: "post" })
           }

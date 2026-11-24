@@ -26,6 +26,7 @@ import {
 import { AppError } from "../../lib/errors/app-error";
 import { logger } from "../../lib/logging/logger";
 import { startsKeepingPolicy } from "../../lib/campaigns/breach-policy";
+import { campaignGuardrailsOf } from "../../lib/campaigns/campaign-floors";
 import { readSettings } from "../settings.server";
 import { recordRecapturedAtSale } from "./recaptured.server";
 
@@ -65,7 +66,8 @@ export async function transitionCampaign(
 ): Promise<TransitionResult> {
   const campaign = await prisma.campaign.findFirstOrThrow({
     where: { id: campaignId, shopId },
-    select: { status: true },
+    // And its guardrails, whose own policy is the one it keeps as it starts (#816).
+    select: { status: true, guardrails: true },
   });
 
   const from = campaign.status as CampaignState;
@@ -88,7 +90,7 @@ export async function transitionCampaign(
   // reads the old state first wins, and the other sees changed: false.
   const updated = await prisma.campaign.updateMany({
     where: { id: campaignId, shopId, status: from },
-    data: { status: to, ...(await keptPolicy(shopId, from, to)) },
+    data: { status: to, ...(await keptPolicy(shopId, from, to, campaign.guardrails)) },
   });
 
   if (updated.count === 0) return { changed: false, from, to };
@@ -109,10 +111,12 @@ export async function transitionCampaign(
  * it follows the store's setting, and from then on it keeps this one while its prices may be up,
  * so changing the setting does not change what it does to prices already on a storefront. Every
  * move into a state with prices live comes through `transitionCampaign` or `claimForSchedule`.
+ * A campaign that chose its own keeps that one instead, as it has since it was saved (#816).
  */
-async function keptPolicy(shopId: string, from: CampaignState, to: CampaignState) {
+async function keptPolicy(shopId: string, from: CampaignState, to: CampaignState, guardrails: unknown) {
   if (!startsKeepingPolicy(from, to)) return {};
-  return { guardrailViolationPolicy: (await readSettings(shopId)).violationPolicy };
+  const own = campaignGuardrailsOf(guardrails).violationPolicy;
+  return { guardrailViolationPolicy: own ?? (await readSettings(shopId)).violationPolicy };
 }
 
 /** The two states that mean "a run has claimed this campaign and may be writing". */
@@ -159,13 +163,13 @@ export async function claimForSchedule(
   actor: string,
 ): Promise<ScheduledClaim | null> {
   const { from: claimable, to, reason } = SCHEDULED_CLAIMS[transition];
-  const campaign = await prisma.campaign.findFirst({ where: { id: campaignId, shopId }, select: { status: true } });
+  const campaign = await prisma.campaign.findFirst({ where: { id: campaignId, shopId }, select: { status: true, guardrails: true } });
   const from = campaign?.status as CampaignState | undefined;
   if (!from || !(claimable as readonly CampaignState[]).includes(from)) return null;
 
   const claimed = await prisma.campaign.updateMany({
     where: { id: campaignId, shopId, status: from },
-    data: { status: to, ...(await keptPolicy(shopId, from, to)) },
+    data: { status: to, ...(await keptPolicy(shopId, from, to, campaign?.guardrails)) },
   });
   if (claimed.count === 0) return null; // someone else took it
 

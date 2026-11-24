@@ -42,7 +42,10 @@ import { CampaignNameField } from "../components/campaign/CampaignNameField";
 import { importErrorCsv } from "../lib/reporting/baseline-errors";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
-import { readSettings, shopCurrency } from "../services/settings.server";
+import { readSettings, shopCurrency, toGuardrails } from "../services/settings.server";
+import { floorsToSave, recordLoosening } from "../services/campaigns/floors.server";
+import { describeFloors, FLOOR_FIELDS, floorFieldsFrom, floorFieldsOf } from "../lib/campaigns/campaign-floors";
+import { CampaignFloorsFields } from "../components/campaign/CampaignFloorsFields";
 import { billingFrom } from "../services/billing.server";
 import { canUseSurface } from "../lib/billing/plans";
 import prisma from "../db.server";
@@ -161,6 +164,8 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
   ]);
 
   const billing = billingFrom(shopRecord);
+  // The store's floors, which a campaign's own start from in Advanced (#816).
+  const storeGuardrails = toGuardrails(settings, currency);
 
   // No preview here, deliberately, and this is load-bearing enough to be worth a
   // paragraph.
@@ -210,6 +215,13 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
     // route. Everything that labels or formats an amount reads this, never `currencies[0]`.
     baseCurrency: currency,
     storeRounding: settings.rounding,
+    // The fields start at the store's floors, or at what the full preview's link carries back,
+    // and the policy at the store's, named (#816). Untouched, the campaign sets none of them.
+    floors: {
+      store: describeFloors(storeGuardrails),
+      policy: settings.violationPolicy,
+      fields: floorFieldsFrom(url.searchParams, floorFieldsOf({}, storeGuardrails, currency)),
+    },
     // What the untouched form describes, built here where it can be built reliably.
     // See the note on the mount effect: reading the form for the *first* request gets a
     // scope that matches nothing (#470).
@@ -424,17 +436,27 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
     schedule,
   };
 
+  // Its own floors and policy (#816). Below the store's only with the word typed, asked as data
+  // as the start's confirmation is, so the form keeps everything typed into it. Before the start's
+  // check, which plans the campaign with them.
+  const floors = await floorsToSave(shop.id, read, {}, actor, "Nothing was created.");
+  if (!floors.ok) return { loosen: floors.ask };
+  input.guardrails = floors.guardrails;
+
   // A dated campaign is started by the scheduler, which cannot ask for the typed
   // confirmation, so the save asks for it instead (#1009): the start's own check, over the
   // campaign as it is about to be stored. Answered as data rather than thrown, so the form
   // keeps everything typed into it and shows the box beside the button.
   if (schedule) {
     const start = await saveStart(shop.id, await unsavedCampaign(shop.id, input), String(form.get("confirmation") ?? ""), actor);
-    if (!start.ok) return { confirm: { unconfirmed: start.unconfirmed, radius: start.radius } };
+    // With the floors' question too, where the word was typed for it, so its box keeps it (#816).
+    if (!start.ok) return { confirm: { unconfirmed: start.unconfirmed, radius: start.radius }, loosen: floors.ask };
     if (start.confirmation) input.startConfirmed = start.confirmation;
   }
 
   const campaign = await createCampaign(shop.id, input, { actor });
+  // Who typed the word for floors below the store's, and what they went below (#816).
+  await recordLoosening(shop.id, campaign.id, actor, floors);
   // Planned in the background as it is created when its scope is too large to plan as its
   // page loads, so the page it lands on finds a plan ready or on its way (#812).
   await requestPlanSummary(shop.id, campaign.id);
@@ -470,6 +492,7 @@ export default function NewCampaign() {
     defaultName,
     firstPreview,
     baseCurrency,
+    floors,
   } = useLoaderData<typeof loader>();
 
   // A dated save the start check asked about (#1009): the box that asks sits by the button.
@@ -1181,6 +1204,16 @@ export default function NewCampaign() {
           />
         </FullRow>
       </FieldGrid>
+
+      {/* Its own floors and policy (#816), starting at the store's: left alone, it sets none and
+          follows the store as every campaign does. Lower than the store's asks for the word. */}
+      <CampaignFloorsFields
+        currency={baseCurrency}
+        initial={floors.fields}
+        storeFloors={floors.store}
+        storePolicy={floors.policy}
+        ask={answer && "loosen" in answer ? answer.loosen : null}
+      />
       </Card>
       )}
 
@@ -1363,7 +1396,8 @@ export const headers: HeadersFunction = (headersArgs) => {
 function queryFrom(fields: FormData): string {
   const params = new URLSearchParams();
   for (const [key, value] of fields.entries()) {
-    if (typeof value !== "string" || key === "name") continue;
+    // Nor the word typed to confirm floors below the store's (#816): a link is not a confirmation.
+    if (typeof value !== "string" || key === "name" || key === FLOOR_FIELDS.word) continue;
     if (value !== "") params.append(key, value);
   }
   return params.toString();
