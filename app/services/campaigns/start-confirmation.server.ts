@@ -31,6 +31,7 @@ import {
   type StartConfirmation,
 } from "../../lib/campaigns/start-confirmation";
 import { AppError } from "../../lib/errors/app-error";
+import { metric } from "../../lib/telemetry/metrics";
 import { planRun } from "../../lib/planning/plan";
 import type { PlanCandidate, PlannedRow, PlanUnchanged } from "../../lib/planning/types";
 import type { ResolvableCampaign } from "../../lib/pricing/types";
@@ -79,6 +80,7 @@ async function planApply(shopId: string, campaign: PlannableCampaign): Promise<S
  * confirmation stored with it covers that. `plan` is the run's own, when the run asks.
  */
 export async function startCheck(shopId: string, campaign: PlannableCampaign, plan?: StartPlan): Promise<StartCheck> {
+  const startedAt = performance.now();
   const planned = plan ?? (await planApply(shopId, campaign));
   if (!planned) return { radius: null, unconfirmed: null };
 
@@ -88,6 +90,16 @@ export async function startCheck(shopId: string, campaign: PlannableCampaign, pl
     unchanged: planned.unchanged,
     campaigns: planned.campaigns,
   });
+  // Timed where it plans for itself, which is what Flow's ten seconds have to fit (#1175).
+  // Measured at 1.9-2.8 s on a laptop for 102,132 variants over two markets; this is
+  // production's own answer.
+  if (!plan) {
+    metric("start.check_ms", Math.round(performance.now() - startedAt), {
+      shopId,
+      campaignId: campaign.id,
+      rows: planned.counts.planned,
+    });
+  }
   return { radius, unconfirmed: unconfirmedStart(radius, startConfirmationOf(campaign.schedule)) };
 }
 
