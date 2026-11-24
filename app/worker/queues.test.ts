@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   deferWhileExecuting,
+  isJobTurn,
   isRunLane,
   jobDedupKey,
   jobOptionsFor,
@@ -215,5 +216,31 @@ describe("the run lanes (#809)", () => {
     // How late a shop's second run starts after its first finishes.
     expect(SHOP_BUSY_RETRY_MS).toBeGreaterThan(0);
     expect(SHOP_BUSY_RETRY_MS).toBeLessThanOrEqual(10_000);
+  });
+});
+
+describe("a chunked run's next turn (#809, D34)", () => {
+  it("is the run's job, keyed as the run, so a ring of the run while it waits is absorbed", () => {
+    const turn = { shopId: "s1", campaignId: "c1", runId: "r1", turn: true };
+    expect(jobDedupKey("execution", turn)).toBe("run:r1");
+  });
+
+  it("is kept as the successor of the job asking for it, and goes behind whatever waits when that job ends", () => {
+    const turn = jobOptionsFor(QUEUE_POLICIES.execution, { shopId: "s1", runId: "r1", turn: true }, { turn: true });
+    expect(turn).toMatchObject({ deduplication: { id: "run:r1", keepLastIfActive: true } });
+    expect(turn).not.toHaveProperty("delay");
+    // Waiting on Shopify, it asks again after a poll's interval rather than at once.
+    expect(jobOptionsFor(QUEUE_POLICIES.execution, { shopId: "s1", runId: "r1", turn: true }, { turn: true, delayMs: 5_000 })).toMatchObject({
+      delay: 5_000,
+    });
+    // A ring is not a turn: it adds nothing while the run's job waits or runs.
+    expect(jobOptionsFor(QUEUE_POLICIES.execution, { shopId: "s1", runId: "r1", turn: true }).deduplication).not.toHaveProperty(
+      "keepLastIfActive",
+    );
+  });
+
+  it("is told apart from every other answer a handler gives", () => {
+    expect(isJobTurn({ turn: { shopId: "s1", runId: "r1", turn: true } })).toBe(true);
+    for (const answer of [undefined, "again", "later"] as const) expect(isJobTurn(answer), String(answer)).toBe(false);
   });
 });

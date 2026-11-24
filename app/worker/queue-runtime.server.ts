@@ -25,6 +25,7 @@ import { metric } from "../lib/telemetry/metrics";
 import { span } from "../lib/observability/otel.server";
 import { withLogContext } from "../lib/logging/context.server";
 import {
+  isJobTurn,
   isRunLane,
   jobOptionsFor,
   QUEUE_NAMES,
@@ -131,12 +132,19 @@ export async function enqueueOrRun(
 
 /**
  * A job run where it was asked for, with every turn it asks for. One whose shop is busy
- * (`later`) is left for the next ring rather than waited on: see `inlineRuntime`.
+ * (`later`) is left for the next ring rather than waited on: see `inlineRuntime`. A chunked
+ * run's next turn (#809, D34) is taken here too, straight after the last: inline, nobody else's
+ * turn comes between them, and the caller is promised the run has been written.
  */
 async function runInline(name: QueueName, ref: JobRef, handler: Handler): Promise<void> {
   for (;;) {
     const result = await traced(name, ref, () => handler(name, ref));
     if (result === "again") continue;
+    if (isJobTurn(result)) {
+      if (result.delayMs) await new Promise((resolve) => setTimeout(resolve, result.delayMs));
+      ref = result.turn;
+      continue;
+    }
     if (result === "later") logger.info("a job's shop is busy; its work waits for the next ring", { queue: name, shopId: ref.shopId });
     return;
   }
@@ -183,6 +191,9 @@ export function redisRuntime(handler: Handler, options: RedisRuntimeOptions): Qu
           // Another turn, asked for while this one still holds its key (#811): stored as its
           // successor and created behind everything already waiting when this one finishes.
           if (result === "again") await add(name, job.data, { again: true });
+          // A chunked run's turn is over and the run goes on (#809, D34): its next turn goes to
+          // the back of this lane, as the successor of this job, so whoever waits takes the slot.
+          if (isJobTurn(result)) await addTurn(name, result.turn, result.delayMs);
           // Its shop is busy (#809): the same job back to wait, so it keeps its deduplication
           // key and a ring meanwhile is absorbed, and its slot goes to another shop now.
           // BullMQ's own way to delay a job from inside it: moved, then `DelayedError`, which
@@ -236,6 +247,16 @@ export function redisRuntime(handler: Handler, options: RedisRuntimeOptions): Qu
     const queue = queues.get(name);
     if (!queue) throw new Error(`No such queue: ${name}`);
     await queue.add(name, ref, jobOptionsFor(QUEUE_POLICIES[name], ref, { again }));
+  }
+
+  /**
+   * A chunked run's next turn (#809, D34): kept as the successor of the job asking for it while
+   * that job holds the run's key, and created behind every job already waiting when it finishes.
+   */
+  async function addTurn(name: QueueName, ref: JobRef, delayMs?: number): Promise<void> {
+    const queue = queues.get(name);
+    if (!queue) throw new Error(`No such queue: ${name}`);
+    await queue.add(name, ref, jobOptionsFor(QUEUE_POLICIES[name], ref, { turn: true, delayMs }));
   }
 
   return {

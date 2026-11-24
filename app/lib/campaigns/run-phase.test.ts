@@ -31,6 +31,13 @@ describe("where a run in flight has got", () => {
     );
   });
 
+  it("counts a run written in chunks across all of them, rather than calling it one operation (#809, D34)", () => {
+    const run = { status: "EXECUTING", writePath: "BULK" as const, writableRows: 62_535, chunked: true };
+    expect(runPhase({ ...run, writtenRows: 0 })).toBe("Writing 0 of 62,535 prices");
+    expect(runPhase({ ...run, writtenRows: 15_000 })).toBe("Writing 15,000 of 62,535 prices");
+    expect(runPhase({ ...run, writtenRows: 62_535 })).toBe("Verifying");
+  });
+
   it("says Verifying once every price is sent, before the run moves its own status", () => {
     expect(runPhase({ status: "EXECUTING", writePath: "SYNC", writtenRows: 60, writableRows: 60 })).toBe("Verifying");
     expect(runPhase({ status: "VERIFYING", writtenRows: 60, writableRows: 60 })).toBe("Verifying");

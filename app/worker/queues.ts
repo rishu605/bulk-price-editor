@@ -142,6 +142,16 @@ export interface JobRef {
    * `campaignId` that release's handler does nothing, and its own tick runs the transition.
    */
   scheduled?: string;
+  /**
+   * The next turn of a chunked run (#809, D34): `runId` is the run, which planned and ledgered
+   * every price in its first turn and writes the next chunk of them in this one. Asks nothing
+   * of the campaign or the schedule: the run's own rows say what is left.
+   *
+   * Read by the release before this one as an execution job for a run that is not QUEUED, which
+   * that release stands down to having done nothing; its reaper then reclaims the waiting run as
+   * Partial, and Resume finishes it.
+   */
+  turn?: boolean;
   /** Who asked, so what the run resolves on their behalf is attributed to them. */
   actor?: string;
   /**
@@ -185,7 +195,24 @@ export interface JobRef {
  * absorbed. Inline there is no queue to go back to, and the work waits where it is recorded --
  * a QUEUED row, a claim, a campaign's schedule -- for the tick that rings it next.
  */
-export type JobResult = void | "again" | "later";
+export type JobResult = void | "again" | "later" | JobTurn;
+
+/**
+ * A chunked run's turn is over and the run goes on (#809, D34): `turn` is the job for its next
+ * one, which goes to the back of the same lane, behind every job waiting there, so another shop's
+ * run takes the slot between two of this run's chunks. Keyed as the run, like the job it follows,
+ * so a ring meanwhile is absorbed. `delayMs` when the next turn has nothing to do sooner: the
+ * run's last bulk operation is still running at Shopify. Inline, the next turn runs at once.
+ */
+export interface JobTurn {
+  turn: JobRef;
+  delayMs?: number;
+}
+
+/** Whether a handler's answer is a chunked run's next turn. */
+export function isJobTurn(result: JobResult): result is JobTurn {
+  return typeof result === "object" && result !== null && "turn" in result;
+}
 
 /**
  * How long a job whose shop is busy waits before it asks again (#809). Short, because it is how
@@ -265,7 +292,11 @@ export function jobDedupKey(name: QueueName, ref: JobRef): string | null {
  * it is read. A drain asking for another turn (`again`) is not: its successor goes to the
  * back of the queue at once, behind the shops that were waiting.
  */
-export function jobOptionsFor(policy: QueuePolicy, ref?: JobRef, { again = false }: { again?: boolean } = {}) {
+export function jobOptionsFor(
+  policy: QueuePolicy,
+  ref?: JobRef,
+  { again = false, turn = false, delayMs = 0 }: { again?: boolean; turn?: boolean; delayMs?: number } = {},
+) {
   return {
     attempts: policy.attempts,
     ...(policy.backoffMs > 0
@@ -283,7 +314,16 @@ export function jobOptionsFor(policy: QueuePolicy, ref?: JobRef, { again = false
       : {}),
     // BullMQ's simple mode: kept until the job completes or fails, so a ring while it waits or
     // runs adds nothing, and the next press after it adds the next job (#808).
-    ...(ref && jobDedupKey(policy.name, ref) ? { deduplication: { id: jobDedupKey(policy.name, ref)! } } : {}),
+    //
+    // A chunked run's next turn is asked for while the job of this turn still holds the run's key
+    // (#809, D34), so it keeps the last one asked for as that job's successor, created behind
+    // everything already waiting the moment this turn finishes -- as a webhook drain's next turn
+    // is. The first turn of a scheduled start holds the schedule's key, not the run's, and its
+    // successor is added at once.
+    ...(ref && jobDedupKey(policy.name, ref)
+      ? { deduplication: { id: jobDedupKey(policy.name, ref)!, ...(turn ? { keepLastIfActive: true } : {}) } }
+      : {}),
+    ...(turn && delayMs > 0 ? { delay: delayMs } : {}),
   };
 }
 

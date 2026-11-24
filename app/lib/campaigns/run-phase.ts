@@ -20,6 +20,8 @@ export interface RunPhaseRow {
   writePath?: "SYNC" | "BULK" | null;
   writtenRows?: number | null;
   writableRows?: number | null;
+  /** Written in chunks, a bulk operation each (#809, D34): its count moves as each one is read. */
+  chunked?: boolean;
 }
 
 /**
@@ -45,8 +47,11 @@ export function runPhase(run: RunPhaseRow): string | null {
   const written = run.writtenRows ?? 0;
   if (rows <= 0) return "Writing prices";
   // A bulk operation writes every row at Shopify and answers once, so it counts none until
-  // it is over: what it is waiting on, rather than "0 of 62,535" for an hour.
-  if (run.writePath === "BULK" && written < rows) return `Writing ${formatCount(rows)} prices as one Shopify bulk operation`;
+  // it is over: what it is waiting on, rather than "0 of 62,535" for an hour. A run written in
+  // chunks is several, each counted as it is read back (D34), so it says how far the run has got.
+  if (run.writePath === "BULK" && written < rows && !run.chunked) {
+    return `Writing ${formatCount(rows)} prices as one Shopify bulk operation`;
+  }
   // Every price sent and answered: the read-back, then tags and market prices, are what is left.
   if (written >= rows) return "Verifying";
   return `Writing ${formatCount(written)} of ${formatCount(rows)} prices`;
