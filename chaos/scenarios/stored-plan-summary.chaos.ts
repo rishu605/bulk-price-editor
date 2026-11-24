@@ -36,7 +36,7 @@ import {
   refreshPlanSummary,
 } from "../../app/services/campaigns/plan-summary.server";
 import type { loader as pageLoader } from "../../app/routes/app.campaigns.$id";
-import type { JobRef, QueueName } from "../../app/worker/queues";
+import { isRunLane, type JobRef, type QueueName } from "../../app/worker/queues";
 import { chaosAdminClient } from "../harness/http-client";
 import { type ChaosContext, fixtureAdminClient, withChaos } from "../harness/scenario";
 
@@ -311,7 +311,7 @@ describe("chaos: the campaign page reads a stored plan (#812)", () => {
       // Apply with nothing to have shown anyone asks for the word, and plans nothing.
       expect((await press(campaignId, "apply")).message).toBe(UNPLANNED_REFUSAL);
       expect(anyPlan()).toBe(0);
-      expect(enqueued.filter((job) => job.name === "execution")).toEqual([]);
+      expect(enqueued.filter((job) => isRunLane(job.name))).toEqual([]);
 
       // The worker plans it; the page reads it.
       await work();
@@ -479,7 +479,8 @@ describe("chaos: the campaign page reads a stored plan (#812)", () => {
       await forgeCurrent(campaignId);
       const queued = await press(campaignId, "apply");
       expect(queued.ok, queued.message).toBe(true);
-      const job = enqueued.find((entry) => entry.name === "execution");
+      // On either run lane: eight prices is the small-run lane's (#809).
+      const job = enqueued.find((entry) => isRunLane(entry.name));
       expect(job?.ref.untypedPress, "the worker was not told the word was not typed").toBe(true);
       const { handleJob } = await import("../../app/worker/handlers.server");
       await expect(handleJob(job!.name, job!.ref)).rejects.toThrow(/said less/);

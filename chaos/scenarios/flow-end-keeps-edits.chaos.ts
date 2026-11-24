@@ -238,9 +238,10 @@ describe("chaos: Flow's End campaign over a price edited by hand", () => {
       expect(answer.status).toBe(200);
       expect(answer.message).toMatch(/background worker is reverting it/);
       expect(answer.message).toMatch(/Any price edited outside Anchor since the campaign set it is left as edited, not reverted\.$/);
+      // Seconds of writing, so the small-run lane (#809).
       expect(enqueued).toEqual([
         {
-          name: "execution",
+          name: "execution-small",
           ref: {
             shopId,
             campaignId,

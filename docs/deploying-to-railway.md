@@ -154,7 +154,7 @@ Each process has its own pool, and every process checks the sum at boot (#810). 
 that matter, and the line that reports them:
 
 ```
-INFO  database pool budget: web 15 + worker 22 + reserve 5 = 42, within max_connections 100 − 3 reserved for superusers = 97 (55 spare)
+INFO  database pool budget: web 15 + worker 24 + reserve 5 = 44, within max_connections 100 − 3 reserved for superusers = 97 (53 spare)
 ```
 
 Over budget is an **error** line ending in what to change; it does not stop the process,
@@ -167,14 +167,22 @@ timeout was asked for and the session did not get it.
 `max_connections` minus the superuser slots. Railway's Postgres runs the stock image, whose
 `max_connections` is 100 — check yours with `SHOW max_connections;`, since a plan or a
 custom config can change it, and the boot line prints what it read. The recommendation,
-against 100: web 15, worker 22, reserve 5, which leaves room for a second web replica.
+against 100: web 15, worker 24, reserve 5, which leaves room for a second web replica.
 
 **Why the worker's is the bigger pool.** It is every queue's as well as the run's: the
-products-webhook drains (#811, ten at once), planning (five), execution and verification
-(two each), sync and audit (one each), and the scheduler's tick, which runs due campaigns
-itself — 22 jobs that can each be holding a connection. The worker's boot line warns when
-`DATABASE_POOL_SIZE_WORKER` is below that count and says what it counted; a run waits out a
-pool timeout by retrying the statement, but this decides how often it has to.
+products-webhook drains (#811, ten at once), planning (five), the two run lanes — `execution`
+and the small-run lane `execution-small` (#809) — and verification (two each), sync and audit
+(one each), and the scheduler's tick — 24 jobs that can each be holding a connection. The
+worker's boot line warns when `DATABASE_POOL_SIZE_WORKER` is below that count and says what it
+counted; a run waits out a pool timeout by retrying the statement, but this decides how often
+it has to.
+
+**The run lanes are capped across every worker, not per process (#809).** Each is two at once
+however many worker replicas run (BullMQ's global concurrency, set by each worker as it
+starts from `QUEUE_POLICIES`), because what a run spends is this pool, and the budget above
+counts one worker. A second replica drains webhooks, plans and syncs faster; it does not run
+more prices at once. Raising either lane is a change to `app/worker/queues.ts` and to this
+budget, together.
 
 **The page timeouts.** Recommended once the budget is set: `DATABASE_POOL_TIMEOUT_WEB_S=2`
 and `DATABASE_STATEMENT_TIMEOUT_WEB_MS=5000`. A page then fails in a couple of seconds with

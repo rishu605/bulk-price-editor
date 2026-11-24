@@ -119,6 +119,7 @@ model Shop {
   errorEvents      ErrorEvent[]
   recaptures       BaselineRecapture[]
   planSummaries    PlanSummary[]
+  leases           ShopLease[]
 
   @@index([uninstalledAt])
   @@map("shops")
@@ -1291,4 +1292,27 @@ model PlanInputChange {
   @@unique([shopId, xid])
   @@index([at])
   @@map("plan_input_changes")
+}
+
+/// The shop's one run, or one sync, at a time (#809, D33): held by whatever is writing for the
+/// shop now -- a worker's job, the tick with Redis down, a campaign page writing fifty variants
+/// -- and taken by a conditional upsert in `shop-lease.server.ts`. A job that finds its shop's
+/// lease held goes back to wait its turn; a run that finds it held on the campaign page is
+/// handed to the worker. A lease, not a lock: renewed while its holder works, and anybody may
+/// take it once it has expired, so a worker that dies holds its shop for a few minutes at most.
+model ShopLease {
+  shopId     String
+  /// `run` or `sync`: a shop's sync never waits for its run, which a revert must never do.
+  kind       String
+  /// Who holds it: the process and the job, so a release or a renewal is only ever its own.
+  holder     String
+  /// The campaign whose run holds it, so a run waiting behind it can say which.
+  campaignId String?
+  acquiredAt DateTime @default(now())
+  expiresAt  DateTime
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@id([shopId, kind])
+  @@map("shop_leases")
 }

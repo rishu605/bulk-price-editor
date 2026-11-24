@@ -27,7 +27,8 @@ import { SCHEDULER_ACTOR } from "../../lib/audit/actor";
 import type { CampaignState } from "../../lib/lifecycle/transitions";
 import { logger } from "../../lib/logging/logger";
 import { enqueueOrRun, type Handler, type QueueRuntime } from "../../worker/queue-runtime.server";
-import type { JobRef } from "../../worker/queues";
+import { laneFor, type JobRef, type RunLane } from "../../worker/queues";
+import { metric } from "../../lib/telemetry/metrics";
 import { enqueueWithin, webQueue } from "../../worker/web-queue.server";
 import { claimForQueue, releaseClaim } from "./lifecycle.server";
 import { clearQueuedRefused, recordQueuedRefused } from "./start-refusal.server";
@@ -48,6 +49,8 @@ export interface QueuedRunOptions {
   untypedPress?: boolean;
   /** The scope's size, as the budget counted it: the row's planned count until the worker plans. */
   scope: number;
+  /** Whether it goes on the small-run lane (#809, `smallRun`), decided from the same count. */
+  small?: boolean;
 }
 
 /** What a queued run was asked to do: on its row (`request`) and in its job. */
@@ -61,6 +64,12 @@ export interface QueuedRequest {
   skipReason?: string;
   keepEdited?: boolean;
   untypedPress?: boolean;
+  /**
+   * On the small-run lane (#809). On the row so a ring puts it on the same lane as the press
+   * did, and the deduplication key absorbs it there; absent on a row from before #809, which
+   * goes on `execution` as every run did.
+   */
+  small?: boolean;
 }
 
 /**
@@ -93,7 +102,7 @@ export async function queueRun(
   campaignId: string,
   /** Why it is not written here, from `handedOver`: names the size and the reason. */
   reason: string,
-  { revert, actor, resume, skipVariantGids, skipReason, keepEdited, untypedPress, scope }: QueuedRunOptions,
+  { revert, actor, resume, skipVariantGids, skipReason, keepEdited, untypedPress, scope, small }: QueuedRunOptions,
 ): Promise<RunOutcome | null> {
   // Everything the request would have run with. A revert that dropped the merchant's "leave
   // as it is" ticks on the way to the worker would overwrite the very edits they asked to
@@ -105,6 +114,7 @@ export async function queueRun(
     ...(skipVariantGids?.length ? { skipVariantGids, skipReason } : {}),
     ...(keepEdited && revert ? { keepEdited: true, skipReason } : {}),
     ...(untypedPress && !revert ? { untypedPress: true } : {}),
+    ...(small ? { small: true } : {}),
   };
 
   const claim = await claimForQueue(
@@ -119,7 +129,7 @@ export async function queueRun(
   // A queued run refused earlier is no longer the latest word on this campaign (#1046): the
   // page reads this one's progress from now on, not that one's refusal.
   await clearQueuedRefused(campaignId);
-  await ring(jobFor({ id: claim.runId, shopId, campaignId, request: { ...request, claimedFrom: claim.from } }));
+  await ring(laneFor(small === true), jobFor({ id: claim.runId, shopId, campaignId, request: { ...request, claimedFrom: claim.from } }));
 
   const verb = revert ? "reverting" : "applying";
   return {
@@ -154,8 +164,13 @@ export function jobFor(row: { id: string; shopId: string; campaignId: string; re
   };
 }
 
+/** The lane a queued run's row names (#809): the small-run lane, or `execution`. */
+export function laneOf(row: { request: unknown }): RunLane {
+  return laneFor(((row.request ?? {}) as Partial<QueuedRequest>).small === true);
+}
+
 /** Asks the worker for a queued run, from the web process. Never throws: the row is the truth. */
-async function ring(ref: JobRef): Promise<void> {
+async function ring(lane: RunLane, ref: JobRef): Promise<void> {
   const queue = webQueue();
   if (!queue) {
     // Development without Redis, or a deployment missing it: the worker's tick runs it.
@@ -163,7 +178,7 @@ async function ring(ref: JobRef): Promise<void> {
     return;
   }
   try {
-    await enqueueWithin(queue, "execution", ref, RUN_ENQUEUE_TIMEOUT_MS);
+    await enqueueWithin(queue, lane, ref, RUN_ENQUEUE_TIMEOUT_MS);
   } catch (error) {
     logger.warn("a queued run was not handed to the worker; its tick will ring it", {
       shopId: ref.shopId,
@@ -199,7 +214,7 @@ export async function ringQueuedRuns(
   });
   for (const row of rows) {
     try {
-      await enqueueOrRun(queue, "execution", jobFor(row), inline, RUN_ENQUEUE_TIMEOUT_MS);
+      await enqueueOrRun(queue, laneOf(row), jobFor(row), inline, RUN_ENQUEUE_TIMEOUT_MS);
     } catch (error) {
       // The run's own failure handling has recorded what it could; one run must not stop the rest.
       logger.error("a queued run rung by the tick failed", {
@@ -222,7 +237,24 @@ export async function adoptQueuedRun(runId: string): Promise<boolean> {
     where: { id: runId, status: "QUEUED" },
     data: { status: "PLANNING", heartbeatAt: new Date() },
   });
-  return adopted.count === 1;
+  if (adopted.count !== 1) return false;
+  await reportRunWait(runId);
+  return true;
+}
+
+/**
+ * How long a run waited, from its press to the worker taking it, by lane and shop (#809):
+ * whatever it waited for -- a slot, or the shop's own run before it, which `queue.wait_ms`
+ * does not count. Best-effort: a metric never changes the run it describes.
+ */
+async function reportRunWait(runId: string): Promise<void> {
+  try {
+    const row = await prisma.campaignRun.findUnique({ where: { id: runId }, select: { shopId: true, createdAt: true, request: true } });
+    if (!row) return;
+    metric("run.wait_ms", Math.max(0, Date.now() - row.createdAt.getTime()), { lane: laneOf(row), shopId: row.shopId });
+  } catch {
+    // A metric is a description of work; failing to take it is not a reason to stop the work.
+  }
 }
 
 /**

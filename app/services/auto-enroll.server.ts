@@ -169,7 +169,7 @@ export async function enrollNewVariants(
  * campaign that has been waiting longest.
  */
 export async function pendingEnrollments(): Promise<
-  Array<{ id: string; shopId: string; shopDomain: string }>
+  Array<{ id: string; shopId: string; shopDomain: string; pending: number; tagged: boolean }>
 > {
   const campaigns = await prisma.campaign.findMany({
     where: { enrollPendingAt: { not: null }, status: { in: ["ACTIVE", "PARTIAL"] } },
@@ -183,6 +183,9 @@ export async function pendingEnrollments(): Promise<
       id: campaign.id,
       shopId: campaign.shop.id,
       shopDomain: campaign.shop.domain,
+      // How many are waiting, and whether each is tagged too: the lane its job goes on (#809).
+      pending: new Set(campaign.enrollPendingVariantGids).size,
+      tagged: campaign.tagKit.length > 0,
     }));
 }
 
