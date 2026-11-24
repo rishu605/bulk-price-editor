@@ -17,6 +17,7 @@
  * The web process still never writes prices -- this is the store, not the app.
  */
 
+import type { ThrottleStatus } from "../../app/lib/shopify/budget";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
@@ -37,7 +38,7 @@ export class FakeShopifyServer implements BlobStore {
   private readonly blobs = new Map<string, string>();
   private port = 0;
 
-  constructor(options: { pollsBeforeComplete?: number } = {}) {
+  constructor(options: { pollsBeforeComplete?: number; throttle?: ThrottleStatus } = {}) {
     this.fake = new FakeShopify({ blobs: this, ...options });
   }
 

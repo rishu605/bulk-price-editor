@@ -33,6 +33,15 @@ Each action does what the equivalent button does, with one difference, below. An
 that could start a campaign the app would have refused would be a way round every safety
 feature in it.
 
+**Every action runs in the background.** Flow waits ten seconds for an answer, so Anchor
+checks what it can at once and hands the rest to its background worker, however small the
+campaign. Flow's run log says the action is under way within a second, and the campaign's
+page shows it as it goes. A request Anchor refuses before it starts (a practice campaign,
+one waiting for approval, one nobody confirmed, a capture while a sale is live) is a failure
+in Flow's run log. One only the run itself can find, such as a guardrail set to block the
+whole campaign, is said on the campaign's page and in the campaigns list once the worker
+reaches it.
+
 **Ending a campaign never writes over a price somebody edited outside Anchor.** When one of
 a campaign's prices has been changed in Shopify since the campaign set it, the Revert button
 doesn't revert straight away. It asks you to review the edits first, on the campaign's
@@ -41,9 +50,8 @@ keeps every edit: each edited price stays as it is, and every other price revert
 includes the edit that put a campaign on hold, and one you chose to leave for now in
 **Prices → Price drift**.
 
-Flow's run log says the edits were kept, and how many when the campaign ended straight away.
-A large campaign is ended in the background, so its count is in the campaign's
-**How it got here** history once it finishes. The campaign's **Ledger** tab lists each kept
+Flow's run log says the edits will be kept. How many were is in the campaign's
+**How it got here** history once the end finishes. The campaign's **Ledger** tab lists each kept
 price, with why it was left. An edit still waiting in **Price drift** stays there for you to
 decide. If you want an edited price reverted too, end the campaign with its Revert button
 instead, and leave that edit unticked.

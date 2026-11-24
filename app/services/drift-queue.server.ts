@@ -41,7 +41,7 @@ import {
 } from "../lib/drift/batch";
 import { chunk } from "../lib/db/chunk";
 import { toAppError } from "../lib/errors/app-error";
-import { estimateMs, overBudget, PAGE_INLINE_BUDGET_MS } from "../lib/execution/inline-budget";
+import { estimateMs, MAX_INLINE_ROWS, overBudget, PAGE_INLINE_BUDGET_MS } from "../lib/execution/inline-budget";
 import type { AdminClient } from "../lib/execution/sync-executor";
 import { LANDED } from "../lib/execution/landed";
 import { formatCount } from "../lib/format/display";
@@ -339,6 +339,10 @@ async function putBackTooLong(
   budgetMs: number,
 ): Promise<string | null> {
   const variants = [...new Set(events.map((event) => event.variantGid))];
+  // A put-back is a run, and the page writes a run of at most fifty variants (D29, #808).
+  if (variants.length > MAX_INLINE_ROWS) {
+    return `Putting back ${prices(variants.length)} is more than the ${formatCount(MAX_INLINE_ROWS)} this page writes while you wait.`;
+  }
   let products = 0;
   if (variants.length <= DEFAULT_THRESHOLD) {
     const [row] = await prisma.$queryRaw<Array<{ count: bigint }>>`

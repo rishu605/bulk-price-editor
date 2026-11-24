@@ -28,6 +28,14 @@ export const DRAFT_DEFAULTS = {
   percentMagnitude: "20",
   /** The money equivalent of the same. */
   fixedMagnitude: "10",
+  /* What the rules from cost and from the compare-at start at (#817): twice cost, a 30%
+     margin, and 20% off the compare-at, the same 20 the percentage starts at. */
+  /** Times cost. */
+  markup: "2",
+  /** Margin on the selling price, in percent. */
+  margin: "30",
+  /** Percent off the compare-at. */
+  offCompareAt: "20",
   /** A strike-through by default: a sale that does not look like one converts worse. */
   compareAt: "set-to-baseline",
   /** Only matters once two campaigns overlap. */

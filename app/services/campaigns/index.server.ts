@@ -8,7 +8,9 @@
 export { createCampaign, toResolvable, astOf, IS_PRACTICE } from "./model.server";
 export { loadCandidates, productMapFor, titleMapFor } from "./candidates.server";
 export { pagePreview, previewCampaign, type PreviewOptions } from "./preview.server";
-export { runCampaign, runToResume, type RunOptions } from "./run.server";
+export { runToResume, type RunOptions } from "./run.server";
+// Routes start runs here, never through `runCampaign` (D29, #808).
+export { startRun, type RunCaller } from "./start-run.server";
 export { campaignRuns, runLedger } from "./history.server";
 export { revertVariant, reinstateVariant } from "./variant-revert.server";
 export {

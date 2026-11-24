@@ -8,10 +8,11 @@
  * 200 to a refusal -- a green run log for something that never happened -- and let a
  * deterministic throw become a 5xx that Flow then repeated for a day and a half.
  *
- * So: work that will not finish well inside ten seconds goes to the worker; a refusal is a
- * 4xx naming the campaign and the reason; only a failure that can clear on its own is a
- * 5xx or 429; and every request, refused or not, leaves an activity entry, so "what did
- * Flow ask for?" is answerable from inside Anchor.
+ * So: every price write and every capture Flow asks for goes to the worker, whatever its
+ * size (D29, #808), and Flow hears 200 once it is queued; a refusal is a 4xx naming the
+ * campaign and the reason; only a failure that can clear on its own is a 5xx or 429; and
+ * every request, refused or not, leaves an activity entry, so "what did Flow ask for?" is
+ * answerable from inside Anchor.
  */
 
 import prisma from "../../db.server";
@@ -21,33 +22,6 @@ import { toAppError } from "../../lib/errors/app-error";
 import { countOf, formatCount } from "../../lib/format/display";
 import { logger } from "../../lib/logging/logger";
 import type { RunOutcome } from "../campaigns/types";
-
-/**
- * How many variants a Flow baseline capture takes on before answering; a larger capture
- * is handed to the background worker (#773). Capturing writes no prices, so the price
- * budget below does not apply to it.
- */
-export const FLOW_INLINE_ROWS = 2_000;
-
-/**
- * How many Shopify reads a Flow capture may make for wholesale ladders before answering
- * (#1092). A wholesale price is baselined with its quantity ladder or not at all, and the
- * ladder is read from Shopify, 25 prices a read (`LADDER_READ_VARIANTS`). Four reads -- a
- * hundred wholesale prices -- is a second or two on a Plus store, whose bucket and restore
- * rate leave a read of this cost unthrottled, and B2B catalogues are a Plus feature. A
- * scope needing more goes to the worker, as a large capture does.
- */
-export const FLOW_INLINE_LADDER_READS = 4;
-
-/**
- * How long a Flow action may spend writing prices before answering (#790).
- *
- * Half of Flow's ten seconds, leaving the rest for authentication, planning and
- * read-back. At the measured cost of a product on the sync path that is a handful of
- * products; anything larger is handed to the background worker and answered at once.
- * See `inline-budget.ts`.
- */
-export const FLOW_INLINE_BUDGET_MS = 5_000;
 
 /** Kept beside the scheduler's, because the run tells the two apart from a person (#1009). */
 export { FLOW_ACTOR };

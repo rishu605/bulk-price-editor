@@ -54,7 +54,7 @@ validate first.
 
 | ID | Capability | Priority | Requirements |
 |---|---|---|---|
-| A-2.1 | Filter builder | core | Conditions: collection, tag (AND/OR groups), vendor, type, status, title/SKU/barcode contains, price range, compare-at presence, cost presence, inventory qty ≶, created/updated date. Composes as (group OR group) where group = AND of conditions. Live debounced match count + 10-row sample. |
+| A-2.1 | Filter builder | core | Conditions: collection, tag (AND/OR groups), vendor, type, status, title/SKU/barcode contains, price range, compare-at presence, cost presence, inventory qty ≶, created/updated date. Composes as (group OR group) where group = AND of conditions. Live debounced match count + 10-row sample. *Later (D32): price range and compare-at presence, which read prices campaigns write; created/updated date, which the catalogue index does not hold.* |
 | A-2.2 | Saved segments | core | Named, reusable. Dynamic (re-evaluated at run/enroll time) or frozen (variant list pinned). Shows referencing campaigns; deletion blocked while referenced. |
 | A-2.3 | Manual selection | core | Product/variant picker with search; mixes with filters; per-campaign exclusion list. |
 | A-2.4 | CSV as filter | core | Upload SKUs/handles/gids; unmatched rows reported; result becomes a frozen segment. |
@@ -63,9 +63,9 @@ validate first.
 
 | ID | Capability | Priority | Requirements |
 |---|---|---|---|
-| A-3.1 | Adjustment rules | core | From baseline: ±%, ±fixed, set exact. From cost: × multiplier, + margin %. From compare-at: −%. Optional per-segment rule rows. All arithmetic in integer minor units with currency-aware precision. |
+| A-3.1 | Adjustment rules | core | From baseline: ±%, ±fixed, set exact. From cost: × multiplier, + margin %. From compare-at: −%. Optional per-segment rule rows *(later, D32: no planner resolves a variant's segments)*. All arithmetic in integer minor units with currency-aware precision. |
 | A-3.2 | Rounding | core | Per-currency profiles: charm endings (.99/.95/.90/.00), step rounding (nearest 1/5/10), direction, zero-decimal currencies (JPY, KRW). Store default + per-campaign override. |
-| A-3.3 | Compare-at policy | core | Per campaign: set to baseline price (strike-through), set/adjust by rule, clear, or leave. Validation blocks compare-at ≤ price; policy on violation: skip / clear / block. |
+| A-3.3 | Compare-at policy | core | Per campaign: set to baseline price (strike-through), set/adjust by rule *(later, D32)*, clear, or leave. Validation blocks compare-at ≤ price; policy on violation: skip / clear / block. |
 | A-3.4 | Surfaces | core | Base always; Markets (per-price-list, incl. per-market compare-at and per-currency rounding) on Markets tier; B2B (catalog price lists + quantity breaks) on Wholesale tier *(launch+)*. Any subset; preview and ledger are per-surface. |
 | A-3.5 | Scheduling | core | Run now / at datetime / window / recurring (weekly, monthly, interval; skip-next; per-occurrence preview). Store-timezone aware incl. DST. Revert buffer. End = resolver recompute, not blind restore. |
 | A-3.6 | Conflict resolution | core | Priority integer (default 100); winner per variant×surface = highest priority, tie → latest start, tie → id. Overlap surfaced at scheduling time with resolved-winner preview. Explicit stacking opt-in is *later*. |

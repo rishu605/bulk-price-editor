@@ -14,14 +14,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const { prisma, readSettings } = vi.hoisted(() => ({
   prisma: {
     campaign: { findFirstOrThrow: vi.fn(), findFirst: vi.fn(), updateMany: vi.fn() },
+    campaignRun: { create: vi.fn() },
     auditLogEntry: { create: vi.fn(), findFirst: vi.fn() },
+    $transaction: vi.fn(),
   },
   readSettings: vi.fn(),
 }));
 vi.mock("../../db.server", () => ({ default: prisma }));
 vi.mock("../settings.server", () => ({ readSettings }));
 
-import { claimForSchedule, transitionCampaign } from "./lifecycle.server";
+import { claimForQueue, claimForSchedule, transitionCampaign } from "./lifecycle.server";
 
 const SHOP = "shop_1";
 
@@ -30,6 +32,8 @@ beforeEach(() => {
   readSettings.mockResolvedValue({ violationPolicy: "block" });
   prisma.campaign.updateMany.mockResolvedValue({ count: 1 });
   prisma.auditLogEntry.findFirst.mockResolvedValue(null);
+  prisma.campaignRun.create.mockResolvedValue({ id: "run_1" });
+  prisma.$transaction.mockImplementation((work: (tx: typeof prisma) => unknown) => work(prisma));
 });
 
 const written = () => prisma.campaign.updateMany.mock.calls[0]![0].data;
@@ -45,6 +49,38 @@ describe("the move that starts a campaign writes the store's policy beside the s
     prisma.campaign.findFirst.mockResolvedValue({ status: "SCHEDULED" });
     await claimForSchedule(SHOP, "c1", "apply", "system");
     expect(written()).toEqual({ status: "APPLYING", guardrailViolationPolicy: "block" });
+  });
+
+  it("when a press is claimed for the queue", async () => {
+    prisma.campaign.findFirstOrThrow.mockResolvedValue({ status: "DRAFT" });
+    await claimForQueue(SHOP, "c1", "APPLYING", QUEUED, { reason: "apply requested", actor: "staff:1" });
+    expect(written()).toEqual({ status: "APPLYING", guardrailViolationPolicy: "block" });
+  });
+});
+
+/** A press over fifty variants, which the worker writes (#808). */
+const QUEUED = { kind: "APPLY" as const, plannedRows: 500, request: {} };
+
+describe("a campaign with a policy of its own keeps that one instead (#816)", () => {
+  const guardrails = { violationPolicy: "clamp" };
+
+  it("pressed by hand", async () => {
+    prisma.campaign.findFirstOrThrow.mockResolvedValue({ status: "DRAFT", guardrails });
+    await transitionCampaign(SHOP, "c1", "APPLYING", { reason: "apply requested", actor: "staff:1" });
+    expect(written()).toEqual({ status: "APPLYING", guardrailViolationPolicy: "clamp" });
+  });
+
+  it("at a scheduled start", async () => {
+    prisma.campaign.findFirst.mockResolvedValue({ status: "SCHEDULED", guardrails });
+    await claimForSchedule(SHOP, "c1", "apply", "system");
+    expect(written()).toEqual({ status: "APPLYING", guardrailViolationPolicy: "clamp" });
+  });
+
+  it("claimed for the queue, which the worker then plans under", async () => {
+    prisma.campaign.findFirstOrThrow.mockResolvedValue({ status: "DRAFT", guardrails });
+    await claimForQueue(SHOP, "c1", "APPLYING", QUEUED, { reason: "apply requested", actor: "staff:1" });
+    expect(written()).toEqual({ status: "APPLYING", guardrailViolationPolicy: "clamp" });
+    expect(readSettings).not.toHaveBeenCalled();
   });
 });
 

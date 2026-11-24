@@ -143,6 +143,34 @@ export class BulkSubmissionError extends AppError {
   }
 }
 
+/**
+ * Shopify will not run bulk mutations for this app at all (#1188).
+ *
+ * Since 12 Nov 2026 a public app without an IP allowlist may not start one, and any app
+ * that has started none for 31 days has to have them enabled again in the Dev Dashboard.
+ * Either way Shopify answers `bulkOperationRunMutation` with "Access denied for
+ * bulkOperationRunMutation field", having run nothing. That said nothing about a session,
+ * and the keyword classifier read it as one: every apply over 1,000 prices went Partial
+ * with "Your session expired" and wrote nothing. It is a refusal of the path, not of the
+ * prices, so the caller writes the same rows one call per product instead.
+ */
+export class BulkMutationsDeniedError extends BulkSubmissionError {
+  constructor(detail: string) {
+    super(
+      "Shopify is not letting this app send price changes in bulk right now, so none were sent that way. " +
+        "No prices were changed by it.",
+      detail,
+    );
+    this.name = "BulkMutationsDeniedError";
+  }
+}
+
+/** Shopify's answer to an app that may not run bulk mutations, as `request` throws it. */
+export function isBulkMutationDenied(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /access denied for bulkOperationRunMutation\b/i.test(message);
+}
+
 export interface SubmitOptions {
   client: AdminClient;
   upload: Uploader;
@@ -272,7 +300,10 @@ export async function submitBulkMutation(
         }),
       isThrottledError,
       { maxAttempts, sleep },
-    );
+    ).catch((error: unknown) => {
+      if (isBulkMutationDenied(error)) throw new BulkMutationsDeniedError(error instanceof Error ? error.message : String(error));
+      throw error;
+    });
     payload = submitted.data?.bulkOperationRunMutation;
 
     const submitErrors = payload?.userErrors ?? [];

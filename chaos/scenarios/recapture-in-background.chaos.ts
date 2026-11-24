@@ -1,6 +1,5 @@
 /**
- * The recapture page hands a recapture with too many ladder reads to the worker, and follows
- * it there (#1105).
+ * The recapture page hands every recapture to the worker, and follows it there (#1105, #808).
  *
  * Since #1071 a wholesale price is recaptured with its quantity ladder or not at all, and the
  * ladder is read from Shopify, 25 prices a read, one read after another (#704). The page ran
@@ -8,14 +7,16 @@
  * -- minutes -- and a "502" past Railway's five while the recapture carried on. Flow's capture
  * already hands such a scope to the worker (#1092); the page had no such path.
  *
- * Now a recapture needing more reads than `PAGE_INLINE_LADDER_READS` -- counted by
- * `ladderReadsToCapture`, as Flow counts -- is checked in the request, then queued, and the
- * page follows its row: the step it is on and how far it has got, then what it did or why it
- * did not. The worker checks it again before writing, and refuses where the page can see.
+ * #1105 queued a recapture needing more reads than the page waited on. Since D29 (#808) a
+ * baseline capture never runs in a web request, whatever its size: every recapture is checked
+ * in the request, then queued, and the page follows its row -- the step it is on and how far it
+ * has got, then what it did or why it did not. The worker checks it again before writing, and
+ * refuses where the page can see. With no worker queue the row waits, and the worker's tick
+ * runs it.
  *
- * Driven through the page's own loader and action, the status route it polls and the
- * worker's own handler: `authenticate.admin` is replaced, the web queue records its jobs,
- * and the page's ladder budget is made small enough for two catalogues to be over it.
+ * Driven through the page's own loader and action, the status route it polls, the worker's
+ * own handler and its tick's ring: `authenticate.admin` is replaced, and the web queue records
+ * its jobs.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -25,6 +26,8 @@ import type { AdminClient } from "../../app/lib/execution/sync-executor";
 import { captureBaselines } from "../../app/services/baselines.server";
 import { syncMarkets } from "../../app/services/markets-sync.server";
 import { reconcile } from "../../app/services/reconciliation.server";
+import { ringQueuedRecaptures, STRANDED_RECAPTURE_AFTER_MS } from "../../app/services/recapture-job.server";
+import { inlineRuntime } from "../../app/worker/queue-runtime.server";
 import type { JobRef, QueueName } from "../../app/worker/queues";
 import { chaosAdminClient } from "../harness/http-client";
 import { type ChaosContext, fixtureAdminClient, withChaos } from "../harness/scenario";
@@ -32,7 +35,6 @@ import { type ChaosContext, fixtureAdminClient, withChaos } from "../harness/sce
 let pending = { shop: "", endpoint: "" };
 let session = true;
 let queue = true;
-let inlineLadderReads = 1;
 const enqueued: Array<{ name: QueueName; ref: JobRef }> = [];
 /** What the page's status poll said as each ladder read went out, while one is watched. */
 const seen: string[] = [];
@@ -78,15 +80,6 @@ vi.mock("../../app/worker/web-queue.server", async (importOriginal) => ({
       : null,
 }));
 
-vi.mock("../../app/lib/execution/inline-budget", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../app/lib/execution/inline-budget")>();
-  return {
-    ...actual,
-    get PAGE_INLINE_LADDER_READS() {
-      return inlineLadderReads;
-    },
-  };
-});
 
 /**
  * The client, telling the scenario what the page would see as each ladder read leaves: the
@@ -110,7 +103,6 @@ beforeEach(() => {
   watching = null;
   session = true;
   queue = true;
-  inlineLadderReads = 1;
 });
 
 const CATALOG = { catalog: { products: 4, variantsPerProduct: 1 }, percent: -20 } as const;
@@ -238,7 +230,7 @@ async function runTheJob() {
 
 const recapturedCount = (shopId: string) => prisma.baseline.count({ where: { shopId, source: "RECAPTURE" } });
 
-describe("chaos: a recapture from the page with more ladder reads than the page can wait on (#1105)", () => {
+describe("chaos: a recapture from the page is the worker's (#1105, #808)", () => {
   it("is checked, handed to the worker, followed step by step, and recaptures every wholesale price with its ladder", async () => {
     await withChaos("recapture-in-background", CATALOG, async (chaos) => {
       const { shopId, domain } = chaos.fixture;
@@ -246,14 +238,13 @@ describe("chaos: a recapture from the page with more ladder reads than the page 
 
       const page = await load();
       expect(page.assessment.scope).toBe(4);
-      // Two catalogues, two reads: one more than this budget.
       const answer = await press({ segment: "", scope: String(page.assessment.scope) });
 
-      expect(enqueued, "the recapture over the page's ladder budget was not handed to the worker").toEqual([
+      expect(enqueued, "the recapture was not handed to the worker").toEqual([
         { name: "sync", ref: { shopId, recaptureId: answer.recapture } },
       ]);
       expect(answer.ok, answer.message).toBe(true);
-      expect(answer.message).toMatch(/^Recapturing 4 variants in the background: reading their wholesale prices' quantity breaks/);
+      expect(answer.message).toMatch(/^Recapturing 4 variants in the background\. This page shows each step as it goes/);
       expect(chaos.fake.ladderReads, "the request read the ladders it handed over").toBe(0);
       expect(await recapturedCount(shopId), "the request recaptured what it handed over").toBe(0);
 
@@ -426,29 +417,29 @@ describe("chaos: a recapture from the page with more ladder reads than the page 
     });
   });
 
-  it("runs while the page waits, as it always did, under the budget or with no worker queue", async () => {
-    await withChaos("recapture-in-background-inline", CATALOG, async (chaos) => {
+  it("never runs in the page's request, however small, and with no worker queue the worker's tick runs it", async () => {
+    await withChaos("recapture-in-background-no-queue", CATALOG, async (chaos) => {
       const { shopId } = chaos.fixture;
       await wholesaleChangedAfterTheSync(chaos);
 
-      inlineLadderReads = 2;
-      const within = await press({ segment: "", scope: "4" });
-      expect(enqueued, "a recapture within the budget was handed to the worker").toEqual([]);
-      expect(within).toMatchObject({ ok: true, message: expect.stringMatching(/^Recaptured 4 baselines .* including 4 wholesale prices/) });
-      expect(within.recapture).toBeUndefined();
-      expect(await wholesaleBaselines(chaos)).toEqual(recaptured(chaos));
-
-      // Over the budget with nowhere to send it: here, as before (#1105 changes nothing without a queue).
-      inlineLadderReads = 1;
+      // Nowhere to send it. It used to run here: now the row waits for the worker.
       queue = false;
       const reads = chaos.fake.ladderReads;
-      const noWorker = await press({ segment: "", scope: "4" });
-      expect(noWorker.ok, noWorker.message).toBe(true);
-      expect(chaos.fake.ladderReads, "the recapture did not run here").toBeGreaterThan(reads);
-      // Everything it read is what the first one recorded, so nothing is superseded again (#781).
-      expect(noWorker.message).toBe("Recaptured 0 baselines across 4 variants. 8 were already correct.");
-      expect(await recapturedCount(shopId)).toBe(4);
-      expect(await prisma.baselineRecapture.count({ where: { shopId, finishedAt: null } }), "an inline recapture held the shop after it ended").toBe(0);
+      const answer = await press({ segment: "", scope: "4" });
+      expect(answer.ok, answer.message).toBe(true);
+      expect(answer.recapture).toBeTruthy();
+      expect(chaos.fake.ladderReads, "the recapture ran in the request").toBe(reads);
+      expect(await recapturedCount(shopId)).toBe(0);
+      expect(await pollStatus(answer.recapture!)).toMatchObject({ running: true, text: "Waiting for the background worker" });
+
+      // The worker's tick, with no Redis of its own, runs it.
+      const { handleJob } = await import("../../app/worker/handlers.server");
+      const now = new Date(Date.now() + STRANDED_RECAPTURE_AFTER_MS + 1_000);
+      expect(await ringQueuedRecaptures(inlineRuntime(handleJob), handleJob, { now, shopId })).toBe(1);
+      expect(await wholesaleBaselines(chaos)).toEqual(recaptured(chaos));
+      expect(await pollStatus(answer.recapture!)).toMatchObject({ running: false, failure: null });
+      // And never twice.
+      expect(await ringQueuedRecaptures(inlineRuntime(handleJob), handleJob, { now, shopId })).toBe(0);
     });
   });
 });

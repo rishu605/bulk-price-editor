@@ -51,6 +51,14 @@ export const HEARTBEAT_EVERY_MS = Math.min(5_000, Math.floor(STALE_AFTER_MS / 10
 /** Runs that have not finished and therefore have something left to reclaim. */
 const NON_TERMINAL = ["PLANNING", "QUEUED", "EXECUTING", "VERIFYING"] as const;
 
+/**
+ * The ones with a process behind them, which can die. A QUEUED run has none yet: it is a row
+ * waiting for the worker (#808), however long that takes, and the tick rings it rather than
+ * reclaiming it (`ringQueuedRuns`). Reclaimed, a run waiting behind another shop's would read
+ * Partial with nothing written, and its job would then find nothing to run.
+ */
+const RECLAIMABLE = ["PLANNING", "EXECUTING", "VERIFYING"] as const;
+
 export interface Liveness {
   heartbeatAt: Date | null;
   startedAt: Date | null;
@@ -127,7 +135,7 @@ export async function reclaimStaleRuns(
   // construction -- and if it ever is not, that unbounded growth is exactly the
   // condition this function exists to clear.
   const candidates = await prisma.campaignRun.findMany({
-    where: { status: { in: [...NON_TERMINAL] }, ...(scope.shopId ? { shopId: scope.shopId } : {}) },
+    where: { status: { in: [...RECLAIMABLE] }, ...(scope.shopId ? { shopId: scope.shopId } : {}) },
     select: {
       id: true,
       shopId: true,

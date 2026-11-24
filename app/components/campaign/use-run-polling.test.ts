@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 
 import { sourceOf } from "../../lib/testing/source";
-import { etaFrom, finished, IN_FLIGHT } from "./useRunPolling";
+import { etaFrom, finished, IN_FLIGHT, phaseFrom, RUN_DONE } from "./useRunPolling";
 
 describe("a page following a run", () => {
   it("reloads once the run it is showing has ended", () => {
@@ -58,11 +58,29 @@ describe("a page following a run", () => {
     }
   });
 
-  it("asks the status route for the estimate, which asks the run only while one writes (#820)", () => {
-    expect(sourceOf("app/routes/app.campaigns.$id.tsx")).toMatch(/const eta = useRunPolling\(data\.campaignId, state\)/);
-    expect(sourceOf("app/routes/app.campaign-status.tsx")).toMatch(
-      /eta: campaign && IN_FLIGHT\.has\(campaign\.status\) \? await runEtaOf\(campaign\.shopId, id\) : null/,
+  it("asks the status route for the estimate and the phase, which asks the run only while one writes (#820, #808)", () => {
+    expect(sourceOf("app/routes/app.campaigns.$id.tsx")).toMatch(/const \{ eta, phase, done \} = useRunPolling\(data\.campaignId, state\)/);
+    const status = sourceOf("app/routes/app.campaign-status.tsx");
+    expect(status).toMatch(
+      /const progress = campaign && IN_FLIGHT\.has\(campaign\.status\) \? await runProgressOf\(campaign\.shopId, id\) : null/,
     );
+    expect(status).toContain("eta: progress?.eta ?? null");
+    expect(status).toContain("phase: progress?.phase ?? null");
+  });
+
+  it("shows the latest answer's phase only while the page is mid-run (#808)", () => {
+    expect(phaseFrom("APPLYING", { phase: "Writing 2 of 60 prices" })).toBe("Writing 2 of 60 prices");
+    expect(phaseFrom("REVERTING", { phase: "Queued" })).toBe("Queued");
+    expect(phaseFrom("APPLYING", undefined)).toBeNull();
+    for (const state of ["ACTIVE", "PARTIAL", "COMPLETED"]) expect(phaseFrom(state, { phase: "Verifying" }), state).toBeNull();
+  });
+
+  it("says Done once the run it watched has finished cleanly, in place of the answer it was given when it was queued (#808)", () => {
+    expect(RUN_DONE).toMatchObject({ ok: true });
+    expect(RUN_DONE.message).toMatch(/^Done\. The background worker has finished/);
+    expect(sourceOf("app/routes/app.campaigns.$id.tsx")).toContain("<ResultBanner result={done ? RUN_DONE : fetcher.data} />");
+    // Not after one that stopped part-way: the page's Partial banner says that.
+    expect(sourceOf("app/components/campaign/useRunPolling.ts")).toContain('new Set(["ACTIVE", "COMPLETED"])');
   });
 
   it("is what the campaign page uses, and it polls the light endpoint, not the page", () => {

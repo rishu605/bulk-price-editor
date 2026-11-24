@@ -59,6 +59,7 @@ export const INSTRUMENTS: Record<Metric, "counter" | "histogram" | "gauge"> = {
   // 102k run), and only a histogram can answer a percentile.
   "db.pool_wait_ms": "histogram",
   "db.transient_retries": "counter",
+  "bulk.mutations_denied": "counter",
 };
 
 let enabled = false;

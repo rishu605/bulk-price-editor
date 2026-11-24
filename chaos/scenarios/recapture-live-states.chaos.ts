@@ -8,7 +8,9 @@
  * Flow recapturing a held campaign's variants was told "safe", and the sale prices became
  * the baseline: permanent, and compounded by every campaign afterwards.
  *
- * Driven through the Flow action itself; only `authenticate.flow` is replaced.
+ * Driven through the Flow action itself; only `authenticate.flow` is replaced, and the web
+ * queue, with a recorder whose jobs the worker's own handler runs: every capture Flow asks for
+ * is the worker's since D29 (#808), which checks again before it writes.
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -16,6 +18,7 @@ import { describe, expect, it, vi } from "vitest";
 import prisma from "../../app/db.server";
 import { PRICES_MAY_BE_LIVE } from "../../app/lib/lifecycle/transitions";
 import { planRecapture } from "../../app/services/recapture.server";
+import type { JobRef, QueueName } from "../../app/worker/queues";
 import { withChaos } from "../harness/scenario";
 
 let pending = { shop: "", segmentId: "" };
@@ -29,6 +32,21 @@ vi.mock("../../app/shopify.server", () => ({
   },
 }));
 
+const enqueued: Array<{ name: QueueName; ref: JobRef }> = [];
+vi.mock("../../app/worker/web-queue.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../app/worker/web-queue.server")>()),
+  webQueue: () => ({
+    async enqueue(name: QueueName, ref: JobRef) {
+      enqueued.push({ name, ref });
+    },
+    async depths() {
+      return {};
+    },
+    async close() {},
+  }),
+}));
+
+/** Flow's Capture baselines, and the worker's run of whatever it queued. */
 async function flowCapture() {
   const { action } = await import("../../app/routes/flow.actions.capture-baselines");
   await action({
@@ -36,6 +54,8 @@ async function flowCapture() {
     params: {},
     context: {},
   } as never);
+  const { handleJob } = await import("../../app/worker/handlers.server");
+  for (const job of enqueued.splice(0)) await handleJob(job.name, job.ref);
 }
 
 describe("chaos: recapture while a campaign's prices may be live", () => {

@@ -98,7 +98,12 @@ export type Metric =
    * `outcome` (#810). Retried ones are the pool under pressure and the run surviving it;
    * any `gave_up` is a run that went Partial because of load.
    */
-  | "db.transient_retries";
+  | "db.transient_retries"
+  /**
+   * A run Shopify refused bulk mutations to, written one call per product instead (#1188).
+   * Any at all means the app has lost bulk access: no IP allowlist, or none run for 31 days.
+   */
+  | "bulk.mutations_denied";
 
 export interface MetricLabels {
   shopId?: string;
