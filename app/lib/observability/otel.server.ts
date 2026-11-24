@@ -60,6 +60,7 @@ export const INSTRUMENTS: Record<Metric, "counter" | "histogram" | "gauge"> = {
   "db.pool_wait_ms": "histogram",
   "db.transient_retries": "counter",
   "bulk.mutations_denied": "counter",
+  "start.check_ms": "histogram",
 };
 
 let enabled = false;

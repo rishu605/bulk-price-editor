@@ -418,7 +418,16 @@ export async function marketBaselines(
   list: MarketList,
   variantGids: string[],
   client: AdminClient,
-): Promise<{ prices: Map<string, Money>; compareAts: Map<string, Money>; moved: string[]; movedBy: MovedCause; stale: string[]; ladderUnread: boolean }> {
+): Promise<{
+  prices: Map<string, Money>;
+  compareAts: Map<string, Money>;
+  moved: string[];
+  movedBy: MovedCause;
+  stale: string[];
+  ladderUnread: boolean;
+  /** How many it recorded just now, which a check made before this call could not count (#1175). */
+  recorded: number;
+}> {
   // Chunked (#810): a whole market's variants in one `IN` list, plus four filters, is the
   // bind-ceiling failure of #346 on any market past 32,763 variants.
   const stored = await inChunks(variantGids, (batch) =>
@@ -461,7 +470,7 @@ export async function marketBaselines(
   const stale = unreadable.map((row) => row.variantGid);
   const unread = new Set(stale);
   const missing = variantGids.filter((gid) => !out.has(gid) && !unread.has(gid));
-  if (missing.length === 0) return { prices: out, compareAts, moved: [], movedBy: "store-price", stale, ladderUnread: false };
+  if (missing.length === 0) return { prices: out, compareAts, moved: [], movedBy: "store-price", stale, ladderUnread: false, recorded: 0 };
 
   const { moved, cause: movedBy } = await movedSinceBaseline(shopId, list, missing);
   const { captured, ladderUnread } = await captureMarketBaselines(
@@ -476,7 +485,7 @@ export async function marketBaselines(
     if (baseline.compareAt) compareAts.set(variantGid, baseline.compareAt);
   }
 
-  return { prices: out, compareAts, moved: [...moved], movedBy, stale, ladderUnread };
+  return { prices: out, compareAts, moved: [...moved], movedBy, stale, ladderUnread, recorded: captured.size };
 }
 
 /**
