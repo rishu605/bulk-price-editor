@@ -103,7 +103,12 @@ export type Metric =
    * A run Shopify refused bulk mutations to, written one call per product instead (#1188).
    * Any at all means the app has lost bulk access: no IP allowlist, or none run for 31 days.
    */
-  | "bulk.mutations_denied";
+  | "bulk.mutations_denied"
+  /**
+   * How long the start check took where it plans for itself: Flow's start, answered inside
+   * Flow's ten seconds, and a save with dates (#1175). With the count it planned, never a price.
+   */
+  | "start.check_ms";
 
 export interface MetricLabels {
   shopId?: string;
