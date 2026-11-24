@@ -31,6 +31,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import prisma from "../../app/db.server";
+import { SCHEDULER_ACTOR } from "../../app/lib/audit/actor";
 import { DANGEROUS_PHRASE } from "../../app/lib/baselines/recapture";
 import { parseMoney } from "../../app/lib/money/money";
 import { marketsNotBeforeSentence } from "../../app/lib/reporting/rollback";
@@ -422,6 +423,34 @@ describe("chaos: a market price past the change threshold asks for the word, as 
       const typed = await press(campaignId, { intent: "apply", confirmation: "apply" });
       expect(typed.ok, typed.message).toBe(true);
       expect(chaos.fake.priceOf(board, LISTS[0].id)).toBe("20.00");
+    });
+  });
+
+  it("counts the market prices of a start nobody previewed once the run has recorded them, and refuses it before writing (#1175)", async () => {
+    await withChaos("market-depth-unpreviewed-start", { ...CATALOG, percent: -60 }, async (chaos) => {
+      const { shopId, campaignId, domain } = chaos.fixture;
+      const { board } = await saleOnTheList(chaos, LISTS[0]);
+      const client = fixtureAdminClient(domain, chaos.server.endpoint())!;
+      const marketBaselines = () =>
+        prisma.baseline.count({ where: { shopId, variantGid: board, priceListGid: LISTS[0].id, surfaceKind: "MARKET", supersededAt: null } });
+
+      // The premise: nobody opened it, so no market baseline is recorded, and the check made
+      // before the run counts no market price at all.
+      expect(await marketBaselines()).toBe(0);
+      const beforeTheRun = await startCheck(shopId, await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } }));
+      expect(beforeTheRun.unconfirmed, "the premise: unrecorded, 60% off in Europe asks for nothing").toBeNull();
+
+      // The scheduler starts it. The run records the board's €50 before it writes, and the
+      // same check, asked again with it counted, refuses the start.
+      await expect(runCampaign(shopId, campaignId, client, { actor: SCHEDULER_ACTOR })).rejects.toThrow(
+        /in Europe, down 60%\. Nobody has confirmed it/,
+      );
+      expect(await marketBaselines(), "recorded by the run, before anything was written").toBe(1);
+      expect(chaos.fake.priceOf(board, LISTS[0].id)).toBe("50.00");
+      const ledger = await prisma.variantChange.count({ where: { shopId, status: { in: ["WRITING", "APPLIED", "VERIFIED"] } } });
+      expect(ledger, "a refused start wrote a price").toBe(0);
+      const { status } = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
+      expect(["APPLYING", "ACTIVE", "PARTIAL"], `left ${status}, claiming a run that never wrote`).not.toContain(status);
     });
   });
 });

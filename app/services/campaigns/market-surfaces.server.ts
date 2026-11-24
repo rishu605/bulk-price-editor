@@ -126,14 +126,14 @@ export async function captureMarketBaselinesFirst(
   campaignId: string,
   variantGids: readonly string[],
   client: AdminClient,
-): Promise<{ messages: string[]; refused: string[] }> {
+): Promise<{ messages: string[]; refused: string[]; recorded: number }> {
   const campaign = await prisma.campaign.findUnique({
     where: { id: campaignId },
     select: { surfaces: true },
   });
   const surfaces = parseSurfaces(campaign?.surfaces);
   if (surfaces.priceLists.length === 0 || variantGids.length === 0) {
-    return { messages: [], refused: [] };
+    return { messages: [], refused: [], recorded: 0 };
   }
 
   const lists = (await prisma.priceListRecord.findMany({
@@ -153,10 +153,13 @@ export async function captureMarketBaselinesFirst(
   // It hid because the shortcut writes a parent adjustment rather than fixed prices, and
   // the scenario counted fixed prices. Zero of them looked like "refused".
   const refused: string[] = [];
+  // Market baselines recorded here for the first time, which the start check could not count (#1175).
+  let recorded = 0;
 
   for (const list of lists) {
     try {
-      const { ladderUnread } = await marketBaselines(shopId, list, [...variantGids], client);
+      const { ladderUnread, recorded: now } = await marketBaselines(shopId, list, [...variantGids], client);
+      recorded += now;
       // Not recorded, so not priced: said once, here, and kept out of the market step (#1103).
       if (ladderUnread) {
         messages.push(...describeLadderUnread(priceListLabel(list), true));
@@ -169,7 +172,7 @@ export async function captureMarketBaselinesFirst(
     }
   }
 
-  return { messages, refused };
+  return { messages, refused, recorded };
 }
 
 export async function applyMarketSurfaces(

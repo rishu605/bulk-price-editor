@@ -1204,6 +1204,15 @@ async function executeCampaignRun(
     messagesBeforeExecution.push(...baselines.messages);
     // Carried to the market step so a market refused here is not quietly priced there.
     refusedMarkets.push(...baselines.refused);
+
+    // A start nobody is there to confirm, asked again now its market prices can be counted
+    // (#1175). The check before the run row plans market prices from the baselines already
+    // recorded, and a campaign nobody previewed has none until the line above: 60% off in
+    // Europe started by the scheduler or Flow as if it moved nothing. Still before anything is
+    // written, so a refusal here writes nothing, as the first one does.
+    if (unattendedStart && baselines.recorded > 0) {
+      await refuseUnconfirmedStart(shopId, campaignRecord, options.actor, { ...outcome, candidates, campaigns: resolvable });
+    }
   }
 
   // One throttled heartbeat for every phase that writes: prices, then tags, then markets.
