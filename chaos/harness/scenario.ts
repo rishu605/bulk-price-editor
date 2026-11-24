@@ -12,6 +12,7 @@ import { expect } from "vitest";
 
 import prisma from "../../app/db.server";
 import { runCampaign, type RunOptions } from "../../app/services/campaigns/run.server";
+import type { ThrottleStatus } from "../../app/lib/shopify/budget";
 import type { RunOutcome } from "../../app/services/campaigns/types";
 import type { FakeShopify } from "./fake-shopify";
 import type { FaultRule } from "./faults";
@@ -67,6 +68,12 @@ export interface ChaosSpec {
   tagKit?: string[];
   /** Polls a bulk operation stays RUNNING. Higher exercises the fallback harder. */
   pollsBeforeComplete?: number;
+  /**
+   * The rate-limit bucket the fake reports, when not a standard plan's 1,000 restoring at 50
+   * a second: a scenario writing thousands of prices one call per product would otherwise
+   * spend minutes waiting for its own budget.
+   */
+  throttle?: ThrottleStatus;
 }
 
 /**
@@ -82,7 +89,7 @@ export async function withChaos(
   body: (context: ChaosContext) => Promise<void>,
 ): Promise<void> {
   const seed = RUN_SEED;
-  const server = new FakeShopifyServer({ pollsBeforeComplete: spec.pollsBeforeComplete ?? 1 });
+  const server = new FakeShopifyServer({ pollsBeforeComplete: spec.pollsBeforeComplete ?? 1, throttle: spec.throttle });
   await server.start();
 
   const fixture = await seedFixture({

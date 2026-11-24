@@ -18,6 +18,8 @@ import {
   reconcileResults,
   submitBulkMutation,
   BulkSubmissionError,
+  BulkMutationsDeniedError,
+  isBulkMutationDenied,
   type BulkOperationState,
   type StagedTarget,
 } from "./bulk-executor";
@@ -460,6 +462,35 @@ function submitClient(options: FakeSubmitOptions = {}) {
   };
   return { client, upload, uploaded };
 }
+
+describe("Shopify denying the app bulk mutations (#1188)", () => {
+  // Word for word what production's log recorded on 24 Nov 2026.
+  const DENIED =
+    "Access denied for bulkOperationRunMutation field. Required access: Only accessible by supported access tokens: " +
+    "https://shopify.dev/docs/api/usage/bulk-operations/queries#access-token-considerations.";
+
+  it("recognises the denial, and nothing else that mentions access", () => {
+    expect(isBulkMutationDenied(new Error(DENIED))).toBe(true);
+    expect(isBulkMutationDenied(new Error("Access denied for priceListFixedPricesAdd field."))).toBe(false);
+    expect(isBulkMutationDenied(new Error("Unauthorized"))).toBe(false);
+  });
+
+  it("throws it as a refusal of the bulk path that ran nothing, not as an expired session", async () => {
+    const { upload } = submitClient();
+    const client: AdminClient = {
+      async request<T>(query: string) {
+        if (query.includes("stagedUploadsCreate")) return submitClient().client.request<T>(query, {});
+        throw new Error(DENIED);
+      },
+    };
+
+    const submitting = submitBulkMutation([row()], { client, upload, productOf, sleep: noSleep });
+    await expect(submitting).rejects.toBeInstanceOf(BulkMutationsDeniedError);
+    const error = await submitting.catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(BulkSubmissionError);
+    expect(toAppError(error).code).not.toBe("UNAUTHENTICATED");
+  });
+});
 
 describe("submission", () => {
   it("uploads the payload and submits the operation", async () => {
