@@ -98,6 +98,17 @@ export interface JobRef {
   fullSync?: boolean;
   /** An execution job that continues a partial run rather than starting fresh (#790). */
   resume?: boolean;
+  /**
+   * The campaign whose newly enrolled products the worker prices, rather than the scheduler's
+   * tick (#808). The variants are not carried: they are the campaign's pending mark, which the
+   * job claims when it runs, so a job lost before then loses nothing.
+   *
+   * Its own field, not `campaignId`: the release before this one knows no enrolment job, and
+   * read as an ordinary execution job it would re-apply the whole campaign -- after a revert
+   * that stopped part-way, the sale put back on everything the revert had restored (#805).
+   * Without a `campaignId` that release's handler does nothing, and its own tick drains the mark.
+   */
+  enroll?: string;
   /** Who asked, so what the run resolves on their behalf is attributed to them. */
   actor?: string;
   /**
@@ -152,6 +163,20 @@ export function webhookDrainKey(shopId: string): string {
 }
 
 /**
+ * The key a job's duplicates share, for the jobs whose work is a row the worker's tick rings
+ * again when it waits too long (#808): a queued run, a catalogue sync, a campaign's
+ * enrolments. A ring of a job still waiting or running is absorbed by it; once it has finished,
+ * the key is free for the next. Null for every other job, which is never rung twice.
+ */
+export function jobDedupKey(name: QueueName, ref: JobRef): string | null {
+  if (name === "execution" && ref.runId) return `run:${ref.runId}`;
+  if (name === "execution" && ref.enroll) return `enroll:${ref.enroll}`;
+  if (name === "sync" && ref.fullSync) return `sync:${ref.shopId}`;
+  if (name === "sync" && ref.recaptureId) return `recapture:${ref.recaptureId}`;
+  return null;
+}
+
+/**
  * BullMQ's options for a queue, derived from its policy.
  *
  * Kept as a function rather than a literal so the policy stays the single place the
@@ -192,6 +217,9 @@ export function jobOptionsFor(policy: QueuePolicy, ref?: JobRef, { again = false
           deduplication: { id: webhookDrainKey(ref.shopId), keepLastIfActive: true },
         }
       : {}),
+    // BullMQ's simple mode: kept until the job completes or fails, so a ring while it waits or
+    // runs adds nothing, and the next press after it adds the next job (#808).
+    ...(ref && jobDedupKey(policy.name, ref) ? { deduplication: { id: jobDedupKey(policy.name, ref)! } } : {}),
   };
 }
 

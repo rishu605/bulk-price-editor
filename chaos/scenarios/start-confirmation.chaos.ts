@@ -356,12 +356,14 @@ describe("chaos: the typed confirmation for a scheduled start (#1009)", () => {
       const log = await prisma.auditLogEntry.findFirstOrThrow({ where: { entityId: campaignId, action: "campaign.start-confirmed" } });
       expect(log.actor).toBe(`staff:${STAFF}`);
 
-      // Now Flow starts it. Eight products outlast Flow's ten seconds, so the worker runs it,
-      // checking again on its own plan: every price at 95% off, read back.
+      // Now Flow starts it. Every run Flow starts is the worker's (D29), which checks again on
+      // its own plan: every price at 95% off, read back.
       const started = await flowStart(campaignId);
       expect(started.status, started.message).toBe(200);
       expect(started.message).toMatch(/background worker is applying it/);
-      expect(enqueued).toEqual([{ name: "execution", ref: { shopId, campaignId, revert: false, claimedFrom: "DRAFT", actor: "shopify-flow" } }]);
+      expect(enqueued).toEqual([
+        { name: "execution", ref: { shopId, campaignId, runId: expect.any(String), revert: false, claimedFrom: "DRAFT", actor: "shopify-flow" } },
+      ]);
       const { handleJob } = await import("../../app/worker/handlers.server");
       await handleJob(enqueued[0].name, enqueued[0].ref);
       expect((await campaignOf(campaignId)).status).toBe("ACTIVE");

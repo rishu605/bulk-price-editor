@@ -303,7 +303,8 @@ export async function applyTakeoverTags(
     if (!winner?.tagKit.length) continue;
 
     const run = await prisma.campaignRun.findFirst({
-      where: { campaignId: winnerId, kind: "APPLY" },
+      // Its latest apply that ran: one queued and refused before it wrote tagged nothing (#808).
+      where: { campaignId: winnerId, kind: "APPLY", status: { not: "CANCELLED" } },
       orderBy: { createdAt: "desc" },
       select: { id: true },
     });

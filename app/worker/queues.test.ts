@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   deferWhileExecuting,
+  jobDedupKey,
   jobOptionsFor,
   QUEUE_NAMES,
   QUEUE_POLICIES,
@@ -109,6 +110,44 @@ describe("a webhooks job is a shop's drain (#811)", () => {
       expect(options, `${name} jobs became deduplicated`).not.toHaveProperty("deduplication");
       expect(options).not.toHaveProperty("delay");
     }
+  });
+});
+
+describe("a job whose work is a row the tick rings again is never two jobs at once (#808)", () => {
+  it("shares a key with its own duplicates, and with nothing else's", () => {
+    expect(jobDedupKey("execution", { shopId: "s1", campaignId: "c1", runId: "r1" })).toBe("run:r1");
+    expect(jobDedupKey("execution", { shopId: "s1", campaignId: "c1", runId: "r2" })).toBe("run:r2");
+    expect(jobDedupKey("execution", { shopId: "s1", enroll: "c1" })).toBe("enroll:c1");
+    expect(jobDedupKey("sync", { shopId: "s1", fullSync: true })).toBe("sync:s1");
+    expect(jobDedupKey("sync", { shopId: "s1", recaptureId: "x1" })).toBe("recapture:x1");
+  });
+
+  it("is deduplicated in BullMQ's simple mode: absorbed while it waits or runs, free once it has finished", () => {
+    expect(jobOptionsFor(QUEUE_POLICIES.execution, { shopId: "s1", runId: "r1" })).toMatchObject({ deduplication: { id: "run:r1" } });
+    const sync = jobOptionsFor(QUEUE_POLICIES.sync, { shopId: "s1", fullSync: true });
+    expect(sync).toMatchObject({ deduplication: { id: "sync:s1" } });
+    // Not "keep the last while active": a ring of a run already running has nothing to add.
+    expect(sync.deduplication).not.toHaveProperty("keepLastIfActive");
+  });
+
+  it("leaves a job the tick never rings as it was: a drift decision, a market sync, Flow's capture", () => {
+    for (const [name, ref] of [
+      ["execution", { shopId: "s1", campaignId: "c1", drift: { resolution: "adopt", asOf: "now" } }],
+      ["execution", { shopId: "s1", campaignId: "c1", revert: true }],
+      ["sync", { shopId: "s1" }],
+      ["sync", { shopId: "s1", recaptureSegmentId: "seg" }],
+    ] as const) {
+      expect(jobDedupKey(name, ref as never), JSON.stringify(ref)).toBeNull();
+    }
+  });
+});
+
+describe("an enrolment job the release before this one cannot mistake for an apply (#808, #805)", () => {
+  it("names its campaign in a field of its own, so that release's handler finds no campaign and does nothing", () => {
+    // That release runs any execution job with a `campaignId` as a whole-campaign apply.
+    const ref = { shopId: "s1", enroll: "c1" };
+    expect(ref).not.toHaveProperty("campaignId");
+    expect(jobDedupKey("execution", ref)).toBe("enroll:c1");
   });
 });
 

@@ -6,8 +6,9 @@
  * seconds, answered 200 to every refusal, and let deterministic throws become 5xx.
  *
  * Driven through the routes' own actions. `authenticate.flow` is replaced (no signed
- * request), the web queue is a recorder whose jobs are then run by the worker's own
- * handler, and Flow's inline limit is lowered to 10 so a 20-variant sale counts as large.
+ * request), and the web queue is a recorder whose jobs are then run by the worker's own
+ * handler. Since D29 (#808) every run and every capture Flow asks for is the worker's,
+ * whatever its size, so a 20-variant sale is queued as a 100,000-variant one is.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -51,11 +52,6 @@ vi.mock("../../app/worker/web-queue.server", async (importOriginal) => ({
     },
     async close() {},
   }),
-}));
-
-vi.mock("../../app/services/flow/flow-answer.server", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../app/services/flow/flow-answer.server")>()),
-  FLOW_INLINE_ROWS: 10,
 }));
 
 beforeEach(() => {
@@ -125,7 +121,11 @@ describe("chaos: Flow's Start campaign", () => {
       expect(answer.ms, "the answer waited for the writes").toBeLessThan(10_000);
       for (const gid of variantGids) expect(Number(chaos.fake.priceOf(gid)!.replace(".", ""))).toBe(baseline.get(gid));
       expect(await statusOf(campaignId)).toBe("APPLYING");
-      expect(enqueued).toEqual([{ name: "execution", ref: { shopId, campaignId, revert: false, claimedFrom: "DRAFT", actor: "shopify-flow" } }]);
+      // The QUEUED row first, which the job names (#808).
+      const run = await prisma.campaignRun.findFirstOrThrow({ where: { campaignId, status: "QUEUED" } });
+      expect(enqueued).toEqual([
+        { name: "execution", ref: { shopId, campaignId, runId: run.id, revert: false, claimedFrom: "DRAFT", actor: "shopify-flow" } },
+      ]);
       expect((await activity(shopId, "start-campaign"))[0].after).toMatchObject({ outcome: "queued", status: 200 });
 
       const { handleJob } = await import("../../app/worker/handlers.server");
@@ -157,10 +157,20 @@ describe("chaos: Flow's End campaign", () => {
 
       expect(answer.status).toBe(200);
       // The worker's run works out which prices are edited, and keeps them (#794).
+      const run = await prisma.campaignRun.findFirstOrThrow({ where: { campaignId, status: "QUEUED" } });
       expect(enqueued).toEqual([
         {
           name: "execution",
-          ref: { shopId, campaignId, revert: true, claimedFrom: "ACTIVE", actor: "shopify-flow", keepEdited: true, skipReason: KEPT_EDIT_REASON },
+          ref: {
+            shopId,
+            campaignId,
+            runId: run.id,
+            revert: true,
+            claimedFrom: "ACTIVE",
+            actor: "shopify-flow",
+            keepEdited: true,
+            skipReason: KEPT_EDIT_REASON,
+          },
         },
       ]);
       expect(await statusOf(campaignId)).toBe("REVERTING");

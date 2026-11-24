@@ -8,9 +8,9 @@
  * wholesale price the merchant changed after the sync stayed "changed outside a campaign"
  * after Flow reported the segment captured, and the next sale computed from the old price.
  *
- * Inline, a ladder read now fits Flow's ten seconds: it asks for the scope's variants only
- * (#704), 25 a read. A scope needing more reads than `FLOW_INLINE_LADDER_READS` goes to the
- * worker, as a large capture already did (#773), and the worker reads with the shop's client.
+ * Every capture Flow asks for is the worker's since D29 (#808), however few ladder reads it
+ * needs (#773 sent only large ones there), and the worker reads with the shop's client: the
+ * scope's variants only (#704), 25 a read.
  *
  * Driven through the route's own action, as `flow-contract.chaos.ts` drives it: Flow's
  * authentication is replaced, the web queue records its jobs, and the worker's own handler
@@ -30,7 +30,6 @@ import { type ChaosContext, fixtureAdminClient, withChaos } from "../harness/sce
 let pending: { shop: string; properties: Record<string, string>; admin?: unknown } = { shop: "", properties: {} };
 let endpoint = "";
 let session = true;
-let inlineLadderReads = 4;
 const enqueued: Array<{ name: QueueName; ref: JobRef }> = [];
 
 vi.mock("../../app/shopify.server", () => ({
@@ -62,20 +61,9 @@ vi.mock("../../app/worker/web-queue.server", async (importOriginal) => ({
   }),
 }));
 
-vi.mock("../../app/services/flow/flow-answer.server", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../app/services/flow/flow-answer.server")>();
-  return {
-    ...actual,
-    get FLOW_INLINE_LADDER_READS() {
-      return inlineLadderReads;
-    },
-  };
-});
-
 beforeEach(() => {
   enqueued.length = 0;
   session = true;
-  inlineLadderReads = 4;
 });
 
 const CATALOG = { catalog: { products: 3, variantsPerProduct: 1 }, percent: -20 } as const;
@@ -165,32 +153,11 @@ const flowActivity = async (shopId: string) =>
   );
 
 describe("chaos: Flow's Capture baselines over a wholesale catalogue (#1092)", () => {
-  it("recaptures a wholesale price changed after the sync inline, with its ladder, and counts it", async () => {
-    await withChaos("flow-capture-wholesale-inline", CATALOG, async (chaos) => {
-      const { shopId, domain } = chaos.fixture;
-      const segment = await changedAfterTheSync(chaos);
-      chaos.fake.ladderReads = 0;
-
-      const answer = await flowCapture(chaos, segment.id);
-
-      expect(answer.status).toBe(200);
-      expect(enqueued, "a capture with one wholesale price was handed to the worker").toEqual([]);
-      expect(answer.message, "Flow's answer did not count the wholesale price it captured").toContain(
-        "including 1 wholesale price with its quantity breaks",
-      );
-      expect(await wholesaleBaseline(chaos), "Flow left the wholesale price's baseline as it was").toEqual(RECAPTURED);
-      expect(chaos.fake.ladderReads, "one wholesale price took more than one ladder read").toBe(1);
-      expect((await reconcile(shopId, domain)).counts.offBaseline, "What's live still calls the price changed outside a campaign").toBe(0);
-      expect(await flowActivity(shopId)).toEqual([expect.objectContaining({ outcome: "done", status: 200 })]);
-    });
-  });
-
-  it("hands a capture with more ladder reads than Flow's wait has room for to the worker, which reads them", async () => {
+  it("hands even a one-read capture to the worker, which reads its ladder and counts it", async () => {
     await withChaos("flow-capture-wholesale-worker", CATALOG, async (chaos) => {
       const { shopId, domain } = chaos.fixture;
       const segment = await changedAfterTheSync(chaos);
-      // One wholesale price is one read; a wait with room for none sends it to the worker.
-      inlineLadderReads = 0;
+      chaos.fake.ladderReads = 0;
 
       const answer = await flowCapture(chaos, segment.id);
 
@@ -203,7 +170,9 @@ describe("chaos: Flow's Capture baselines over a wholesale catalogue (#1092)", (
       await handleJob(enqueued[0]!.name, enqueued[0]!.ref);
 
       expect(await wholesaleBaseline(chaos), "the worker left the wholesale price's baseline as it was").toEqual(RECAPTURED);
-      expect((await reconcile(shopId, domain)).counts.offBaseline).toBe(0);
+      expect(chaos.fake.ladderReads, "one wholesale price took more than one ladder read").toBe(1);
+      expect((await reconcile(shopId, domain)).counts.offBaseline, "What's live still calls the price changed outside a campaign").toBe(0);
+      expect(await flowActivity(shopId)).toEqual([expect.objectContaining({ outcome: "queued", status: 200 })]);
       const [recaptured] = await prisma.auditLogEntry.findMany({ where: { shopId, action: "baselines.recapture" } });
       expect(recaptured!.after).toMatchObject({ wholesale: 1, wholesaleLeft: 0 });
     });
@@ -213,7 +182,6 @@ describe("chaos: Flow's Capture baselines over a wholesale catalogue (#1092)", (
     await withChaos("flow-capture-wholesale-no-session", CATALOG, async (chaos) => {
       const { shopId } = chaos.fixture;
       const segment = await changedAfterTheSync(chaos);
-      inlineLadderReads = 0;
       await flowCapture(chaos, segment.id);
       session = false;
 

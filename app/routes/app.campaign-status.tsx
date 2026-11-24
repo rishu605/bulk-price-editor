@@ -6,7 +6,8 @@
  * and the page shows the last numbers it has until a newer plan is stored. The page has to
  * notice when either ends, and its own loader is the wrong thing to ask every few seconds.
  * This is two indexed reads, so the page polls here and reloads itself once, when the
- * answer changes. While a run writes, one more says how long it has left (`runEtaOf`, #820).
+ * answer changes. While a run is in flight, one more says where it has got -- Queued, Planning,
+ * Writing N of M, Verifying (#808) -- and how long it has left (`runProgressOf`, #820).
  *
  * Outside `/app/campaigns/*` for the same reason `app.revert-preview` is:
  * `app.campaigns.$id` would read the segment as a campaign id.
@@ -17,7 +18,7 @@ import type { LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { planStatus } from "../services/campaigns/plan-summary.server";
-import { runEtaOf } from "../services/campaigns/run-eta.server";
+import { runProgressOf } from "../services/campaigns/run-eta.server";
 import { IN_FLIGHT } from "../components/campaign/useRunPolling";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -33,11 +34,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       })
     : null;
 
+  // Where its run has got and how long it has left (#808, #820). Only a campaign mid-run has one.
+  const progress = campaign && IN_FLIGHT.has(campaign.status) ? await runProgressOf(campaign.shopId, id) : null;
   return {
     status: campaign?.status ?? null,
     // When its newest stored plan was made, and whether one is still on its way (#812).
     plan: campaign ? await planStatus({ domain: session.shop }, id) : { at: null, waiting: false },
-    // How long its run has left, once that can be seen (#820). Only a campaign mid-run has one.
-    eta: campaign && IN_FLIGHT.has(campaign.status) ? await runEtaOf(campaign.shopId, id) : null,
+    eta: progress?.eta ?? null,
+    phase: progress?.phase ?? null,
   };
 };
