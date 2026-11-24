@@ -19,6 +19,8 @@ export async function describeBlocked(
     campaignId: string;
     /** Its floor-breach policy, which decides what it is told to do (#1161). None for a revert, which plans without it. */
     breach?: BreachPolicy;
+    /** It sets floors of its own (#816), so the floor to lower may be one of them. */
+    ownFloors?: boolean;
   },
 ): Promise<string> {
   // Titles for the ones named only; the rest are a count.
@@ -39,6 +41,7 @@ export async function describeBlocked(
     }),
     when,
     planned.breach,
+    planned.ownFloors,
   );
 }
 
@@ -57,7 +60,8 @@ async function stoppedBy(
   if (ids.length === 0) return new Map();
   const campaigns = await prisma.campaign.findMany({
     where: { shopId, id: { in: ids } },
-    select: { id: true, name: true, status: true, guardrailViolationPolicy: true },
+    // With its own floors and policy (#816): a campaign that chose Block keeps it in any state.
+    select: { id: true, name: true, status: true, guardrailViolationPolicy: true, guardrails: true },
   });
   return new Map(
     await Promise.all(

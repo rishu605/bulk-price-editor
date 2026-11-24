@@ -19,8 +19,10 @@ import {
   ruleFrom,
   ruleInputProblem,
 } from "../../lib/campaigns/draft-form";
+import { FLOOR_FIELDS, floorsFromForm, type FloorsInput } from "../../lib/campaigns/campaign-floors";
 import { readRoundingPolicy } from "../../lib/money/rounding-policy";
 import { segmentToAst } from "../segments.server";
+import { guardrailsFor } from "../settings.server";
 import type { DraftCampaign } from "./draft-preview.server";
 import prisma from "../../db.server";
 
@@ -47,6 +49,11 @@ export async function draftCampaignFrom(
     : null;
 
   const ruleProblem = ruleInputProblem(read, currency);
+  // Its own floors and policy, read as the save reads them (#816), against the store's now. Only
+  // where the fields were posted: without them -- the first preview's own request, a link from
+  // Home -- the campaign sets none, and there is nothing to compare.
+  const floors: FloorsInput =
+    read(FLOOR_FIELDS.marker) === "1" ? floorsFromForm(read, currency, await guardrailsFor(shopId)) : { ok: true, floors: {}, below: [] };
 
   return {
     ast: {
@@ -69,5 +76,6 @@ export async function draftCampaignFrom(
     compareAtPolicy: compareAtFrom(read),
     rounding: readRoundingPolicy(source.entries()),
     priority: priorityFrom(read),
+    ...(floors.ok ? { floors: floors.floors, below: floors.below } : { floorsProblem: floors.problems.join(" ") }),
   };
 }

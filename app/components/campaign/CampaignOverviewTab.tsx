@@ -10,7 +10,7 @@ import { Blank } from "../Blank";
 import { describeActor } from "../../lib/audit/actor";
 import { ALL_STATES, describeState } from "../../lib/lifecycle/transitions";
 import { humanise } from "../../lib/format/label";
-import { BREACH_POLICY_LABELS, breachPolicyDetail } from "../../lib/campaigns/breach-policy";
+import { CampaignFloorsCard } from "./CampaignFloorsCard";
 import { CampaignNote } from "./CampaignNote";
 import { StartConfirmationCard } from "./StartConfirmation";
 import type { CampaignDetailProps } from "./props";
@@ -29,7 +29,6 @@ export function CampaignOverviewTab(props: CampaignDetailProps) {
     timeZone,
     campaignId,
     practice,
-    breachPolicy,
   } = props;
 
   return (
@@ -87,13 +86,9 @@ export function CampaignOverviewTab(props: CampaignDetailProps) {
         ))}
       </Card>
 
-      {/* Which policy it plans and runs with, and whose (#789). Nothing on the page said, and a
-          campaign made before the merchant chose Block went on clamping under it. */}
-      <Card heading="Floors">
-        <Fact label="When a price would breach a floor" detail={breachPolicyDetail(breachPolicy)}>
-          <s-text>{BREACH_POLICY_LABELS[breachPolicy.policy]}</s-text>
-        </Fact>
-      </Card>
+      {/* Which floors and policy it plans and runs with, whose they are, and the fields that
+          change them (#789, #816). */}
+      <CampaignFloorsCard {...props} />
 
       <Card heading="New products">    <s-paragraph>
           {autoEnroll

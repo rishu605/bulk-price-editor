@@ -106,12 +106,16 @@ export type CompareAtViolationPolicy = "skip" | "clear" | "block";
 
 // --------------------------------------------------------------- guardrails
 
+/** One of the three floors a store sets, and a campaign may set its own of (#816). */
+export type GuardrailFloor = "neverBelowCost" | "minMarginPercent" | "minPrice";
+
 /**
  * Floors below which a price must never be written.
  *
  * Campaign-level guardrails may only *tighten* store-level ones; the merge helper
  * enforces that. A campaign able to relax a store-wide "never below cost" rule would
- * make the store setting meaningless.
+ * make the store setting meaningless. The one exception is `loosens`, below: a floor a
+ * person confirmed by typing the word, which the audit log records (#816).
  */
 export interface Guardrails {
   /** Never price at or below cost. Requires cost to be present. */
@@ -126,6 +130,12 @@ export interface Guardrails {
    * as zero — that would let a campaign price below cost while reporting success.
    */
   missingCostPolicy?: "skip" | "error";
+  /**
+   * The floors a campaign sets below the store's, each confirmed by somebody typing the word
+   * (#816). For these the campaign's own value is the floor, absent meaning none; every other
+   * floor only tightens the store's. Only ever on a campaign's guardrails, never the store's.
+   */
+  loosens?: readonly GuardrailFloor[];
 }
 
 /** What happens when a computed price violates a floor. */

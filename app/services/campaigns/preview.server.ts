@@ -49,6 +49,7 @@ import {
 } from "./types";
 import { rowsThatFit } from "../../lib/ui/table-budget";
 import { inChunks } from "../../lib/db/chunk";
+import { hasOwnFloors } from "../../lib/campaigns/campaign-floors";
 import { describeBlocked } from "./blocked.server";
 import { recapturedBaselines, type RecapturedBaseline } from "./recaptured.server";
 import { recapturedVariants } from "../../lib/campaigns/recaptured";
@@ -173,6 +174,7 @@ export async function previewCampaign(
         message: await describeBlocked(shopId, outcome.blocked, "preview", {
           campaignId,
           breach: options.revert ? undefined : breach,
+          ownFloors: !options.revert && hasOwnFloors(campaign.guardrails),
         }),
       },
       writePath: "none",
