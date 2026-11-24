@@ -1,0 +1,28 @@
+{
+  "advisories": [
+    {
+      "id": "GHSA-7mx3-vvmw-hjmv",
+      "package": "@graphql-tools/utils",
+      "until": "2027-01-31",
+      "reason": "Dev only, through @shopify/api-codegen-preset (GraphQL codegen over this repo's own documents). The fix (12.0.2+) needs @whatwg-node/promise-helpers 2, which needs Node >= 22.15; CI runs 22.12 under engine-strict. Goes when Node moves (#1185)."
+    },
+    {
+      "id": "GHSA-c4qx-w738-7hr3",
+      "package": "@graphql-tools/utils",
+      "until": "2027-01-31",
+      "reason": "Dev only, through @shopify/api-codegen-preset. Same fix and the same Node >= 22.15 blocker as GHSA-7mx3-vvmw-hjmv (#1185)."
+    },
+    {
+      "id": "GHSA-6fw5-9hq8-w87g",
+      "package": "@graphql-tools/executor-legacy-ws",
+      "until": "2027-01-31",
+      "reason": "Dev only, through @shopify/api-codegen-preset; codegen reads a committed schema file and opens no WebSocket. The fix (1.1.36+) needs @graphql-tools/utils 12.0.2, so Node >= 22.15 (#1185)."
+    },
+    {
+      "id": "GHSA-434m-5hcj-pxf3",
+      "package": "@graphql-tools/executor-legacy-ws",
+      "until": "2027-01-31",
+      "reason": "Dev only, as GHSA-6fw5-9hq8-w87g: no WebSocket is opened, and the fix needs Node >= 22.15 (#1185)."
+    }
+  ]
+}
