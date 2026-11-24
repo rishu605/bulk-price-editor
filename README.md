@@ -38,7 +38,7 @@ working agreement for how the hierarchy is meant to be used.
 
 ### Prerequisites
 
-- Node.js `>=22.12` (see `engines` in `package.json`)
+- Node.js 24 or later (see `engines` in `package.json`; the image and CI run 24)
 - [Shopify CLI](https://shopify.dev/docs/apps/tools/cli/getting-started)
 - Docker (for local Postgres + Redis)
 - A [Shopify Partner](https://partners.shopify.com) account with a development store
