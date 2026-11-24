@@ -4,7 +4,7 @@
 # per service in Railway. Building twice would let the two drift apart — and the pair
 # that must never disagree about a price is exactly this pair, because the worker writes
 # what the web process previewed.
-FROM node:20-alpine
+FROM node:24-alpine
 
 RUN apk add --no-cache openssl
 

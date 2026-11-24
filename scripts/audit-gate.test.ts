@@ -131,9 +131,8 @@ describe("isReport", () => {
 describe("parseAllowlist", () => {
   const list = (advisories: unknown[]) => JSON.stringify({ advisories });
 
-  it("reads the committed list, and every entry has a date", () => {
+  it("reads the committed list, which is usually empty, and every entry has a date", () => {
     const entries = parseAllowlist(readFileSync(ALLOWLIST_PATH, "utf8"));
-    expect(entries.length).toBeGreaterThan(0);
     for (const e of entries) expect(e.until).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
