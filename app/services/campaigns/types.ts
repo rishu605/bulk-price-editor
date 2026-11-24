@@ -6,7 +6,8 @@
  */
 
 import type { AlreadyCorrect, Overlap } from "../../lib/planning/overlaps";
-import type { AdjustmentRule, CompareAtPolicy, Guardrails } from "../../lib/pricing/types";
+import type { AdjustmentRule, CompareAtPolicy, CompareAtViolationPolicy } from "../../lib/pricing/types";
+import type { CampaignGuardrails } from "../../lib/campaigns/campaign-floors";
 import type { PlannedRow } from "../../lib/planning/types";
 import type { MarginRow } from "../../lib/pricing/margin";
 import type { StoredRoundingPolicy } from "../../lib/money/rounding-policy";
@@ -22,6 +23,12 @@ export interface CampaignInput {
   rule: AdjustmentRule;
   compareAtPolicy: CompareAtPolicy;
   /**
+   * What to do when the compare-at it would write is not above the new price (#817, PRD
+   * A-3.3): drop it, leave the variant at its price, or stop the campaign. Absent is "clear",
+   * what every campaign did before the editor asked.
+   */
+  compareAtViolationPolicy?: CompareAtViolationPolicy;
+  /**
    * Rounding, per currency.
    *
    * Not a single choice: a campaign pricing into three markets prices in three
@@ -29,7 +36,11 @@ export interface CampaignInput {
    * another (E9).
    */
   rounding: StoredRoundingPolicy;
-  guardrails?: Guardrails;
+  /**
+   * Its own floors and floor-breach policy (#816), as `floorsToSave` read them: below the
+   * store's only with the word typed. Absent sets nothing, and it follows the store's.
+   */
+  guardrails?: CampaignGuardrails;
   priority?: number;
   /**
    * Price products that enter scope while the campaign runs. Defaults on: a merchant

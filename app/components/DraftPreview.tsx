@@ -55,6 +55,8 @@ export function DraftPreview(props: DraftPreviewProps) {
 export function previewAnnouncement(preview: Preview | null, pending: boolean): string {
   if (pending || !preview) return "";
   if (preview.ruleProblem) return preview.ruleProblem;
+  if (preview.scopeProblem) return preview.scopeProblem;
+  if (preview.floorsProblem) return preview.floorsProblem;
   // The banner's own sentence, which names each variant, its price and its floor (#1076).
   if (preview.blocked) return preview.blocked.message;
 
@@ -70,6 +72,7 @@ export function previewAnnouncement(preview: Preview | null, pending: boolean): 
     sentences.push(`${example.title} would go from ${example.before} to ${example.after}.`);
   }
   if (preview.skipped > 0) sentences.push(`${formatCount(preview.skipped)} would be left alone.`);
+  sentences.push(...ruleNeedsLines(preview.ruleNeeds));
   if (preview.withoutBaseline > 0) sentences.push(withoutBaselineLine(preview.withoutBaseline));
   return sentences.join(" ");
 }
@@ -84,6 +87,26 @@ export function previewAnnouncement(preview: Preview | null, pending: boolean): 
  */
 function changingLine(preview: Pick<Preview, "changing" | "matched">): { figure: string; rest: string } {
   return { figure: formatCount(preview.changing), rest: ` of ${countOf(preview.matched, "variant")} would change price.` };
+}
+
+/**
+ * What a rule from cost or from the compare-at cannot reach (#817), as its consequence: those
+ * variants keep their price, and what to do about it. Worded once for the panel and the region.
+ */
+export function ruleNeedsLines(needs: Preview["ruleNeeds"]): string[] {
+  if (!needs) return [];
+  const lines: string[] = [];
+  if (needs.cost > 0) {
+    lines.push(
+      `${countOf(needs.cost, "variant")} ${needs.cost === 1 ? "has" : "have"} no cost recorded, so this rule cannot price ${needs.cost === 1 ? "it" : "them"} and ${needs.cost === 1 ? "it keeps its" : "they keep their"} price. Record costs under Prices → Costs, or add "Cost per item is recorded" to the scope.`,
+    );
+  }
+  if (needs.compareAt > 0) {
+    lines.push(
+      `${countOf(needs.compareAt, "variant")} ${needs.compareAt === 1 ? "has" : "have"} no compare-at price in ${needs.compareAt === 1 ? "its" : "their"} baseline, so this rule cannot price ${needs.compareAt === 1 ? "it" : "them"} and ${needs.compareAt === 1 ? "it keeps its" : "they keep their"} price.`,
+    );
+  }
+  return lines;
 }
 
 function withoutBaselineLine(count: number): string {
@@ -128,12 +151,13 @@ function PreviewBody({ preview, pending = false, surface, fullPreviewHref }: Dra
     );
   }
 
-  // The rule's amount is empty, not a number, or no price at all (#696): nothing to show
-  // but why, where the merchant is typing it.
-  if (preview.ruleProblem) {
+  // The rule's amount is empty, not a number, or no price at all (#696), the scope is not one
+  // (#817), or a floor of the campaign's own is not one (#816): nothing to show but why, where
+  // the merchant is typing it.
+  if (preview.ruleProblem || preview.scopeProblem || preview.floorsProblem) {
     return (
       <s-banner tone="critical">
-        <s-paragraph>{preview.ruleProblem}</s-paragraph>
+        <s-paragraph>{preview.ruleProblem ?? preview.scopeProblem ?? preview.floorsProblem}</s-paragraph>
       </s-banner>
     );
   }
@@ -220,6 +244,13 @@ function PreviewBody({ preview, pending = false, surface, fullPreviewHref }: Dra
           </s-text>
         </s-paragraph>
       ) : null}
+      {/* The rule's own consequence (#817): a price from cost reaches only the variants with a
+          cost, and a percentage off the compare-at only those with one. */}
+      {ruleNeedsLines(preview.ruleNeeds).map((line) => (
+        <s-paragraph key={line}>
+          <s-text tone="caution">{line}</s-text>
+        </s-paragraph>
+      ))}
       {preview.withoutBaseline > 0 ? (
         <s-paragraph>
           <s-text tone="caution">
@@ -233,6 +264,23 @@ function PreviewBody({ preview, pending = false, surface, fullPreviewHref }: Dra
           where they went (#751). */}
       {preview.leftOutByStatus > 0 ? (
         <Secondary>{leftOutSentence(preview.leftOutByStatus)}</Secondary>
+      ) : null}
+
+      {/* Which floors and policy these prices were worked out with, and whose (#816): the
+          store's, or this campaign's own from Advanced, with any below the store's that Create
+          will ask to be confirmed. */}
+      {preview.floors ? (
+        <s-stack gap={SPACE.tight}>
+          <Secondary>
+            Floors: {preview.floors.applied}. {preview.floors.whose}
+          </Secondary>
+          <Secondary>If a price breaches one: {preview.floors.policy}.</Secondary>
+          {preview.floors.below ? (
+            <s-paragraph>
+              <s-text tone="caution">{preview.floors.below}</s-text>
+            </s-paragraph>
+          ) : null}
+        </s-stack>
       ) : null}
 
       {/* Said once, above the table, rather than on every row that has one.

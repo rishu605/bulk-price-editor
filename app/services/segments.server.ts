@@ -38,10 +38,19 @@ export type ConditionField =
   | "title"
   | "sku"
   | "barcode"
+  /**
+   * Dormant (D32, #817): compiled here and offered by no screen. They read the mirror's live
+   * price and compare-at, which campaigns write, so a campaign scoped by them moves its own
+   * variants out of its scope as it prices them: 20% off "$100 and over" takes a $110 product
+   * to $88, and "set to baseline" gives every variant a compare-at. Every plan reads scopes
+   * live (#752), so a lower-priority sale then writes over it. They ship once a scope can read
+   * the baseline. The filter builder's field list leaves them out (`BUILDER_FIELDS`).
+   */
   | "priceMin"
   | "priceMax"
   | "inventoryMin"
   | "inventoryMax"
+  /** Dormant (D32, #817), for the reason `priceMin` is: a campaign's compare-at policy writes it. */
   | "hasCompareAt"
   | "hasCost"
   /**
@@ -55,7 +64,12 @@ export type ConditionField =
 
 export interface Condition {
   field: ConditionField;
-  /** A list only for `variantGid`, which is inherently plural. */
+  /**
+   * A list for `variantGid`, which is inherently plural, and for the fields a merchant picks
+   * several values of (#817): any of them for `collection`, `tag`, `vendor` and
+   * `productType`. One value stays a string, as every scope before the filter builder
+   * stored it, so the AST of a scope built with one value is the AST it always was.
+   */
   value: string | number | boolean | string[];
 }
 
@@ -82,27 +96,57 @@ export interface FilterAst {
    * has no group to put it in.
    */
   productStatuses?: readonly ProductStatus[];
+  /**
+   * Variants the whole scope leaves out, ANDed over every group (#817): the products a
+   * merchant picked to leave out of a campaign or segment. Beside the groups for the reason
+   * `productStatuses` is: it holds over all of them and over an empty AST, which has no
+   * group to put it in. A variant left out is simply not in scope, so a lower-priority
+   * campaign covering it still prices it, as `excludeTag` leaves one.
+   */
+  excludeVariantGids?: readonly string[];
 }
 
 export const EMPTY_AST: FilterAst = { groups: [] };
 
+/**
+ * A condition's values: its list, trimmed and without blanks, or its one value.
+ *
+ * One value compiles exactly as it always did, so a scope saved before lists existed asks
+ * the same query (#817).
+ */
+function valuesOf(value: Condition["value"]): string[] {
+  return (Array.isArray(value) ? value : [value]).map((item) => String(item).trim()).filter(Boolean);
+}
+
+/** One value as itself, several as any of them, for a case-insensitive column. */
+function anyOf(
+  column: "vendor" | "productType",
+  values: string[],
+): Prisma.VariantIndexWhereInput | null {
+  if (values.length === 0) return null;
+  const one = (text: string) => ({ [column]: { equals: text, mode: "insensitive" as const } });
+  return values.length === 1 ? one(values[0]) : { OR: values.map(one) };
+}
+
 function conditionToWhere(condition: Condition): Prisma.VariantIndexWhereInput | null {
   const { field, value } = condition;
   const text = String(value).trim();
+  const values = valuesOf(value);
 
   switch (field) {
+    // `hasSome` for several values, which the same GIN index serves (#817).
     case "collection":
-      return text ? { collections: { has: text } } : null;
+      return values.length === 0 ? null : values.length === 1 ? { collections: { has: values[0] } } : { collections: { hasSome: values } };
     case "tag":
-      return text ? { tags: { has: text } } : null;
+      return values.length === 0 ? null : values.length === 1 ? { tags: { has: values[0] } } : { tags: { hasSome: values } };
     case "excludeTag":
       // `NOT` rather than a filter applied afterwards, so the exclusion is part of the
       // query the GIN index on `tags` serves rather than a second pass over the result.
-      return text ? { NOT: { tags: { has: text } } } : null;
+      return values.length === 0 ? null : values.length === 1 ? { NOT: { tags: { has: values[0] } } } : { NOT: { tags: { hasSome: values } } };
     case "vendor":
-      return text ? { vendor: { equals: text, mode: "insensitive" } } : null;
+      return anyOf("vendor", values);
     case "productType":
-      return text ? { productType: { equals: text, mode: "insensitive" } } : null;
+      return anyOf("productType", values);
     case "status":
       return text ? { status: text.toUpperCase() as "ACTIVE" | "ARCHIVED" | "DRAFT" } : null;
     case "title":
@@ -167,6 +211,10 @@ export function astToWhere(shopId: string, ast: FilterAst): Prisma.VariantIndexW
     // `in` even for a single status, so the shape does not depend on how many were
     // chosen. `[shopId, status]` is indexed.
     ...(ast.productStatuses ? { status: { in: [...ast.productStatuses] } } : {}),
+    // The products picked to leave out (#817), over every group, as the statuses are.
+    ...(ast.excludeVariantGids && ast.excludeVariantGids.length > 0
+      ? { variantGid: { notIn: [...ast.excludeVariantGids] } }
+      : {}),
   };
 
   const groups = (ast.groups ?? [])

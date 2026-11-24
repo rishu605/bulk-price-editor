@@ -122,3 +122,60 @@ describe("what a variant another running campaign's kept Block stops is told to 
     }
   });
 });
+
+describe("what a campaign that chose Block itself is told to do (#816)", () => {
+  it("before it starts: choose clamp or skip for it, since Settings does not reach it", () => {
+    const text = blockedMessage([gloves], "preview", { policy: "block", kept: false, store: "clamp", own: true }, true);
+    expect(text).toContain(
+      'This campaign chose "Block the whole campaign" itself, whatever Settings says. Lower the floor in Settings or in ' +
+        "this campaign's own floors, take this variant out of the campaign's products, or choose clamp or skip for this " +
+        "campaign instead of blocking.",
+    );
+  });
+
+  it("once started: revert it and choose again, since starting again does not hand it the store's", () => {
+    const text = blockedMessage([gloves], "run", { policy: "block", kept: true, store: "clamp", own: true });
+    expect(text).toContain(
+      'This campaign chose "Block the whole campaign" itself and keeps that until it ends, whatever Settings says. ' +
+        "Lower or remove the floor in Settings, or revert the campaign, choose clamp or skip for it, and apply it again.",
+    );
+    expect(text).not.toContain("starts under the store's policy");
+  });
+
+  it("names its own floors as a place to lower one, only where it sets any", () => {
+    expect(blockedMessage([gloves], "run", undefined, true)).toContain("Lower the floor in Settings or in this campaign's own floors,");
+    expect(blockedMessage([gloves], "run")).toContain("Lower the floor in Settings,");
+  });
+
+  it("names another running campaign that chose Block, and what reaches it", () => {
+    const text = blockedMessage(
+      [{ ...gloves, by: { name: "Clearance", breach: { policy: "block", kept: true, store: "clamp", own: true } } }],
+      "run",
+    );
+    expect(text).toContain('"Clearance" is a running campaign that chose "Block the whole campaign" and keeps that until it ends');
+    expect(text).toContain('or revert "Clearance", choose clamp or skip for it, and apply it again.');
+  });
+});
+
+describe("a campaign its compare-at policy stops (#817, PRD A-3.3)", () => {
+  const compareAt: BlockedLine = { title: "Wool scarf", reason: "invalid-compare-at" };
+  const floor: BlockedLine = { title: "Boot", reason: "below-floor", wouldBe: money(500, "USD"), floor: money(900, "USD") };
+
+  it("says it is the compare-at, and what reaches it, not a floor", () => {
+    const message = blockedMessage([compareAt], "preview");
+    expect(message).toMatch(/^This campaign stops when a compare-at would not be above the new price/);
+    expect(message).toContain('"Wool scarf": compare-at would be below the price');
+    expect(message).toContain('Choose "Drop the strike-through" or "Leave the variant at its price"');
+    expect(message).not.toMatch(/floor|guardrail/i);
+  });
+
+  it("says a floor's variants and the compare-at's apart, when both stop it", () => {
+    const message = blockedMessage([floor, compareAt], "run");
+    expect(message).toMatch(/^A guardrail stopped this run before anything was written: "Boot" would be \$5\.00, under its \$9\.00 floor\./);
+    expect(message).toMatch(/The compare-at check also stopped it: "Wool scarf"/);
+  });
+
+  it("names a cost a rule needs as a cost to record (#817)", () => {
+    expect(blockedMessage([{ title: "Gloves", reason: "needs-cost" }], "preview")).toContain(", record the missing costs");
+  });
+});

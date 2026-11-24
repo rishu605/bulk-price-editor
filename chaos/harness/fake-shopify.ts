@@ -238,6 +238,13 @@ export class FakeShopify {
   bulkRefusals = 0;
 
   /**
+   * Fault injection: the app may not run bulk mutations at all (#1188), as on production
+   * from 12 Nov 2026: no IP allowlist, or none run for 31 days. Shopify refuses
+   * `bulkOperationRunMutation` at the top level and runs nothing.
+   */
+  bulkMutationsDenied = false;
+
+  /**
    * How many bulk queries the app may have running in this shop at once (#1081).
    *
    * Counted apart from the mutations, as Shopify counts them: "In API versions 2026-01 and
@@ -1357,6 +1364,21 @@ export class FakeShopify {
   }
 
   private runBulkMutation(variables: Record<string, unknown>) {
+    // Shopify's answer on 24 Nov 2026, word for word, read from production's log.
+    if (this.bulkMutationsDenied) {
+      return {
+        data: { bulkOperationRunMutation: null },
+        errors: [
+          {
+            message:
+              "Access denied for bulkOperationRunMutation field. Required access: Only accessible by supported access " +
+              "tokens: https://shopify.dev/docs/api/usage/bulk-operations/queries#access-token-considerations.",
+            extensions: { code: "ACCESS_DENIED" },
+          },
+        ],
+      };
+    }
+
     const path = String(variables.stagedUploadPath ?? "");
     const body = this.blobs.get(path);
     if (body === undefined) {

@@ -27,8 +27,13 @@ import {
 } from "../services/segments-crud.server";
 import { countOf, formatCount } from "../lib/format/display";
 import { listCreatedMessage, listMatchedSentence } from "../lib/segments/list-report";
-import { facetDetails, type Facets } from "../lib/segments/facets";
+import type { Facets } from "../lib/segments/facets";
 import { facets } from "../services/segments.server";
+import { readerFor } from "../lib/campaigns/draft-form";
+import { draftOfAst, EMPTY_SCOPE, encodeScope, scopeFrom } from "../lib/segments/scope-builder";
+import { titleMapFor } from "../services/campaigns/candidates.server";
+import { ScopeBuilder } from "../components/scope/ScopeBuilder";
+import { useScopeCount } from "../components/scope/useScopeCount";
 import { RouteBoundary } from "../components/RouteBoundary";
 import { withGuard } from "../lib/errors/guard.server";
 import { AppError } from "../lib/errors/app-error";
@@ -56,40 +61,26 @@ export const loader = withGuard("/app/settings/segments", async ({ request }: Lo
   // form survives a reload and the row's Edit is an ordinary link.
   const editId = new URL(request.url).searchParams.get("edit");
   const found = editId ? segments.find((segment) => segment.id === editId) : undefined;
-  const editing = found
-    ? { ...found, conditions: conditionsOf((await getSegment(shop.id, found.id)).filterAst) }
-    : null;
+  // The whole filter, in the builder the editor uses (#817). The form read back the first
+  // group's collection, tag and vendor only, so saving an edit dropped anything else.
+  const scope = found ? draftOfAst((await getSegment(shop.id, found.id)).filterAst) : null;
+  const editing =
+    found && scope
+      ? { ...found, scope, pickedTitles: Object.fromEntries(await titleMapFor(shop.id, [...scope.include, ...scope.exclude])) }
+      : null;
 
   return { segments, facets: available, editing };
 });
 
-/** The filter form's three fields, read back out of a stored filter. */
-function conditionsOf(stored: unknown): Record<"collection" | "tag" | "vendor", string> {
-  const out = { collection: "", tag: "", vendor: "" };
-  const groups = (stored as { groups?: Array<{ conditions?: Array<{ field: string; value: string }> }> } | null)?.groups;
-  for (const condition of groups?.[0]?.conditions ?? []) {
-    if (condition.field in out) out[condition.field as keyof typeof out] = condition.value;
-  }
-  return out;
-}
-
-/** The filter the form describes: collection, tag and vendor, each optional. */
+/**
+ * The filter the form describes, read as the editor reads its scope (#817): the builder's
+ * field, or the collection, tag and vendor fields before it. Refused by name, beside the
+ * builder, when it cannot be used.
+ */
 function filterFrom(form: FormData) {
-  const conditions = [
-    ["collection", form.get("collection")],
-    ["tag", form.get("tag")],
-    ["vendor", form.get("vendor")],
-  ] as const;
-
-  return {
-    groups: [
-      {
-        conditions: conditions
-          .filter(([, value]) => value && String(value).trim())
-          .map(([field, value]) => ({ field, value: String(value).trim() })),
-      },
-    ].filter((group) => group.conditions.length > 0),
-  };
+  const scope = scopeFrom(readerFor(form));
+  if (!scope.ok) throw new AppError({ code: "VALIDATION", userMessage: scope.problem, context: { field: "scope" } });
+  return scope.ast;
 }
 
 type ActionData = {
@@ -347,6 +338,7 @@ function NewSegment({
 }) {
   const [how, setHow] = useState<"filter" | "list">("filter");
   const result = fetcher.data;
+  const count = useScopeCount(encodeScope(EMPTY_SCOPE));
 
   return (
     <Card heading="New segment">  <fetcher.Form method="post">
@@ -394,7 +386,7 @@ function NewSegment({
                 <s-choice value="filter" defaultSelected>
                   Everything matching a filter
                   <s-text slot="details" color="subdued">
-                    Collection, tag or vendor.
+                    Collections, tags, vendors, types, stock and more, or products you pick.
                   </s-text>
                 </s-choice>
                 <s-choice value="list">
@@ -409,50 +401,16 @@ function NewSegment({
 
             {how === "filter" ? (
               <>
-                <s-select
-                  name="collection"
-                  label="Collection"
-                  details={facetDetails(available.totals.collections, "collections")}
-                >
-                  <s-option value="" defaultSelected>
-                    Any collection
-                  </s-option>
-                  {available.collections.map((c) => (
-                    <s-option key={c} value={c}>
-                      {c}
-                    </s-option>
-                  ))}
-                </s-select>
-
-                <s-select
-                  name="tag"
-                  label="Tag"
-                  details={facetDetails(available.totals.tags, "tags")}
-                >
-                  <s-option value="" defaultSelected>
-                    Any tag
-                  </s-option>
-                  {available.tags.map((t) => (
-                    <s-option key={t} value={t}>
-                      {t}
-                    </s-option>
-                  ))}
-                </s-select>
-
-                <s-select
-                  name="vendor"
-                  label="Vendor"
-                  details={facetDetails(available.totals.vendors, "vendors")}
-                >
-                  <s-option value="" defaultSelected>
-                    Any vendor
-                  </s-option>
-                  {available.vendors.map((v) => (
-                    <s-option key={v} value={v}>
-                      {v}
-                    </s-option>
-                  ))}
-                </s-select>
+                {/* The editor's builder (#817): every condition that ships, "or" groups, the
+                    product picker and a live count. */}
+                <FullRow>
+                  <ScopeBuilder facets={available} initial={EMPTY_SCOPE} onChange={count.request} count={count.count} />
+                </FullRow>
+                {result && !result.ok && result.field === "scope" ? (
+                  <FullRow>
+                    <s-text tone="critical">{result.message}</s-text>
+                  </FullRow>
+                ) : null}
 
                 <s-select name="kind" label="How it should behave">
                   <s-option value="DYNAMIC" defaultSelected>
@@ -512,15 +470,7 @@ function EditSegment({
   const result = fetcher.data;
   const confirm = result && !result.ok ? result.confirm : undefined;
   const dynamic = segment.kind === "DYNAMIC";
-
-  /** A facet's options, with the segment's own value kept even if it is no longer listed. */
-  const optionsFor = (current: string, values: readonly string[]) =>
-    (current && !values.includes(current) ? [current, ...values] : values).map((value) => (
-      <s-option key={value} value={value} defaultSelected={value === current}>
-        {value}
-      </s-option>
-    ));
-  const { collection, tag, vendor } = segment.conditions;
+  const count = useScopeCount(encodeScope(segment.scope));
 
   return (
     <Card heading={`Edit “${segment.name}”`}>
@@ -558,24 +508,21 @@ function EditSegment({
 
             {dynamic ? (
               <>
-                <s-select name="collection" label="Collection" details={facetDetails(available.totals.collections, "collections")}>
-                  <s-option value="" defaultSelected={!collection}>
-                    Any collection
-                  </s-option>
-                  {optionsFor(collection, available.collections)}
-                </s-select>
-                <s-select name="tag" label="Tag" details={facetDetails(available.totals.tags, "tags")}>
-                  <s-option value="" defaultSelected={!tag}>
-                    Any tag
-                  </s-option>
-                  {optionsFor(tag, available.tags)}
-                </s-select>
-                <s-select name="vendor" label="Vendor" details={facetDetails(available.totals.vendors, "vendors")}>
-                  <s-option value="" defaultSelected={!vendor}>
-                    Any vendor
-                  </s-option>
-                  {optionsFor(vendor, available.vendors)}
-                </s-select>
+                {/* The segment's whole filter, in the editor's builder (#817). */}
+                <FullRow>
+                  <ScopeBuilder
+                    facets={available}
+                    initial={segment.scope}
+                    pickedTitles={segment.pickedTitles}
+                    onChange={count.request}
+                    count={count.count}
+                  />
+                </FullRow>
+                {result && !result.ok && result.field === "scope" ? (
+                  <FullRow>
+                    <s-text tone="critical">{result.message}</s-text>
+                  </FullRow>
+                ) : null}
                 <FullRow>
                   <s-checkbox
                     name="pin"

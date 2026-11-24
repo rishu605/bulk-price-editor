@@ -164,6 +164,8 @@ async function turnsUntilDone(chaos: ChaosContext, runId: string): Promise<numbe
 
 /** Three products' worth of variants per product, so a chunk of 500 splits products the way a real one does. */
 const LARGE = { products: 500, variantsPerProduct: 3 };
+/** A Plus store's bucket, for the scenario that writes its chunks one call per product. */
+const PLUS = { maximumAvailable: 20_000, currentlyAvailable: 20_000, restoreRate: 1_000 };
 
 describe.skipIf(!REDIS_URL)("chaos: a large run is written in chunks that interleave with other shops' runs (#809, D34)", () => {
   beforeEach(async () => {
@@ -386,6 +388,24 @@ describe("chaos: a failed chunk leaves a chunked run Partial, and Resume finishe
       expect(new Set(landed.map((row) => row.variantGid)).size).toBe(1_500);
       expect(landed).toHaveLength(1_500);
       sentOnceEach(chaos);
+    });
+  }, 300_000);
+
+  it("writes every chunk one call per product when Shopify denies the app bulk mutations, and ends verified-clean (#1188)", async () => {
+    await withChaos("chunked-bulk-denied", { catalog: LARGE, percent: -10, throttle: PLUS }, async (chaos) => {
+      const { campaignId } = chaos.fixture;
+      chaos.fake.bulkMutationsDenied = true;
+
+      const runId = (await chaos.apply({ turns: true })).runId;
+      // Every chunk forces the bulk path, and every one falls back rather than failing the run.
+      await turnsUntilDone(chaos, runId);
+      expect(chaos.fake.bulkLines).toEqual([]);
+      expect(await prisma.campaignRun.findUniqueOrThrow({ where: { id: runId } })).toMatchObject({
+        status: "COMPLETED",
+        verifiedRows: 1_500,
+      });
+      expect(await statusOf(campaignId)).toBe("ACTIVE");
+      await chaos.expectHonest(runId);
     });
   }, 300_000);
 

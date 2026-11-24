@@ -43,6 +43,7 @@ import { withGuard } from "../lib/errors/guard.server";
 import { formatCount } from "../lib/format/display";
 import { ROWS_PER_VIEW } from "../lib/ui/table-budget";
 import { SPACE } from "../lib/ui/spacing";
+import { Secondary } from "../components/Type";
 
 export const loader = withGuard("/app/campaigns/preview", async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -67,8 +68,11 @@ export const loader = withGuard("/app/campaigns/preview", async ({ request }: Lo
   return {
     // No catalogue to match against yet, rather than conditions matching nothing (#800).
     catalogue: preview.catalogue ? catalogueNotice(preview.catalogue) : null,
-    // The rule's amount cannot be used (#696); the page says why instead of pricing at 0.01.
-    ruleProblem: preview.ruleProblem ?? null,
+    // The rule's amount cannot be used (#696), or a floor of its own (#816); the page says why
+    // instead of pricing at 0.01.
+    ruleProblem: preview.ruleProblem ?? preview.floorsProblem ?? null,
+    // Which floors and policy these rows were worked out with (#816), as the editor's panel says.
+    floors: preview.floors ?? null,
     rows,
     total,
     page,
@@ -83,7 +87,7 @@ export const loader = withGuard("/app/campaigns/preview", async ({ request }: Lo
 });
 
 export default function FullPreview() {
-  const { rows, total, page, pages, counts, catalogue, ruleProblem } = useLoaderData<typeof loader>();
+  const { rows, total, page, pages, counts, catalogue, ruleProblem, floors } = useLoaderData<typeof loader>();
   const [params] = useSearchParams();
 
   const pageHref = (next: number) => {
@@ -113,6 +117,12 @@ export default function FullPreview() {
               </s-text>
             </s-paragraph>
           )}
+          {floors && !ruleProblem ? (
+            <Secondary>
+              Floors: {floors.applied}. {floors.whose} If a price breaches one: {floors.policy}.
+              {floors.below ? ` ${floors.below}` : ""}
+            </Secondary>
+          ) : null}
 
           {ruleProblem ? (
             <s-banner tone="critical">

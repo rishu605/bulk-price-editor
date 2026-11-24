@@ -10,6 +10,7 @@
  */
 
 import { SCOPE_CONDITION_FIELDS, type FieldReader } from "../campaigns/draft-form";
+import { builderNarrows } from "../segments/scope-builder";
 
 /**
  * The fields that narrow a campaign to something smaller than the catalogue.
@@ -24,6 +25,11 @@ export const NARROWING_FIELDS = [
   "segment",
 ] as const;
 
+/**
+ * Whether the scope is narrowed: a field above, or the filter builder's own (#817), which
+ * counts every condition but "Not tagged" and a product picked to add, as these count every
+ * field but the exception.
+ */
 export function scopeChosen(read: FieldReader): boolean {
-  return NARROWING_FIELDS.some((field) => (read(field) ?? "").trim() !== "");
+  return NARROWING_FIELDS.some((field) => (read(field) ?? "").trim() !== "") || builderNarrows(read);
 }

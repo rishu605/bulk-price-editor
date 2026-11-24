@@ -10,6 +10,7 @@
  */
 
 import { BREACH_POLICY_LABELS, type BreachPolicy } from "../campaigns/breach-policy";
+import { COMPARE_AT_VIOLATION_LABELS } from "../campaigns/compare-at-violation";
 import { formatPrice } from "../money/format";
 import type { Money } from "../money/money";
 import { SKIP_REASON_ROW } from "./reasons";
@@ -48,17 +49,55 @@ function line(entry: BlockedLine): string {
  * The sentence. `when` is "preview" for a plan nothing has run yet -- the campaign page and the
  * editor -- and "run" for a run it stopped, which the history, the scheduler and Flow read.
  * `breach` is the planned campaign's floor-breach policy as `breachPolicyFor` reads it, which
- * decides what it is told to do (#1161); none where the store's setting decides it.
+ * decides what it is told to do (#1161); none where the store's setting decides it. `ownFloors`
+ * says the planned campaign sets floors of its own (#816), so the floor to lower may be its own.
  */
-export function blockedMessage(lines: readonly BlockedLine[], when: "preview" | "run", breach?: BreachPolicy): string {
+export function blockedMessage(
+  lines: readonly BlockedLine[],
+  when: "preview" | "run",
+  breach?: BreachPolicy,
+  ownFloors = false,
+): string {
+  // A compare-at the campaign was told to stop over is not a floor (#817), and lowering one
+  // changes nothing about it: those variants are said on their own, after any a floor stopped.
+  const compareAt = lines.filter((entry) => entry.reason === "invalid-compare-at");
+  const floors = lines.filter((entry) => entry.reason !== "invalid-compare-at");
+  const sentences = [
+    ...(floors.length > 0 ? [floorSentence(floors, when, breach, ownFloors)] : []),
+    ...(compareAt.length > 0 ? [compareAtSentence(compareAt, when, floors.length > 0)] : []),
+  ];
+  return sentences.join(" ");
+}
+
+function listOf(lines: readonly BlockedLine[]): string {
   const named = lines.slice(0, BLOCKED_NAMED).map(line);
   const rest = lines.length - named.length;
-  const list = named.join("; ") + (rest > 0 ? `; and ${rest} more` : "");
+  return named.join("; ") + (rest > 0 ? `; and ${rest} more` : "");
+}
+
+function floorSentence(lines: readonly BlockedLine[], when: "preview" | "run", breach: BreachPolicy | undefined, ownFloors: boolean): string {
   const opening =
     when === "run"
       ? "A guardrail stopped this run before anything was written"
       : "A guardrail set to block the whole campaign would stop it before anything is written";
-  return `${opening}: ${list}. ${nextSteps(lines, breach)}`;
+  return `${opening}: ${listOf(lines)}. ${nextSteps(lines, breach, ownFloors ? "in Settings or in this campaign's own floors" : "in Settings")}`;
+}
+
+/**
+ * The compare-at check, set to stop the campaign (#817, PRD A-3.3): the strike-through it would
+ * write is at or under the new price, which shows no saving. What reaches it is the campaign's
+ * own compare-at choices, not a floor.
+ */
+function compareAtSentence(lines: readonly BlockedLine[], when: "preview" | "run", afterFloors: boolean): string {
+  const opening =
+    when === "run"
+      ? `${afterFloors ? "The compare-at check also stopped it" : "The compare-at check stopped this run before anything was written"}`
+      : `${afterFloors ? "The compare-at check would also stop it" : "This campaign stops when a compare-at would not be above the new price, so it would stop before anything is written"}`;
+  const which = lines.length === 1 ? "that variant" : "those variants";
+  return (
+    `${opening}: ${listOf(lines)}. Choose "${COMPARE_AT_VIOLATION_LABELS.clear}" or "${COMPARE_AT_VIOLATION_LABELS.skip}" ` +
+    `for a compare-at that would not be above the price, set the compare-at to leave unchanged, or take ${which} out of the campaign's products.`
+  );
 }
 
 /** Whether a campaign keeps Block from its start, which the store's setting does not reach (D21). */
@@ -80,10 +119,10 @@ function keeperOf(entry: BlockedLine): BlockedLine["by"] {
  * What to do: for the variants the planned campaign stopped, then for those another running
  * campaign's kept Block stopped (#1169), each by what reaches the campaign that stopped it.
  */
-function nextSteps(lines: readonly BlockedLine[], breach?: BreachPolicy): string {
+function nextSteps(lines: readonly BlockedLine[], breach: BreachPolicy | undefined, floorsAt: string): string {
   const own = lines.filter((entry) => !keeperOf(entry));
   const kept = lines.filter((entry) => keeperOf(entry));
-  return [...(own.length > 0 ? [ownSteps(own, breach)] : []), ...(kept.length > 0 ? [keptSteps(kept)] : [])].join(" ");
+  return [...(own.length > 0 ? [ownSteps(own, breach, floorsAt)] : []), ...(kept.length > 0 ? [keptSteps(kept)] : [])].join(" ");
 }
 
 /**
@@ -93,17 +132,26 @@ function nextSteps(lines: readonly BlockedLine[], breach?: BreachPolicy): string
  * start under a setting that is not Block. Only when what it keeps is Block: one keeping Clamp or
  * Skip was stopped by something else, a cost it needs, and is told what it always was.
  */
-function ownSteps(lines: readonly BlockedLine[], breach?: BreachPolicy): string {
+function ownSteps(lines: readonly BlockedLine[], breach: BreachPolicy | undefined, floorsAt: string): string {
   const costs = costsOf(lines);
+  const which = lines.length === 1 ? "this variant" : `these ${lines.length} variants`;
+  // Its own choice of Block (#816): Settings never reaches it, started or not. Before it starts
+  // it can choose again; once started it keeps it until it ends, as D21 says of any policy.
+  if (breach?.own && breach.policy === "block") {
+    return breach.kept
+      ? `This campaign chose "${BREACH_POLICY_LABELS.block}" itself and keeps that until it ends, whatever Settings says. ` +
+          `Lower or remove the floor ${floorsAt}${costs}, or revert the campaign, choose clamp or skip for it, and apply it again.`
+      : `This campaign chose "${BREACH_POLICY_LABELS.block}" itself, whatever Settings says. Lower the floor ${floorsAt}, ` +
+          `take ${which} out of the campaign's products${costs}, or choose clamp or skip for this campaign instead of blocking.`;
+  }
   if (keepsBlock(breach)) {
     return (
       `This campaign started under "${BREACH_POLICY_LABELS.block}" and keeps that until it ends, whatever Settings says. ` +
-      `Lower or remove the floor in Settings${costs}${startAgain("the campaign", breach.store)}.`
+      `Lower or remove the floor ${floorsAt}${costs}${startAgain("the campaign", breach.store)}.`
     );
   }
-  const which = lines.length === 1 ? "this variant" : `these ${lines.length} variants`;
   return (
-    `Lower the floor in Settings, take ${which} out of the campaign's products${costs}` +
+    `Lower the floor ${floorsAt}, take ${which} out of the campaign's products${costs}` +
     `, or set "When a price would breach a floor" to clamp or skip instead of blocking.`
   );
 }
@@ -119,10 +167,13 @@ function keptSteps(lines: readonly BlockedLine[]): string {
   const names = [...new Set(keepers.map((by) => by.name))];
   const one = names.length === 1;
   const who = listed(names.map((name) => `"${name}"`));
+  // One that chose Block itself (#816) is not given the store's policy by starting again.
+  const chose = keepers.every((by) => by.breach.own);
   return (
-    `${who} ${one ? "is a running campaign that" : "are running campaigns that each"} started under ` +
+    `${who} ${one ? "is a running campaign that" : "are running campaigns that each"} ${chose ? "chose" : "started under"} ` +
     `"${BREACH_POLICY_LABELS.block}" and keeps that until it ends, whatever Settings says. ` +
-    `Lower or remove the floor in Settings${costsOf(lines)}${startAgain(one ? who : "each", keepers[0].breach.store)}.`
+    `Lower or remove the floor in Settings${costsOf(lines)}` +
+    `${chose ? `, or revert ${one ? who : "each"}, choose clamp or skip for it, and apply it again` : startAgain(one ? who : "each", keepers[0].breach.store)}.`
   );
 }
 
@@ -136,9 +187,12 @@ function startAgain(which: string, store: BreachPolicy["store"]): string {
     : `, or revert ${which} and apply it again, so it starts under the store's policy now, "${BREACH_POLICY_LABELS[store]}"`;
 }
 
-/** "Record the missing costs" removes the cause whatever the policy. */
+/**
+ * "Record the missing costs" removes the cause whatever the policy: a guardrail's, or a rule
+ * that prices from cost (#817).
+ */
 function costsOf(lines: readonly BlockedLine[]): string {
-  return lines.some((entry) => entry.reason === "missing-cost") ? ", record the missing costs" : "";
+  return lines.some((entry) => entry.reason === "missing-cost" || entry.reason === "needs-cost") ? ", record the missing costs" : "";
 }
 
 /** `"A"`, `"A" and "B"`, `"A", "B" and "C"`; past five, "and N more". */
