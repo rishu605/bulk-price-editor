@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 
 import prisma from "../../app/db.server";
 import { formatMoney, money } from "../../app/lib/money/money";
+import { SCHEDULER_ACTOR } from "../../app/lib/audit/actor";
 import { auditMirror } from "../../app/services/mirror-audit.server";
 import { chaosAdminClient } from "../harness/http-client";
 import { withChaos } from "../harness/scenario";
@@ -89,6 +90,30 @@ describe("chaos: the nightly mirror audit", () => {
           where: { shopId, action: "mirror.audit" },
         });
         expect(entries).toBe(3);
+      },
+    );
+  });
+
+  it("records who asked for an audit, so a staff member's spot check is not the scheduler's", async () => {
+    await withChaos(
+      "mirror-audit-actor",
+      { catalog: { products: 2, variantsPerProduct: 1 }, percent: -10 },
+      async (chaos) => {
+        const { shopId } = chaos.fixture;
+        const client = chaosAdminClient(chaos.server.endpoint());
+
+        // What's live's "Check now", as the route asks for it.
+        await auditMirror(client, shopId, { size: 1, actor: "staff:91614707946" });
+        const pressed = await prisma.auditLogEntry.findMany({
+          where: { shopId, action: { in: ["mirror.audit", "mirror.audited"] } },
+          select: { actor: true },
+        });
+        expect(pressed.map((entry) => entry.actor)).toEqual(["staff:91614707946", "staff:91614707946"]);
+
+        // The nightly sweep's, as the scheduler asks for it.
+        await auditMirror(client, shopId, { actor: SCHEDULER_ACTOR });
+        const swept = await prisma.auditLogEntry.count({ where: { shopId, action: "mirror.audit", actor: SCHEDULER_ACTOR } });
+        expect(swept).toBe(1);
       },
     );
   });

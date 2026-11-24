@@ -333,8 +333,11 @@ async function auditDueMirrors(now: Date): Promise<number> {
     try {
       if (!isOffPeak(now, shop.timezone)) continue;
 
+      // The sweep's own audits only. A merchant's spot check on What's live samples as few as
+      // they ask for, one price at the least, and it used to count as tonight's audit.
+      // Before audits carried an actor, every one was the sweep's.
       const last = await prisma.auditLogEntry.findFirst({
-        where: { shopId: shop.id, action: "mirror.audit" },
+        where: { shopId: shop.id, action: "mirror.audit", OR: [{ actor: SCHEDULER_ACTOR }, { actor: null }] },
         orderBy: { createdAt: "desc" },
         select: { createdAt: true },
       });
@@ -345,7 +348,7 @@ async function auditDueMirrors(now: Date): Promise<number> {
 
       // A development store transferred to a merchant stops being free (#713).
       await refreshDeveloperStore(client, shop.id);
-      await auditMirror(client, shop.id, { now });
+      await auditMirror(client, shop.id, { now, actor: SCHEDULER_ACTOR });
       audited++;
     } catch (error) {
       logger.warn("mirror audit failed", {

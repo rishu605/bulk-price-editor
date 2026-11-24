@@ -300,7 +300,7 @@ async function auditJob(ref: JobRef): Promise<void> {
   if (!client) return;
 
   const { auditMirror } = await import("../services/mirror-audit.server");
-  await auditMirror(client, ref.shopId);
+  await auditMirror(client, ref.shopId, { actor: ref.actor ?? SCHEDULER_ACTOR });
 }
 
 async function syncJob(ref: JobRef): Promise<void> {
