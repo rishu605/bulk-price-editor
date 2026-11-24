@@ -217,7 +217,7 @@ export async function claimForQueue(
   row: QueuedRunRow,
   options: TransitionOptions,
 ): Promise<QueueClaim> {
-  const campaign = await prisma.campaign.findFirstOrThrow({ where: { id: campaignId, shopId }, select: { status: true } });
+  const campaign = await prisma.campaign.findFirstOrThrow({ where: { id: campaignId, shopId }, select: { status: true, guardrails: true } });
   const from = campaign.status as CampaignState;
   if (CLAIM_STATES.has(from)) return { claimed: false };
   if (!canTransition(from, to)) {
@@ -227,7 +227,7 @@ export async function claimForQueue(
       context: { campaignId, from, to, reason: options.reason },
     });
   }
-  const policy = await keptPolicy(shopId, from, to);
+  const policy = await keptPolicy(shopId, from, to, campaign.guardrails);
   const now = new Date();
 
   let runId: string | null;
