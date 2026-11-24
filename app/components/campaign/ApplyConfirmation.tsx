@@ -192,7 +192,11 @@ export function ApplyConfirmation({
           ) : null}
 
           <Fact label="How long">
-            {describeRunDuration(writePath === "bulk" ? "bulk" : "sync", counts.planned)}
+            {describeRunDuration(
+              writePath === "bulk" ? "bulk" : "sync",
+              counts.planned,
+              counts.planned + counts.noop + counts.skipped,
+            )}
           </Fact>
 
           {/* NA's modal says who gets emailed when the job completes, and this is the

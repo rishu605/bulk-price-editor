@@ -18,11 +18,16 @@ harder — so pushing makes the whole thing slower, not faster.
 The app reads the remaining budget from Shopify's own response on every call rather than
 assuming a number, because the limits differ by Shopify plan.
 
-## Large catalogues
+## Large campaigns
 
-Above a few thousand products the app switches to Shopify's bulk operation API, which is
-designed for exactly this and does not consume the same budget. You do not choose this —
-the app picks the path and the preview tells you which one it will use and why.
+A run that writes more than 1,000 prices goes to Shopify's bulk operation API, which is
+designed for exactly this and does not consume the same budget. If Shopify is not letting
+the app run bulk operations, the run is written one product at a time instead: slower,
+paced by your store's limit, and every price is still read back. You do not choose either
+path. The app picks it, and the preview says how the run will go.
+
+Any campaign covering more than 50 variants is written in the background, so you can leave
+the page while it runs. The campaign page shows how far it has got.
 
 ## Nothing is lost
 

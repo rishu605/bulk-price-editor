@@ -16,11 +16,26 @@ import { describe, expect, it } from "vitest";
 import { describeRunDuration } from "./duration";
 
 describe("what it is willing to claim", () => {
-  it("bounds a sync run by the ceiling that made it a sync run", () => {
+  it("promises the wait only for a run the page writes itself: fifty variants or fewer (D29)", () => {
+    expect(describeRunDuration("sync", 50)).toContain("while you wait");
+    expect(describeRunDuration("sync", 51)).not.toContain("while you wait");
+  });
+
+  it("says a larger run goes to the background, and promises no duration for it", () => {
+    // "190 variants, written while you wait. A run this size is kept under 60 seconds" was on
+    // Black Friday 2026's Preview tab on 24 Nov, over a run the worker writes since #808.
     const text = describeRunDuration("sync", 400);
 
-    expect(text).toContain("60 seconds");
     expect(text).toContain("400 variants");
+    expect(text).toContain("in the background");
+    expect(text).toContain("leave this page");
+    expect(text).not.toMatch(/\d+\s*(seconds|minutes)/);
+  });
+
+  it("decides by the campaign's scope, not only what it writes", () => {
+    // Forty prices to write over a scope of sixty is still the worker's run.
+    expect(describeRunDuration("sync", 40, 60)).toContain("in the background");
+    expect(describeRunDuration("sync", 40, 60)).not.toContain("while you wait");
   });
 
   it("does not put a number on the bulk queue", () => {

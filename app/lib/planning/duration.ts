@@ -1,4 +1,5 @@
-import { countOf } from "../format/display";
+import { MAX_INLINE_ROWS } from "../execution/inline-budget";
+import { countOf, formatCount } from "../format/display";
 import type { WritePath } from "./types";
 
 /**
@@ -13,9 +14,13 @@ import type { WritePath } from "./types";
  *
  * So this asserts nothing it has not been told:
  *
- * - **sync** is *defined* as a run that fits inside `maxSyncSeconds` — `selectWritePath`
- *   switches to bulk precisely when it would not. "Under a minute" is therefore a
- *   property of the decision that was made, not a guess about a shop's bucket.
+ * - **while you wait** only for a run the page writes itself: a campaign of at most
+ *   `MAX_INLINE_ROWS` variants (D29). Every larger one is the background worker's since
+ *   #808, so "written while you wait, kept under 60 seconds" over 190 variants promised a
+ *   wait that never happened -- the press answers at once and the page follows the run.
+ * - **one product at a time in the background** for the rest of the sync path: one call per
+ *   product at the shop's own rate limit, which this file may not guess at (rule 8), so it
+ *   says how it goes rather than how long.
  * - **bulk** costs no rate-limit points and is queued by Shopify FIFO. The dominant term
  *   is queue latency, which is not ours to know. Saying "a few minutes" with confidence
  *   would be the kind of made-up number this file exists to avoid, so it says the shape
@@ -34,8 +39,11 @@ import type { WritePath } from "./types";
 export function describeRunDuration(
   path: WritePath | "none",
   rowCount: number,
-  /** Seconds a sync run is allowed to take. Mirrors `selectWritePath`'s ceiling. */
-  maxSyncSeconds = 60,
+  /**
+   * How many variants the campaign covers, written or not: what decides whether the page
+   * writes it while it waits (D29). The rows it writes when the caller has no other count.
+   */
+  scope = rowCount,
 ): string {
   if (rowCount === 0) return "Nothing would be written.";
 
@@ -49,8 +57,15 @@ export function describeRunDuration(
     );
   }
 
+  if (scope <= MAX_INLINE_ROWS) {
+    return (
+      `${variants}, written while you wait. A campaign covering more than ${formatCount(MAX_INLINE_ROWS)} ` +
+      "variants is written in the background instead."
+    );
+  }
+
   return (
-    `${variants}, written while you wait. A run this size is kept under ` +
-    `${maxSyncSeconds} seconds — a larger one is handed to Shopify to finish in the background.`
+    `${variants}, written in the background one product at a time, each read back as it goes. ` +
+    "You can leave this page; it shows how far the run has got, and it keeps going."
   );
 }

@@ -115,7 +115,11 @@ export function CampaignPreviewTab({ preview, approval, fetcher, busy, floors, b
         {preview.blocked ? null : (
           <s-paragraph>
             <s-text>
-              {describeRunDuration(preview.writePath === "bulk" ? "bulk" : "sync", preview.counts.planned)}
+              {describeRunDuration(
+                preview.writePath === "bulk" ? "bulk" : "sync",
+                preview.counts.planned,
+                preview.counts.planned + preview.counts.noop + preview.counts.skipped,
+              )}
             </s-text>
           </s-paragraph>
         )}
