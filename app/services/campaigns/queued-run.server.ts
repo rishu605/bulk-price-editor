@@ -31,6 +31,7 @@ import { laneFor, type JobRef, type RunLane } from "../../worker/queues";
 import { metric } from "../../lib/telemetry/metrics";
 import { enqueueWithin, webQueue } from "../../worker/web-queue.server";
 import { claimForQueue, releaseClaim } from "./lifecycle.server";
+import { renewRunLease } from "../shop-lease.server";
 import { clearQueuedRefused, recordQueuedRefused } from "./start-refusal.server";
 import { queuedVerb } from "../../lib/campaigns/queued-refusal";
 import type { RunOutcome } from "./types";
@@ -225,6 +226,58 @@ export async function ringQueuedRuns(
     }
   }
   return rows.length;
+}
+
+/**
+ * The doorbell for a chunked run waiting for its next turn (#809, D34), the worker's tick's as
+ * `ringQueuedRuns` is. Two things for each, every tick:
+ *
+ * - **Its shop's lease, renewed.** The run holds its shop from its first turn to its last, and
+ *   between turns no process is there to renew it. Without this a run waiting longer than the
+ *   lease lasts behind other shops' work would find another of its shop's runs writing when its
+ *   turn came.
+ * - **Its next turn, rung** once it has waited `STRANDED_RUN_AFTER_MS`. A turn still waiting in
+ *   Redis absorbs the ring by the run's key; one Redis lost -- or that its worker never queued,
+ *   because it died between ending its turn and asking for the next, or the reaper gave a dead
+ *   turn back -- is queued now, or run here when the queue cannot take it, as a QUEUED run is.
+ *
+ * A turn rung here does not carry a scheduled start's campaign, so the end of a window that
+ * closed while it wrote follows at the next tick, not in the same job (#1053). Returns how many
+ * it rang.
+ */
+export async function ringChunkedRuns(
+  queue: QueueRuntime,
+  inline: Handler,
+  { now = new Date(), shopId }: { now?: Date; shopId?: string } = {},
+): Promise<number> {
+  const waiting = await prisma.runChunk.findMany({
+    where: {
+      waitingSince: { not: null },
+      // An uninstalled shop's run waits for a reinstall, as a QUEUED one does.
+      run: { status: "EXECUTING", shop: { uninstalledAt: null }, ...(shopId ? { shopId } : {}) },
+    },
+    orderBy: { waitingSince: "asc" },
+    select: { runId: true, waitingSince: true, run: { select: { shopId: true, campaignId: true } } },
+  });
+  let rung = 0;
+  for (const row of waiting) {
+    try {
+      await renewRunLease(row.run.shopId, row.runId);
+      if (row.waitingSince && row.waitingSince.getTime() > now.getTime() - STRANDED_RUN_AFTER_MS) continue;
+      const ref: JobRef = { shopId: row.run.shopId, campaignId: row.run.campaignId, runId: row.runId, turn: true };
+      // Always the large lane: a run of more than a chunk is never small (`smallRun`).
+      await enqueueOrRun(queue, "execution", ref, inline, RUN_ENQUEUE_TIMEOUT_MS);
+      rung++;
+    } catch (error) {
+      // One run must not stop the rest; its turn's own failure handling has said what it could.
+      logger.error("a chunked run rung by the tick failed", {
+        runId: row.runId,
+        campaignId: row.run.campaignId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return rung;
 }
 
 /**

@@ -18,11 +18,22 @@ import { adminClientForShop } from "../services/admin-client.server";
 import type { JobRef, JobResult, QueueName } from "./queues";
 import type { LeaseKind } from "../services/shop-lease.server";
 
+/**
+ * A run that goes on in later turns (#809, D34): the job that ran its first turn hands the shop's
+ * lease to it, and the runtime queues its next turn.
+ */
+interface Continues {
+  runId: string;
+  campaignId: string;
+}
+
 export async function handleJob(name: QueueName, ref: JobRef): Promise<JobResult> {
   switch (name) {
     // Either lane, the same work: the lane says only how soon it gets a slot (#809).
     case "execution":
     case "execution-small":
+      // A chunked run's next turn (#809, D34): its lease is the run's, not this job's.
+      if (ref.turn) return chunkTurnJob(ref);
       // A drift decision over many prices is execution too: a put-back is a run, and
       // keeping or leaving thousands is the same queue's kind of work (#822). So is pricing
       // the products a running campaign gained, which the tick used to do itself (#808), and a
@@ -67,26 +78,97 @@ export async function handleJob(name: QueueName, ref: JobRef): Promise<JobResult
 /**
  * Runs a job holding its shop's lease of this kind, or answers `later` without doing anything
  * when another of the shop's runs -- or syncs -- holds it (#809): the runtime puts the job back
- * to wait its turn and gives its slot to another shop. Released however the job ends.
+ * to wait its turn and gives its slot to another shop. Released however the job ends -- except
+ * when the job was a chunked run's first turn (D34), when the lease is handed to the run, which
+ * holds the shop until its last turn, and the run's next turn is the job's answer.
  *
  * The campaign is the lease's, when the job names one, so a run waiting behind it can say
  * whose run it is waiting for.
  */
-async function onShop(ref: JobRef, kind: LeaseKind, work: () => Promise<void>): Promise<JobResult> {
-  const { leaseHolder, withShopLease } = await import("../services/shop-lease.server");
+async function onShop(ref: JobRef, kind: LeaseKind, work: () => Promise<void | Continues>): Promise<JobResult> {
+  const { leaseHolder, runHolder, withShopLease } = await import("../services/shop-lease.server");
   const campaignId = ref.campaignId ?? ref.enroll ?? ref.scheduled ?? null;
-  const ran = await withShopLease(ref.shopId, kind, work, { holder: leaseHolder(kind), campaignId });
-  return ran.busy ? "later" : undefined;
+  const ran = await withShopLease(ref.shopId, kind, work, {
+    holder: leaseHolder(kind),
+    campaignId,
+    keepFor: (next) => (next ? runHolder(next.runId) : null),
+  });
+  if (ran.busy) return "later";
+  return ran.value ? { turn: turnOf(ref, ran.value) } : undefined;
+}
+
+/**
+ * The job for a chunked run's next turn (#809, D34). Keyed as the run, as a queued run's job is,
+ * so a ring of the run while it waits is absorbed. A scheduled start's carries the campaign, so
+ * the run's last turn ends the sale straight after if its window closed meanwhile (#1053).
+ */
+function turnOf(ref: JobRef, next: Continues): JobRef {
+  return {
+    shopId: ref.shopId,
+    campaignId: next.campaignId,
+    runId: next.runId,
+    turn: true,
+    ...(ref.scheduled ? { scheduled: ref.scheduled } : {}),
+  };
+}
+
+/**
+ * One turn of a chunked run (#809, D34): `continueChunkedRun` writes its next chunk, or ends it.
+ *
+ * The shop's lease is the run's here, held by its name (`runHolder`) from its first turn to its
+ * last, so another of the shop's runs never starts between two of its chunks. Taken back at the
+ * start of the turn -- `later` when somebody else took it after it expired -- and kept, not
+ * released, when the run goes on or another process is in its turn: the tick renews it while the
+ * run waits. Given up when the run ends, however it ends.
+ */
+async function chunkTurnJob(ref: JobRef): Promise<JobResult> {
+  if (!ref.runId) return;
+  const shop = await prisma.shop.findUnique({ where: { id: ref.shopId }, select: { domain: true, uninstalledAt: true } });
+  // Waits for a reinstall, as a queued run does: the tick does not ring it meanwhile.
+  if (!shop || shop.uninstalledAt) return;
+
+  const { runHolder, takeShopLease } = await import("../services/shop-lease.server");
+  const lease = await takeShopLease(ref.shopId, "run", { holder: runHolder(ref.runId), campaignId: ref.campaignId ?? null });
+  if (!lease) return "later";
+
+  let keep = false;
+  try {
+    const client = await adminClientForShop(shop.domain);
+    const { continueChunkedRun } = await import("../services/campaigns/run.server");
+    const turn = await continueChunkedRun(ref.shopId, ref.runId, client);
+    if (turn.kind === "continues") {
+      keep = true;
+      return { turn: ref, ...(turn.delayMs ? { delayMs: turn.delayMs } : {}) };
+    }
+    // Another process's turn: the lease is that turn's as much as this job's, so it stays.
+    if (turn.kind === "elsewhere") keep = true;
+    // A scheduled start's last turn, with its window closed while it wrote: its end follows in
+    // the same job and under the same lease, as it does for a start written in one job (#1053).
+    if (turn.kind === "finished" && ref.scheduled && !turn.revert) {
+      const { runScheduledJob } = await import("../services/scheduled-run.server");
+      const after = await runScheduledJob(ref.scheduled, { turns: true });
+      if (after) {
+        await lease.handOver(runHolder(after.runId));
+        keep = true;
+        return { turn: turnOf(ref, after) };
+      }
+    }
+    return;
+  } finally {
+    if (keep) await lease.keep();
+    else await lease.release();
+  }
 }
 
 /** A campaign's due start or end, handed over by the tick (#809): see `scheduled-run.server.ts`. */
-async function scheduledJob(ref: JobRef): Promise<void> {
+async function scheduledJob(ref: JobRef): Promise<void | Continues> {
   if (!ref.scheduled) return;
   const { runScheduledJob } = await import("../services/scheduled-run.server");
-  await runScheduledJob(ref.scheduled);
+  // A start or end large enough to write in chunks goes on in later turns (D34).
+  return runScheduledJob(ref.scheduled, { turns: true });
 }
 
-async function runCampaignJob(ref: JobRef): Promise<void> {
+async function runCampaignJob(ref: JobRef): Promise<void | Continues> {
   if (!ref.campaignId) return;
 
   const shop = await prisma.shop.findUnique({
@@ -117,7 +199,7 @@ async function runCampaignJob(ref: JobRef): Promise<void> {
   }
 
   const { runCampaign } = await import("../services/campaigns/run.server");
-  await runCampaign(ref.shopId, ref.campaignId, client, {
+  const outcome = await runCampaign(ref.shopId, ref.campaignId, client, {
     // The QUEUED row the web process wrote, which this run takes over rather than creating
     // one of its own (#808). None on a job from before rows were queued.
     ...(ref.runId ? { runId: ref.runId } : {}),
@@ -135,7 +217,10 @@ async function runCampaignJob(ref: JobRef): Promise<void> {
     // A press of Apply without the word, checked again on this run's own plan (#812).
     ...(ref.untypedPress ? { untypedPress: true } : {}),
     ...(ref.claimedFrom ? { claimedFrom: ref.claimedFrom as CampaignState } : {}),
+    // Large enough, it plans here and writes its prices in later turns (#809, D34).
+    turns: true,
   });
+  return outcome.continues ? { runId: outcome.runId, campaignId: ref.campaignId } : undefined;
 }
 
 /**

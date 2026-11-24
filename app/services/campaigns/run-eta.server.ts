@@ -39,7 +39,16 @@ export async function runProgressOf(
   const run = await prisma.campaignRun.findFirst({
     where: { shopId, campaignId, status: { in: [...LIVE_RUN] } },
     orderBy: { createdAt: "desc" },
-    select: { status: true, writePath: true, startedAt: true, heartbeatAt: true, writtenRows: true, writableRows: true },
+    select: {
+      status: true,
+      writePath: true,
+      startedAt: true,
+      heartbeatAt: true,
+      writtenRows: true,
+      writableRows: true,
+      // Written in chunks (#809, D34): counted across them, so "Writing N of M" is the run's.
+      chunk: { select: { size: true } },
+    },
   });
   if (!run) return { phase: null, eta: null };
 
@@ -54,5 +63,5 @@ export async function runProgressOf(
     },
     now,
   );
-  return { phase: runPhase(run), eta };
+  return { phase: runPhase({ ...run, chunked: run.chunk !== null }), eta };
 }

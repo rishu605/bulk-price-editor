@@ -17,7 +17,8 @@ storefront, which is the failure mode the whole product exists to prevent.
 2. **One writer per occurrence, and it is the worker.** A price write requires holding
    the `campaign_runs` row for `(campaign, occurrence, kind)` — a unique index, so the
    loser of the race defers rather than writing twice — and only one live run per campaign,
-   and one run per shop at a time, held by its `shop_leases` row wherever it is written (D33).
+   and one run per shop at a time, held by its `shop_leases` row wherever it is written and
+   across a chunked run's turns (D33, D34).
    The web process writes only a run of at most `MAX_INLINE_ROWS` (50) variants pressed on
    the campaign page, so a one-variant revert stays instant, unless another of the store's runs
    is writing, when it is the worker's too and waits Queued behind it. Everything larger, and every

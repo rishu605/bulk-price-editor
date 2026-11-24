@@ -38,14 +38,20 @@ function failRunBody(): string {
 
 describe("a failed run reaches a terminal state", () => {
   it("finishes the run row before rethrowing", () => {
+    // Since #809 the catch hands its error to `endFailedRun`, which a chunked run's turn ends
+    // through too (D34): the catch must still reach it, and it must still keep the order.
+    const catchAt = RUN.indexOf("  } catch (error) {\n    if (planning) clearInterval(planning);");
+    expect(catchAt, "runCampaign's catch should exist").toBeGreaterThan(-1);
+    expect(RUN.indexOf("return endFailedRun(", catchAt), "the catch must end the run").toBeGreaterThan(catchAt);
+    const ending = RUN.slice(RUN.indexOf("async function endFailedRun("));
     // Ordering matters: `releaseClaim` is what lets another worker pick the campaign up,
     // so the row has to be settled first. And both have to happen before the rethrow,
     // which is what leaves the function.
-    const fail = RUN.indexOf("await failRun(");
-    // The release in the catch, after `failRun`. A refusal releases the scheduler's claim
-    // on the success path too (#701), earlier in the file and with no run row to settle.
-    const release = RUN.indexOf("await releaseClaim(", fail);
-    const rethrow = RUN.indexOf("    throw error;", release);
+    const fail = ending.indexOf("await failRun(");
+    // The release after `failRun`. A refusal releases the scheduler's claim on the success
+    // path too (#701), elsewhere in the file and with no run row to settle.
+    const release = ending.indexOf("await releaseClaim(", fail);
+    const rethrow = ending.indexOf("\n  throw error;", release);
 
     expect(fail, "the catch must finish the run row").toBeGreaterThan(-1);
     expect(fail, "the run row is settled before the campaign is released").toBeLessThan(

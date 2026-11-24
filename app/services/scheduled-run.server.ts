@@ -34,6 +34,11 @@ export interface ScheduledTally {
   /** Refused before it started: awaiting approval, over a limit, refused for good (#975). */
   refused: number;
   failures: Array<{ campaignId: string; error: string }>;
+  /**
+   * A transition large enough to write in chunks, whose first turn this was (#809, D34): its
+   * prices are written in later turns, and the job that ran it queues the next.
+   */
+  continues?: { runId: string; campaignId: string };
 }
 
 /** A tally to fill, for a caller with none of its own: the worker's job. */
@@ -54,7 +59,14 @@ export function emptyTally(): ScheduledTally {
 export async function runScheduledTransition(
   campaignId: string,
   tally: ScheduledTally,
-  { now = new Date() }: { now?: Date } = {},
+  {
+    now = new Date(),
+    turns = false,
+  }: {
+    now?: Date;
+    /** The worker's job runs it, and can give a large run back to its lane between chunks (D34). */
+    turns?: boolean;
+  } = {},
 ): Promise<Set<string>> {
   const transitioned = new Set<string>();
   // The real clock, so `now` can be moved on by the time the apply took.
@@ -71,8 +83,9 @@ export async function runScheduledTransition(
   // the tick that handed this over asked before the job waited.
   if (transition === "apply" && startRefusal(campaign.schedule)) return transitioned;
 
-  await runDue(campaign, transition, now, tally, transitioned);
-  if (transition !== "apply") return transitioned;
+  await runDue(campaign, transition, now, tally, transitioned, turns);
+  // A start written in chunks has not finished: its last turn asks after its end (#809, D34).
+  if (transition !== "apply" || tally.continues) return transitioned;
 
   // An apply that outlasted its window ends now, not a tick later (#829, #1053). This has been
   // inside the apply all along -- at 102,132 variants, past the end of a 30-minute sale -- so
@@ -81,7 +94,7 @@ export async function runScheduledTransition(
   const later = new Date(now.getTime() + (Date.now() - startedAt));
   const after = await prisma.campaign.findUnique({ where: { id: campaign.id }, select: { status: true, schedule: true } });
   if (after && dueTransition({ schedule: parseSchedule(after.schedule), status: after.status }, later) === "revert") {
-    await runDue({ ...campaign, ...after }, "revert", later, tally, transitioned);
+    await runDue({ ...campaign, ...after }, "revert", later, tally, transitioned, turns);
   }
   return transitioned;
 }
@@ -103,6 +116,7 @@ async function runDue(
   now: Date,
   tally: ScheduledTally,
   transitioned: Set<string>,
+  turns: boolean,
 ): Promise<void> {
   // Which attempt at this occurrence, if any. Null when one is still running or every
   // attempt has been used; a finished attempt never blocks the next one (#700).
@@ -128,7 +142,10 @@ async function runDue(
       // Two ticks that both find this window due produce the same key, and the unique
       // index turns the second into a no-op rather than a second apply.
       occurrenceKey,
+      turns,
     );
+    // Written in later turns (#809, D34): under way, and counted as the transition it is.
+    if (outcome?.continues) tally.continues = { runId: outcome.runId, campaignId: campaign.id };
     // Refused before it started, and released back to SCHEDULED: nothing was applied,
     // and counting it as applied made a stuck campaign look like a working tick.
     if (outcome?.refused) {
@@ -163,6 +180,7 @@ async function runTransition(
   campaignId: string,
   transition: Transition,
   occurrenceKey: string,
+  turns: boolean,
 ): Promise<RunOutcome | null> {
   const client = await adminClientForShop(shopDomain);
   if (!client) {
@@ -203,6 +221,7 @@ async function runTransition(
     actor: SCHEDULER_ACTOR,
     revert: transition === "revert",
     occurrenceKey,
+    ...(turns ? { turns: true } : {}),
     claimedFrom: claim.from,
     ...(claim.recorded ? {} : { claimUnrecorded: claim.reason }),
     // An end tried again after one stopped part-way finishes that revert, as Resume does, so
@@ -224,14 +243,21 @@ async function runTransition(
  * The worker's job for a transition the tick handed over (#809): runs it, and says in the log
  * what the tick's own line used to say for it. Never throws, as the tick never did for one
  * campaign: the next tick asks again while the transition is still due.
+ *
+ * Answers the run that goes on in later turns, when the transition is large enough to be written
+ * in chunks and the job can give it back to its lane (`turns`, D34).
  */
-export async function runScheduledJob(campaignId: string): Promise<void> {
+export async function runScheduledJob(
+  campaignId: string,
+  { turns = false }: { turns?: boolean } = {},
+): Promise<{ runId: string; campaignId: string } | undefined> {
   const tally = emptyTally();
-  await runScheduledTransition(campaignId, tally);
+  await runScheduledTransition(campaignId, tally, { turns });
   for (const failure of tally.failures) {
     logger.error("a scheduled transition failed", { campaignId: failure.campaignId, error: failure.error });
   }
   if (tally.applied + tally.reverted + tally.refused > 0) {
     logger.info("a scheduled transition ran", { campaignId, applied: tally.applied, reverted: tally.reverted, refused: tally.refused });
   }
+  return tally.continues;
 }
