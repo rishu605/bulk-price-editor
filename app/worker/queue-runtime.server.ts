@@ -505,7 +505,37 @@ async function traced<T>(
           ...(ref.runId ? { "run.id": ref.runId } : {}),
           ...(ref.revert === undefined ? {} : { "job.revert": ref.revert }),
         },
-        work,
+        async () => {
+          try {
+            return await work();
+          } catch (error) {
+            await reportJobFailure(name, ref, error);
+            throw error;
+          }
+        },
       ),
   );
+}
+
+/**
+ * A failed job, reported the way a failed request is: logged with its cause and stored as
+ * an ErrorEvent, so Diagnostics lists it with a reference.
+ *
+ * `job failed` logs only the message a handler threw, which for a run is the merchant's
+ * sentence, "This apply stopped part-way". What Shopify actually said was in the error's
+ * cause and went nowhere: a queued 3,591-variant apply on DartMode Labs failed twice in a
+ * row on 24 Nov with "Your session expired" and nothing anywhere said which call refused
+ * it (#1188). Inside the job's log context, so the line carries its shop, campaign and run.
+ */
+async function reportJobFailure(name: QueueName, ref: JobRef, error: unknown): Promise<void> {
+  try {
+    const { reportError } = await import("../services/error-report.server");
+    await reportError(error, { shopId: ref.shopId, route: `job ${name}` });
+  } catch (failure) {
+    // The job's own failure still propagates; losing its report must not replace it.
+    logger.warn("could not report a failed job", {
+      queue: name,
+      error: failure instanceof Error ? failure.message : String(failure),
+    });
+  }
 }

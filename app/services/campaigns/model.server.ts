@@ -29,6 +29,7 @@ import type { AdjustmentRule,
 import { PRICES_MAY_BE_LIVE, PRICING_STATES, type CampaignState } from "../../lib/lifecycle/transitions";
 import { breachPolicyFor, type BreachPolicy } from "../../lib/campaigns/breach-policy";
 import { campaignGuardrailsOf, floorsAudit, resolverGuardrails, setsAnything } from "../../lib/campaigns/campaign-floors";
+import { asCompareAtViolation } from "../../lib/campaigns/compare-at-violation";
 import { productStatusesOf, type ProductStatus } from "../../lib/campaigns/product-status";
 import { START_CONFIRMED_KEY } from "../../lib/campaigns/start-confirmation";
 import { parseSurfaces } from "../../lib/campaigns/surfaces";
@@ -226,7 +227,8 @@ async function campaignRow(shopId: string, input: CampaignInput) {
       ruleRows: [{ segmentIds: [], rule: input.rule }] as never,
       surfaces: { base: true, priceLists: input.priceLists ?? [] } as never,
       compareAtPolicy: input.compareAtPolicy as never,
-      compareAtViolationPolicy: "clear",
+      // The campaign's choice (#817), or "clear", which this wrote for every campaign before.
+      compareAtViolationPolicy: input.compareAtViolationPolicy ?? "clear",
       // Its own floors and policy, as the editor read them (#816); nothing, for a campaign that
       // sets none, which follows the store's floors as every campaign always has.
       guardrails: (input.guardrails ?? {}) as never,
@@ -267,6 +269,7 @@ export type PlannableCampaign = Pick<
   | "priority"
   | "ruleRows"
   | "compareAtPolicy"
+  | "compareAtViolationPolicy"
   | "guardrails"
   | "guardrailViolationPolicy"
   | keyof typeof DEFINITION
@@ -294,6 +297,7 @@ export async function unsavedCampaign(shopId: string, input: CampaignInput): Pro
     // The JSON columns exactly as the row writes them: no field of the plan is rebuilt here.
     ruleRows: row.ruleRows,
     compareAtPolicy: row.compareAtPolicy,
+    compareAtViolationPolicy: row.compareAtViolationPolicy,
     guardrails: row.guardrails,
     guardrailViolationPolicy: row.guardrailViolationPolicy,
     schedule: row.schedule as Prisma.JsonValue,
@@ -529,7 +533,9 @@ export function toResolvable(campaign: PlannableCampaign): ResolvableCampaign {
     // JsonValue and RuleRow[] do not overlap structurally.
     ruleRows: campaign.ruleRows as unknown as ResolvableCampaign["ruleRows"],
     compareAtPolicy: campaign.compareAtPolicy as unknown as CompareAtPolicy,
-    compareAtViolationPolicy: "clear",
+    // Read from the campaign (#817). Hardcoded here and in `createCampaign`, so the resolver's
+    // skip and block were tested and unreachable, as the breach policy's were (#338).
+    compareAtViolationPolicy: asCompareAtViolation(campaign.compareAtViolationPolicy),
     roundingPolicy: roundingFor(campaign.rounding),
     // Its own floors over the store's (#816): tighter only, but for each one somebody typed the
     // word to take below the store's. Every campaign before #816 stored `{}`, which is nothing.

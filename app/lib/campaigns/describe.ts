@@ -69,6 +69,16 @@ export function describeRule(rule: AdjustmentRule | null | undefined): string {
       // prices came from is the honest summary.
       return "Prices from a file";
 
+    // From cost and from the compare-at (#817), which no screen offered before.
+    case "from-cost-multiplier":
+      return `Cost${NB}×${NB}${strip(rule.factor)}`;
+
+    case "from-cost-margin":
+      return `${strip(rule.marginPercent)}%${NB}margin on cost`;
+
+    case "percent-of-compare-at":
+      return `${strip(Math.abs(rule.percent))}%${NB}off compare-at`;
+
     default:
       return "No rule";
   }
@@ -93,8 +103,16 @@ export function describeScope(ast: FilterAst | null | undefined, segmentName?: s
   // Draft and archived products, when the campaign opted into them (#751). After the rest,
   // because it widens whatever the rest says -- a segment included.
   const statuses = describeProductStatuses(ast?.productStatuses);
-  const scope = describeConditions(ast, segmentName);
+  // The products picked to leave out (#817), which narrow whatever the rest says. Not over a
+  // segment, which replaces the inline filter and its picks with it.
+  const left = segmentName ? 0 : (ast?.excludeVariantGids?.length ?? 0);
+  const scope = describeConditions(ast, segmentName) + (left > 0 ? ` · except ${chosen(left)}` : "");
   return statuses ? `${scope} · ${statuses}` : scope;
+}
+
+/** "1 chosen variant", "4 chosen variants". */
+function chosen(count: number): string {
+  return `${count} chosen ${count === 1 ? "variant" : "variants"}`;
 }
 
 function describeConditions(ast: FilterAst | null | undefined, segmentName?: string | null): string {
@@ -105,10 +123,10 @@ function describeConditions(ast: FilterAst | null | undefined, segmentName?: str
 
   const conditions = groups.flatMap((group) => group.conditions);
 
-  const pinned = conditions.find((condition) => condition.field === "variantGid");
-  if (pinned) {
-    const count = Array.isArray(pinned.value) ? pinned.value.length : 1;
-    return `${count} chosen ${count === 1 ? "variant" : "variants"}`;
+  // Only a pinned list -- a frozen segment's, or products picked with no conditions beside
+  // them. Picked products beside conditions are one more "or" below (#817).
+  if (conditions.every((condition) => condition.field === "variantGid")) {
+    return chosen(conditions.reduce((sum, condition) => sum + (Array.isArray(condition.value) ? condition.value.length : 1), 0));
   }
 
   /*
@@ -133,7 +151,7 @@ function describeConditions(ast: FilterAst | null | undefined, segmentName?: str
     conditions.every((condition) => condition.field === field);
 
   if (oneEach && field in PREFIX) {
-    const values = conditions.map((condition) => String(condition.value));
+    const values = conditions.flatMap((condition) => valuesOf(condition.value));
     return `${PREFIX[field]} ${listOut(values)}`;
   }
 
@@ -167,15 +185,33 @@ function listOut(values: string[]): string {
   return `${values.slice(0, -1).join(", ")} or ${values[values.length - 1]}`;
 }
 
+/** A condition's values as words: a list for one with several (#817), else the one. */
+function valuesOf(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(String) : [String(value)];
+}
+
 function describeCondition(condition: { field: string; value: unknown }): string {
   const value = String(condition.value);
+  // Several values of one field are any of them (#817): "Tagged sale or clearance".
+  const values = listOut(valuesOf(condition.value));
 
   switch (condition.field) {
     case "excludeTag":
       // Said as an exception rather than as another condition, because that is what it
       // is: "In Outerwear · except tagged no-sale" is a sentence a merchant can check
       // against what they meant.
-      return `except tagged ${value}`;
+      return `except tagged ${values}`;
+    case "status":
+      return `Status ${value.toLowerCase()}`;
+    // The builder's other conditions (#817), as its own rows say them.
+    case "inventoryMin":
+      return `Stock at least ${value}`;
+    case "inventoryMax":
+      return `Stock at most ${value}`;
+    case "hasCost":
+      return condition.value === true ? "Cost recorded" : "No cost recorded";
+    case "variantGid":
+      return chosen(Array.isArray(condition.value) ? condition.value.length : 1);
     case "title":
       return `Title contains “${value}”`;
     case "sku":
@@ -186,7 +222,7 @@ function describeCondition(condition: { field: string; value: unknown }): string
       // A field nobody anticipated still gets a readable phrase rather than nothing —
       // the same argument `describeAction` makes about not being a lookup table.
       return condition.field in PREFIX
-        ? `${PREFIX[condition.field]} ${value}`
+        ? `${PREFIX[condition.field]} ${values}`
         : `${condition.field}: ${value}`;
   }
 }

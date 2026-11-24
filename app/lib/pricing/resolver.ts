@@ -115,12 +115,16 @@ export function resolve(input: ResolveInput): Resolution {
       // the rule can say, so the "block" policy does not stop the whole run over it.
       if (error.reason === "currency-mismatch") return skipped(winner, "currency-mismatch", rule);
 
+      // A rule with nothing to price from says which amount it needed (#817): a missing
+      // compare-at was reported as a missing cost, and a cost the rule needs as the guardrail's.
       const reason =
         error.reason === "invalid-margin"
           ? "invalid-margin"
           : error.reason === "missing-import"
             ? "missing-import"
-            : "missing-cost";
+            : error.reason === "missing-compare-at"
+              ? "needs-compare-at"
+              : "needs-cost";
       return winner.guardrailViolationPolicy === "block"
         ? blocked(winner, reason, rule)
         : skipped(winner, reason, rule);
