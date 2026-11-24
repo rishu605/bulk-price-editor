@@ -15,7 +15,6 @@ import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
 import { toAdminClient } from "../services/admin-client.server";
 import { confirmShopTimezone, windowInStoreZone } from "../services/shop-timezone.server";
-import { facetDetails } from "../lib/segments/facets";
 import { facets } from "../services/segments.server";
 import { createCampaign } from "../services/campaigns/index.server";
 import { requestPlanSummary } from "../services/campaigns/plan-summary.server";
@@ -50,16 +49,20 @@ import { billingFrom } from "../services/billing.server";
 import { canUseSurface } from "../lib/billing/plans";
 import prisma from "../db.server";
 import {
-  astFrom,
   compareAtFrom,
+  compareAtViolationFrom,
   priorityFrom,
   productStatusesFrom,
   readerFor,
   revertBufferFrom,
   ruleFrom,
   ruleInputProblem,
-  SCOPE_CONDITION_FIELDS,
 } from "../lib/campaigns/draft-form";
+import { scopeFrom } from "../lib/segments/scope-builder";
+import { titleMapFor } from "../services/campaigns/candidates.server";
+import { ScopeBuilder } from "../components/scope/ScopeBuilder";
+import { MatchCount } from "../components/scope/MatchCount";
+import { CompareAtViolationField } from "../components/campaign/CompareAtViolationField";
 import { PageSections, PageShell } from "../components/PageShell";
 import { UnsavedChanges } from "../components/UnsavedChanges";
 import { DraftPreview } from "../components/DraftPreview";
@@ -162,6 +165,11 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
     // says so instead of naming a zone Anchor has not read.
     confirmShopTimezone(shop.id, toAdminClient(admin), actorFor(sessionToken, session.shop)),
   ]);
+
+  // The filter builder's scope as the link carries it (#817): its own field, or the fields
+  // before it. With the names of any products it picked, which the field carries as ids only.
+  const scope = scopeFrom(readerFor(url.searchParams)).draft;
+  const pickedTitles = Object.fromEntries(await titleMapFor(shop.id, [...scope.include, ...scope.exclude]));
 
   const billing = billingFrom(shopRecord);
   // The store's floors, which a campaign's own start from in Advanced (#816).
@@ -266,12 +274,9 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
     })),
     // Past imports only, so the stored zone will do when Shopify did not answer just now.
     importsTimeZone: timeZone ?? shop.timezone,
+    scope,
+    pickedTitles,
     selected: {
-      collection: url.searchParams.get("collection") ?? "",
-      tag: url.searchParams.get("tag") ?? "",
-      excludeTag: url.searchParams.get("excludeTag") ?? "",
-      vendor: url.searchParams.get("vendor") ?? "",
-      title: url.searchParams.get("title") ?? "",
       segment: segmentId,
       // Ticked when the full preview's "Back to the campaign" carries them, so the boxes
       // say what the preview the merchant just read was pricing (#751).
@@ -289,30 +294,11 @@ export const loader = withGuard("/app/campaigns/new", async ({ request }: Loader
   };
 });
 
-/**
- * The scope form's fields.
- *
- * Named once and shared with the form, so a field added to one and forgotten in the
- * other cannot silently stop being filterable.
- */
-export const SCOPE_FIELDS = [...SCOPE_CONDITION_FIELDS, "segment"] as const;
-
-
-/** Builds an AST from the simple scope form: all provided conditions ANDed. */
-
 export const action = withGuard("/app/campaigns/new", async ({ request }: ActionFunctionArgs) => {
   const { admin, session, sessionToken } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
 
   const form = await request.formData();
-  const params = new URLSearchParams();
-  // The same list the preview reads, not a copy of it. A field in one and not the other
-  // is a scope a merchant sets, sees previewed, and does not get — or the reverse, which
-  // is worse. Rule 4: preview and execution share one code path.
-  for (const field of SCOPE_CONDITION_FIELDS) {
-    const value = form.get(field);
-    if (typeof value === "string" && value.trim()) params.set(field, value.trim());
-  }
 
   // The shop's own currency, not a form field. The form never had one, so this used to
   // fall back to "USD" on every store -- and the conversion to minor units used a
@@ -328,6 +314,10 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
   }
   const rule = ruleFrom(read, currency);
   const compareAtPolicy = compareAtFrom(read);
+  // The scope as the preview reads it, not a copy of that reading (#817): the filter builder's
+  // field, or the fields before it. A scope a merchant sets, sees previewed and does not get --
+  // or the reverse -- is what rule 4 says preview and execution must never be.
+  const scope = scopeFrom(read);
 
   const dates = {
     startDate: String(form.get("startDate") ?? ""),
@@ -392,6 +382,10 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
     .filter(Boolean);
 
   const segmentId = String(form.get("segment") ?? "").trim();
+  // Refused by name, as the rule is. Not over a segment, which replaces the builder's scope.
+  if (!scope.ok && !segmentId) {
+    throw new AppError({ code: "VALIDATION", userMessage: `${scope.problem} Nothing was created.` });
+  }
 
   // The page holds its button until a guided campaign is narrowed; this is the same rule
   // for a submit that did not come through that button -- no JavaScript, or a hand-built
@@ -417,13 +411,15 @@ export const action = withGuard("/app/campaigns/new", async ({ request }: Action
 
   const input: CampaignInput = {
     name: String(form.get("name") ?? "Untitled campaign").trim() || "Untitled campaign",
-    ast: astFrom(readerFor(params)),
+    ast: scope.ok ? scope.ast : { groups: [] },
     ...(segmentId ? { segmentId } : {}),
     // The reader the live preview uses, so a box ticked there is a box this keeps (#751).
     productStatuses: productStatusesFrom(read),
     ...(practice ? { practice: true } : {}),
     rule,
     compareAtPolicy,
+    // What a compare-at not above the new price does (#817, PRD A-3.3): "clear" unless chosen.
+    compareAtViolationPolicy: compareAtViolationFrom(read),
     rounding: readRoundingPolicy(form.entries()),
     priority: priorityFrom(read),
     // An unchecked checkbox is simply absent from the form, so presence is the value.
@@ -468,6 +464,8 @@ export default function NewCampaign() {
   const {
     facets: available,
     catalogue,
+    scope,
+    pickedTitles,
     selected,
     segments,
     usingSegment,
@@ -523,6 +521,9 @@ export default function NewCampaign() {
    */
   const [ruleKind, setRuleKind] = useState<string>(initialRuleKind);
   const fromFile = ruleKind === FROM_FILE;
+  // The compare-at choice, held for the question beside it (#817): only a compare-at that is
+  // set can fail to be above the price.
+  const [compareAt, setCompareAt] = useState<string>(initialRule.compareAt);
 
   // Its own fetcher, posting to the import route. Sharing the editor's would mean one
   // `state` for two very different submissions, so a dry run in flight would put the
@@ -772,6 +773,7 @@ export default function NewCampaign() {
                 name="compareAt"
                 label="Compare-at price"
                 details="Setting it to the baseline is what shows a customer the old price struck through."
+                onChange={(event) => setCompareAt(String(event.currentTarget.value))}
               >
                 <s-option value="set-to-baseline" defaultSelected={initialRule.compareAt === "set-to-baseline"}>
                   Set to baseline
@@ -783,6 +785,9 @@ export default function NewCampaign() {
                   Clear it
                 </s-option>
               </s-select>
+
+              {/* Beside the compare-at, while it sets one (#817, PRD A-3.3). */}
+              {compareAt === "set-to-baseline" ? <CompareAtViolationField initial={initialRule.compareAtViolation} /> : null}
 
               {/* The whole row, because these six options are the longest text in the
                   form: `label · example` puts "Leave prices exactly as calculated ·
@@ -858,8 +863,8 @@ export default function NewCampaign() {
           the second page caused in the first place. */}
       {fromFile ? null : (
       <Card heading={headings.scope}>    <s-paragraph>
-          Which variants the rule above applies to. Leave everything blank to target every
-          active product in the catalogue; conditions combine with AND.
+          Which variants the rule above applies to: a saved segment, or the conditions and
+          products below. With neither, it covers every active product.
         </s-paragraph>
 
         <FieldGrid>
@@ -894,80 +899,30 @@ export default function NewCampaign() {
             </FullRow>
           ) : null}
 
-          <s-select
-            name="collection"
-            label="Collection"
-            details={facetDetails(available.totals.collections, "collections")}
-          >
-            <s-option value="" defaultSelected={!selected.collection}>
-              Any collection
-            </s-option>
-            {available.collections.map((c) => (
-              <s-option key={c} value={c} defaultSelected={selected.collection === c}>
-                {c}
-              </s-option>
-            ))}
-          </s-select>
-          <s-select
-            name="vendor"
-            label="Vendor"
-            details={facetDetails(available.totals.vendors, "vendors")}
-          >
-            <s-option value="" defaultSelected={!selected.vendor}>
-              Any vendor
-            </s-option>
-            {available.vendors.map((v) => (
-              <s-option key={v} value={v} defaultSelected={selected.vendor === v}>
-                {v}
-              </s-option>
-            ))}
-          </s-select>
-          <s-select name="tag" label="Tag" details={facetDetails(available.totals.tags, "tags")}>
-            <s-option value="" defaultSelected={!selected.tag}>
-              Any tag
-            </s-option>
-            {available.tags.map((t) => (
-              <s-option key={t} value={t} defaultSelected={selected.tag === t}>
-                {t}
-              </s-option>
-            ))}
-          </s-select>
-          <s-text-field name="title" label="Title contains" value={selected.title} />
+          {/* The filter builder (#817, PRD A-2.1 and A-2.3), the one the Segments form uses: every
+              condition that ships, several values, "or" groups, the product picker, and the
+              count under it. It replaced five selects of one value each, ANDed, which could not
+              say "Boots or Gloves", "stock of 50 or more" or "these four products".
 
-          {/* The exception, beside the conditions rather than in its own card.
-              
-              Sami gives "Exclude products" a card of its own next to "Apply to products";
-              here it belongs in the same grid, because it is read as part of one sentence
-              — "In Outerwear, tagged sale, except tagged no-sale" — and a second card
-              would make the exception look like a second decision.
-
-              A tag rather than a variant picker: a merchant who keeps a list of things
-              never to discount already keeps it as a tag, and a picker would be a list
-              that goes stale the moment they add a product. */}
+              The count is the preview's: it prices this same scope through `astToWhere`, so the
+              number under the conditions is the one the panel and the run work from. */}
           <FullRow>
-            <s-select
-              name="excludeTag"
-              label="Except anything tagged"
-              details={[
-                "Leaves these out of this campaign. They stay eligible for your other campaigns.",
-                facetDetails(available.totals.tags, "tags"),
-              ]
-                .filter(Boolean)
-                .join(" ")}
-            >
-              <s-option value="" defaultSelected={!selected.excludeTag}>
-                Nothing excluded
-              </s-option>
-              {available.tags.map((tag) => (
-                <s-option
-                  key={tag}
-                  value={tag}
-                  defaultSelected={selected.excludeTag === tag}
-                >
-                  {tag}
-                </s-option>
-              ))}
-            </s-select>
+            <ScopeBuilder
+              facets={available}
+              initial={scope}
+              pickedTitles={pickedTitles}
+              count={
+                <MatchCount
+                  matched={
+                    previewFetcher.data && !previewFetcher.data.ruleProblem && !previewFetcher.data.floorsProblem
+                      ? previewFetcher.data.matched
+                      : null
+                  }
+                  pending={previewFetcher.state !== "idle"}
+                  problem={previewFetcher.data?.scopeProblem}
+                />
+              }
+            />
           </FullRow>
 
           {/* Product status, after every condition because it narrows all of them -- and a

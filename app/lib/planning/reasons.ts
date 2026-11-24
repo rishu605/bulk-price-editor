@@ -17,6 +17,8 @@ import type { ResolutionReason } from "../pricing/types";
 /** Plural, for a run summary that groups rows by reason. */
 export const SKIP_REASON_GROUP: Record<ResolutionReason, string> = {
   "missing-cost": "have no cost recorded, and a cost-based guardrail applies",
+  "needs-cost": "have no cost recorded, and this rule prices from cost",
+  "needs-compare-at": "have no compare-at price in their baseline, and this rule prices from it",
   "missing-import": "were not in the imported file",
   "currency-mismatch": "are priced by a fixed amount in another currency, which is never converted",
   "baseline-currency": "have a baseline in another currency than their price, which is never converted; import it again in your store's currency",
@@ -33,6 +35,8 @@ export const SKIP_REASON_GROUP: Record<ResolutionReason, string> = {
 /** Singular, for one row in a preview table. */
 export const SKIP_REASON_ROW: Record<ResolutionReason, string> = {
   "missing-cost": "No cost recorded",
+  "needs-cost": "Needs a cost: none recorded",
+  "needs-compare-at": "Needs a compare-at: none in its baseline",
   "missing-import": "Not in the imported file",
   "currency-mismatch": "Fixed amount is in another currency",
   "baseline-currency": "Baseline is in another currency",

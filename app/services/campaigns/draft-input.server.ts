@@ -11,8 +11,8 @@
  */
 
 import {
-  astFrom,
   compareAtFrom,
+  compareAtViolationFrom,
   priorityFrom,
   productStatusesFrom,
   readerFor,
@@ -21,6 +21,7 @@ import {
 } from "../../lib/campaigns/draft-form";
 import { FLOOR_FIELDS, floorsFromForm, type FloorsInput } from "../../lib/campaigns/campaign-floors";
 import { readRoundingPolicy } from "../../lib/money/rounding-policy";
+import { scopeFrom } from "../../lib/segments/scope-builder";
 import { segmentToAst } from "../segments.server";
 import { guardrailsFor } from "../settings.server";
 import type { DraftCampaign } from "./draft-preview.server";
@@ -49,6 +50,8 @@ export async function draftCampaignFrom(
     : null;
 
   const ruleProblem = ruleInputProblem(read, currency);
+  // The filter builder's scope, or the old fields (#817): what the create action reads.
+  const scope = scopeFrom(read);
   // Its own floors and policy, read as the save reads them (#816), against the store's now. Only
   // where the fields were posted: without them -- the first preview's own request, a link from
   // Home -- the campaign sets none, and there is nothing to compare.
@@ -63,7 +66,7 @@ export async function draftCampaignFrom(
             filterAst: segment.filterAst,
             frozenVariantGids: segment.frozenVariantGids,
           })
-        : astFrom(read)),
+        : scope.ok ? scope.ast : { groups: [] }),
       // Over the segment too, as `scopeOf` does for the campaign this becomes (#751): the
       // segment replaces the filter, not the choice of draft and archived products.
       productStatuses: productStatusesFrom(read),
@@ -73,7 +76,11 @@ export async function draftCampaignFrom(
     ...(ruleProblem
       ? { rule: { kind: "percent-change" as const, percent: 0 }, ruleProblem }
       : { rule: ruleFrom(read, currency) }),
+    // A scope the builder cannot use is said instead of priced, as a rule is (#817). Not where
+    // a segment replaces it.
+    ...(!segment && !scope.ok ? { scopeProblem: scope.problem } : {}),
     compareAtPolicy: compareAtFrom(read),
+    compareAtViolationPolicy: compareAtViolationFrom(read),
     rounding: readRoundingPolicy(source.entries()),
     priority: priorityFrom(read),
     ...(floors.ok ? { floors: floors.floors, below: floors.below } : { floorsProblem: floors.problems.join(" ") }),

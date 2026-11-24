@@ -6,7 +6,7 @@
  */
 
 import type { AlreadyCorrect, Overlap } from "../../lib/planning/overlaps";
-import type { AdjustmentRule, CompareAtPolicy } from "../../lib/pricing/types";
+import type { AdjustmentRule, CompareAtPolicy, CompareAtViolationPolicy } from "../../lib/pricing/types";
 import type { CampaignGuardrails } from "../../lib/campaigns/campaign-floors";
 import type { PlannedRow } from "../../lib/planning/types";
 import type { MarginRow } from "../../lib/pricing/margin";
@@ -22,6 +22,12 @@ export interface CampaignInput {
   ast: FilterAst;
   rule: AdjustmentRule;
   compareAtPolicy: CompareAtPolicy;
+  /**
+   * What to do when the compare-at it would write is not above the new price (#817, PRD
+   * A-3.3): drop it, leave the variant at its price, or stop the campaign. Absent is "clear",
+   * what every campaign did before the editor asked.
+   */
+  compareAtViolationPolicy?: CompareAtViolationPolicy;
   /**
    * Rounding, per currency.
    *
