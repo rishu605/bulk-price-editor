@@ -9,6 +9,11 @@
 
 import { describe, expect, it, vi } from "vitest";
 
+const { reportError } = vi.hoisted(() => ({
+  reportError: vi.fn<(error: unknown, context?: Record<string, unknown>) => Promise<object>>(async () => ({})),
+}));
+vi.mock("../services/error-report.server", () => ({ reportError }));
+
 import { sourceOf } from "../lib/testing/source";
 import { logger } from "../lib/logging/logger";
 
@@ -72,6 +77,31 @@ describe("running without Redis", () => {
   it("propagates a handler failure to the caller", async () => {
     // Inline means inline. Swallowing here would make a failure invisible in exactly
     // the deployment that has no queue to inspect.
+    const runtime = inlineRuntime(async () => {
+      throw new Error("handler blew up");
+    });
+
+    await expect(runtime.enqueue("audit", { shopId: "s1" })).rejects.toThrow("handler blew up");
+  });
+
+  it("reports a failed job with its cause, as a failed request is, and still throws it (#1188)", async () => {
+    // A run's error carries the merchant's sentence; Shopify's answer is its cause. Only a
+    // report keeps the cause, and before this a queued run's never was.
+    reportError.mockClear();
+    const cause = new Error("Staged upload failed: 403 AccessDenied");
+    const runtime = inlineRuntime(async () => {
+      throw new Error("This apply stopped part-way.", { cause });
+    });
+
+    await expect(runtime.enqueue("execution", { shopId: "s1", campaignId: "c1" })).rejects.toThrow("stopped part-way");
+    expect(reportError).toHaveBeenCalledTimes(1);
+    const [reported, context] = reportError.mock.calls[0]!;
+    expect((reported as Error).cause).toBe(cause);
+    expect(context).toEqual({ shopId: "s1", route: "job execution" });
+  });
+
+  it("still throws the job's own error when its report fails", async () => {
+    reportError.mockRejectedValueOnce(new Error("database down"));
     const runtime = inlineRuntime(async () => {
       throw new Error("handler blew up");
     });
