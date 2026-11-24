@@ -123,8 +123,9 @@ describe("chaos: Flow's Start campaign", () => {
       expect(await statusOf(campaignId)).toBe("APPLYING");
       // The QUEUED row first, which the job names (#808).
       const run = await prisma.campaignRun.findFirstOrThrow({ where: { campaignId, status: "QUEUED" } });
+      // Twenty variants is seconds of writing: the small-run lane (#809).
       expect(enqueued).toEqual([
-        { name: "execution", ref: { shopId, campaignId, runId: run.id, revert: false, claimedFrom: "DRAFT", actor: "shopify-flow" } },
+        { name: "execution-small", ref: { shopId, campaignId, runId: run.id, revert: false, claimedFrom: "DRAFT", actor: "shopify-flow" } },
       ]);
       expect((await activity(shopId, "start-campaign"))[0].after).toMatchObject({ outcome: "queued", status: 200 });
 
@@ -160,7 +161,7 @@ describe("chaos: Flow's End campaign", () => {
       const run = await prisma.campaignRun.findFirstOrThrow({ where: { campaignId, status: "QUEUED" } });
       expect(enqueued).toEqual([
         {
-          name: "execution",
+          name: "execution-small",
           ref: {
             shopId,
             campaignId,

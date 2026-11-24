@@ -238,8 +238,9 @@ would say so.
 
 ## Alert: queue depth rising
 
-**Metric:** `queue.depth`, per queue. The alert reads `execution`'s depth from Redis each
-tick; until #813 nothing passed it one, so it could not fire.
+**Metric:** `queue.depth`, per queue. The alert reads the two run lanes' depth from Redis
+each tick, `execution` and `execution-small` together (#809); until #813 nothing passed it
+one, so it could not fire.
 
 **What it means.** Jobs are arriving faster than they are draining. Which queue matters
 enormously: `audit` backing up is cosmetic, `execution` backing up means merchant
@@ -259,21 +260,29 @@ single poison job, its failure is in `error_events` with the job id.
 
 ## Alert: a shop's run is waiting to start
 
-**Signal:** the `execution` queue's waiting jobs, read from Redis by the worker's alerting job:
-each shop's longest-waiting run. Pages past 2 min (`RUN_WAIT_MS` in `alerts.ts`). The history
-is `queue.wait_ms` with `queue=execution`, per shop, recorded as each run starts.
+**Signal:** the two run lanes' waiting jobs, read from Redis by the worker's alerting job:
+each shop's longest-waiting run. Pages past 2 min on `execution` (`RUN_WAIT_MS` in
+`alerts.ts`) and past 1 min on `execution-small`, the small-run lane (`SMALL_RUN_WAIT_MS`,
+#809). The history is `queue.wait_ms` per lane and shop, recorded as each job first starts,
+and `run.wait_ms` per lane and shop, from the press to the worker taking the run.
 
-**What it means.** A merchant pressed Apply or Revert, or a scheduled end came due, and the
-worker has not picked the job up. Their page reads Applying or Reverting with nothing
-happening, or a sale is running past its end. Usually it is one shop's run waiting behind
-another's — `execution` runs two at a time, and one 102,132-variant run holds a slot for
-minutes. That is Epic 19's failure (#807), and `npm run gate:two-shops` is the test for it
-(`docs/perf/two-shop-gate.md`).
+**What it means.** A merchant pressed Apply or Revert, or a scheduled start or end came due,
+and the worker has not picked the job up. Their page reads Queued with nothing happening, or a
+sale is running past its end. Since #809 a shop runs one thing at a time (its `shop_leases`
+row) and runs of two minutes' writing or less have a lane of their own, so this is no longer
+one shop's run behind another's sale on the same slot: it is a lane whose every slot is taken
+— `execution` runs two at once across every worker, and one 102,132-variant run holds a slot
+for as long as Shopify's bulk queue takes — or no worker consuming. A run waiting behind its
+own shop's other run is not waiting in this sense: it is put back, delayed rather than waiting,
+and never fires this. That is Epic 19's failure (#807), and `npm run gate:two-shops` is the test
+for it (`docs/perf/two-shop-gate.md`).
 
-**Diagnose.** `queue.depth` and `queue.oldest_wait_ms` for `execution`: two active and the
+**Diagnose.** `queue.depth` and `queue.oldest_wait_ms` for each lane: two active and the
 rest waiting is slots held by long runs; nothing active is no worker consuming — look at the
 worker's logs and `scheduler-stopped`. `/healthz` → `queues` shows the same counts without
-shop ids. Since D29 a run the web process handed over is a `QUEUED` `campaign_runs` row from
+shop ids. `queue.deferred` counts jobs put back because their shop was busy; who holds a shop
+now is `SELECT "shopId", kind, "campaignId", "expiresAt" FROM shop_leases;` — a row past its
+`expiresAt` is free, and a worker that died holds its shop five minutes at most. Since D29 a run the web process handed over is a `QUEUED` `campaign_runs` row from
 the moment of the press: `SELECT id, "campaignId", "createdAt" FROM campaign_runs WHERE status = 'QUEUED' ORDER BY "createdAt";`
 lists them, oldest first. The tick rings any older than fifteen seconds, so a job Redis never
 took, or lost, is queued again without anyone doing anything; the reaper leaves them alone.
@@ -288,7 +297,8 @@ afterwards anyway. If no worker is consuming, restart the worker service.
 
 **Signal:** the front job of `sync`, `webhooks`, `planning` or `verification` has waited more
 than 10 min to start (`QUEUE_STALLED_MS`). The history is `queue.oldest_wait_ms`, per queue.
-`execution` has the page above instead; `audit` never pages.
+The two run lanes, `execution` and `execution-small`, have the page above instead; `audit`
+never pages.
 
 **What it means.** Nothing is taking from that queue. A stalled `webhooks` queue is the
 mirror going stale with no error anywhere: `webhook-lag` is computed from *processed*
@@ -483,7 +493,7 @@ line `alerts.ts` draws between a page and a graph.
 | `shop-error-spike` | **Page** | One merchant's every campaign is failing inside a healthy global rate — the incident the overall error rate cannot see. |
 | `unpriceable-variants` | **Page** | Variants are mirrored, counted and shown, with no baseline — so campaigns silently skip them and the merchant is told nothing. |
 | `pages-waiting-for-database` | **Page** | Every shop's pages are blank, and a run writing in the web process can die of a pool timeout part-way, leaving prices half-changed. |
-| `shop-run-waiting` | **Page** | A merchant's Apply, Revert or scheduled end has not started for minutes — usually behind another shop's large run, which is the failure Epic 19 exists to prevent. |
+| `shop-run-waiting` | **Page** | A merchant's Apply, Revert or scheduled start or end has not started for minutes, or a small run for a minute — a run lane full or stopped, the failure Epic 19 exists to prevent. |
 | `queue-stalled` | **Page** | Nothing is taking from a queue, so webhooks or syncs stop reaching the mirror — and the webhook-lag alert, which reads processed deliveries, goes quiet instead of firing. |
 
 **Look at these next working day.**

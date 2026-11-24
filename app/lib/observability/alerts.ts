@@ -34,7 +34,7 @@ export interface SignalWindow {
   requests: number;
   /** Fraction of a sampled mirror that disagreed with Shopify. */
   divergenceRate: number | null;
-  /** Depth of the execution queue. */
+  /** Depth of the execution queues: both run lanes together (#809). */
   executionQueueDepth: number | null;
   /**
    * Live variants the nightly audit could not give a base surface row.
@@ -73,8 +73,8 @@ export interface SignalWindow {
    */
   queues: QueueSignal[] | null;
   /**
-   * How long each shop's longest-waiting run has waited in `execution`, or null when Redis
-   * could not be read (#813). Only shops with a run waiting have a row.
+   * How long each shop's longest-waiting run has waited in each run lane, or null when Redis
+   * could not be read (#813, #809). Only shops with a run waiting have a row.
    */
   shopRunWaits: ShopRunWait[] | null;
 }
@@ -89,6 +89,8 @@ export interface QueueSignal {
 export interface ShopRunWait {
   shopId: string;
   waitMs: number;
+  /** On the small-run lane (#809), which pages sooner: see `SMALL_RUN_WAIT_MS`. */
+  small?: boolean;
 }
 
 export interface ShopRate {
@@ -153,6 +155,16 @@ export const PAGES_DATABASE_WAIT_MS = 5_000;
  * past its end -- and it is one shop waiting behind another's run, which is #807's failure.
  */
 export const RUN_WAIT_MS = 2 * 60_000;
+
+/**
+ * How long a run on the small-run lane may wait to start before somebody is woken (#809).
+ *
+ * The lane exists so a one-variant run never waits behind anyone's sale: its slots are its own,
+ * and it takes only runs of two minutes' writing or less. A minute of waiting there -- twice the
+ * gate's 30 s for a 1-variant apply, end to end -- is the lane full or stopped. A run put back
+ * because its own shop has another run writing is not waiting in this sense, and never fires it.
+ */
+export const SMALL_RUN_WAIT_MS = 60_000;
 
 /**
  * How long any other queue's front job may wait before the queue counts as stalled (#813).
@@ -294,8 +306,9 @@ export function evaluate(window: SignalWindow): AlertCondition[] {
   }
 
   // Per shop, the way the error rate is: the backlog alert above counts jobs, and one
-  // shop's run waiting behind another's is a single job that no count notices (#813).
-  const waiting = (window.shopRunWaits ?? []).filter((shop) => shop.waitMs > RUN_WAIT_MS);
+  // shop's run waiting behind another's is a single job that no count notices (#813). Sooner
+  // on the small-run lane, which a large run never holds (#809).
+  const waiting = (window.shopRunWaits ?? []).filter((shop) => shop.waitMs > (shop.small ? SMALL_RUN_WAIT_MS : RUN_WAIT_MS));
   if (waiting.length > 0) {
     firing.push({
       id: "shop-run-waiting",

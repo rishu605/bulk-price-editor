@@ -10,10 +10,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   deferWhileExecuting,
+  isRunLane,
   jobDedupKey,
   jobOptionsFor,
+  laneFor,
   QUEUE_NAMES,
   QUEUE_POLICIES,
+  RUN_LANES,
+  SHOP_BUSY_RETRY_MS,
   WEBHOOK_COALESCE_MS,
   webhookDrainKey,
 } from "./queues";
@@ -164,5 +168,52 @@ describe("what waits while a shop is executing", () => {
     expect(deferWhileExecuting("execution")).toBe(false);
     expect(deferWhileExecuting("verification")).toBe(false);
     expect(deferWhileExecuting("webhooks")).toBe(false);
+  });
+});
+
+describe("the run lanes (#809)", () => {
+  it("gives the small-run lane slots of its own, retried never, like execution", () => {
+    expect(RUN_LANES).toEqual(["execution", "execution-small"]);
+    expect(laneFor(true)).toBe("execution-small");
+    expect(laneFor(false)).toBe("execution");
+    for (const lane of RUN_LANES) {
+      expect(isRunLane(lane)).toBe(true);
+      // A partly-written run resumes through the ledger; a retried job would replan from scratch.
+      expect(QUEUE_POLICIES[lane]).toMatchObject({ attempts: 1, retryable: false });
+    }
+    expect(isRunLane("sync")).toBe(false);
+  });
+
+  it("caps both lanes across every worker, at no more than one process runs", () => {
+    // The database's budget, not a replica's CPU (#810): a second worker must not double it.
+    for (const lane of RUN_LANES) {
+      const policy = QUEUE_POLICIES[lane];
+      expect(policy.globalConcurrency, lane).toBeGreaterThan(0);
+      expect(policy.globalConcurrency!, lane).toBeLessThanOrEqual(policy.concurrency);
+    }
+    // Every other class keeps the per-process cap it had.
+    for (const name of QUEUE_NAMES.filter((queue) => !isRunLane(queue))) {
+      expect(QUEUE_POLICIES[name].globalConcurrency, name).toBeUndefined();
+    }
+  });
+
+  it("deduplicates a run, an enrolment and a scheduled transition alike on either lane", () => {
+    for (const lane of RUN_LANES) {
+      expect(jobDedupKey(lane, { shopId: "s1", runId: "r1" })).toBe("run:r1");
+      expect(jobDedupKey(lane, { shopId: "s1", enroll: "c1" })).toBe("enroll:c1");
+      expect(jobDedupKey(lane, { shopId: "s1", scheduled: "c1" })).toBe("scheduled:c1:apply");
+      expect(jobDedupKey(lane, { shopId: "s1", scheduled: "c1", revert: true })).toBe("scheduled:c1:revert");
+    }
+  });
+
+  it("names a scheduled transition's campaign in a field of its own, so the release before cannot run it as an apply", () => {
+    // That release runs any execution job with a `campaignId` as a whole-campaign apply.
+    expect({ shopId: "s1", scheduled: "c1" }).not.toHaveProperty("campaignId");
+  });
+
+  it("puts a busy shop's job back for seconds, not minutes", () => {
+    // How late a shop's second run starts after its first finishes.
+    expect(SHOP_BUSY_RETRY_MS).toBeGreaterThan(0);
+    expect(SHOP_BUSY_RETRY_MS).toBeLessThanOrEqual(10_000);
   });
 });

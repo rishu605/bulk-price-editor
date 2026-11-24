@@ -361,8 +361,9 @@ describe("chaos: the typed confirmation for a scheduled start (#1009)", () => {
       const started = await flowStart(campaignId);
       expect(started.status, started.message).toBe(200);
       expect(started.message).toMatch(/background worker is applying it/);
+      // Seconds of writing, so the small-run lane (#809).
       expect(enqueued).toEqual([
-        { name: "execution", ref: { shopId, campaignId, runId: expect.any(String), revert: false, claimedFrom: "DRAFT", actor: "shopify-flow" } },
+        { name: "execution-small", ref: { shopId, campaignId, runId: expect.any(String), revert: false, claimedFrom: "DRAFT", actor: "shopify-flow" } },
       ]);
       const { handleJob } = await import("../../app/worker/handlers.server");
       await handleJob(enqueued[0].name, enqueued[0].ref);

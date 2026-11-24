@@ -16,18 +16,30 @@ import type { CampaignState } from "../lib/lifecycle/transitions";
 import prisma from "../db.server";
 import { adminClientForShop } from "../services/admin-client.server";
 import type { JobRef, JobResult, QueueName } from "./queues";
+import type { LeaseKind } from "../services/shop-lease.server";
 
 export async function handleJob(name: QueueName, ref: JobRef): Promise<JobResult> {
   switch (name) {
+    // Either lane, the same work: the lane says only how soon it gets a slot (#809).
     case "execution":
+    case "execution-small":
       // A drift decision over many prices is execution too: a put-back is a run, and
       // keeping or leaving thousands is the same queue's kind of work (#822). So is pricing
-      // the products a running campaign gained, which the tick used to do itself (#808).
-      return ref.drift ? driftDecisionJob(ref) : ref.enroll ? enrollmentJob(ref) : runCampaignJob(ref);
+      // the products a running campaign gained, which the tick used to do itself (#808), and a
+      // campaign's scheduled start or end, which the tick ran inside itself until #809.
+      return onShop(ref, "run", () =>
+        ref.drift
+          ? driftDecisionJob(ref)
+          : ref.enroll
+            ? enrollmentJob(ref)
+            : ref.scheduled
+              ? scheduledJob(ref)
+              : runCampaignJob(ref),
+      );
     case "audit":
       return auditJob(ref);
     case "sync":
-      return syncJob(ref);
+      return onShop(ref, "sync", () => syncJob(ref));
     // A shop's products webhooks, persisted by the route and drained here (#811): the
     // queue's first move from the web process, a change of caller as this said it would be.
     case "webhooks":
@@ -50,6 +62,28 @@ export async function handleJob(name: QueueName, ref: JobRef): Promise<JobResult
       throw new Error(`No handler for queue ${String(unhandled)}`);
     }
   }
+}
+
+/**
+ * Runs a job holding its shop's lease of this kind, or answers `later` without doing anything
+ * when another of the shop's runs -- or syncs -- holds it (#809): the runtime puts the job back
+ * to wait its turn and gives its slot to another shop. Released however the job ends.
+ *
+ * The campaign is the lease's, when the job names one, so a run waiting behind it can say
+ * whose run it is waiting for.
+ */
+async function onShop(ref: JobRef, kind: LeaseKind, work: () => Promise<void>): Promise<JobResult> {
+  const { leaseHolder, withShopLease } = await import("../services/shop-lease.server");
+  const campaignId = ref.campaignId ?? ref.enroll ?? ref.scheduled ?? null;
+  const ran = await withShopLease(ref.shopId, kind, work, { holder: leaseHolder(kind), campaignId });
+  return ran.busy ? "later" : undefined;
+}
+
+/** A campaign's due start or end, handed over by the tick (#809): see `scheduled-run.server.ts`. */
+async function scheduledJob(ref: JobRef): Promise<void> {
+  if (!ref.scheduled) return;
+  const { runScheduledJob } = await import("../services/scheduled-run.server");
+  await runScheduledJob(ref.scheduled);
 }
 
 async function runCampaignJob(ref: JobRef): Promise<void> {
