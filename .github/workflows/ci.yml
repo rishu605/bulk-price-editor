@@ -103,21 +103,26 @@ jobs:
       # `--json` uses the bulk advisory endpoint rather than the retiring quick one. Three
       # attempts, because a registry outage is not this repository's fault; a non-empty
       # advisory list still fails, because a real one is.
+      #
+      # An advisory with no installable fix is the one case the gate can't settle by
+      # upgrading, and it held every PR red for a month (#915), long enough that `Test`
+      # below stopped running on `main` at all. So `scripts/audit-gate.ts` judges the two
+      # reports (D35):
+      #
+      #   - anything high that reaches the runtime (`--omit=dev`) fails, always;
+      #   - a dev-only advisory fails unless `.github/audit-allowlist.json` names its GHSA
+      #     id with a reason and an `until` date, after which it fails again.
       - name: Audit dependencies
         run: |
           for attempt in 1 2 3; do
-            if npm audit --audit-level=high --json > audit.json; then
-              echo "No advisories at or above high."
-              exit 0
-            fi
-
             # `npm audit` exits non-zero for both "found advisories" and "could not ask".
             # The difference is whether the body is a report or an error, and only the
-            # first is ours to fix.
-            if jq -e '.metadata.vulnerabilities' audit.json > /dev/null 2>&1; then
-              echo "::error::High or critical advisories found."
-              jq '.metadata.vulnerabilities' audit.json
-              exit 1
+            # first is ours to fix, so the exit status is ignored and the body is read.
+            npm audit --json > audit.json || true
+            npm audit --omit=dev --json > audit-runtime.json || true
+            if jq -e '.metadata.vulnerabilities' audit.json > /dev/null 2>&1 &&
+              jq -e '.metadata.vulnerabilities' audit-runtime.json > /dev/null 2>&1; then
+              exec npx tsx scripts/audit-gate.ts audit.json audit-runtime.json
             fi
 
             echo "Audit endpoint did not answer (attempt ${attempt}/3):"
