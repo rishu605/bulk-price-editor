@@ -28,20 +28,43 @@ export class MissingCostError extends Error {
  * Merges store and campaign guardrails. Campaign settings may only **tighten**.
  *
  * Without this rule a campaign could disable a store-wide "never below cost" policy,
- * making the store setting decorative. Loosening is possible only by changing the
- * store setting, which is a deliberate, audit-logged action.
+ * making the store setting decorative. Loosening is possible by changing the store
+ * setting, a deliberate, audit-logged action, or for one campaign's floors in `loosens`:
+ * each one a person typed the word for, which the audit log records with who and what
+ * (#816). A clearance sells below the everyday floor on purpose; it says so first.
  */
 export function mergeGuardrails(store?: Guardrails, campaign?: Guardrails): Guardrails {
   if (!store) return campaign ?? {};
   if (!campaign) return store;
 
+  // The campaign's own value is the floor for these, absent meaning none.
+  const own = new Set(campaign.loosens ?? []);
   return {
-    // Either side may switch it on; neither may switch it off.
-    neverBelowCost: store.neverBelowCost || campaign.neverBelowCost,
-    minMarginPercent: pickTighter(store.minMarginPercent, campaign.minMarginPercent),
-    minPrice: pickHigher(store.minPrice, campaign.minPrice),
+    // Either side may switch it on; neither may switch it off, unless confirmed.
+    neverBelowCost: own.has("neverBelowCost")
+      ? campaign.neverBelowCost === true
+      : store.neverBelowCost || campaign.neverBelowCost,
+    minMarginPercent: own.has("minMarginPercent")
+      ? campaign.minMarginPercent
+      : pickTighter(store.minMarginPercent, campaign.minMarginPercent),
+    minPrice: own.has("minPrice") ? campaign.minPrice : pickHigher(store.minPrice, campaign.minPrice),
     missingCostPolicy: campaign.missingCostPolicy ?? store.missingCostPolicy,
   };
+}
+
+/**
+ * A campaign's guardrails as they apply to a price in `currency` (#816).
+ *
+ * Its minimum price is typed in the store's currency, and is left out on a market priced in
+ * another, as the store's is (#691): there is no figure to convert it by that the app could
+ * stand behind, and comparing dollars with euros throws. The other floors read cost, which
+ * the market's own plan already leaves out where it has none in that currency.
+ */
+export function inCurrency(guardrails: Guardrails | undefined, currency: string): Guardrails | undefined {
+  if (!guardrails?.minPrice || guardrails.minPrice.currency === currency) return guardrails;
+  const forCurrency = { ...guardrails };
+  delete forCurrency.minPrice;
+  return forCurrency;
 }
 
 function pickTighter(a?: number, b?: number): number | undefined {

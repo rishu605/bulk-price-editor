@@ -16,6 +16,7 @@ import { startConfirmationView } from "../lib/campaigns/start-confirmation";
 import { scheduledWindow } from "../lib/scheduling/window-input";
 import { zoneShiftOf } from "../lib/scheduling/zone-shift";
 import { scheduleAction } from "../services/campaigns/schedule-control.server";
+import { floorsAction, floorsOf } from "../services/campaigns/floors.server";
 import { RunHistoryTable } from "../components/RunHistoryTable";
 import { rowsToShow } from "../components/RollbackReportTable";
 import { RunResultSection } from "../components/RunResultSection";
@@ -71,7 +72,7 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
         autoEnroll: true,
         enrollPendingAt: true,
         status: true,
-        guardrailViolationPolicy: true,
+        guardrailViolationPolicy: true, guardrails: true, // its own floors and policy, if any (#816)
         ruleRows: true,
         note: true,
         archivedAt: true,
@@ -161,6 +162,7 @@ export const loader = withGuard("/app/campaigns/$id", async ({ request, params }
     history,
     // What it does when a price would breach a floor, as its plan does (#789): the store's until it starts.
     breachPolicy: await breachPolicyOf(shop.id, record),
+    floors: await floorsOf(shop.id, record, shop.timezone), // which floors it is planned with, and whose (#816)
     // Whether the scheduler and Flow may start it as it is now (#1009), from this preview.
     startConfirmation: startConfirmationView(record.schedule, preview.confirm, (at) => formatScheduleInstant(at, shop.timezone)),
   };
@@ -184,6 +186,9 @@ export const action = withGuard("/app/campaigns/$id", async ({ request, params }
   // Calling off or moving a campaign that has not started (#760). None of it writes a price.
   const scheduling = await scheduleAction(shop.id, campaignId, intent, form, toAdminClient(admin), actor);
   if (scheduling) return scheduling;
+  // Its own floors and policy (#816): below the store's only with the word typed. No price written.
+  const floors = await floorsAction(shop.id, campaignId, intent, form, actor);
+  if (floors) return floors;
   if (intent === "request-approval") {
     await requestApproval(shop.id, campaignId, actor);
     return { ok: true, message: "Approval requested. Somebody else needs to sign this off." };

@@ -28,7 +28,14 @@ import { uncontrolledAmong } from "../reconciliation.server";
 import { offBaseline } from "./off-baseline";
 import { competingCampaigns, heldEditsOf, importIdsOf, withScopes } from "./model.server";
 import { overlapsFrom, type Overlap } from "../../lib/planning/overlaps";
-import { guardrailsFor, readSettings } from "../settings.server";
+import { guardrailsFor, readSettings, shopCurrency } from "../settings.server";
+import { breachPolicyFor, breachPolicyOfDraft } from "../../lib/campaigns/breach-policy";
+import {
+  draftFloorsView,
+  draftGuardrails,
+  ownFloors,
+  type CampaignGuardrails,
+} from "../../lib/campaigns/campaign-floors";
 import { skipReasonForRow } from "../../lib/planning/reasons";
 import { liveIfDrifted } from "../../lib/pricing/drift-note";
 import { resolvePolicy } from "../../lib/money/rounding-policy";
@@ -37,6 +44,7 @@ import { EVERY_STATUS } from "../../lib/campaigns/product-status";
 import type {
   AdjustmentRule,
   CompareAtPolicy,
+  GuardrailFloor,
   GuardrailViolationPolicy,
   ResolvableCampaign,
 } from "../../lib/pricing/types";
@@ -53,6 +61,12 @@ export interface DraftCampaign {
   priority: number;
   /** Why the rule's amount cannot be used, if it cannot (#696). Nothing is priced then. */
   ruleProblem?: string;
+  /** Its own floors and policy, as the fields say (#816). None follows the store's. */
+  floors?: CampaignGuardrails;
+  /** Of those floors, the ones below the store's, which Create asks to be confirmed. */
+  below?: GuardrailFloor[];
+  /** Why the floor fields cannot be used, if they cannot. Nothing is priced then. */
+  floorsProblem?: string;
 }
 
 export interface DraftPreviewRow {
@@ -135,6 +149,13 @@ export interface DraftPreview {
    * less. The panel says so instead of previewing the whole scope at 0.01.
    */
   ruleProblem?: string;
+  /** Why the floor fields cannot be used (#816), said instead of a preview, as `ruleProblem` is. */
+  floorsProblem?: string;
+  /**
+   * Which floors and policy the draft is previewed with, and whose (#816): the store's, or its
+   * own, with any below the store's that Create will ask to be confirmed.
+   */
+  floors?: { applied: string; whose: string; below: string | null; policy: string };
   /**
    * Variants the conditions match that are left out because their product is draft or
    * archived and the draft does not include that status (#751).
@@ -174,6 +195,9 @@ function draftAsResolvable(
   draft: DraftCampaign,
   violationPolicy: GuardrailViolationPolicy,
 ): ResolvableCampaign {
+  // Its own floors over the store's, any below them as though confirmed: nothing is created
+  // until they are, so these are the prices the campaign will have (#816).
+  const own = draft.floors ?? {};
   return {
     id: DRAFT_ID,
     priority: draft.priority,
@@ -184,8 +208,10 @@ function draftAsResolvable(
     compareAtPolicy: draft.compareAtPolicy,
     compareAtViolationPolicy: "clear",
     roundingPolicy: resolvePolicy(draft.rounding),
-    guardrails: undefined,
-    guardrailViolationPolicy: violationPolicy,
+    guardrails: draftGuardrails(own, draft.below ?? []),
+    // Its own choice where it made one (#816); otherwise the store's, as a campaign created a
+    // moment from now follows until it starts (D21).
+    guardrailViolationPolicy: own.violationPolicy ?? violationPolicy,
     excludedVariantGids: [],
   };
 }
@@ -199,11 +225,13 @@ export async function previewDraft(
   limit = 25,
 ): Promise<DraftPreview> {
   if (draft.ruleProblem) return { ...EMPTY, ruleProblem: draft.ruleProblem };
+  if (draft.floorsProblem) return { ...EMPTY, floorsProblem: draft.floorsProblem };
 
-  const [others, settings] = await Promise.all([
+  const [others, settings, currency] = await Promise.all([
     // Every campaign meant to be pricing its variants, as in a run (#821).
     competingCampaigns(shopId),
     readSettings(shopId),
+    shopCurrency(shopId),
   ]);
   const resolvable = [
     draftAsResolvable(draft, settings.violationPolicy),
@@ -218,6 +246,13 @@ export async function previewDraft(
     countMatching(shopId, draft.ast),
     countLeftOutByStatus(shopId, draft.ast),
   ]);
+
+  // Said beside the counts: which floors and policy these prices were worked out with (#816).
+  const own = draft.floors ?? {};
+  const floors = {
+    ...draftFloorsView(own, draft.below ?? [], storeGuardrails, currency),
+    policy: breachPolicyOfDraft(own.violationPolicy, settings.violationPolicy),
+  };
 
   if (candidates.length === 0) {
     // Nothing matched: asked whether there is anything to match at all, which costs one
@@ -243,10 +278,15 @@ export async function previewDraft(
       blocked: {
         reason: outcome.reason,
         variantGid: outcome.ref.variantGid,
-        // The store's setting decides what the draft is told; a running campaign that outranks
-        // it on a variant and stops it is named, with what reaches that one (#1169).
-        message: await describeBlocked(shopId, outcome.blocked, "preview", { campaignId: DRAFT_ID }),
+        // The store's setting decides what the draft is told, or its own choice (#816); a running
+        // campaign that outranks it on a variant and stops it is named, with what reaches that one (#1169).
+        message: await describeBlocked(shopId, outcome.blocked, "preview", {
+          campaignId: DRAFT_ID,
+          ...(own.violationPolicy ? { breach: breachPolicyFor("DRAFT", own.violationPolicy, settings.violationPolicy, own.violationPolicy) } : {}),
+          ownFloors: ownFloors(own).length > 0,
+        }),
       },
+      floors,
     };
   }
 
@@ -298,6 +338,7 @@ export async function previewDraft(
     withoutBaseline: matched - candidates.length,
     blocked: null,
     staleBaselines,
+    floors,
     rows: shown.map((row) => {
       const baseline = baselines.get(row.ref.variantGid) ?? null;
 

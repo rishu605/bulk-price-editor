@@ -16,6 +16,7 @@ import { uncopiableRule } from "../../lib/campaigns/rule-limits";
 import { AppError } from "../../lib/errors/app-error";
 import { logger } from "../../lib/logging/logger";
 import { campaignDefinition, DEFINITION, definitionData } from "./model.server";
+import { campaignGuardrailsOf } from "../../lib/campaigns/campaign-floors";
 
 /**
  * Everything that describes what a campaign *does*, and nothing about what it *did*.
@@ -103,7 +104,11 @@ export async function duplicateCampaign(
       ruleRows: ruleRows as Prisma.InputJsonValue,
       surfaces: surfaces as Prisma.InputJsonValue,
       compareAtPolicy: compareAtPolicy as Prisma.InputJsonValue,
-      guardrails: guardrails === null ? Prisma.DbNull : (guardrails as Prisma.InputJsonValue),
+      // Its floors and policy, without the typed confirmation of any below the store's (#816):
+      // that was a person's decision about the source, as its start's was (#1009). The copy's
+      // floors below the store's are held to the store's until somebody types the word for it,
+      // and its Floors card says so.
+      guardrails: guardrails === null ? Prisma.DbNull : (copiedGuardrails(guardrails) as Prisma.InputJsonValue),
       shopId,
       name: copyName(source.name, taken.map((c) => c.name), options.real ? "real" : "copy"),
       status: "DRAFT",
@@ -296,4 +301,11 @@ export async function housekeepingAction(
   }
 
   return null;
+}
+
+/** A campaign's guardrails as its copy keeps them: everything but the confirmation (#816). */
+function copiedGuardrails(stored: Prisma.JsonValue) {
+  const copied = campaignGuardrailsOf(stored);
+  delete copied.loosened;
+  return copied;
 }

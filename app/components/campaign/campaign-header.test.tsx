@@ -83,6 +83,15 @@ const props = (over: Partial<CampaignDetailProps> = {}) =>
     startConfirmation: { confirmed: null, unconfirmed: null },
     // A draft follows the store's setting (#789).
     breachPolicy: { policy: "clamp", kept: false, store: "clamp" },
+    // Which floors it is planned with: the store's, as every campaign that sets none (#816).
+    floors: {
+      applied: "At least $5.00",
+      whose: "The store's floors, from Settings.",
+      unconfirmed: null,
+      fields: { neverBelowCost: false, minMarginPercent: "", minPrice: "5.00", policy: "" },
+      store: "At least $5.00",
+      currency: "USD",
+    },
     ...over,
   }) as unknown as CampaignDetailProps;
 
@@ -1206,5 +1215,63 @@ describe("the campaign's floor-breach policy is said where it is decided (#789)"
     );
     expect(running).toContain("Clamp it to the floor and carry on");
     expect(running).toContain("Settings now says “Block the whole campaign”, for new campaigns and anything not yet started.");
+  });
+});
+
+describe("the campaign's floors are said, and changed, where they apply (#816)", () => {
+  const text = (html: string) => html.replace(/&#x27;/g, "'");
+  const own = {
+    applied: "Never at or below cost, at least 10% margin and at least $5.00",
+    whose: "This campaign's own minimum margin 10% (the store's is 25%), below the store's, confirmed by Staff 7946 on 1 Nov 2026, 10:00.",
+    unconfirmed: null,
+    fields: { neverBelowCost: true, minMarginPercent: "10", minPrice: "5.00", policy: "block" },
+    store: "Never at or below cost, at least 25% margin and at least $5.00",
+    currency: "USD",
+  };
+
+  it("restates which floors, and whose, in the Apply dialog", () => {
+    const dialog = text(modalOf(render(<CampaignHeader {...props({ floors: own } as never)} />), "apply-confirmation"));
+    expect(dialog).toContain('<s-text color="subdued">Floors</s-text>');
+    expect(dialog).toContain(`${own.applied}. ${own.whose}`);
+  });
+
+  it("lists them on the Overview tab, with fields that start at what applies and the policy offered before it starts", () => {
+    const html = text(render(<CampaignOverviewTab {...props({ floors: own } as never)} />));
+    expect(html).toContain("Floors that apply");
+    expect(html).toContain(own.applied);
+    expect(html).toContain('name="intent" value="floors"');
+    expect(html).toContain('name="floorMinMargin"');
+    expect(html).toMatch(/<s-option value="block" defaultSelected="">Block the whole campaign<\/s-option>|<s-option value="block" defaultselected/i);
+    expect(html).toContain("The store's setting: clamp it to the floor and carry on");
+  });
+
+  it("does not offer the policy once the campaign has started, which keeps the one it started with (D21)", () => {
+    const html = text(
+      render(
+        <CampaignOverviewTab
+          {...props({ floors: own, lifecycle: describeState("ACTIVE"), state: "ACTIVE", breachPolicy: { policy: "clamp", kept: true, store: "clamp" } } as never)}
+        />,
+      ),
+    );
+    expect(html).not.toContain('name="breachPolicy"');
+    expect(html).toContain("When a price would breach a floor: Clamp it to the floor and carry on, until it ends");
+    // Its floors still can be changed: going below the store's asks for the word.
+    expect(html).toContain('name="floorMinMargin"');
+  });
+
+  it("asks for the word beside the box when the save answered with the question", () => {
+    const ask = "This goes below the store's floors: minimum margin 5% (the store's is 25%).";
+    const html = text(
+      render(<CampaignOverviewTab {...props({ floors: own, fetcher: { Form: "form", state: "idle", data: { ok: false, message: ask, loosen: ask } } } as never)} />),
+    );
+    expect(html).toContain(ask);
+    expect(html).toContain('name="loosen"');
+    expect(html).toContain("Type loosen to confirm");
+  });
+
+  it("offers no fields while a run is writing it", () => {
+    const html = text(render(<CampaignOverviewTab {...props({ floors: own, lifecycle: describeState("APPLYING"), state: "APPLYING" } as never)} />));
+    expect(html).toContain("Floors that apply");
+    expect(html).not.toContain('value="floors"');
   });
 });

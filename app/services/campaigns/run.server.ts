@@ -47,6 +47,7 @@ import { editsLeft } from "../../lib/campaigns/kept-edits";
 import { refusedForGood, startRefusedEntry } from "../../lib/scheduling/start-refusal";
 import type { CampaignState } from "../../lib/lifecycle/transitions";
 import { breachPolicyFor } from "../../lib/campaigns/breach-policy";
+import { hasOwnFloors } from "../../lib/campaigns/campaign-floors";
 import { SKIP_REASON_GROUP } from "../../lib/planning/reasons";
 import { baseRowsOnly, type LedgerState, planResume } from "../../lib/execution/resume";
 import { applyCampaignTags, applyTakeoverTags, removeCampaignTags } from "./tags.server";
@@ -828,10 +829,15 @@ async function executeCampaignRun(
   // revert, as for its preview: what stops it is another campaign's policy, and the sentence
   // names that campaign, as it does one that outranks this one on a variant (#1169).
   if (outcome.kind === "blocked") {
-    const told = options.revert || !stateBefore ? undefined : breachPolicyFor(stateBefore, breach.policy, breach.store);
+    // A policy of the campaign's own is its own in every state (#816).
+    const told = options.revert || !stateBefore ? undefined : breachPolicyFor(stateBefore, breach.policy, breach.store, breach.own ? breach.policy : undefined);
     throw new AppError({
       code: "GUARDRAIL_BLOCKED",
-      userMessage: await describeBlocked(shopId, outcome.blocked, "run", { campaignId, breach: told }),
+      userMessage: await describeBlocked(shopId, outcome.blocked, "run", {
+        campaignId,
+        breach: told,
+        ownFloors: !options.revert && hasOwnFloors(campaignRecord.guardrails),
+      }),
       context: { campaignId, blocked: outcome.blocked.length, firstVariantGid: outcome.ref.variantGid, reason: outcome.reason },
     });
   }

@@ -74,6 +74,7 @@ export function CampaignHeader({
   zoneShift,
   startConfirmation,
   breachPolicy,
+  floors,
   eta,
 }: CampaignDetailProps) {
   // Archiving a campaign that is still running asks first (#748); Restore never does.
@@ -366,6 +367,7 @@ export function CampaignHeader({
           busy={busy}
           heldEdits={heldEdits}
           breachPolicy={breachPolicy}
+          floors={floors}
           onConfirm={(confirmation) =>
             fetcher.submit({ intent: "apply", confirmation }, { method: "post" })
           }
