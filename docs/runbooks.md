@@ -132,7 +132,7 @@ looking at an old incident, that is why.
 
 1. `SELECT "beatAt", instance, now() - "beatAt" AS quiet FROM scheduler_heartbeat;` — one row. How long it has been quiet, and which process stamped it last.
 2. Is the worker process alive? A crash loop shows as repeated startup lines with no ticks between.
-3. Is Redis reachable? The leader lock lives there. Without it no worker will consider itself leader, and the process stays up while doing nothing — which is why this alert exists rather than a process-liveness one.
+3. Is Redis reachable? The leader lock lives there. Without it no worker will consider itself leader, and nothing is scheduled — which is why this alert exists rather than a process-liveness one. What merchants and Flow already asked for still runs (D29, #808): every worker rings queued runs, syncs and recaptures from their rows each tick, and runs them there when Redis cannot take the job, so "Queued" on a campaign page clears on its own.
 4. `SELECT id, status, "startedAt", "heartbeatAt" FROM campaign_runs WHERE status NOT IN ('COMPLETED','FAILED','PARTIAL');` — runs stuck in EXECUTING with an old heartbeat confirm the worker died mid-run.
 
 **Remediate.** Restart the worker. The reaper reclaims stale runs on the next tick and
@@ -273,7 +273,10 @@ minutes. That is Epic 19's failure (#807), and `npm run gate:two-shops` is the t
 **Diagnose.** `queue.depth` and `queue.oldest_wait_ms` for `execution`: two active and the
 rest waiting is slots held by long runs; nothing active is no worker consuming — look at the
 worker's logs and `scheduler-stopped`. `/healthz` → `queues` shows the same counts without
-shop ids.
+shop ids. Since D29 a run the web process handed over is a `QUEUED` `campaign_runs` row from
+the moment of the press: `SELECT id, "campaignId", "createdAt" FROM campaign_runs WHERE status = 'QUEUED' ORDER BY "createdAt";`
+lists them, oldest first. The tick rings any older than fifteen seconds, so a job Redis never
+took, or lost, is queued again without anyone doing anything; the reaper leaves them alone.
 
 **Remediate.** Let the long runs finish rather than restarting the worker: a restart
 mid-write leaves a Partial campaign to resume, and the waiting job stays queued and starts

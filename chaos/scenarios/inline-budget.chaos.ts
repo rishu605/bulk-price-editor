@@ -1,122 +1,123 @@
 /**
- * A campaign too large for the request that asked for it must be refused, not started.
+ * A campaign too large for the request that asked for it is never written there (D29, #808).
  *
- * `runCampaign` writes prices inline, so an apply from the campaign page happens during
- * the HTTP request and dies with it. Railway closes a request after five minutes with
- * no data transferred, and a React Router action sends nothing until it returns.
+ * `runCampaign` used to write prices inline, so an apply from the campaign page happened
+ * during the HTTP request and died with it. Railway closes a request after five minutes with
+ * no data transferred, and a React Router action sends nothing until it returns -- and the
+ * proxy closing the connection does not stop `runCampaign` writing. The merchant saw an error
+ * while their storefront changed anyway.
  *
- * The failure that produces is the worst one available: the proxy closes the connection
- * and `runCampaign` carries on writing regardless. The merchant sees an error, and
- * their storefront changes anyway -- prices moved with the app reporting that they did
- * not, which is the single outcome this product exists to prevent.
+ * #790 answered that with a time budget, and with no worker queue an apply past it was refused
+ * and a revert ran in the request after all. D29 answers it for good: past the page's limit a
+ * run is a QUEUED run row and a job, with or without a queue. So this proves the two halves
+ * that replaced the refusal: nothing is written in the request, whatever is missing -- no
+ * ledger row, no price moved -- and the run is not lost either, because the worker's tick
+ * finds the row and writes it, to the same verified end a run in the request reaches.
  *
- * So the check is a refusal *before the claim*: no run row, no ledger row, no price
- * moved, and the campaign still in the state the merchant left it in, ready to be
- * scheduled instead.
- *
- * The limit is a property of the caller, not of the campaign. The worker and the
- * scheduler have no request attached, so they pass no limit and run the same campaign
- * to completion -- which is the second half of what this scenario proves, and the half
- * that makes "schedule it instead" honest advice rather than a brush-off.
+ * The limit is a property of the caller, not of the campaign. The worker and the scheduler
+ * have no request attached, so they pass no limit and run the same campaign to completion.
  */
 
 import { describe, expect, it, vi } from "vitest";
 
 import prisma from "../../app/db.server";
-import { pricesMayBeLive } from "../../app/lib/lifecycle/transitions";
-import { withChaos } from "../harness/scenario";
+import { PAGE_INLINE } from "../../app/lib/execution/inline-budget";
+import { ringQueuedRuns, STRANDED_RUN_AFTER_MS } from "../../app/services/campaigns/queued-run.server";
+import { inlineRuntime } from "../../app/worker/queue-runtime.server";
+import type { JobRef, QueueName } from "../../app/worker/queues";
+import { type ChaosContext, fixtureAdminClient, withChaos } from "../harness/scenario";
 
-// No worker queue, so a revert over the limit has nowhere to go but here. With one, it is
-// handed to the worker instead (#772, `queued-revert.chaos.ts`) -- and CI has Redis, so
-// without this the revert below would put a real job on a real queue.
+// No worker queue: the web process has nowhere to hand the job, which is the case that used
+// to run a revert here and refuse an apply. CI has Redis, so without this the run below would
+// put a real job on a real queue.
 vi.mock("../../app/worker/web-queue.server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../app/worker/web-queue.server")>()),
   webQueue: () => null,
 }));
 
-describe("chaos: a run too large for its request is refused, not abandoned halfway", () => {
-  it("refuses before the claim and leaves the campaign schedulable", async () => {
+let endpoint = "";
+vi.mock("../../app/services/admin-client.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../app/services/admin-client.server")>();
+  return { ...actual, adminClientForShop: async (domain: string) => fixtureAdminClient(domain, endpoint) };
+});
+
+/** Five rows, so the twelve-variant fixture is the worker's. What is under test is the comparison. */
+const SMALL = { ...PAGE_INLINE, rows: 5 };
+
+async function handler(name: QueueName, ref: JobRef) {
+  const { handleJob } = await import("../../app/worker/handlers.server");
+  return handleJob(name, ref);
+}
+
+/** The worker's tick, with no Redis of its own either: it runs what it rings. */
+function workerTick(chaos: ChaosContext) {
+  return ringQueuedRuns(inlineRuntime(handler), handler, {
+    now: new Date(Date.now() + STRANDED_RUN_AFTER_MS + 1_000),
+    shopId: chaos.fixture.shopId,
+  });
+}
+
+describe("chaos: a run too large for its request is queued, never written there", () => {
+  it("writes nothing in the request, and the worker's tick writes all of it", async () => {
     await withChaos(
       "inline-budget",
       { catalog: { products: 4, variantsPerProduct: 3 }, percent: -20 },
       async (ctx) => {
+        endpoint = ctx.server.endpoint();
         const { shopId, campaignId } = ctx.fixture;
-
-        const before = await prisma.campaign.findUniqueOrThrow({
-          where: { id: campaignId },
-          select: { status: true },
-        });
         const pricesBefore = ctx.livePrices();
 
-        // Four products against a budget of a millisecond. What is under test is the
-        // comparison and everything it protects, not the constant.
-        const refused = await ctx.apply({ actor: "chaos", inlineBudgetMs: 1 });
+        const queued = await ctx.apply({ actor: "chaos", inline: SMALL });
 
-        expect(refused.refused, "a refusal has to say so in the outcome").toBeTruthy();
-        expect(refused.refused, "and tell the merchant where to go next").toMatch(
-          /schedul/i,
-        );
-        expect(refused.messages.join(" ")).toContain("12");
-
-        // Clean, because nothing is half-done. An unclean outcome would route this into
-        // the needs-attention queue, where there is nothing to attend to.
-        expect(refused.clean, "nothing started, so nothing is partial").toBe(true);
-        expect(refused.planned).toBe(0);
-        expect(refused.verified).toBe(0);
+        // Not refused (#790's answer with no queue): queued, and said so with the size.
+        expect(queued.refused, "an apply is never refused for its size").toBeUndefined();
+        expect(queued.queued).toBe(true);
+        expect(queued.messages.join(" ")).toMatch(/covers 12 variants, more than the 5.*background worker is applying it/);
+        // Clean, because nothing is half-done.
+        expect(queued.clean).toBe(true);
+        expect(queued.verified).toBe(0);
 
         // Ledger before write (I4), from the other direction: no write, so no row.
-        expect(
-          await prisma.variantChange.count({ where: { shopId } }),
-          "a refused run must not ledger anything",
-        ).toBe(0);
-        expect(
-          await prisma.campaignRun.count({ where: { campaignId } }),
-          "no run started, so no run row should exist",
-        ).toBe(0);
-
-        const after = await prisma.campaign.findUniqueOrThrow({
-          where: { id: campaignId },
-          select: { status: true },
-        });
-        expect(after.status, "refused before the claim, so the state never moved").toBe(
-          before.status,
-        );
-        expect(
-          pricesMayBeLive(after.status as never),
-          "the app must not believe this campaign's prices might be on the storefront",
-        ).toBe(false);
-
+        expect(await prisma.variantChange.count({ where: { shopId } }), "the request ledgered a write").toBe(0);
         for (const [gid, price] of pricesBefore) {
-          expect(ctx.livePrices().get(gid), `${gid} must not have moved`).toBe(price);
+          expect(ctx.livePrices().get(gid), `${gid} moved inside the request`).toBe(price);
         }
+        // Claimed, with its row: the page reads Applying, and a second press is refused by it.
+        const run = await prisma.campaignRun.findFirstOrThrow({ where: { campaignId } });
+        expect(run.status).toBe("QUEUED");
+        expect((await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } })).status).toBe("APPLYING");
 
-        // The other half: the same campaign, run by a caller with no request attached,
-        // goes through. The advice to schedule it is only honest if scheduling works.
-        const ran = await ctx.apply();
-        expect(ran.clean, "the worker has no deadline, so it runs the same campaign").toBe(
-          true,
-        );
-        expect(ran.verified, "all twelve variants, verified").toBe(12);
+        // The worker, with no deadline, runs the same campaign to a verified end.
+        expect(await workerTick(ctx)).toBe(1);
+        await ctx.expectHonest(run.id);
+        const finished = await prisma.campaignRun.findUniqueOrThrow({ where: { id: run.id } });
+        expect(finished).toMatchObject({ status: "COMPLETED", verifiedRows: 12 });
+        expect((await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } })).status).toBe("ACTIVE");
       },
     );
   });
 
-  it("never refuses a revert, however large", async () => {
+  it("never refuses a revert, however large, and never writes it in the request either", async () => {
     await withChaos(
       "inline-budget-revert",
       { catalog: { products: 4, variantsPerProduct: 3 }, percent: -20 },
       async (ctx) => {
+        endpoint = ctx.server.endpoint();
         const applied = await ctx.apply();
         expect(applied.clean).toBe(true);
+        const sale = ctx.livePrices();
 
-        // A limit far below the scope. Refusing here would strand a store at 20% off
-        // because it is large -- the guard causing the incident it exists to prevent. With
-        // no worker queue to hand it to, it runs here, as it always did.
-        const reverted = await ctx.revert({ actor: "chaos", inlineBudgetMs: 1 });
-
+        // A limit far below the scope. Refusing here would strand a store at 20% off because
+        // it is large -- the guard causing the incident it exists to prevent.
+        const reverted = await ctx.revert({ actor: "chaos", inline: SMALL });
         expect(reverted.refused, "a revert is never gated, on anything").toBeFalsy();
-        expect(reverted.clean).toBe(true);
-        expect(reverted.verified).toBe(12);
+        expect(reverted.queued).toBe(true);
+        for (const [gid, price] of sale) expect(ctx.livePrices().get(gid)).toBe(price);
+
+        expect(await workerTick(ctx)).toBe(1);
+        const run = await prisma.campaignRun.findFirstOrThrow({ where: { campaignId: ctx.fixture.campaignId, kind: "REVERT" } });
+        expect(run).toMatchObject({ status: "COMPLETED", verifiedRows: 12 });
+        await ctx.expectHonest(run.id);
       },
     );
   });

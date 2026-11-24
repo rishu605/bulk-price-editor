@@ -11,7 +11,8 @@
  * admin that talks to the fake store, the web queue with a recorder whose jobs are then run
  * through the worker's own handler, and `adminClientForShop` because the fixture shop has
  * no Shopify session. The page's budget is cut to ten seconds so a fixture of a dozen
- * products can sit either side of it; the bulk path fits no budget at all.
+ * products can sit either side of it, under the fifty variants the page writes at most since
+ * D29 (#808); the bulk path fits no budget at all.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -61,10 +62,10 @@ vi.mock("../../app/services/admin-client.server", async (importOriginal) => {
   return { ...actual, adminClientForShop: async (domain: string) => fixtureAdminClient(domain, pending.endpoint) };
 });
 
-vi.mock("../../app/lib/execution/inline-budget", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../app/lib/execution/inline-budget")>()),
-  PAGE_INLINE_BUDGET_MS: 10_000,
-}));
+vi.mock("../../app/lib/execution/inline-budget", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../app/lib/execution/inline-budget")>();
+  return { ...actual, PAGE_INLINE_BUDGET_MS: 10_000, PAGE_INLINE: { ...actual.PAGE_INLINE, budgetMs: 10_000 } };
+});
 
 beforeEach(() => {
   enqueued.length = 0;

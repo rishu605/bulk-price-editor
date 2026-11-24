@@ -6,8 +6,10 @@
  * would have refused would be a way round every safety feature in the product, reachable
  * by anybody who can build a Flow — and the merchant would have no idea it existed.
  *
- * So there is no separate code path here. It authenticates, finds the campaign, and calls
- * the same `runCampaign` the button calls.
+ * So there is no separate code path here. It authenticates, finds the campaign, and starts
+ * the same run the button starts (`startRun`), every gate included. Only where it is written
+ * differs: Flow waits ten seconds, so every run it starts is the worker's (D29, #808), and
+ * Flow hears 200 once the run is queued and a 4xx when a gate refuses it.
  */
 
 import type { ActionFunctionArgs } from "react-router";
@@ -15,12 +17,11 @@ import type { ActionFunctionArgs } from "react-router";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 import { toAdminClient } from "../services/admin-client.server";
-import { runCampaign } from "../services/campaigns/index.server";
+import { startRun } from "../services/campaigns/index.server";
 import {
   answerForError,
   answerForRun,
   FLOW_ACTOR,
-  FLOW_INLINE_BUDGET_MS,
   recordFlowRequest,
   respond,
   type FlowAnswer,
@@ -59,15 +60,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return respond(answer);
   }
 
-  // The same call the button makes, bounded by Flow's ten seconds rather than the page's
-  // five minutes (#773): anything larger goes to the background worker and is answered at
-  // once, after the approval and plan gates have had their say.
+  // The same run the button starts, handed to the background worker whatever its size (D29)
+  // and answered at once, after the approval and plan gates have had their say (#773).
   let answer: FlowAnswer;
   try {
-    const outcome = await runCampaign(shop.id, campaign.id, toAdminClient(admin), {
-      actor: FLOW_ACTOR,
-      inlineBudgetMs: FLOW_INLINE_BUDGET_MS,
-    });
+    const outcome = await startRun(shop.id, campaign.id, toAdminClient(admin), "flow", { actor: FLOW_ACTOR });
     answer = answerForRun(outcome, campaign.name, "applied");
   } catch (error) {
     answer = answerForError(error, `"${campaign.name}" was not applied`);

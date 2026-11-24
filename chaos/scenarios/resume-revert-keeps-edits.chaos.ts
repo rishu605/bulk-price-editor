@@ -22,6 +22,9 @@ import prisma from "../../app/db.server";
 import { KEPT_EDIT_REASON } from "../../app/lib/campaigns/kept-edits";
 import { rollbackReport } from "../../app/services/campaigns/rollback-report.server";
 import { tick } from "../../app/services/scheduler.server";
+import { ringQueuedRuns, STRANDED_RUN_AFTER_MS } from "../../app/services/campaigns/queued-run.server";
+import { inlineRuntime } from "../../app/worker/queue-runtime.server";
+import type { JobRef, QueueName } from "../../app/worker/queues";
 import { isVariantWrite } from "../harness/faults";
 import { chaosAdminClient } from "../harness/http-client";
 import { type ChaosContext, fixtureAdminClient, withChaos } from "../harness/scenario";
@@ -48,7 +51,8 @@ vi.mock("../../app/services/admin-client.server", async (importOriginal) => {
   };
 });
 
-// No worker queue: the webhook is handled in the request, and so is every run.
+// No worker queue: the webhook is handled in the request, and so is every run the page writes
+// while it waits. What Flow starts is the worker's (D29): its tick runs it (`worker` below).
 vi.mock("../../app/worker/web-queue.server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../app/worker/web-queue.server")>()),
   webQueue: () => null,
@@ -122,6 +126,13 @@ async function flowEnds(chaos: ChaosContext) {
     context: {},
   } as never)) as Response;
   return ((await response.json()) as { message: string }).message;
+}
+
+/** The worker's tick, with no Redis of its own: it runs what Flow queued. */
+async function worker(chaos: ChaosContext) {
+  const handle = async (name: QueueName, ref: JobRef) => (await import("../../app/worker/handlers.server")).handleJob(name, ref);
+  const now = new Date(Date.now() + STRANDED_RUN_AFTER_MS + 1_000);
+  await ringQueuedRuns(inlineRuntime(handle), handle, { now, shopId: chaos.fixture.shopId });
 }
 
 /** Fails every price write to this variant's product, so a revert over it stops part-way. */
@@ -280,8 +291,10 @@ describe("chaos: Resume after a revert that kept an edit stopped part-way", () =
       const sale = cents(chaos, stuck);
 
       breakWritesTo(chaos, stuck);
+      // Queued, whatever its size (D29), and told what the worker will do with the edits.
       const answer = await flowEnds(chaos);
-      expect(answer).toMatch(/Resume it from the campaign page\. 1 price edited outside Anchor was left as edited, not reverted\./);
+      expect(answer).toMatch(/background worker is reverting it.*edited outside Anchor/);
+      await worker(chaos);
       await expectStoppedKeepingEdit(chaos, edited, stuck, sale);
       expect((await banner(chaos)).explanation).toMatch(KEPT_ONE);
 

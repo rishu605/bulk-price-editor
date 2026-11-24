@@ -17,13 +17,12 @@ import type { ActionFunctionArgs } from "react-router";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 import { toAdminClient } from "../services/admin-client.server";
-import { runCampaign } from "../services/campaigns/index.server";
+import { startRun } from "../services/campaigns/index.server";
 import { KEPT_EDIT_REASON } from "../lib/campaigns/kept-edits";
 import {
   answerForError,
   answerForRun,
   FLOW_ACTOR,
-  FLOW_INLINE_BUDGET_MS,
   recordFlowRequest,
   respond,
   type FlowAnswer,
@@ -57,14 +56,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return respond(answer);
   }
 
-  // Bounded by Flow's ten seconds (#773): a revert larger than that is handed to the
-  // background worker (#772) and answered at once. Never refused for its size.
+  // Handed to the background worker whatever its size (D29, #808) and answered at once:
+  // Flow waits ten seconds (#773). Never refused for its size.
   let answer: FlowAnswer;
   try {
-    const outcome = await runCampaign(shop.id, campaign.id, toAdminClient(admin), {
+    const outcome = await startRun(shop.id, campaign.id, toAdminClient(admin), "flow", {
       actor: FLOW_ACTOR,
       revert: true,
-      inlineBudgetMs: FLOW_INLINE_BUDGET_MS,
       // Every price the rollback report lists as edited, found by whichever process writes.
       keepEdited: true,
       skipReason: KEPT_EDIT_REASON,
