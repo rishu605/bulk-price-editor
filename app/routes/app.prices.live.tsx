@@ -10,6 +10,7 @@ import { authenticate } from "../shopify.server";
 import { ensureShop } from "../services/shop.server";
 import { reconcile } from "../services/reconciliation.server";
 import { auditMirror } from "../services/mirror-audit.server";
+import { actorFor } from "../lib/audit/actor";
 import { toAdminClient } from "../services/admin-client.server";
 import { ReconciliationTable } from "../components/ReconciliationTable";
 import { clearedSearch } from "../components/FilterForm";
@@ -66,7 +67,7 @@ export const loader = withGuard("/app/prices/live", async ({ request }: LoaderFu
 });
 
 export const action = withGuard("/app/prices/live", async ({ request }: ActionFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
+  const { admin, session, sessionToken } = await authenticate.admin(request);
   const shop = await ensureShop(session.shop);
   const form = await request.formData();
 
@@ -76,7 +77,7 @@ export const action = withGuard("/app/prices/live", async ({ request }: ActionFu
   // rather than writing a second comparison is the point: a spot check that could
   // disagree with the nightly audit would undermine both.
   const size = Math.min(1000, Math.max(1, Number(form.get("size") ?? 100) || 100));
-  const result = await auditMirror(toAdminClient(admin), shop.id, { size });
+  const result = await auditMirror(toAdminClient(admin), shop.id, { size, actor: actorFor(sessionToken, session.shop) });
 
   return {
     ok: true,

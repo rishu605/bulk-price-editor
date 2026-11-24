@@ -58,7 +58,16 @@ const BATCH = 100;
 export async function auditMirror(
   client: AdminClient,
   shopId: string,
-  options: { threshold?: number; now?: Date; size?: number } = {},
+  options: {
+    threshold?: number;
+    now?: Date;
+    size?: number;
+    /**
+     * Who asked: a staff member's spot check on What's live, or the scheduler's nightly sweep.
+     * Unset, the Activity log shows "Scheduler", which a check somebody pressed is not.
+     */
+    actor?: string;
+  } = {},
 ): Promise<AuditResult> {
   const threshold = options.threshold ?? ALERT_THRESHOLD;
   const now = options.now ?? new Date();
@@ -192,6 +201,7 @@ export async function auditMirror(
   await prisma.auditLogEntry.create({
     data: {
       shopId,
+      actor: options.actor ?? null,
       action: "mirror.audit",
       entity: "Shop",
       entityId: shopId,
@@ -249,6 +259,7 @@ export async function auditMirror(
   await prisma.auditLogEntry.create({
     data: {
       shopId,
+      actor: options.actor ?? null,
       action: "mirror.audited",
       entity: "mirror",
       after: {
