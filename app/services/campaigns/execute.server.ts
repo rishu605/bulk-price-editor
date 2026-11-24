@@ -15,6 +15,7 @@
  */
 
 import {
+  BulkMutationsDeniedError,
   bulkOperationById,
   isTerminal,
   reconcileResults,
@@ -35,6 +36,7 @@ import { classifyFailure } from "../../lib/execution/classify";
 import type { PlannedRow } from "../../lib/planning/types";
 import { selectWritePath } from "../../lib/planning/write-path";
 import { RateLimitBudget } from "../../lib/shopify/budget";
+import { logger } from "../../lib/logging/logger";
 import { metric } from "../../lib/telemetry/metrics";
 
 export interface ExecuteOutcome {
@@ -113,33 +115,52 @@ export async function executeRows(
   const path = context.forcePath ?? decision.path;
   await context.onPath?.(path);
 
-  if (path === "sync") {
-    const budget = new RateLimitBudget();
-    const result = await executeSync(rows, {
-      client: context.client,
-      budget,
-      productOf: context.productOf,
-      verifySampleRate: context.verifySampleRate ?? 1,
-      onProgress: context.onProgress,
+  if (path === "sync") return executeSyncPath(rows, context);
+
+  try {
+    return await executeBulk(rows, writable, context);
+  } catch (error) {
+    // Shopify refused the bulk path itself, having run nothing (#1188). The rows are no
+    // less writable one call per product, which needs no bulk access, and the worker that
+    // runs every run this large has no time limit to fit them in. A caller that forced the
+    // bulk path asked to see it fail.
+    if (!(error instanceof BulkMutationsDeniedError) || context.forcePath === "bulk") throw error;
+    logger.error("Shopify denied this app bulk mutations; writing the run one call per product instead", {
+      shop: context.shopId,
+      rows: writable.length,
+      detail: error.message.slice(0, 300),
     });
+    metric("bulk.mutations_denied", 1, { shop: context.shopId });
+    await context.onPath?.("sync");
+    return executeSyncPath(rows, context);
+  }
+}
 
-    // Reported after the run rather than during it: the interesting number is how much
-    // of the merchant's bucket this campaign left behind, and sampling mid-run would
-    // mostly record the sleep the budget manager had just finished taking.
-    //
-    // Only the sync path. The bulk path spends no rate-limit budget at all, so reporting
-    // a saturation for it would draw a flat line that means "we did not look" while
-    // reading as "nothing was used".
-    const usable = budget.usableMaximum();
-    if (usable > 0) {
-      const saturation = Math.min(1, Math.max(0, 1 - budget.available() / usable));
-      metric("budget.saturation", saturation, { shop: context.shopId });
-    }
+/** The sync path: one `productVariantsBulkUpdate` per product, read back as it goes. */
+async function executeSyncPath(rows: PlannedRow[], context: ExecuteContext): Promise<ExecuteOutcome> {
+  const budget = new RateLimitBudget();
+  const result = await executeSync(rows, {
+    client: context.client,
+    budget,
+    productOf: context.productOf,
+    verifySampleRate: context.verifySampleRate ?? 1,
+    onProgress: context.onProgress,
+  });
 
-    return { ...result, path: "sync" };
+  // Reported after the run rather than during it: the interesting number is how much
+  // of the merchant's bucket this campaign left behind, and sampling mid-run would
+  // mostly record the sleep the budget manager had just finished taking.
+  //
+  // Only the sync path. The bulk path spends no rate-limit budget at all, so reporting
+  // a saturation for it would draw a flat line that means "we did not look" while
+  // reading as "nothing was used".
+  const usable = budget.usableMaximum();
+  if (usable > 0) {
+    const saturation = Math.min(1, Math.max(0, 1 - budget.available() / usable));
+    metric("budget.saturation", saturation, { shop: context.shopId });
   }
 
-  return executeBulk(rows, writable, context);
+  return { ...result, path: "sync" };
 }
 
 /**
